@@ -3,6 +3,9 @@ import "./style.css";
 const FRAME_RATE = 120;
 const DEFAULT_BACKGROUND_COLOR = "#2188ad";
 
+const NEW_PANE_OFFSET_X = 30;
+const NEW_PANE_OFFSET_Y = 30;
+
 const canvas = document.querySelector("canvas");
 const context = canvas?.getContext("2d");
 
@@ -37,20 +40,27 @@ class Pane {
   width: number;
   height: number;
 
-  constructor(width: number, height: number) {
+  constructor(width: number, height: number, pane_index: number) {
     this.width = width;
     this.height = height;
     this.element = document.createElement("div");
     this.element.className = "pane";
 
-    this.x = window.innerWidth / 2 - this.width / 2;
-    this.y = window.innerHeight / 2 - this.height / 2;
+    this.x =
+      window.innerWidth / 2 - this.width / 2 + pane_index * NEW_PANE_OFFSET_X;
+    this.y =
+      window.innerHeight / 2 - this.height / 2 + pane_index * NEW_PANE_OFFSET_Y;
 
     this.element.style.position = "absolute";
     this.element.style.left = `${this.x}px`;
     this.element.style.top = `${this.y}px`;
     this.element.style.width = `${this.width}px`;
     this.element.style.height = `${this.height}px`;
+
+    this.element.addEventListener("click", () => {
+      this.element?.remove();
+      panes.pop();
+    });
 
     main_element.appendChild(this.element);
   }
@@ -88,7 +98,7 @@ class Icon {
     this.element.appendChild(name_element);
 
     this.element?.addEventListener("click", () => {
-      panes.push(new Pane(800, 600));
+      panes.push(new Pane(800, 600, panes.length));
     });
 
     document.getElementById("icon-container")?.appendChild(this.element);
