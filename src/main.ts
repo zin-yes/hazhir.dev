@@ -5,15 +5,6 @@ const FRAME_RATE = 120;
 const NEW_PANE_OFFSET_X = 30;
 const NEW_PANE_OFFSET_Y = 30;
 
-const canvas = document.querySelector("canvas");
-const context = canvas?.getContext("2d");
-
-const main_element = document.getElementsByTagName("main")[0];
-
-function clear_background(context: CanvasRenderingContext2D) {
-  context.clearRect(0, 0, window.innerWidth, window.innerHeight);
-}
-
 class Pane {
   element: HTMLDivElement | null;
   x: number = 0;
@@ -51,8 +42,6 @@ class Pane {
       this.element.style.top = `${this.y}px`;
     }
   }
-
-  draw(context: CanvasRenderingContext2D) {}
 }
 
 let panes: Pane[] = [];
@@ -64,8 +53,10 @@ class Icon {
   width: number = 0;
   height: number = 0;
   active: boolean = false;
+  grid_position: { x: number; y: number };
 
-  constructor(icon_index: number) {
+  constructor(grid_position: { x: number; y: number }) {
+    this.grid_position = grid_position;
     this.element = document.createElement("div");
     this.element.className = "icon";
 
@@ -96,8 +87,9 @@ class Icon {
 
     this.width = this.element.offsetWidth;
     this.height = this.element.offsetHeight;
-    this.y = 10;
-    this.x = 20 + this.width * icon_index + 30 * icon_index;
+    this.x = 20 + this.width * this.grid_position.x + 30 * this.grid_position.x;
+    this.y =
+      20 + this.height * 2 * this.grid_position.y + 30 * this.grid_position.y;
     this.element.style.left = `${this.x}px`;
     this.element.style.top = `${this.y}px`;
   }
@@ -120,18 +112,23 @@ class Icon {
       this.element.style.top = `${this.y}px`;
     }
   }
-
-  draw(context: CanvasRenderingContext2D) {}
 }
 
-let icons: Icon[] = [new Icon(0)];
+const canvas = document.querySelector("canvas");
+const context = canvas?.getContext("2d");
+
+const main_element = document.getElementsByTagName("main")[0];
+
+let icons: Icon[] = [];
+
+// This is some example code and will be removed later
+for (let x = 0; x < 2; x++) {
+  for (let y = 0; y < 5; y++) {
+    icons.push(new Icon({ x: x, y: y }));
+  }
+}
 
 let selection_box = { x: 0, y: 0, width: 100, height: 100 };
-
-function initialize(canvas: HTMLCanvasElement) {
-  canvas.width = window.innerWidth;
-  canvas.height = window.innerHeight;
-}
 
 let mouse = {
   x: 0,
@@ -139,26 +136,34 @@ let mouse = {
   down: false,
 };
 
-main_element?.addEventListener("mousemove", (e) => {
-  mouse.x = e.clientX;
-  mouse.y = e.clientY;
-});
+function clear_background(context: CanvasRenderingContext2D) {
+  context.clearRect(0, 0, window.innerWidth, window.innerHeight);
+}
 
-main_element?.addEventListener("mousedown", (e) => {
-  selection_box.x = e.clientX;
-  selection_box.y = e.clientY;
-  mouse.down = true;
-  console.log(selection_box, mouse);
-});
+function initialize(canvas: HTMLCanvasElement) {
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
 
-main_element?.addEventListener("mouseleave", () => {
-  mouse.down = false;
-});
+  main_element?.addEventListener("mousemove", (e) => {
+    mouse.x = e.clientX;
+    mouse.y = e.clientY;
+  });
 
-main_element?.addEventListener("mouseup", () => {
-  mouse.down = false;
-  console.log(selection_box, mouse);
-});
+  main_element?.addEventListener("mousedown", (e) => {
+    selection_box.x = e.clientX;
+    selection_box.y = e.clientY;
+
+    mouse.down = true;
+  });
+
+  main_element?.addEventListener("mouseleave", () => {
+    mouse.down = false;
+  });
+
+  main_element?.addEventListener("mouseup", () => {
+    mouse.down = false;
+  });
+}
 
 function update() {
   if (mouse.down) {
@@ -167,11 +172,34 @@ function update() {
 
     icons.forEach((icon) => {
       if (icon.element) {
+        const flipped_horizontally =
+          selection_box.x > selection_box.x + selection_box.width;
+        const flipped_vertically =
+          selection_box.y > selection_box.y + selection_box.height;
+
+        const selection_box_left = flipped_horizontally
+          ? selection_box.x + selection_box.width
+          : selection_box.x;
+        const selection_box_right = flipped_horizontally
+          ? selection_box.x
+          : selection_box.x + selection_box.width;
+        const selection_box_top = flipped_vertically
+          ? selection_box.y + selection_box.height
+          : selection_box.y;
+        const selection_box_bottom = flipped_vertically
+          ? selection_box.y
+          : selection_box.y + selection_box.height;
+
+        const icon_left = icon.x;
+        const icon_right = icon.x + icon.element.offsetWidth;
+        const icon_top = icon.y;
+        const icon_bottom = icon.y + icon.element.offsetHeight;
+
         icon.active =
-          selection_box.x < icon.x + icon.element.offsetWidth &&
-          selection_box.x + Math.abs(selection_box.width) > icon.x &&
-          selection_box.y < icon.y + icon.element.offsetHeight &&
-          selection_box.y + Math.abs(selection_box.height) > icon.y;
+          selection_box_left < icon_right &&
+          selection_box_right > icon_left &&
+          selection_box_top < icon_bottom &&
+          selection_box_bottom > icon_top;
       }
     });
   }
@@ -204,13 +232,6 @@ function draw(context: CanvasRenderingContext2D) {
       selection_box.height
     );
   }
-
-  icons.forEach((icon) => {
-    icon.draw(context);
-  });
-  panes.forEach((pane) => {
-    pane.draw(context);
-  });
 }
 
 if (canvas && context) {
