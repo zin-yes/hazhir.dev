@@ -24,6 +24,7 @@ class Pane {
       window.innerHeight / 2 - this.height / 2 + pane_index * NEW_PANE_OFFSET_Y;
 
     this.element.style.position = "absolute";
+    this.element.style.zIndex = 2;
     this.element.style.left = `${this.x}px`;
     this.element.style.top = `${this.y}px`;
     this.element.style.width = `${this.width}px`;
