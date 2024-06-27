@@ -1,9 +1,10 @@
 {
-  "name": "v2",
-  "version": "0.1.0",
+  "name": "hazhir.dev",
+  "version": "0.2.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "dev-turbo": "next dev --turbo",
     "build": "next build",
     "start": "next start",
     "lint": "next lint"
