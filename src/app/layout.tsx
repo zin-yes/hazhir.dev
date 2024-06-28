@@ -1,13 +1,12 @@
 import "./global.css";
 
-import { Silkscreen } from "next/font/google";
-const default_font = Silkscreen({ subsets: ["latin"], weight: ["400", "700"] });
+import { Jost } from "next/font/google";
+const default_font = Jost({ subsets: ["latin"] });
 
 import type { Metadata } from "next";
 export const metadata: Metadata = {
   title: "hazhir.dev",
-  description:
-    "Some cool projects that I have worked on in a retro operating system theme.",
+  description: "Some cool projects that I have worked on.",
 };
 
 export default function RootLayout({

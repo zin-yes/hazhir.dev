@@ -1,22 +1,18 @@
-import { auth } from "@/auth";
-import { signIn, signOut } from "next-auth/react";
-import Image from "next/image";
+import { database } from "@/database";
+import { testTable } from "@/database/schema";
 
 export default async function HomePage() {
-  const session = await auth();
+  await database.insert(testTable).values({
+    id: Math.floor(Math.random() * 100000),
+    name: "Hello this is a database test.",
+  });
+  const data = await database.query.testTable.findMany();
+  console.log(data);
+
   return (
-    <main className="w-full h-[100vh] flex flex-col justify-center items-center">
-      <div className="flex flex-col p-8 rounded-xl gap-2">
-        <Image
-          src={session?.user?.image ?? ""}
-          alt="Profile picture"
-          width={64}
-          height={64}
-        />
-        <h2 className="text-xl">{session?.user?.name ?? "No name"}</h2>
-        <span>{session?.user?.email ?? "No email"}</span>
-        <span>{session?.user?.id ?? "No id"}</span>
-      </div>
+    <main className="w-full h-[100vh] flex flex-col items-center justify-center">
+      <h1 className="text-2xl font-medium">hazhir.dev</h1>
+      <p className="text-md font-light">cool projects coming soon...</p>
     </main>
   );
 }
