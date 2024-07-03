@@ -1,7 +1,11 @@
+import { ThemeProvider } from "./theme-proivider";
+
 import "./global.css";
 
-import { Silkscreen } from "next/font/google";
-const default_font = Silkscreen({ subsets: ["latin"], weight: ["400", "700"] });
+import { Montserrat } from "next/font/google";
+const default_font = Montserrat({
+  subsets: ["latin"],
+});
 
 import type { Metadata } from "next";
 export const metadata: Metadata = {
@@ -17,7 +21,11 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body className={default_font.className}>{children}</body>
+      <body className={default_font.className}>
+        <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
+          {children}
+        </ThemeProvider>
+      </body>
     </html>
   );
 }
