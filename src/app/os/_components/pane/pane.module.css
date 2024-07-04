@@ -97,8 +97,8 @@
   user-select: all;
   overflow: hidden;
   background: rgb(56, 0, 94);
-  color: rgb(242, 209, 255);
-  border: 3px double black;
+  border-radius: 0.7em;
+  border: 2px solid hsl(var(--accent));
 }
 
 .content {
