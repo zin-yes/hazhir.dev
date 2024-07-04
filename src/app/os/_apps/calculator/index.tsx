@@ -66,7 +66,7 @@ export default function CalculatorApp() {
   const mathViewRef = useRef<MathViewRef>(null);
 
   return (
-    <div className="bg-card rounded-lg p-6 w-full h-full">
+    <div className="bg-card p-6 w-full h-full">
       <div className="mb-6">
         <MathView
           className={`bg-muted rounded-md p-4 text-3xl font-bold text-card-foreground ${

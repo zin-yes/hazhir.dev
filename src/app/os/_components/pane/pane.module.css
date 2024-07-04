@@ -1,0 +1,143 @@
+.pane {
+  position: absolute;
+
+  left: -10px;
+  top: -10px;
+
+  width: 1200px;
+  height: 720px;
+
+  opacity: 0;
+  transition: 0.2s opacity;
+}
+
+.top_group,
+.bottom_group {
+  display: flex;
+  flex-direction: row;
+  width: 100%;
+  height: 10px;
+}
+
+.middle_group {
+  height: 100%;
+  display: flex;
+  flex-direction: row;
+  width: 100%;
+}
+
+.titlebar {
+  background: black;
+  color: white;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+
+  min-height: 50px;
+}
+
+.icon {
+  width: 14px;
+  aspect-ratio: 1/1;
+}
+
+.title {
+  padding: 0 10px;
+  font-weight: 600;
+  height: 100%;
+  width: 100%;
+  min-width: 0;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  font-size: 16px;
+}
+
+.title > span {
+  overflow: hidden;
+  white-space: nowrap;
+  text-wrap: nowrap;
+  text-overflow: ellipsis;
+}
+
+.actions {
+  display: flex;
+  flex-direction: row;
+  min-width: fit-content;
+  height: 100%;
+}
+
+.actions > div {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 100%;
+  cursor: pointer;
+  width: 35px;
+}
+
+.actions > div:hover {
+  background: white;
+  color: black;
+}
+
+.actions > div:last-child:hover {
+  background: red;
+  color: white;
+}
+
+.body {
+  width: calc(100% - 20px);
+
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  user-select: all;
+  overflow: hidden;
+  background: rgb(56, 0, 94);
+  color: rgb(242, 209, 255);
+  border: 3px double black;
+}
+
+.content {
+  overflow: hidden;
+  position: relative;
+  height: 100%;
+}
+
+.overflow_allowed {
+  overflow-y: scroll;
+}
+
+.bottom_left_resize_handle,
+.bottom_right_resize_handle,
+.top_left_resize_handle,
+.top_right_resize_handle {
+  width: 10px;
+  aspect-ratio: 1/1;
+}
+
+.bottom_left_resize_handle,
+.top_right_resize_handle {
+  cursor: nesw-resize;
+}
+
+.bottom_right_resize_handle,
+.top_left_resize_handle {
+  cursor: nwse-resize;
+}
+
+.bottom_resize_handle,
+.top_resize_handle {
+  width: 100%;
+  height: 10px;
+  cursor: ns-resize;
+}
+
+.left_resize_handle,
+.right_resize_handle {
+  cursor: ew-resize;
+  width: 10px;
+}
