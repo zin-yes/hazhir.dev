@@ -115,18 +115,8 @@
   width: 10px;
   aspect-ratio: 1/1;
   transition-duration: 1s;
-
-  opacity: 0;
 }
 
-.bottom_left_resize_handle:hover,
-.bottom_right_resize_handle:hover,
-.top_left_resize_handle:hover,
-.top_right_resize_handle:hover,
-.bottom_left_resize_handle:active,
-.bottom_right_resize_handle:active,
-.top_left_resize_handle:active,
-.top_right_resize_handle:active,
 .bottom_resize_handle:hover,
 .top_resize_handle:hover,
 .left_resize_handle:hover,
@@ -141,13 +131,6 @@
   transition-duration: 1s;
   transition-delay: 1s border-radius;
   border-radius: 3px;
-}
-
-.bottom_left_resize_handle:active,
-.bottom_right_resize_handle:active,
-.top_left_resize_handle:active,
-.top_right_resize_handle:active {
-  transform: scale(1.1);
 }
 
 .bottom_resize_handle:hover,
