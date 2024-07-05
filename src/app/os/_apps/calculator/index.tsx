@@ -12,6 +12,10 @@ const MathView = dynamic(() => import("react-math-view-locked"), {
 
 import evaluatex from "evaluatex/dist/evaluatex";
 
+// TODO: Refactor this into a class, and reorganize everything so that the code is split into multiple seperate files in a new folder somewhere that is not '_apps'.
+
+// FIXME: the SSR makes getting the ref for other calls super difficult, and having SSR enabled doesn't let the project build properly; rewrite a new & simpler calculator app from scratch, or find a different way of getting one to work with libraries.
+
 export default function CalculatorApp() {
   const addToCurrentCalculation = (value: string) => {
     mathViewRef.current?.focus();

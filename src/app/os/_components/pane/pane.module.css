@@ -93,7 +93,6 @@
   flex-direction: column;
   user-select: all;
   overflow: hidden;
-  background: rgb(56, 0, 94);
   border-radius: 0.7em;
   border: 2px solid hsl(var(--accent));
 }
@@ -137,14 +136,14 @@
 .top_resize_handle:hover,
 .left_resize_handle:hover,
 .right_resize_handle:hover {
-  transform: scale(0.9);
+  transform: scale(0.95);
 }
 
 .bottom_resize_handle:active,
 .top_resize_handle:active,
 .left_resize_handle:active,
 .right_resize_handle:active {
-  transform: scale(0.95);
+  transform: scale(0.9);
 }
 
 .bottom_left_resize_handle,

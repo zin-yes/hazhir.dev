@@ -14,15 +14,16 @@ import {
 } from "@/utils/resizability";
 import { AppWindowIcon, Maximize2, Minimize2, X } from "lucide-react";
 
-// To do (not ordered):
-// - Move resize code to a utils file.
-// - Move hard coded constants to a config. file.
-// - Style the scrollbar.
-// - Add functionality to the pane actions.
-// - Don't let the pane completely leave the window, so that it can always be dragged and moved around even if you accidentaly move it outside the window.
+// TODO: Add a way to have "system" configs (e.g. desktop 'wallpaper', accent color, text size/scaling options).
+// TODO: Refactor this into a class and split the repeatable chunks of logic up into other files.
+// TODO: Clean up the code and make it more understandable and concise if possible.
+// TODO: Add a robust way to add more control variables & also add more control variables on the props:
+//  - Starting x & y positions.
+//  - Color customizations.
+//  - ...
+// TODO: Change padding of action bar to match the window and add a system to keep that consistent across the system.
 
-// Known bugs:
-// - When clicking a resizing handle, and then dragging the cursor on top of another resize handle it changes the cursor texture to the one currently hovered, it should be the one that is currently being resized.
+// FIXME: Add destructors/disposing functions for the events on the inside the useEffect.
 
 const DEFAULT_WIDTH = 800;
 const DEFAULT_HEIGHT = 600;
