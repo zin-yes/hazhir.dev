@@ -2,10 +2,15 @@
 
 import { Button } from "@/components/ui/button";
 import { useRef, useState } from "react";
+import dynamic from "next/dynamic";
 
-import MathView, { MathViewRef } from "react-math-view-locked";
+import { MathViewRef } from "react-math-view-locked";
 
-import evaluatex from "evaluatex";
+const MathView = dynamic(() => import("react-math-view-locked"), {
+  ssr: false,
+});
+
+import evaluatex from "evaluatex/dist/evaluatex";
 
 export default function CalculatorApp() {
   const addToCurrentCalculation = (value: string) => {

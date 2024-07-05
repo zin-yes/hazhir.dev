@@ -1,3 +1,5 @@
+"use client";
+
 import CalculatorApp from "./_apps/calculator";
 import Pane from "./_components/pane";
 
