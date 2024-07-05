@@ -1,10 +1,9 @@
 import { RefObject } from "react";
 
-import PANE_CONFIG from "@/config/pane";
-
 export function add_right_resize_handle_event(
   resize_handle_element: Element,
-  parent_ref: RefObject<HTMLDivElement>
+  parent_ref: RefObject<HTMLDivElement>,
+  min_width: number
 ) {
   const mousedown = (event: any) => {
     const pane_x = parent_ref.current!.offsetLeft;
@@ -17,10 +16,7 @@ export function add_right_resize_handle_event(
       event.preventDefault();
 
       parent_ref.current!.style.width =
-        Math.max(
-          pane_x + (event.pageX - starting_mouse_x),
-          PANE_CONFIG.defaults.MIN_WIDTH
-        ) + "px";
+        Math.max(pane_x + (event.pageX - starting_mouse_x), min_width) + "px";
     };
 
     const mouse_up_event = (event: MouseEvent) => {
@@ -39,7 +35,8 @@ export function add_right_resize_handle_event(
 
 export function add_left_resize_handle_event(
   resize_handle_element: Element,
-  parent_ref: RefObject<HTMLDivElement>
+  parent_ref: RefObject<HTMLDivElement>,
+  min_width: number
 ) {
   const mousedown = (event: any) => {
     const pane_x = parent_ref.current!.offsetLeft;
@@ -52,22 +49,16 @@ export function add_left_resize_handle_event(
     const mouse_move_event = (event: MouseEvent) => {
       event.preventDefault();
 
-      if (
-        starting_width - (event.pageX - starting_mouse_x) <
-        PANE_CONFIG.defaults.MIN_WIDTH
-      ) {
-        parent_ref.current!.style.left =
-          starting_right - PANE_CONFIG.defaults.MIN_WIDTH + "px";
+      if (starting_width - (event.pageX - starting_mouse_x) < min_width) {
+        parent_ref.current!.style.left = starting_right - min_width + "px";
       } else {
         parent_ref.current!.style.left =
           pane_x + (event.pageX - starting_mouse_x) + "px";
       }
 
       parent_ref.current!.style.width =
-        Math.max(
-          starting_width - (event.pageX - starting_mouse_x),
-          PANE_CONFIG.defaults.MIN_WIDTH
-        ) + "px";
+        Math.max(starting_width - (event.pageX - starting_mouse_x), min_width) +
+        "px";
     };
 
     const mouse_up_event = (event: MouseEvent) => {
@@ -86,7 +77,8 @@ export function add_left_resize_handle_event(
 
 export function add_bottom_resize_handle_event(
   resize_handle_element: Element,
-  parent_ref: RefObject<HTMLDivElement>
+  parent_ref: RefObject<HTMLDivElement>,
+  min_height: number
 ) {
   const mousedown = (event: any) => {
     const starting_pane_y = parent_ref.current!.offsetTop;
@@ -101,7 +93,7 @@ export function add_bottom_resize_handle_event(
       parent_ref.current!.style.height =
         Math.max(
           starting_pane_y + (event.pageY - starting_mouse_y),
-          PANE_CONFIG.defaults.MIN_HEIGHT
+          min_height
         ) + "px";
     };
 
@@ -121,7 +113,8 @@ export function add_bottom_resize_handle_event(
 
 export function add_top_resize_handle_event(
   resize_handle_element: Element,
-  parent_ref: RefObject<HTMLDivElement>
+  parent_ref: RefObject<HTMLDivElement>,
+  min_height: number
 ) {
   resize_handle_element?.addEventListener("mousedown", (event: any) => {
     const starting_pane_y = parent_ref.current!.offsetTop;
@@ -136,17 +129,12 @@ export function add_top_resize_handle_event(
       event.preventDefault();
 
       parent_ref.current!.style.top =
-        (starting_height - (event.pageY - starting_mouse_y) <
-        PANE_CONFIG.defaults.MIN_HEIGHT
+        (starting_height - (event.pageY - starting_mouse_y) < min_height
           ? starting_pane_y
           : starting_pane_y + (event.pageY - starting_mouse_y)) + "px";
 
-      if (
-        starting_height - (event.pageY - starting_mouse_y) <
-        PANE_CONFIG.defaults.MIN_HEIGHT
-      ) {
-        parent_ref.current!.style.top =
-          starting_bottom - PANE_CONFIG.defaults.MIN_HEIGHT + "px";
+      if (starting_height - (event.pageY - starting_mouse_y) < min_height) {
+        parent_ref.current!.style.top = starting_bottom - min_height + "px";
       } else {
         parent_ref.current!.style.top =
           starting_pane_y + (event.pageY - starting_mouse_y) + "px";
@@ -155,7 +143,7 @@ export function add_top_resize_handle_event(
       parent_ref.current!.style.height =
         Math.max(
           starting_height - (event.pageY - starting_mouse_y),
-          PANE_CONFIG.defaults.MIN_HEIGHT
+          min_height
         ) + "px";
     };
 

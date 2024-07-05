@@ -12,6 +12,7 @@ import {
   add_bottom_resize_handle_event,
   add_dragging_handle_event,
 } from "@/utils/resizability";
+import { AppWindowIcon, Maximize2, Minimize2, X } from "lucide-react";
 
 // To do (not ordered):
 // - Move resize code to a utils file.
@@ -23,16 +24,22 @@ import {
 // Known bugs:
 // - When clicking a resizing handle, and then dragging the cursor on top of another resize handle it changes the cursor texture to the one currently hovered, it should be the one that is currently being resized.
 
+const DEFAULT_WIDTH = 800;
+const DEFAULT_HEIGHT = 600;
+const MIN_DEFAULT_DIMENSIONS = 400;
+
 export default function Pane({
   children,
   className,
   action_bar = {
     icon: {
-      src: "",
+      svg: <AppWindowIcon />,
     },
     title: "Untitled pane",
   },
   settings = {
+    starting_width: DEFAULT_WIDTH,
+    starting_height: DEFAULT_HEIGHT,
     allow_overflow: true,
   },
 }: {
@@ -40,11 +47,16 @@ export default function Pane({
   className?: string;
   action_bar?: {
     icon?: {
-      src: string;
+      src?: string;
+      svg?: React.ReactNode;
     };
     title?: string;
   };
   settings?: {
+    min_width?: number;
+    min_height?: number;
+    starting_width?: number;
+    starting_height?: number;
     allow_overflow?: boolean;
   };
 }) {
@@ -61,6 +73,11 @@ export default function Pane({
 
   // Add resize and drag functionality to pane.
   useEffect(() => {
+    if (ref.current) {
+      ref.current.style.width = settings.starting_width + "px";
+      ref.current.style.height = settings.starting_height + "px";
+    }
+
     const title_element = ref.current!.getElementsByClassName(styles.title)[0];
     const right_resize_handle_element = ref.current!.getElementsByClassName(
       styles.right_resize_handle
@@ -86,32 +103,80 @@ export default function Pane({
     )[0];
 
     // Set up resize functionality for right resize handle.
-    add_right_resize_handle_event(right_resize_handle_element, ref);
+    add_right_resize_handle_event(
+      right_resize_handle_element,
+      ref,
+      settings.min_width!
+    );
 
     // Set up resize functionality for bottom right resize handle.
-    add_bottom_resize_handle_event(bottom_right_resize_handle_element, ref);
-    add_right_resize_handle_event(bottom_right_resize_handle_element, ref);
+    add_bottom_resize_handle_event(
+      bottom_right_resize_handle_element,
+      ref,
+      settings.min_height ?? MIN_DEFAULT_DIMENSIONS
+    );
+    add_right_resize_handle_event(
+      bottom_right_resize_handle_element,
+      ref,
+      settings.min_width ?? MIN_DEFAULT_DIMENSIONS
+    );
 
     // Set up resize functionality for top right resize handle.
-    add_top_resize_handle_event(top_right_resize_handle_element, ref);
-    add_right_resize_handle_event(top_right_resize_handle_element, ref);
+    add_top_resize_handle_event(
+      top_right_resize_handle_element,
+      ref,
+      settings.min_height ?? MIN_DEFAULT_DIMENSIONS
+    );
+    add_right_resize_handle_event(
+      top_right_resize_handle_element,
+      ref,
+      settings.min_width ?? MIN_DEFAULT_DIMENSIONS
+    );
 
     // Set up resize functionality for left resize handle.
-    add_left_resize_handle_event(left_resize_handle_element, ref);
+    add_left_resize_handle_event(
+      left_resize_handle_element,
+      ref,
+      settings.min_width ?? MIN_DEFAULT_DIMENSIONS
+    );
 
     // Set up resize functionality for bottom left resize handle.
-    add_bottom_resize_handle_event(bottom_left_resize_handle_element, ref);
-    add_left_resize_handle_event(bottom_left_resize_handle_element, ref);
+    add_bottom_resize_handle_event(
+      bottom_left_resize_handle_element,
+      ref,
+      settings.min_height ?? MIN_DEFAULT_DIMENSIONS
+    );
+    add_left_resize_handle_event(
+      bottom_left_resize_handle_element,
+      ref,
+      settings.min_width ?? MIN_DEFAULT_DIMENSIONS
+    );
 
     // Set up resize functionality for top left resize handle.
-    add_top_resize_handle_event(top_left_resize_handle_element, ref);
-    add_left_resize_handle_event(top_left_resize_handle_element, ref);
+    add_top_resize_handle_event(
+      top_left_resize_handle_element,
+      ref,
+      settings.min_height ?? MIN_DEFAULT_DIMENSIONS
+    );
+    add_left_resize_handle_event(
+      top_left_resize_handle_element,
+      ref,
+      settings.min_width ?? MIN_DEFAULT_DIMENSIONS
+    );
 
     // Set up resize functionality for bottom resize handle.
-    add_bottom_resize_handle_event(bottom_resize_handle_element, ref);
+    add_bottom_resize_handle_event(
+      bottom_resize_handle_element,
+      ref,
+      settings.min_height ?? MIN_DEFAULT_DIMENSIONS
+    );
 
     // Set up resize functionality for top resize handle.
-    add_top_resize_handle_event(top_resize_handle_element, ref);
+    add_top_resize_handle_event(
+      top_resize_handle_element,
+      ref,
+      settings.min_height ?? MIN_DEFAULT_DIMENSIONS
+    );
 
     // Dragging handle for the pane.
     add_dragging_handle_event(title_element, ref);
@@ -125,8 +190,8 @@ export default function Pane({
       ref.current!.style.height = "calc(100% - 40px)";
       setMaximized(true);
     } else {
-      ref.current!.style.width = "800px";
-      ref.current!.style.height = "600px";
+      ref.current!.style.width = `${settings.starting_width}px`;
+      ref.current!.style.height = `${settings.starting_height}px`;
       center();
       setMaximized(false);
     }
@@ -157,7 +222,7 @@ export default function Pane({
         <div className={styles.body}>
           <div className={styles.titlebar}>
             <div className={styles.title}>
-              {action_bar.icon && (
+              {action_bar.icon && action_bar.icon.src ? (
                 <Image
                   className={styles.icon}
                   src={action_bar.icon.src}
@@ -165,18 +230,22 @@ export default function Pane({
                   height={14}
                   alt="Pane icon."
                 />
+              ) : (
+                (action_bar.icon && action_bar.icon.svg) ?? action_bar.icon?.svg
               )}
               <span>{action_bar.title}</span>
             </div>
             <div className={styles.actions}>
-              <div className={styles.minimize}>-</div>
+              <div className={styles.minimize}>
+                <Minimize2 />
+              </div>
               <div
                 className={styles.maximize}
                 onClick={() => {
                   maximize();
                 }}
               >
-                +
+                <Maximize2 />
               </div>
               <div
                 className={styles.close}
@@ -184,7 +253,7 @@ export default function Pane({
                   close();
                 }}
               >
-                x
+                <X />
               </div>
             </div>
           </div>
