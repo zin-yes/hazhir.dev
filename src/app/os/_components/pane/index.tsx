@@ -180,7 +180,13 @@ export default function Pane({
 
     // Dragging handle for the pane.
     add_dragging_handle_event(title_element, ref);
-  }, [ref]);
+  }, [
+    ref,
+    settings.min_width,
+    settings.min_height,
+    settings.starting_width,
+    settings.starting_height,
+  ]);
 
   const maximize = () => {
     if (!maximized) {
