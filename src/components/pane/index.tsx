@@ -191,14 +191,33 @@ export default function Pane({
 
   const maximize = () => {
     if (!maximized) {
-      ref.current!.style.left = "-10px";
-      ref.current!.style.top = "-10px";
-      ref.current!.style.width = "calc(100% + 20px)";
-      ref.current!.style.height = "calc(100% - 40px)";
+      ref.current!.style.left = "-12px";
+      ref.current!.style.top = "-12px";
+      ref.current!.style.width = "calc(100% + 24px)";
+      ref.current!.style.height = "calc(100% + 4px)";
+      (
+        document.getElementsByClassName(styles.body)[0] as HTMLDivElement
+      ).style.borderRadius = "0";
       setMaximized(true);
+
+      const title_element = ref.current!.getElementsByClassName(
+        styles.title
+      )[0] as HTMLDivElement;
+
+      title_element.replaceWith(title_element.cloneNode(true));
     } else {
       ref.current!.style.width = `${settings.starting_width}px`;
       ref.current!.style.height = `${settings.starting_height}px`;
+      (
+        document.getElementsByClassName(styles.body)[0] as HTMLDivElement
+      ).style.borderRadius = "0.7em";
+
+      const title_element = ref.current!.getElementsByClassName(
+        styles.title
+      )[0] as HTMLDivElement;
+
+      add_dragging_handle_event(title_element, ref);
+
       center();
       setMaximized(false);
     }
@@ -243,16 +262,14 @@ export default function Pane({
               <span>{action_bar.title}</span>
             </div>
             <div className={styles.actions}>
-              <div className={styles.minimize}>
-                <Minimize2 />
-              </div>
+              {/* <div className={styles.minimize}></div> */}
               <div
                 className={styles.maximize}
                 onClick={() => {
                   maximize();
                 }}
               >
-                <Maximize2 />
+                {maximized ? <Minimize2 /> : <Maximize2 />}
               </div>
               <div
                 className={styles.close}

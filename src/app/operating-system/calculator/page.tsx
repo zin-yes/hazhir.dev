@@ -1,4 +1,4 @@
-import CalculatorApp from "../_apps/calculator";
+import CalculatorApp from "@/components/applications/calculator";
 
 export default function CalculatorPage() {
   return (

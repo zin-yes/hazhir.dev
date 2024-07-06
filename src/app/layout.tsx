@@ -1,5 +1,3 @@
-import { ThemeProvider } from "./theme-proivider";
-
 import "./global.css";
 
 import { Montserrat } from "next/font/google";
@@ -8,6 +6,7 @@ const default_font = Montserrat({
 });
 
 import type { Metadata } from "next";
+import { ThemeProvider } from "@/components/providers/theme-proivider";
 export const metadata: Metadata = {
   title: "hazhir.dev",
   description:

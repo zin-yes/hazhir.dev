@@ -16,6 +16,8 @@ import evaluatex from "evaluatex/dist/evaluatex";
 
 // FIXME: the SSR makes getting the ref for other calls super difficult, and having SSR enabled doesn't let the project build properly; rewrite a new & simpler calculator app from scratch, or find a different way of getting one to work with libraries.
 
+// FIXME: Theme changing does not work with the library used for the latex display.
+
 export default function CalculatorApp() {
   const addToCurrentCalculation = (value: string) => {
     mathViewRef.current?.focus();
