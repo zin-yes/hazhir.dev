@@ -36,15 +36,21 @@ export default function MockTerminalApplication() {
       terminal.writeln(
         "This is a very simple terminal emulator application. Try typing."
       );
+      terminal.writeln("");
       terminal.onKey((event) => {
         console.log(event.domEvent);
 
         if (event.domEvent.key == "Enter") {
           terminal.writeln("");
         } else if (event.domEvent.key == "Backspace") {
-          terminal.write("\b \b");
+          if (terminal.buffer.active.cursorX == 0) {
+            terminal.write("[A");
+          } else {
+            terminal.write("\b \b");
+          }
         } else {
           terminal.write(event.key);
+          console.log(event.key);
         }
       });
     }
