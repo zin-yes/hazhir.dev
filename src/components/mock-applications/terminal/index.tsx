@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import { Terminal } from "@xterm/xterm";
 import { signIn, signOut, useSession } from "next-auth/react";
+import figlet from "figlet";
 
 export default function MockTerminalApplication() {
   const [resizeMessage, setResizeMessage] = useState<string>("");
@@ -47,8 +48,32 @@ export default function MockTerminalApplication() {
         fontSize: 18,
       };
       terminal.open(terminalRef.current);
-      terminal.writeln(
-        "For a list of commands type \u001b[31m'help'\u001b[37m and press enter."
+      figlet(
+        "hazhir.dev",
+        {
+          font: "Mini",
+          horizontalLayout: "default",
+          verticalLayout: "default",
+          width: terminal.cols,
+          whitespaceBreak: true,
+        },
+        function (err, data) {
+          if (err) {
+            console.log("Something went wrong...");
+            console.dir(err);
+            return;
+          }
+
+          data!.split("\n").forEach((item) => {
+            terminal.writeln(item);
+          });
+
+          terminal.writeln(
+            "For a list of commands type \u001b[31m'help'\u001b[37m and press enter."
+          );
+          terminal.writeln("");
+          terminal.write(prefix);
+        }
       );
 
       let prefix = "";
@@ -58,8 +83,6 @@ export default function MockTerminalApplication() {
         prefix = "$ ";
       }
 
-      terminal.writeln("");
-      terminal.write(prefix);
       terminal.onKey((event) => {
         if (event.domEvent.key === "UpArrow") {
         } else if (event.domEvent.key === "DownArrow") {

@@ -59,7 +59,6 @@ export default function Pane({
   const titleId = useId();
 
   const ref = useRef<HTMLDivElement>(null);
-
   // Center the pane element.
   useEffect(() => {
     if (ref.current) {
