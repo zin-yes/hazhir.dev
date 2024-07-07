@@ -81,7 +81,7 @@ const InputField = forwardRef<
       }}
       ref={ref}
       value={props.value}
-      className="bg-muted rounded-lg p-4 text-3xl font-bold text-card-foreground text-right h-19 border-none"
+      className="bg-secondary rounded-lg p-4 text-3xl font-bold text-card-foreground text-right h-19 border-none"
     />
   );
 });

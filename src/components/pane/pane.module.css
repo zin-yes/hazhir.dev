@@ -24,7 +24,7 @@
 }
 
 .titlebar {
-  background: black;
+  background: hsl(var(--primary));
   color: white;
   display: flex;
   flex-direction: row;
@@ -42,7 +42,7 @@
 .title {
   padding: 0 1.2em;
   font-weight: 600;
-  height: 100%;
+  height: 35px;
   width: 100%;
   min-width: 0;
   display: flex;
@@ -76,13 +76,13 @@
 }
 
 .actions > div:hover {
-  background: white;
-  color: black;
+  background: hsl(var(--background));
+  color: hsl(var(--foreground));
 }
 
 .actions > div:last-child:hover {
   background: red;
-  color: white;
+  color: hsl(var(--foreground));
 }
 
 .body {

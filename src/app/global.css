@@ -54,6 +54,10 @@
     @apply border-border;
     user-select: none;
   }
+  *::-webkit-scrollbar {
+    display: none;
+  }
+
   body {
     @apply bg-background text-foreground;
     overflow: hidden;

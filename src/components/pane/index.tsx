@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { cloneElement, useEffect, useId, useRef, useState } from "react";
 
 import Image from "next/image";
 
@@ -23,8 +23,6 @@ import { AppWindowIcon, Maximize2, Minimize2, X } from "lucide-react";
 //  - ...
 // TODO: Change padding of action bar to match the window and add a system to keep that consistent across the system.
 
-// FIXME: Add destructors/disposing functions for the events on the inside the useEffect.
-
 const DEFAULT_WIDTH = 800;
 const DEFAULT_HEIGHT = 600;
 const MIN_DEFAULT_DIMENSIONS = 400;
@@ -32,12 +30,7 @@ const MIN_DEFAULT_DIMENSIONS = 400;
 export default function Pane({
   children,
   className,
-  action_bar = {
-    icon: {
-      svg: <AppWindowIcon />,
-    },
-    title: "Untitled pane",
-  },
+  action_bar = {},
   settings = {
     starting_width: DEFAULT_WIDTH,
     starting_height: DEFAULT_HEIGHT,
@@ -49,7 +42,7 @@ export default function Pane({
   action_bar?: {
     icon?: {
       src?: string;
-      svg?: React.ReactNode;
+      svg?: React.ReactElement<any>;
     };
     title?: string;
   };
@@ -62,6 +55,8 @@ export default function Pane({
   };
 }) {
   const [maximized, setMaximized] = useState<boolean>(false);
+  const bodyId = useId();
+  const titleId = useId();
 
   const ref = useRef<HTMLDivElement>(null);
 
@@ -70,7 +65,7 @@ export default function Pane({
     if (ref.current) {
       center();
     }
-  }, []);
+  }, [ref]);
 
   // Add resize and drag functionality to pane.
   useEffect(() => {
@@ -79,7 +74,7 @@ export default function Pane({
       ref.current.style.height = settings.starting_height + "px";
     }
 
-    const title_element = ref.current!.getElementsByClassName(styles.title)[0];
+    const title_element = document.getElementById(titleId)!;
     const right_resize_handle_element = ref.current!.getElementsByClassName(
       styles.right_resize_handle
     )[0];
@@ -195,9 +190,8 @@ export default function Pane({
       ref.current!.style.top = "-12px";
       ref.current!.style.width = "calc(100% + 24px)";
       ref.current!.style.height = "calc(100% + 4px)";
-      (
-        document.getElementsByClassName(styles.body)[0] as HTMLDivElement
-      ).style.borderRadius = "0";
+      (document.getElementById(bodyId) as HTMLDivElement).style.borderRadius =
+        "0";
       setMaximized(true);
 
       const title_element = ref.current!.getElementsByClassName(
@@ -208,13 +202,10 @@ export default function Pane({
     } else {
       ref.current!.style.width = `${settings.starting_width}px`;
       ref.current!.style.height = `${settings.starting_height}px`;
-      (
-        document.getElementsByClassName(styles.body)[0] as HTMLDivElement
-      ).style.borderRadius = "0.7em";
+      (document.getElementById(bodyId) as HTMLDivElement).style.borderRadius =
+        "0.7em";
 
-      const title_element = ref.current!.getElementsByClassName(
-        styles.title
-      )[0] as HTMLDivElement;
+      const title_element = document.getElementById(titleId) as HTMLDivElement;
 
       add_dragging_handle_event(title_element, ref);
 
@@ -245,9 +236,9 @@ export default function Pane({
       </div>
       <div className={styles.middle_group}>
         <div className={styles.left_resize_handle}></div>
-        <div className={styles.body}>
+        <div className={styles.body} id={bodyId}>
           <div className={styles.titlebar}>
-            <div className={styles.title}>
+            <div className={styles.title} id={titleId}>
               {action_bar.icon && action_bar.icon.src ? (
                 <Image
                   className={styles.icon}
@@ -256,10 +247,12 @@ export default function Pane({
                   height={14}
                   alt="Pane icon."
                 />
+              ) : action_bar.icon && action_bar.icon.svg ? (
+                cloneElement(action_bar.icon.svg, { size: 20 })
               ) : (
-                (action_bar.icon && action_bar.icon.svg) ?? action_bar.icon?.svg
+                <AppWindowIcon size={20} />
               )}
-              <span>{action_bar.title}</span>
+              <span>{action_bar.title ?? "Untitled pane"}</span>
             </div>
             <div className={styles.actions}>
               {/* <div className={styles.minimize}></div> */}
@@ -269,7 +262,7 @@ export default function Pane({
                   maximize();
                 }}
               >
-                {maximized ? <Minimize2 /> : <Maximize2 />}
+                {maximized ? <Minimize2 size={20} /> : <Maximize2 size={20} />}
               </div>
               <div
                 className={styles.close}
@@ -277,7 +270,7 @@ export default function Pane({
                   close();
                 }}
               >
-                <X />
+                <X size={20} />
               </div>
             </div>
           </div>
