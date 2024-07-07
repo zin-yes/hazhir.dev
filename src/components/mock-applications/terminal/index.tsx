@@ -1,33 +1,39 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { Terminal } from "@xterm/xterm";
 import { signIn, signOut, useSession } from "next-auth/react";
 
 export default function MockTerminalApplication() {
   const [resizeMessage, setResizeMessage] = useState<string>("");
-  const terminal = new Terminal({
-    fontSize: 18,
-    theme: {
-      background: "rgba(0,0,0,0)",
-    },
-  });
+  const terminal = useMemo<Terminal>(() => {
+    return new Terminal({
+      fontSize: 18,
+      theme: {
+        background: "rgba(0,0,0,0)",
+      },
+    });
+  }, []);
 
   const terminalRef = useRef<HTMLDivElement>(null);
   const terminalContainerRef = useRef<HTMLDivElement>(null);
-  const terminalResizeObserver = new ResizeObserver(
-    (entries: ResizeObserverEntry[], observer: ResizeObserver) => {
-      const columns = Math.floor(entries[0].contentRect.width / 10.7);
-      const rows = Math.ceil(entries[0].contentRect.height / 20);
+  const terminalResizeObserver = useMemo<ResizeObserver>(
+    () =>
+      new ResizeObserver(
+        (entries: ResizeObserverEntry[], observer: ResizeObserver) => {
+          const columns = Math.floor(entries[0].contentRect.width / 10.7);
+          const rows = Math.ceil(entries[0].contentRect.height / 20);
 
-      // TODO: Resize XTERM
-      if (terminal) {
-        terminal.resize(columns, rows);
-      }
+          // TODO: Resize XTERM
+          if (terminal) {
+            terminal.resize(columns, rows);
+          }
 
-      setResizeMessage(`${columns} x ${rows}`);
-    }
+          setResizeMessage(`${columns} x ${rows}`);
+        }
+      ),
+    [terminal]
   );
 
   const { data: session, status } = useSession();

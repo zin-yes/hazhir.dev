@@ -67,7 +67,7 @@ export default function Pane({
         center();
       }, 300);
 
-      ref.current.addEventListener("click", () => {
+      ref.current.addEventListener("mousedown", () => {
         const operatingSystemContainerElement = document.getElementById(
           "operating-system-container"
         ) as HTMLDivElement;
