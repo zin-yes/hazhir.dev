@@ -73,6 +73,8 @@ export default function MockTerminalApplication() {
                 (terminal.cols - 6) / 2
               )}`
             );
+            terminal.writeln("signin - redirects you to a sign in page.");
+            terminal.writeln("signout - signs you out.");
             terminal.writeln("clear - clear all of the text.");
             terminal.writeln("calculator - start the calculator app.");
             terminal.writeln("settings - start the settings app.");
