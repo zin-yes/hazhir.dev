@@ -10,6 +10,7 @@ const default_font = Montserrat({
 });
 7;
 import type { Metadata } from "next";
+import { NextAuthSessionProvider } from "@/components/providers/session-provider";
 export const metadata: Metadata = {
   title: "hazhir.dev",
   description:
@@ -30,7 +31,7 @@ export default function RootLayout({
           enableSystem
           disableTransitionOnChange
         >
-          {children}
+          <NextAuthSessionProvider>{children}</NextAuthSessionProvider>
         </ThemeProvider>
       </body>
     </html>

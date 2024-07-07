@@ -22,16 +22,22 @@ import {
 } from "@/components/ui/context-menu";
 import { Calculator, Settings, TerminalSquare } from "lucide-react";
 import dynamic from "next/dynamic";
+import React, { useEffect, useState } from "react";
 
 export default function OperatingSystemPage() {
+  const [panes, setPanes] = useState<React.ReactNode[]>([
+    <MockCalculatorApplicationPane />,
+    <MockTerminalApplicationPane />,
+  ]);
+
   return (
     <>
       <ContextMenu>
         <ContextMenuTrigger>
           <main className="w-[100vw] h-[100vh]" id="operating-system-container">
-            <MockCalculatorApplicationPane />
-            <MockSettingsApplicationPane />
-            <MockTerminalApplicationPane />
+            {panes.map((item, index) => {
+              return <React.Fragment key={index}>{item}</React.Fragment>;
+            })}
           </main>
         </ContextMenuTrigger>
         <ContextMenuContent>

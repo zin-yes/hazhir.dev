@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { Terminal } from "@xterm/xterm";
+import { signIn, signOut, useSession } from "next-auth/react";
 
 export default function MockTerminalApplication() {
   const [resizeMessage, setResizeMessage] = useState<string>("");
@@ -24,6 +25,8 @@ export default function MockTerminalApplication() {
     }
   );
 
+  const { data: session, status } = useSession();
+
   useEffect(() => {
     if (terminalContainerRef.current) {
       terminalResizeObserver.observe(terminalContainerRef.current);
@@ -34,23 +37,80 @@ export default function MockTerminalApplication() {
       };
       terminal.open(terminalRef.current);
       terminal.writeln(
-        "This is a very simple terminal emulator application. Try typing."
+        "For a list of commands type \u001b[31m'help'\u001b[37m and press enter."
       );
-      terminal.writeln("");
-      terminal.onKey((event) => {
-        console.log(event.domEvent);
 
-        if (event.domEvent.key == "Enter") {
+      let prefix = "";
+      if (status === "authenticated") {
+        prefix = session!.user.name!.replaceAll(" ", "_") + " $ ";
+      } else {
+        prefix = "$ ";
+      }
+
+      terminal.writeln("");
+      terminal.write(prefix);
+      terminal.onKey((event) => {
+        if (event.domEvent.key === "Enter") {
           terminal.writeln("");
-        } else if (event.domEvent.key == "Backspace") {
+
+          let line = terminal.buffer.active
+            .getLine(terminal.buffer.active.cursorY)
+            ?.translateToString()
+            .trim();
+          line = line?.substring(prefix.length, line.length);
+          if (line === "clear") {
+            setTimeout(() => {
+              terminal.clear();
+            }, 10);
+          } else if (line === "signout") {
+            signOut();
+          } else if (line === "signin") {
+            signIn("/operating-system");
+          } else if (line === "help") {
+            terminal.writeln("");
+            terminal.writeln(
+              `${"─".repeat((terminal.cols - 6) / 2)} help ${"─".repeat(
+                (terminal.cols - 6) / 2
+              )}`
+            );
+            terminal.writeln("clear - clear all of the text.");
+            terminal.writeln("calculator - start the calculator app.");
+            terminal.writeln("settings - start the settings app.");
+            terminal.writeln("");
+          } else if (line === "calculator") {
+            terminal.writeln("");
+            terminal.writeln(
+              "This command will start the calculator app in future versions, but for now it just prints this text."
+            );
+            terminal.writeln("");
+          } else if (line === "settings") {
+            terminal.writeln("");
+            terminal.writeln(
+              "This command will start the settings app in future versions, but for now it just prints this text."
+            );
+            terminal.writeln("");
+          } else {
+            terminal.writeln("Unknown command.");
+            terminal.writeln("");
+          }
+
+          terminal.write(prefix);
+        } else if (event.domEvent.key === "Backspace") {
           if (terminal.buffer.active.cursorX == 0) {
             terminal.write("[A");
+            terminal.write(
+              "[C".repeat(
+                terminal.buffer.active
+                  .getLine(terminal.buffer.active.cursorY)!
+                  .translateToString()
+                  .trimEnd().length
+              )
+            );
           } else {
             terminal.write("\b \b");
           }
         } else {
           terminal.write(event.key);
-          console.log(event.key);
         }
       });
     }
