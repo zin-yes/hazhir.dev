@@ -26,8 +26,8 @@ import React, { useEffect, useState } from "react";
 
 export default function OperatingSystemPage() {
   const [panes, setPanes] = useState<React.ReactNode[]>([
-    <MockCalculatorApplicationPane />,
-    <MockTerminalApplicationPane />,
+    <MockCalculatorApplicationPane key={0} />,
+    <MockTerminalApplicationPane key={1} />,
   ]);
 
   return (
