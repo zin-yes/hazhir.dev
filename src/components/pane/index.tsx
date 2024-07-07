@@ -63,7 +63,36 @@ export default function Pane({
   // Center the pane element.
   useEffect(() => {
     if (ref.current) {
-      center();
+      setTimeout(() => {
+        center();
+      }, 300);
+
+      ref.current.addEventListener("mousedown", () => {
+        const operatingSystemContainerElement = document.getElementById(
+          "operating-system-container"
+        ) as HTMLDivElement;
+
+        let highestZIndex = 0;
+        for (
+          let i = 0;
+          i < operatingSystemContainerElement.childNodes.length;
+          i++
+        ) {
+          if (
+            Number(
+              (operatingSystemContainerElement.childNodes[i] as HTMLDivElement)
+                .style.zIndex
+            ) > highestZIndex
+          ) {
+            highestZIndex = Number(
+              (operatingSystemContainerElement.childNodes[i] as HTMLDivElement)
+                .style.zIndex
+            );
+          }
+        }
+
+        ref.current!.style.zIndex = String(highestZIndex + 1);
+      });
     }
   }, [ref]);
 
@@ -228,7 +257,7 @@ export default function Pane({
   };
 
   return (
-    <div ref={ref} className={styles.pane}>
+    <div ref={ref} className={styles.pane + " pane"}>
       <div className={styles.top_group}>
         <div className={styles.top_left_resize_handle}></div>
         <div className={styles.top_resize_handle}></div>

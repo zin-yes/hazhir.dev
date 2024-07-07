@@ -7,7 +7,12 @@ import { signIn, signOut, useSession } from "next-auth/react";
 
 export default function MockTerminalApplication() {
   const [resizeMessage, setResizeMessage] = useState<string>("");
-  const terminal = new Terminal({ fontSize: 18 });
+  const terminal = new Terminal({
+    fontSize: 18,
+    theme: {
+      background: "rgba(0,0,0,0)",
+    },
+  });
 
   const terminalRef = useRef<HTMLDivElement>(null);
   const terminalContainerRef = useRef<HTMLDivElement>(null);
@@ -50,7 +55,9 @@ export default function MockTerminalApplication() {
       terminal.writeln("");
       terminal.write(prefix);
       terminal.onKey((event) => {
-        if (event.domEvent.key === "Enter") {
+        if (event.domEvent.key === "UpArrow") {
+        } else if (event.domEvent.key === "DownArrow") {
+        } else if (event.domEvent.key === "Enter") {
           terminal.writeln("");
 
           let line = terminal.buffer.active
@@ -68,6 +75,20 @@ export default function MockTerminalApplication() {
             signOut();
           } else if (line === "signin") {
             signIn("/operating-system");
+          } else if (line === "sessioninfo") {
+            terminal.writeln("");
+            if (status === "authenticated") {
+              JSON.stringify(session, null, 2)
+                .split("\n")
+                .map((item) => {
+                  terminal.writeln(item);
+                });
+            } else {
+              terminal.writeln(
+                "There is no valid session at the current moment. Use \u001b[31m'signin'\u001b[37m to create one."
+              );
+            }
+            terminal.writeln("");
           } else if (line === "help") {
             // TODO: Auto generate the commands from a JSON file.
             terminal.writeln("");
@@ -81,6 +102,9 @@ export default function MockTerminalApplication() {
             terminal.writeln("settings - start the settings app");
             terminal.writeln("signin - redirects you to a sign in page");
             terminal.writeln("signout - signs you out");
+            terminal.writeln(
+              "sessioninfo - prints the current auth. session's info"
+            );
             terminal.writeln("");
           } else if (line === "calculator") {
             terminal.writeln("");
@@ -132,7 +156,7 @@ export default function MockTerminalApplication() {
 
   return (
     <div
-      className="w-full h-full bg-black p-4 flex justify-center items-center"
+      className="w-full h-full bg-card p-4 flex justify-center items-center"
       ref={terminalContainerRef}
     >
       <div ref={terminalRef}></div>
