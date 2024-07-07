@@ -143,7 +143,14 @@ export default function MockTerminalApplication() {
         }
       });
     }
-  }, [terminalContainerRef, terminalRef]);
+  }, [
+    terminalContainerRef,
+    terminalRef,
+    session,
+    status,
+    terminal,
+    terminalResizeObserver,
+  ]);
 
   useEffect(() => {
     // FIXME: Make the timeout work so that it doesn't still go thru if its not the "last resize"

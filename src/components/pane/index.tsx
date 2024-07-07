@@ -67,7 +67,7 @@ export default function Pane({
         center();
       }, 300);
 
-      ref.current.addEventListener("mousedown", () => {
+      ref.current.addEventListener("click", () => {
         const operatingSystemContainerElement = document.getElementById(
           "operating-system-container"
         ) as HTMLDivElement;
@@ -211,6 +211,7 @@ export default function Pane({
     settings.min_height,
     settings.starting_width,
     settings.starting_height,
+    titleId,
   ]);
 
   const maximize = () => {
