@@ -58,6 +58,8 @@ export default function MockTerminalApplication() {
             ?.translateToString()
             .trim();
           line = line?.substring(prefix.length, line.length);
+
+          // TODO: Create a proper A.P.I for implementing new commands.
           if (line === "clear") {
             setTimeout(() => {
               terminal.clear();
@@ -67,17 +69,18 @@ export default function MockTerminalApplication() {
           } else if (line === "signin") {
             signIn("/operating-system");
           } else if (line === "help") {
+            // TODO: Auto generate the commands from a JSON file.
             terminal.writeln("");
             terminal.writeln(
               `${"─".repeat((terminal.cols - 6) / 2)} help ${"─".repeat(
                 (terminal.cols - 6) / 2
               )}`
             );
-            terminal.writeln("signin - redirects you to a sign in page");
-            terminal.writeln("signout - signs you out");
             terminal.writeln("clear - clear all of the text");
             terminal.writeln("calculator - start the calculator app");
             terminal.writeln("settings - start the settings app");
+            terminal.writeln("signin - redirects you to a sign in page");
+            terminal.writeln("signout - signs you out");
             terminal.writeln("");
           } else if (line === "calculator") {
             terminal.writeln("");
