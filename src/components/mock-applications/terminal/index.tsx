@@ -43,12 +43,6 @@ export default function MockTerminalApplication() {
           terminal.writeln("");
         } else if (event.domEvent.key == "Backspace") {
           terminal.write("\b \b");
-        } else if (
-          event.domEvent.shiftKey ||
-          event.domEvent.altKey ||
-          event.domEvent.ctrlKey ||
-          event.domEvent.metaKey
-        ) {
         } else {
           terminal.write(event.key);
         }
