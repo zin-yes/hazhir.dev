@@ -254,9 +254,10 @@ export default function Pane({
   };
   const close = () => {
     ref.current!.style.opacity = "0";
+    ref.current!.style.transform = "scale(0)";
     setTimeout(() => {
       ref.current?.remove();
-    }, 200);
+    }, 1000);
   };
   const center = () => {
     ref.current!.style.top =

@@ -5,7 +5,8 @@
   top: -10px;
 
   opacity: 0;
-  transition: 0.2s opacity;
+  transition-property: opacity, transform;
+  transition-duration: 0.6s;
   z-index: 1;
 }
 
