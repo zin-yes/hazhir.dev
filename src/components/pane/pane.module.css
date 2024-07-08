@@ -105,7 +105,7 @@
 
   overflow: hidden;
   border-radius: 0.5em;
-  border: 2px solid hsl(var(--accent));
+  border: 1.5px solid hsl(var(--accent));
   transition: 0.2s box-shadow;
   transition: 0.5s filter;
   z-index: 2;

@@ -12,6 +12,10 @@ const TerminalApplication = dynamic(
   () => import("@/components/applications/terminal"),
   { ssr: false }
 );
+const MockFileExplorerApplication = dynamic(
+  () => import("@/components/mock-applications/file-explorer"),
+  { ssr: false }
+);
 
 import Pane from "@/components/pane";
 import {
@@ -20,7 +24,14 @@ import {
   ContextMenuItem,
   ContextMenuContent,
 } from "@/components/ui/context-menu";
-import { Calculator, Settings, TerminalSquare } from "lucide-react";
+import {
+  Calculator,
+  File,
+  Folder,
+  FolderClosed,
+  Settings,
+  TerminalSquare,
+} from "lucide-react";
 import dynamic from "next/dynamic";
 import React, { useState } from "react";
 
@@ -29,6 +40,7 @@ export default function OperatingSystemPage() {
     <MockCalculatorApplicationPane key={0} />,
     <TerminalApplicationPane key={1} />,
     <MockSettingsApplicationPane key={2} />,
+    <MockFileExplorerApplicationPane key={3} />,
   ]);
 
   const addPane = (pane: React.ReactNode) => {
@@ -102,6 +114,28 @@ function MockSettingsApplicationPane() {
       }}
     >
       <MockSettingsApplication />
+    </Pane>
+  );
+}
+
+function MockFileExplorerApplicationPane() {
+  return (
+    <Pane
+      action_bar={{
+        title: "File Explorer",
+        icon: {
+          svg: <FolderClosed />,
+        },
+      }}
+      settings={{
+        min_width: 700,
+        min_height: 460,
+        starting_width: 700,
+        starting_height: 450,
+        allow_overflow: false,
+      }}
+    >
+      <MockFileExplorerApplication />
     </Pane>
   );
 }

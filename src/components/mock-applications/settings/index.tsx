@@ -30,7 +30,7 @@ import {
 } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 
-export default function Component() {
+export default function MockSettingsApplication() {
   return (
     <div className="flex w-full bg-background h-full overflow-hidden">
       <aside className="hidden w-64 flex-col border-r bg-background p-6 sm:flex sticky">

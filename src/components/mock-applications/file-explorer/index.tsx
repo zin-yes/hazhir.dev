@@ -1,12 +1,24 @@
+import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import { Input } from "@/components/ui/input";
+  Card,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+  CardContent,
+} from "@/components/ui/card";
+import { Label } from "@/components/ui/label";
 import {
+  Select,
+  SelectTrigger,
+  SelectValue,
+  SelectContent,
+  SelectItem,
+} from "@/components/ui/select";
+import {
+  AccessibilityIcon,
+  AppWindowIcon,
+  ClockIcon,
   ComputerIcon,
   DownloadIcon,
   FileIcon,
@@ -19,23 +31,31 @@ import {
   InfoIcon,
   LayoutGridIcon,
   ListIcon,
+  LockIcon,
   MenuIcon,
   Music2Icon,
+  NetworkIcon,
+  PowerIcon,
   SearchIcon,
+  SettingsIcon,
   UploadIcon,
+  UserIcon,
   VideoIcon,
 } from "lucide-react";
-import Link from "next/link";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Input } from "@/components/ui/input";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 export default function MockFileExplorerApplication() {
   return (
-    <div className="flex min-h-screen w-full">
-      <div className="hidden w-64 flex-col border-r bg-background p-4 md:flex">
-        <div className="mb-4 flex items-center gap-2">
-          <FolderIcon className="h-6 w-6" />
-          <h2 className="text-lg font-medium">File Explorer</h2>
-        </div>
-        <nav className="flex flex-col gap-2">
+    <div className="flex w-full bg-background h-full overflow-hidden">
+      <aside className="hidden w-64 flex-col border-r bg-background p-6 px-2 sm:flex sticky">
+        <nav className=" flex flex-col space-y-1">
           <Link
             href="#"
             className="flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors hover:bg-muted"
@@ -85,8 +105,8 @@ export default function MockFileExplorerApplication() {
             Videos
           </Link>
         </nav>
-      </div>
-      <div className="flex flex-1 flex-col">
+      </aside>
+      <div className="flex flex-col w-full h-full">
         <header className="sticky top-0 z-10 flex h-14 items-center gap-4 border-b bg-background px-4 md:h-16 md:px-6">
           <Button variant="outline" size="icon" className="md:hidden">
             <MenuIcon className="h-5 w-5" />
@@ -135,8 +155,8 @@ export default function MockFileExplorerApplication() {
             </Button>
           </div>
         </header>
-        <main className="flex-1 overflow-auto p-4 md:p-6">
-          <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
+        <ScrollArea className="flex-1 h-full">
+          <div className="grid grid-cols-3 gap-4 w-full p-4">
             <div className="group relative flex flex-col items-center justify-center rounded-md border bg-muted/40 p-4 transition-colors hover:bg-muted">
               <FolderIcon className="h-12 w-12 text-muted-foreground" />
               <div className="mt-2 text-center text-sm font-medium">
@@ -201,7 +221,7 @@ export default function MockFileExplorerApplication() {
               <div className="absolute inset-0 z-10 cursor-pointer" />
             </div>
           </div>
-        </main>
+        </ScrollArea>
       </div>
     </div>
   );

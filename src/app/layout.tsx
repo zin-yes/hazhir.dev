@@ -8,7 +8,7 @@ import { Montserrat } from "next/font/google";
 const default_font = Montserrat({
   subsets: ["latin"],
 });
-7;
+
 import type { Metadata } from "next";
 import { NextAuthSessionProvider } from "@/components/providers/session-provider";
 export const metadata: Metadata = {
@@ -27,7 +27,7 @@ export default function RootLayout({
       <body className={default_font.className}>
         <ThemeProvider
           attribute="class"
-          defaultTheme="dark"
+          defaultTheme="light"
           enableSystem
           disableTransitionOnChange
         >

@@ -193,7 +193,6 @@ export default function Pane({
   const maximize = () => {
     if (!maximized) {
       ref.current!.style.transition = "0.7s";
-      ref.current!.style.pointerEvents = "none";
       ref.current!.style.left = "-12px";
       ref.current!.style.top = "-12px";
       ref.current!.style.width = "calc(100% + 24px)";
@@ -204,7 +203,6 @@ export default function Pane({
 
       setTimeout(() => {
         ref.current!.style.transition = "";
-        ref.current!.style.pointerEvents = "all";
       }, 700);
 
       const title_element = ref.current!.getElementsByClassName(
