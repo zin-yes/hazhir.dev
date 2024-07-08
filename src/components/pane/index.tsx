@@ -291,25 +291,19 @@ export default function Pane({
       }
 
       if (
-        !(
-          operatingSystemContainerElement.childNodes[i] as HTMLDivElement
-        ).id.includes(bodyId)
-      ) {
-        if (
-          Number(ref.current!.style.zIndex) <
-            Number(
-              (operatingSystemContainerElement.childNodes[i] as HTMLDivElement)
-                .style.zIndex
-            ) &&
+        Number(ref.current!.style.zIndex) <
           Number(
             (operatingSystemContainerElement.childNodes[i] as HTMLDivElement)
               .style.zIndex
-          ) > Number(paneOnTop?.style.zIndex ?? 0)
-        ) {
-          paneOnTop = operatingSystemContainerElement.childNodes[
-            i
-          ] as HTMLDivElement;
-        }
+          ) &&
+        Number(
+          (operatingSystemContainerElement.childNodes[i] as HTMLDivElement)
+            .style.zIndex
+        ) > Number(paneOnTop?.style.zIndex ?? 0)
+      ) {
+        paneOnTop = operatingSystemContainerElement.childNodes[
+          i
+        ] as HTMLDivElement;
       }
     }
     if (paneOnTop) {
