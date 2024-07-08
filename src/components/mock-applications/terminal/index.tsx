@@ -59,7 +59,7 @@ export default function MockTerminalApplication() {
         },
         function (err, data) {
           if (err) {
-            console.log("Something went wrong...");
+            console.error("Something went wrong...");
             console.dir(err);
             return;
           }

@@ -8,6 +8,10 @@
   transition: 0.2s opacity;
 }
 
+.pane_in_focus {
+  box-shadow: 0px 0px 20px -2px var(--pane-in-focus-shadow-color);
+}
+
 .top_group,
 .bottom_group {
   display: flex;
@@ -93,8 +97,14 @@
   flex-direction: column;
   user-select: all;
   overflow: hidden;
-  border-radius: 0.7em;
+  border-radius: 0.5em;
   border: 2px solid hsl(var(--accent));
+  transition: 0.2s box-shadow;
+  transition: 0.5s filter;
+}
+
+.body:hover {
+  filter: none !important;
 }
 
 .content {

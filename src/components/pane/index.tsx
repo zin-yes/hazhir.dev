@@ -88,7 +88,17 @@ export default function Pane({
                 .style.zIndex
             );
           }
+          const body_element = (
+            operatingSystemContainerElement.childNodes[i] as HTMLDivElement
+          ).getElementsByClassName(styles.body)[0] as HTMLDivElement;
+          body_element.classList.remove(styles.pane_in_focus);
+          body_element.style.filter = "blur(1px)";
         }
+        const this_panes_body_element = ref.current!.getElementsByClassName(
+          styles.body
+        )[0] as HTMLDivElement;
+        this_panes_body_element.classList.add(styles.pane_in_focus);
+        this_panes_body_element.style.filter = "";
 
         ref.current!.style.zIndex = String(highestZIndex + 1);
       });

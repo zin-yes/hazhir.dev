@@ -4,6 +4,7 @@
 
 @layer base {
   :root {
+    --pane-in-focus-shadow-color: hsla(20, 14.3%, 4.1%, 0.1);
     --background: 0 0% 100%;
     --foreground: 20 14.3% 4.1%;
     --card: 0 0% 100%;
@@ -27,6 +28,7 @@
   }
 
   .dark {
+    --pane-in-focus-shadow-color: hsla(60, 9.1%, 97.8%, 0.07);
     --background: 20 14.3% 4.1%;
     --foreground: 60 9.1% 97.8%;
     --card: 20 14.3% 4.1%;
