@@ -255,6 +255,52 @@ export default function Pane({
   const close = () => {
     ref.current!.style.opacity = "0";
     ref.current!.style.transform = "scale(0)";
+
+    const operatingSystemContainerElement = document.getElementById(
+      "operating-system-container"
+    ) as HTMLDivElement;
+
+    let paneOnTop: HTMLDivElement | null = null;
+    for (
+      let i = 0;
+      i < operatingSystemContainerElement.childNodes.length;
+      i++
+    ) {
+      if (i === 0) {
+        paneOnTop = operatingSystemContainerElement.childNodes[
+          i
+        ] as HTMLDivElement;
+      }
+
+      if (
+        !(
+          operatingSystemContainerElement.childNodes[i] as HTMLDivElement
+        ).id.includes(bodyId)
+      ) {
+        if (
+          Number(ref.current!.style.zIndex) <
+            Number(
+              (operatingSystemContainerElement.childNodes[i] as HTMLDivElement)
+                .style.zIndex
+            ) &&
+          Number(
+            (operatingSystemContainerElement.childNodes[i] as HTMLDivElement)
+              .style.zIndex
+          ) > Number(paneOnTop?.style.zIndex ?? 0)
+        ) {
+          paneOnTop = operatingSystemContainerElement.childNodes[
+            i
+          ] as HTMLDivElement;
+        }
+      }
+    }
+    if (paneOnTop) {
+      const body_element = paneOnTop.getElementsByClassName(
+        styles.body
+      )[0] as HTMLDivElement;
+      body_element.classList.add(styles.pane_in_focus);
+      body_element.style.filter = "";
+    }
     setTimeout(() => {
       ref.current?.remove();
     }, 1000);

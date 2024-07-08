@@ -17,7 +17,6 @@ export default function MockTerminalApplication() {
   );
 
   useEffect(() => {
-    console.log({ resizeMessage, debouncedReszieMessage });
     if (resizeMessage !== "") {
       setTimeout(() => {
         setResizeMessage("");
