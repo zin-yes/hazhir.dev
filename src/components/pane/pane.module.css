@@ -67,6 +67,7 @@
   display: flex;
   flex-direction: row;
   min-width: fit-content;
+  gap: 5px;
   height: 100%;
 }
 
@@ -74,19 +75,23 @@
   display: flex;
   justify-content: center;
   align-items: center;
-  height: 100%;
+  height: 80%;
   aspect-ratio: 1/1 !important;
   cursor: pointer;
+  margin: auto;
 }
 
 .actions > div:hover {
   background: hsl(var(--background));
+  opacity: 0.8;
   color: hsl(var(--foreground));
+  border-radius: var(--radius);
 }
 
 .actions > div:last-child:hover {
+  opacity: 0.8;
   background: red;
-  color: hsl(var(--foreground));
+  color: white;
 }
 
 .body {

@@ -5,9 +5,27 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Terminal } from "@xterm/xterm";
 import { signIn, signOut, useSession } from "next-auth/react";
 import figlet from "figlet";
+import chalk from "chalk";
+import lodash from "lodash";
 
 export default function MockTerminalApplication() {
   const [resizeMessage, setResizeMessage] = useState<string>("");
+  let debouncedReszieMessage = "";
+  const setResizeMessageDebounced = lodash.debounce(
+    (value: string) => setResizeMessage(value),
+    600
+  );
+
+  useEffect(() => {
+    console.log({ resizeMessage, debouncedReszieMessage });
+    if (resizeMessage !== "") {
+      setTimeout(() => {
+        setResizeMessage("");
+        setResizeMessageDebounced("");
+      }, 600);
+    }
+  }, [debouncedReszieMessage]);
+
   const terminal = useMemo<Terminal>(() => {
     return new Terminal({
       fontSize: 18,
@@ -26,12 +44,12 @@ export default function MockTerminalApplication() {
           const columns = Math.floor(entries[0].contentRect.width / 10.7);
           const rows = Math.ceil(entries[0].contentRect.height / 20);
 
-          // TODO: Resize XTERM
           if (terminal) {
             terminal.resize(columns, rows);
           }
 
           setResizeMessage(`${columns} x ${rows}`);
+          setResizeMessageDebounced("");
         }
       ),
     [terminal]
@@ -69,7 +87,9 @@ export default function MockTerminalApplication() {
           });
 
           terminal.writeln(
-            "For a list of commands type \u001b[31m'help'\u001b[37m and press enter."
+            `For a list of commands type ${chalk.blue(
+              "'help'"
+            )} and press enter.`
           );
           terminal.writeln("");
           terminal.write(prefix);
@@ -180,15 +200,6 @@ export default function MockTerminalApplication() {
     terminal,
     terminalResizeObserver,
   ]);
-
-  useEffect(() => {
-    // FIXME: Make the timeout work so that it doesn't still go thru if its not the "last resize"
-    if (resizeMessage !== "") {
-      setTimeout(() => {
-        setResizeMessage("");
-      }, 600);
-    }
-  }, [resizeMessage]);
 
   return (
     <div
