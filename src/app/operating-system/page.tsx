@@ -8,8 +8,8 @@ const MockSettingsApplication = dynamic(
   () => import("@/components/mock-applications/settings"),
   { ssr: false }
 );
-const MockTerminalApplication = dynamic(
-  () => import("@/components/mock-applications/terminal"),
+const TerminalApplication = dynamic(
+  () => import("@/components/applications/terminal"),
   { ssr: false }
 );
 
@@ -22,12 +22,13 @@ import {
 } from "@/components/ui/context-menu";
 import { Calculator, Settings, TerminalSquare } from "lucide-react";
 import dynamic from "next/dynamic";
-import React, { useEffect, useState } from "react";
+import React, { useState } from "react";
 
 export default function OperatingSystemPage() {
   const [panes, setPanes] = useState<React.ReactNode[]>([
     <MockCalculatorApplicationPane key={0} />,
-    <MockTerminalApplicationPane key={1} />,
+    <TerminalApplicationPane key={1} />,
+    <MockSettingsApplicationPane key={2} />,
   ]);
 
   const addPane = (pane: React.ReactNode) => {
@@ -49,7 +50,7 @@ export default function OperatingSystemPage() {
         <ContextMenuContent>
           <ContextMenuItem
             onClick={() => {
-              addPane(<MockTerminalApplicationPane key={panes.length + 1} />);
+              addPane(<TerminalApplicationPane key={panes.length + 1} />);
             }}
           >
             Placeholder option #1
@@ -105,7 +106,7 @@ function MockSettingsApplicationPane() {
   );
 }
 
-function MockTerminalApplicationPane() {
+function TerminalApplicationPane() {
   return (
     <Pane
       action_bar={{
@@ -122,7 +123,7 @@ function MockTerminalApplicationPane() {
         allow_overflow: false,
       }}
     >
-      <MockTerminalApplication />
+      <TerminalApplication />
     </Pane>
   );
 }

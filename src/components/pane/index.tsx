@@ -67,40 +67,7 @@ export default function Pane({
       }, 300);
 
       ref.current.addEventListener("mousedown", () => {
-        const operatingSystemContainerElement = document.getElementById(
-          "operating-system-container"
-        ) as HTMLDivElement;
-
-        let highestZIndex = 0;
-        for (
-          let i = 0;
-          i < operatingSystemContainerElement.childNodes.length;
-          i++
-        ) {
-          if (
-            Number(
-              (operatingSystemContainerElement.childNodes[i] as HTMLDivElement)
-                .style.zIndex
-            ) > highestZIndex
-          ) {
-            highestZIndex = Number(
-              (operatingSystemContainerElement.childNodes[i] as HTMLDivElement)
-                .style.zIndex
-            );
-          }
-          const body_element = (
-            operatingSystemContainerElement.childNodes[i] as HTMLDivElement
-          ).getElementsByClassName(styles.body)[0] as HTMLDivElement;
-          body_element.classList.remove(styles.pane_in_focus);
-          body_element.style.filter = "blur(1px)";
-        }
-        const this_panes_body_element = ref.current!.getElementsByClassName(
-          styles.body
-        )[0] as HTMLDivElement;
-        this_panes_body_element.classList.add(styles.pane_in_focus);
-        this_panes_body_element.style.filter = "";
-
-        ref.current!.style.zIndex = String(highestZIndex + 1);
+        focusPane();
       });
     }
   }, [ref]);
@@ -225,7 +192,7 @@ export default function Pane({
 
   const maximize = () => {
     if (!maximized) {
-      ref.current!.style.transition = "1s";
+      ref.current!.style.transition = "0.7s";
       ref.current!.style.pointerEvents = "none";
       ref.current!.style.left = "-12px";
       ref.current!.style.top = "-12px";
@@ -238,7 +205,7 @@ export default function Pane({
       setTimeout(() => {
         ref.current!.style.transition = "";
         ref.current!.style.pointerEvents = "all";
-      }, 1000);
+      }, 700);
 
       const title_element = ref.current!.getElementsByClassName(
         styles.title
@@ -246,7 +213,7 @@ export default function Pane({
 
       title_element.replaceWith(title_element.cloneNode(true));
     } else {
-      ref.current!.style.transition = "1s";
+      ref.current!.style.transition = "0.7s";
 
       ref.current!.style.width = `${settings.starting_width}px`;
       ref.current!.style.height = `${settings.starting_height}px`;
@@ -259,7 +226,7 @@ export default function Pane({
 
       setTimeout(() => {
         ref.current!.style.transition = "";
-      }, 1000);
+      }, 700);
 
       (document.getElementById(bodyId) as HTMLDivElement).style.borderRadius =
         "0.7em";
@@ -270,55 +237,92 @@ export default function Pane({
       setMaximized(false);
     }
   };
-  const close = () => {
-    ref.current!.style.opacity = "0";
-    ref.current!.style.transform = "scale(0)";
 
+  function getTopElement(a: HTMLElement, b: HTMLElement) {
+    const aIndex = getZIndex(a);
+    const bIndex = getZIndex(b);
+    return aIndex > bIndex ? a : b;
+  }
+
+  function getZIndex(element: Element): number {
+    const zIndex = document
+      .defaultView!.getComputedStyle(element)
+      .getPropertyValue("z-index");
+    return isNaN(Number(zIndex)) ? 0 : Number(zIndex);
+  }
+
+  const focusPane = () => {
     const operatingSystemContainerElement = document.getElementById(
       "operating-system-container"
     ) as HTMLDivElement;
 
-    let paneOnTop: HTMLDivElement | null = null;
+    let highestZIndex = 0;
     for (
       let i = 0;
       i < operatingSystemContainerElement.childNodes.length;
       i++
     ) {
-      if (i === 0) {
-        paneOnTop = operatingSystemContainerElement.childNodes[
-          i
-        ] as HTMLDivElement;
-      }
-
       if (
-        Number(ref.current!.style.zIndex) <
-          Number(
-            (operatingSystemContainerElement.childNodes[i] as HTMLDivElement)
-              .style.zIndex
-          ) &&
         Number(
           (operatingSystemContainerElement.childNodes[i] as HTMLDivElement)
             .style.zIndex
-        ) > Number(paneOnTop?.style.zIndex ?? 0)
+        ) > highestZIndex
       ) {
-        paneOnTop = operatingSystemContainerElement.childNodes[
-          i
-        ] as HTMLDivElement;
+        highestZIndex = Number(
+          (operatingSystemContainerElement.childNodes[i] as HTMLDivElement)
+            .style.zIndex
+        );
       }
+      const body_element = (
+        operatingSystemContainerElement.childNodes[i] as HTMLDivElement
+      ).getElementsByClassName(styles.body)[0] as HTMLDivElement;
+      body_element.classList.remove(styles.pane_in_focus);
+      body_element.style.filter = "blur(1px)";
     }
-    if (paneOnTop) {
-      const body_element = paneOnTop.getElementsByClassName(
-        styles.body
-      )[0] as HTMLDivElement;
-      body_element.classList.add(styles.pane_in_focus);
-      body_element.style.filter = "";
+    const this_panes_body_element = ref.current!.getElementsByClassName(
+      styles.body
+    )[0] as HTMLDivElement;
+
+    if (!this_panes_body_element.classList.contains(styles.pane_in_focus)) {
+      this_panes_body_element.classList.add(styles.pane_in_focus);
+      this_panes_body_element.style.filter = "";
     }
+
+    ref.current!.style.zIndex = String(highestZIndex + 1);
+  };
+
+  const close = () => {
+    ref.current!.style.opacity = "0";
+    ref.current!.style.transform = "scale(0)";
     setTimeout(() => {
       ref.current?.remove();
-    }, 1000);
+      const panes = (
+        document.getElementById("operating-system-container") as HTMLDivElement
+      ).childNodes;
+
+      let topPane: HTMLDivElement | undefined;
+      panes.forEach((item) => {
+        if (!topPane) topPane = item as HTMLDivElement;
+
+        if (getTopElement(topPane, item as HTMLDivElement) === item)
+          topPane = item as HTMLDivElement;
+      });
+
+      if (topPane) {
+        const this_panes_body_element = topPane.getElementsByClassName(
+          styles.body
+        )[0] as HTMLDivElement;
+
+        if (!this_panes_body_element.classList.contains(styles.pane_in_focus)) {
+          this_panes_body_element.classList.add(styles.pane_in_focus);
+          this_panes_body_element.style.filter = "";
+        }
+      }
+    }, 600);
   };
+
   const center = () => {
-    ref.current!.style.transition = "1s";
+    ref.current!.style.transition = "0.7s";
     ref.current!.style.top =
       (window.innerHeight - ref.current!.clientHeight) / 2 + "px";
     ref.current!.style.left =
@@ -327,7 +331,7 @@ export default function Pane({
 
     setTimeout(() => {
       ref.current!.style.transition = "";
-    }, 1000);
+    }, 700);
   };
 
   return (
