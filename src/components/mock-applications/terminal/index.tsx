@@ -202,7 +202,7 @@ export default function MockTerminalApplication() {
 
   return (
     <div
-      className="w-full h-full bg-card p-4 flex justify-center items-center"
+      className="w-full h-full bg-card p-4 flex justify-start items-start"
       ref={terminalContainerRef}
     >
       <div ref={terminalRef}></div>

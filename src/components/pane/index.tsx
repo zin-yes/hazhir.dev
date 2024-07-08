@@ -225,6 +225,8 @@ export default function Pane({
 
   const maximize = () => {
     if (!maximized) {
+      ref.current!.style.transition = "1s";
+      ref.current!.style.pointerEvents = "none";
       ref.current!.style.left = "-12px";
       ref.current!.style.top = "-12px";
       ref.current!.style.width = "calc(100% + 24px)";
@@ -233,22 +235,38 @@ export default function Pane({
         "0";
       setMaximized(true);
 
+      setTimeout(() => {
+        ref.current!.style.transition = "";
+        ref.current!.style.pointerEvents = "all";
+      }, 1000);
+
       const title_element = ref.current!.getElementsByClassName(
         styles.title
       )[0] as HTMLDivElement;
 
       title_element.replaceWith(title_element.cloneNode(true));
     } else {
+      ref.current!.style.transition = "1s";
+
       ref.current!.style.width = `${settings.starting_width}px`;
       ref.current!.style.height = `${settings.starting_height}px`;
+      ref.current!.style.top = `${
+        window.innerHeight / 2 - settings.starting_height! / 2
+      }px`;
+      ref.current!.style.left = `${
+        window.innerWidth / 2 - settings.starting_width! / 2
+      }px`;
+
+      setTimeout(() => {
+        ref.current!.style.transition = "";
+      }, 1000);
+
       (document.getElementById(bodyId) as HTMLDivElement).style.borderRadius =
         "0.7em";
 
       const title_element = document.getElementById(titleId) as HTMLDivElement;
 
       add_dragging_handle_event(title_element, ref);
-
-      center();
       setMaximized(false);
     }
   };
@@ -306,11 +324,16 @@ export default function Pane({
     }, 1000);
   };
   const center = () => {
+    ref.current!.style.transition = "1s";
     ref.current!.style.top =
       (window.innerHeight - ref.current!.clientHeight) / 2 + "px";
     ref.current!.style.left =
       (window.innerWidth - ref.current!.clientWidth) / 2 + "px";
     ref.current!.style.opacity = "1";
+
+    setTimeout(() => {
+      ref.current!.style.transition = "";
+    }, 1000);
   };
 
   return (

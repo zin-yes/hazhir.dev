@@ -182,7 +182,18 @@
   transition-property: opacity, transform;
   transition-duration: 0.6s;
   transition-delay: 1s border-radius;
-  border-radius: 10px;
+  border-radius: 15px;
+}
+
+.bottom_left_resize_handle:hover:before,
+.bottom_right_resize_handle:hover:before,
+.top_left_resize_handle:hover:before,
+.top_right_resize_handle:hover:before,
+.bottom_left_resize_handle:active:before,
+.bottom_right_resize_handle:active:before,
+.top_left_resize_handle:active:before,
+.top_right_resize_handle:active:before {
+  border-radius: 1.7px;
 }
 
 .bottom_left_resize_handle:hover:before {

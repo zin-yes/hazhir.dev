@@ -30,6 +30,12 @@ export default function OperatingSystemPage() {
     <MockTerminalApplicationPane key={1} />,
   ]);
 
+  const addPane = (pane: React.ReactNode) => {
+    let _panes = panes;
+    _panes.push(pane);
+    setPanes(_panes);
+  };
+
   return (
     <>
       <ContextMenu>
@@ -41,7 +47,13 @@ export default function OperatingSystemPage() {
           </main>
         </ContextMenuTrigger>
         <ContextMenuContent>
-          <ContextMenuItem>Placeholder option #1</ContextMenuItem>
+          <ContextMenuItem
+            onClick={() => {
+              addPane(<MockTerminalApplicationPane key={panes.length + 1} />);
+            }}
+          >
+            Placeholder option #1
+          </ContextMenuItem>
           <ContextMenuItem>Placeholder option #2</ContextMenuItem>
         </ContextMenuContent>
       </ContextMenu>
