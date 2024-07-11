@@ -35,10 +35,10 @@ import React, { useState } from "react";
 
 export default function OperatingSystemPage() {
   const [panes, setPanes] = useState<React.ReactNode[]>([
-    <MockCalculatorApplicationPane key={0} />,
+    // <MockCalculatorApplicationPane key={0} />,
     <TerminalApplicationPane key={1} />,
-    <MockSettingsApplicationPane key={2} />,
-    <MockFileExplorerApplicationPane key={3} />,
+    // <MockSettingsApplicationPane key={2} />,
+    // <MockFileExplorerApplicationPane key={3} />,
   ]);
 
   const addPane = (pane: React.ReactNode) => {

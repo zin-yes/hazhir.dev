@@ -277,7 +277,7 @@ export default function Pane({
         operatingSystemContainerElement.childNodes[i] as HTMLDivElement
       ).getElementsByClassName(styles.body)[0] as HTMLDivElement;
       body_element.classList.remove(styles.pane_in_focus);
-      body_element.style.filter = "blur(1px)";
+      body_element.style.filter = "blur(1px) brightness(80%)";
     }
     const this_panes_body_element = ref.current!.getElementsByClassName(
       styles.body

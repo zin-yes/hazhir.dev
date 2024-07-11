@@ -3,6 +3,8 @@ import ansiEscapes from "ansi-escape-sequences";
 
 import commands from "./commands.json";
 
+// FIXME: When resizing the lines dont unwrap and wrap properly.
+
 // TODO: Add command history.
 
 interface CommandBuffer {
@@ -24,8 +26,6 @@ function writeToTerminalAndCommandBuffer(
   terminal: Terminal
 ): CommandBuffer {
   let result: CommandBuffer = commandBuffer;
-
-  console.log("Writing " + content + " to buffer: " + JSON.stringify(result));
 
   terminal.write(ansiEscapes.cursor.hide);
 
@@ -74,6 +74,58 @@ function writeToTerminalAndCommandBuffer(
     };
 
     writeAndReturnToOriginalPosition(end, terminal);
+  }
+
+  terminal.write(ansiEscapes.cursor.show);
+
+  return result;
+}
+
+function removeFromTerminalAndCommandBuffer(
+  steps: number,
+  commandBuffer: CommandBuffer,
+  terminal: Terminal
+): CommandBuffer {
+  let result: CommandBuffer = commandBuffer;
+
+  terminal.write(ansiEscapes.cursor.hide);
+
+  const start = result.content.substring(0, result.cursorPosition - steps);
+  const end = result.content.substring(
+    result.cursorPosition,
+    result.content.length
+  );
+
+  const startingCursorX = terminal.buffer.active.cursorX;
+
+  for (let i = 0; i < steps; i++) {
+    const isStartOfLine = (startingCursorX - i) % terminal.cols === 0;
+
+    if (isStartOfLine) {
+      terminal.write("\b \b");
+      terminal.write(ansiEscapes.cursor.previousLine());
+      terminal.write(ansiEscapes.cursor.forward(terminal.cols));
+    } else {
+      terminal.write("\b \b");
+    }
+  }
+
+  if (result.cursorPosition === result.content.length) {
+    result = {
+      content: commandBuffer.content.substring(
+        0,
+        commandBuffer.cursorPosition - steps
+      ),
+      cursorPosition: commandBuffer.cursorPosition - steps,
+    };
+    writeAndReturnToOriginalPosition(" ".repeat(steps), terminal);
+  } else {
+    result = {
+      content: start + end,
+      cursorPosition: result.cursorPosition - steps,
+    };
+
+    writeAndReturnToOriginalPosition(end + " ".repeat(steps), terminal);
   }
 
   terminal.write(ansiEscapes.cursor.show);
@@ -196,6 +248,43 @@ export function parseCommand(
   }
 
   switch (event.domEvent.key) {
+    case "Backspace":
+      if (
+        _commandBuffer.cursorPosition <= _commandBuffer.content.length &&
+        _commandBuffer.cursorPosition > 0
+      ) {
+        if (event.domEvent.ctrlKey) {
+          const cursorStartedOnASpace =
+            _commandBuffer.content.charAt(_commandBuffer.cursorPosition - 1) ===
+            " ";
+          let toBeRemoved = 0;
+
+          // Count the number of spaces or characters to the left (depending on cursorStartingOnASpace) until we've hit something different.
+          for (let i = 0; i < _commandBuffer.cursorPosition; i++) {
+            const cursorCurrentlyOnASpace =
+              _commandBuffer.content.charAt(
+                _commandBuffer.cursorPosition - 1 - i
+              ) === " ";
+
+            if (cursorCurrentlyOnASpace !== cursorStartedOnASpace) break;
+
+            toBeRemoved++;
+          }
+
+          _commandBuffer = removeFromTerminalAndCommandBuffer(
+            toBeRemoved,
+            _commandBuffer,
+            terminal
+          );
+        } else {
+          _commandBuffer = removeFromTerminalAndCommandBuffer(
+            1,
+            _commandBuffer,
+            terminal
+          );
+        }
+      }
+      break;
     case "Enter":
       _commandBuffer = onCommand(_commandBuffer, terminal);
       break;
@@ -230,31 +319,73 @@ export function parseCommand(
     case "ArrowUp":
       break;
     case "ArrowLeft":
-      if (!event.domEvent.shiftKey) {
-        if (
-          _commandBuffer.cursorPosition <= _commandBuffer.content.length &&
-          _commandBuffer.cursorPosition > 0
-        ) {
+      if (
+        _commandBuffer.cursorPosition <= _commandBuffer.content.length &&
+        _commandBuffer.cursorPosition > 0
+      ) {
+        if (event.domEvent.ctrlKey) {
+          const cursorStartedOnASpace =
+            _commandBuffer.content.charAt(_commandBuffer.cursorPosition - 1) ===
+            " ";
+          let toStep = 0;
+
+          // Count the number of spaces or characters to the left (depending on cursorStartingOnASpace) until we've hit something different.
+          for (let i = 0; i < _commandBuffer.cursorPosition; i++) {
+            const cursorCurrentlyOnASpace =
+              _commandBuffer.content.charAt(
+                _commandBuffer.cursorPosition - 1 - i
+              ) === " ";
+
+            if (cursorCurrentlyOnASpace !== cursorStartedOnASpace) break;
+
+            toStep++;
+          }
+
+          _commandBuffer.cursorPosition += -toStep;
+
+          moveCursorBack(toStep, terminal);
+        } else {
           moveCursorBack(1, terminal);
 
           _commandBuffer.cursorPosition += -1;
         }
-      } else {
-        moveCursorBack(1, terminal);
       }
       break;
     case "ArrowRight":
-      if (!event.domEvent.shiftKey) {
-        if (
-          _commandBuffer.cursorPosition < _commandBuffer.content.length &&
-          _commandBuffer.cursorPosition >= 0
-        ) {
+      if (
+        _commandBuffer.cursorPosition < _commandBuffer.content.length &&
+        _commandBuffer.cursorPosition >= 0
+      ) {
+        if (event.domEvent.ctrlKey) {
+          const cursorStartedOnASpace =
+            _commandBuffer.content.charAt(_commandBuffer.cursorPosition) ===
+            " ";
+          let toStep = 0;
+
+          // Count the number of spaces or characters to the left (depending on cursorStartingOnASpace) until we've hit something different.
+          for (
+            let i = 0;
+            i < _commandBuffer.content.length - _commandBuffer.cursorPosition;
+            i++
+          ) {
+            const cursorCurrentlyOnASpace =
+              _commandBuffer.content.charAt(
+                _commandBuffer.cursorPosition + i
+              ) === " ";
+
+            if (cursorCurrentlyOnASpace !== cursorStartedOnASpace) break;
+
+            toStep++;
+          }
+
+          _commandBuffer.cursorPosition += toStep;
+
+          moveCursorForward(toStep, terminal);
+        } else {
           moveCursorForward(1, terminal);
 
-          _commandBuffer.cursorPosition += +1;
+          _commandBuffer.cursorPosition += 1;
         }
-      } else {
-        moveCursorForward(1, terminal);
       }
       break;
     default:
@@ -265,20 +396,4 @@ export function parseCommand(
       );
       break;
   }
-
-  const start = _commandBuffer.content.substring(
-    0,
-    _commandBuffer.cursorPosition
-  );
-  const end = _commandBuffer.content.substring(
-    _commandBuffer.cursorPosition,
-    _commandBuffer.content.length
-  );
-
-  console.log({
-    cursorX: terminal.buffer.active.cursorX,
-    cols: terminal.cols,
-    content: start + "|" + end,
-    cursorPosition: _commandBuffer.cursorPosition,
-  });
 }
