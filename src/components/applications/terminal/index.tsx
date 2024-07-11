@@ -10,7 +10,7 @@ import { FitAddon } from "@xterm/addon-fit";
 
 import themes from "./themes.json";
 
-import { parseCommand } from "./command-line-routine";
+import { COMMAND_LINE_PREFIX, parseCommand } from "./command-line-routine";
 
 export default function TerminalApplication() {
   const [resizeMessage, setResizeMessage] = useState<string>("");
@@ -30,6 +30,7 @@ export default function TerminalApplication() {
     return new Terminal({
       fontSize: 18,
       theme: terminalTheme,
+      convertEol: true,
     });
   }, []);
 
@@ -75,6 +76,8 @@ export default function TerminalApplication() {
         terminal.open(terminalRef.current);
 
         fitAddon.fit();
+
+        terminal.write(COMMAND_LINE_PREFIX);
 
         terminal.onKey((event) => {
           parseCommand(terminal, event);

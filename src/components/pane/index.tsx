@@ -27,6 +27,8 @@ const DEFAULT_WIDTH = 800;
 const DEFAULT_HEIGHT = 600;
 const MIN_DEFAULT_DIMENSIONS = 400;
 
+// TODO: Rewrite window system to be more centralized.
+
 export default function Pane({
   children,
   className,

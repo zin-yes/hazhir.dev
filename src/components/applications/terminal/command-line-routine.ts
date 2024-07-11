@@ -10,10 +10,13 @@ interface CommandBuffer {
   cursorPosition: number;
 }
 
+// TODO: Check if theres a better way to store this.
 let _commandBuffer: CommandBuffer = {
   content: "",
   cursorPosition: 0,
 };
+
+export const COMMAND_LINE_PREFIX = "$ ";
 
 function writeToTerminalAndCommandBuffer(
   content: string,
@@ -33,6 +36,8 @@ function writeToTerminalAndCommandBuffer(
   );
 
   const startingCursorX = terminal.buffer.active.cursorX;
+  const startingCursorY = terminal.buffer.active.cursorY;
+  let currentCursorY = startingCursorY;
 
   for (
     let characterIndex = 0;
@@ -46,13 +51,18 @@ function writeToTerminalAndCommandBuffer(
 
     if (isBeforeEndOfLine) {
       terminal.write(character);
-      terminal.write(ansiEscapes.cursor.nextLine());
+      if (terminal.buffer.active.getLine(currentCursorY + 1)) {
+        terminal.write("\n\r");
+      } else {
+        terminal.write(ansiEscapes.cursor.nextLine());
+      }
+      currentCursorY += 1;
     } else {
       terminal.write(character);
     }
   }
 
-  if (result.cursorPosition == result.content.length) {
+  if (result.cursorPosition === result.content.length) {
     result = {
       content: commandBuffer.content + content,
       cursorPosition: commandBuffer.cursorPosition + content.length,
@@ -147,6 +157,7 @@ function onCommand(
         ansiEscapes.style.reset
     );
     terminal.writeln("");
+    terminal.write(COMMAND_LINE_PREFIX);
   } else {
     terminal.writeln("");
     terminal.writeln("");
@@ -164,6 +175,7 @@ function onCommand(
         ansiEscapes.style.reset
     );
     terminal.writeln("");
+    terminal.write(COMMAND_LINE_PREFIX);
   }
 
   return {
