@@ -1,0 +1,7 @@
+[
+  {
+    "name": "help",
+    "aliases": ["?"],
+    "description": "Lists all of the commands available to the current user."
+  }
+]

@@ -26,8 +26,6 @@ import {
 } from "@/components/ui/context-menu";
 import {
   Calculator,
-  File,
-  Folder,
   FolderClosed,
   Settings,
   TerminalSquare,
