@@ -79,8 +79,8 @@ export default function TerminalApplication() {
 
         terminal.write(COMMAND_LINE_PREFIX);
 
-        terminal.onKey((event) => {
-          parseCommand(terminal, event);
+        terminal.onKey(async (event) => {
+          await parseCommand(terminal, event);
         });
 
         terminal.onData(() => {});

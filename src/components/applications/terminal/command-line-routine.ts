@@ -1,6 +1,9 @@
 import type { Terminal } from "@xterm/xterm";
 import ansiEscapes from "ansi-escape-sequences";
 
+import { all, common, createEmphasize } from "emphasize";
+
+import commandCallbacks from "./command-callbacks";
 import commands from "./commands.json";
 
 // FIXME: When resizing the lines dont unwrap and wrap properly.
@@ -179,10 +182,19 @@ function moveCursorForward(steps: number, terminal: Terminal) {
   if (steps > 1) terminal.write(ansiEscapes.cursor.show);
 }
 
-function onCommand(
+async function onCommand(
   commandBuffer: CommandBuffer,
   terminal: Terminal
-): CommandBuffer {
+): Promise<CommandBuffer> {
+  if (commandBuffer.content.length === 0) {
+    terminal.writeln("");
+    terminal.write(COMMAND_LINE_PREFIX);
+    return {
+      content: "",
+      cursorPosition: 0,
+    };
+  }
+
   const tokens = commandBuffer.content.split(" ");
   const command = tokens[0];
 
@@ -193,23 +205,35 @@ function onCommand(
   const commandExists = queryForCommand !== undefined;
 
   if (commandExists) {
-    terminal.writeln("");
-    terminal.writeln("");
-    terminal.writeln(
-      ansiEscapes.style.green +
-        "Known command " +
-        ansiEscapes.style.black +
-        "`" +
-        ansiEscapes.style.gray +
-        commandBuffer.content +
-        ansiEscapes.style.black +
-        "`" +
-        ansiEscapes.style.green +
-        "." +
-        ansiEscapes.style.reset
-    );
-    terminal.writeln("");
-    terminal.write(COMMAND_LINE_PREFIX);
+    // terminal.writeln("");
+    // terminal.writeln("");
+    // terminal.writeln(
+    //   ansiEscapes.style.green +
+    //     "Known command " +
+    //     ansiEscapes.style.black +
+    //     "`" +
+    //     ansiEscapes.style.gray +
+    //     commandBuffer.content +
+    //     ansiEscapes.style.black +
+    //     "`" +
+    //     ansiEscapes.style.green +
+    //     "." +
+    //     ansiEscapes.style.reset
+    // );
+    // terminal.writeln("");
+    // terminal.writeln(
+    //   createEmphasize(all).highlight(
+    //     "json",
+    //     JSON.stringify(queryForCommand, null, 2)
+    //   ).value
+    // );
+
+    commandCallbacks[queryForCommand.callbackName](
+      terminal,
+      COMMAND_LINE_PREFIX
+    ).then(() => {
+      terminal.write(COMMAND_LINE_PREFIX);
+    });
   } else {
     terminal.writeln("");
     terminal.writeln("");
@@ -236,7 +260,7 @@ function onCommand(
   };
 }
 
-export function parseCommand(
+export async function parseCommand(
   terminal: Terminal,
   event: { key: string; domEvent: KeyboardEvent }
 ) {
@@ -286,7 +310,7 @@ export function parseCommand(
       }
       break;
     case "Enter":
-      _commandBuffer = onCommand(_commandBuffer, terminal);
+      _commandBuffer = await onCommand(_commandBuffer, terminal);
       break;
     case "End":
       const end = _commandBuffer.content.substring(
@@ -313,8 +337,11 @@ export function parseCommand(
         terminal
       );
       break;
+    case "Escape":
+      break;
     case "PageDown":
     case "ArrowDown":
+      break;
     case "PageUp":
     case "ArrowUp":
       break;
@@ -388,6 +415,8 @@ export function parseCommand(
         }
       }
       break;
+    // TODO: Add delete key functionality.
+    case "Delete":
     default:
       _commandBuffer = writeToTerminalAndCommandBuffer(
         content,

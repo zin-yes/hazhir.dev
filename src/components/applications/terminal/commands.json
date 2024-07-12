@@ -4,6 +4,15 @@
     "usage": ["help <command?>", "? <command?>"],
     "examples": ["help <TODO>"],
     "aliases": ["?"],
-    "description": "Lists all of the commands available to the current user."
+    "description": "Lists all of the commands available to the current user.",
+    "callbackName": "help"
+  },
+  {
+    "name": "clear",
+    "usage": ["clear"],
+    "examples": ["clear"],
+    "aliases": [],
+    "description": "Clears the terminal.",
+    "callbackName": "clear"
   }
 ]
