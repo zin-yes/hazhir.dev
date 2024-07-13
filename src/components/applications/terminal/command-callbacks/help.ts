@@ -103,25 +103,57 @@ function removeAllAnsiEscapeCharacters(text: string): string {
   return result;
 }
 
-function sorroundTextWithEdges(
+function sorroundTextWithCharacters(
   text: string,
   width: number,
-  spacer: string
+  spacer: string,
+  leftEdge: string,
+  rightEdge: string
 ): string {
   const spacesLeftOver =
     width -
     (removeAllAnsiEscapeCharacters(text).length +
-      LEFT_EDGE.length +
-      RIGHT_EDGE.length);
+      leftEdge.length +
+      rightEdge.length);
 
   let result =
-    LEFT_EDGE + text + spacer.repeat(Math.max(spacesLeftOver, 0)) + RIGHT_EDGE;
+    leftEdge + text + spacer.repeat(Math.max(spacesLeftOver, 0)) + rightEdge;
 
   if (result.length < width) {
     result =
-      result.substring(0, result.length - RIGHT_EDGE.length) +
+      result.substring(0, result.length - rightEdge.length) +
       spacer.repeat(width - result.length) +
-      RIGHT_EDGE;
+      rightEdge;
+  }
+
+  return result;
+}
+
+function sorroundTextWithCharactersCentered(
+  text: string,
+  width: number,
+  spacer: string,
+  leftEdge: string,
+  rightEdge: string
+): string {
+  const spacesLeftOver =
+    width -
+    (removeAllAnsiEscapeCharacters(text).length +
+      leftEdge.length +
+      rightEdge.length);
+
+  let result =
+    leftEdge +
+    spacer.repeat(Math.max(spacesLeftOver / 2, 0)) +
+    text +
+    spacer.repeat(Math.max(spacesLeftOver / 2, 0)) +
+    rightEdge;
+
+  if (result.length < width) {
+    result =
+      result.substring(0, result.length - rightEdge.length) +
+      spacer.repeat(width - result.length) +
+      rightEdge;
   }
 
   return result;
@@ -134,7 +166,7 @@ function constructItemText(
     examples: string[];
     aliases: string[];
     description: string;
-    callbackName: string;
+    callbackFunctionName: string;
   },
   width: number
 ): string[] {
@@ -162,10 +194,12 @@ function constructItemText(
       ITEM_SPACER_MARGIN +
       ITEM_SPACER.repeat(Math.max(nameSpacesLeftOver / 2, 0));
 
-    const nameHeader = sorroundTextWithEdges(
+    const nameHeader = sorroundTextWithCharacters(
       nameHeaderText,
       width,
-      ITEM_SPACER
+      ITEM_SPACER,
+      LEFT_EDGE,
+      RIGHT_EDGE
     );
     let lines = [nameHeader];
 
@@ -174,7 +208,15 @@ function constructItemText(
     wrap(item.description, { width: descriptionSpacesLeftOver, indent: "" })
       .split("\n")
       .forEach((line) =>
-        lines.push(sorroundTextWithEdges(line, width, TEXT_ROW_SPACER))
+        lines.push(
+          sorroundTextWithCharacters(
+            line,
+            width,
+            TEXT_ROW_SPACER,
+            LEFT_EDGE,
+            RIGHT_EDGE
+          )
+        )
       );
     return lines;
   }
@@ -223,20 +265,59 @@ function constructFooter(width: number): string {
   return result;
 }
 
+const COMMANDS_PER_PAGE = 5;
+
 async function help(fullCommand: string, terminal: Terminal): Promise<void> {
+  const args = fullCommand.trim().split(" ");
+  let currentPage = 0;
+
+  if (args.length > 1) {
+    console.log(args);
+    currentPage = Number(args[1]) - 1;
+  }
+
   const width = terminal.cols;
+
+  const currentPageCommands = commands.slice(
+    currentPage * COMMANDS_PER_PAGE,
+    currentPage * COMMANDS_PER_PAGE + COMMANDS_PER_PAGE
+  );
 
   terminal.writeln("");
   terminal.writeln("");
-  terminal.writeln(constructHeaderText("HELP", width));
-  commands.map((item, index) => {
-    constructItemText(item, width).forEach((item) => {
-      terminal.writeln(item);
+  if (currentPageCommands.length > 0) {
+    terminal.writeln(constructHeaderText("HELP", width));
+    currentPageCommands.map((item, index) => {
+      if (item.name.length > 0) {
+        constructItemText(item, width).forEach((item) => {
+          terminal.writeln(item);
+        });
+        if (index < currentPageCommands.length - 1)
+          terminal.writeln(constructHorizontalSpacer(width));
+      }
     });
-    if (index < commands.length - 1)
-      terminal.writeln(constructHorizontalSpacer(width));
-  });
-  terminal.writeln(constructFooter(width));
+    terminal.writeln(constructFooter(width));
+    const totalPages = Math.ceil(commands.length / COMMANDS_PER_PAGE);
+    if (totalPages > 1) {
+      terminal.writeln(
+        sorroundTextWithCharactersCentered(
+          `Page ${currentPage + 1} of ${totalPages} ${
+            currentPage === 0
+              ? ansi.style.gray +
+                "(type 'help <page>' to see more)" +
+                ansi.style.reset
+              : ""
+          }`,
+          width,
+          " ",
+          "",
+          ""
+        )
+      );
+    }
+  } else {
+    terminal.writeln(`Page ${args[1]} does not exist.`);
+  }
   terminal.writeln("");
 }
 

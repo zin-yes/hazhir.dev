@@ -205,7 +205,7 @@ async function onCommand(
   const commandExists = queryForCommand !== undefined;
 
   if (commandExists) {
-    commandCallbacks[queryForCommand.callbackName](
+    commandCallbacks[queryForCommand.callbackFunctionName](
       commandBuffer.content,
       terminal
     )
