@@ -75,6 +75,11 @@ export default function TerminalApplication() {
         terminal.loadAddon(fitAddon);
         terminal.open(terminalRef.current);
 
+        terminalContainerRef.current.addEventListener("mousedown", (event) => {
+          event.preventDefault();
+          terminal.focus();
+        });
+
         fitAddon.fit();
 
         terminal.write(COMMAND_LINE_PREFIX);
