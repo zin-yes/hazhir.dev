@@ -175,25 +175,6 @@ function constructItemText(
       .forEach((line) =>
         lines.push(sorroundTextWithEdges(line, width, TEXT_ROW_SPACER))
       );
-
-    // let description = item.description;
-    // const descriptionSpacesLeftOver =
-    //   width - (LEFT_EDGE.length + RIGHT_EDGE.length);
-    // while (description.length > descriptionSpacesLeftOver) {
-    //   lines.push(
-    //     sorroundTextWithEdges(
-    //       description.substring(0, descriptionSpacesLeftOver),
-    //       width,
-    //       TEXT_ROW_SPACER
-    //     )
-    //   );
-
-    //   description = description.substring(
-    //     descriptionSpacesLeftOver,
-    //     description.length
-    //   );
-    // }
-    // lines.push(sorroundTextWithEdges(description, width, TEXT_ROW_SPACER));
     return lines;
   }
 
