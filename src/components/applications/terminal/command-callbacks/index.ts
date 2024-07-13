@@ -1,12 +1,14 @@
 import type { Terminal } from "@xterm/xterm";
 
-import { clear } from "./clear";
-import { help } from "./help";
+import clear from "./clear";
+import help from "./help";
 
-const commandCallbacks: Record<
-  string,
-  (terminal: Terminal, commandLinePrefix: string) => Promise<void>
-> = {
+export type CommandCallback = (
+  fullCommand: string,
+  terminal: Terminal
+) => Promise<void>;
+
+const commandCallbacks: Record<string, CommandCallback> = {
   clear: clear,
   help: help,
 };

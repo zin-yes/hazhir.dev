@@ -1,7 +1,7 @@
 import type { Terminal } from "@xterm/xterm";
-import ansiEscapes from "ansi-escape-sequences";
+import ansi from "ansi-escape-sequences";
 
-import { all, common, createEmphasize } from "emphasize";
+import wrap from "word-wrap";
 
 import commandCallbacks from "./command-callbacks";
 import commands from "./commands.json";
@@ -30,7 +30,7 @@ function writeToTerminalAndCommandBuffer(
 ): CommandBuffer {
   let result: CommandBuffer = commandBuffer;
 
-  terminal.write(ansiEscapes.cursor.hide);
+  terminal.write(ansi.cursor.hide);
 
   const start = result.content.substring(0, result.cursorPosition);
   const end = result.content.substring(
@@ -57,7 +57,7 @@ function writeToTerminalAndCommandBuffer(
       if (terminal.buffer.active.getLine(currentCursorY + 1)) {
         terminal.write("\n\r");
       } else {
-        terminal.write(ansiEscapes.cursor.nextLine());
+        terminal.write(ansi.cursor.nextLine());
       }
       currentCursorY += 1;
     } else {
@@ -79,7 +79,7 @@ function writeToTerminalAndCommandBuffer(
     writeAndReturnToOriginalPosition(end, terminal);
   }
 
-  terminal.write(ansiEscapes.cursor.show);
+  terminal.write(ansi.cursor.show);
 
   return result;
 }
@@ -91,7 +91,7 @@ function removeFromTerminalAndCommandBuffer(
 ): CommandBuffer {
   let result: CommandBuffer = commandBuffer;
 
-  terminal.write(ansiEscapes.cursor.hide);
+  terminal.write(ansi.cursor.hide);
 
   const start = result.content.substring(0, result.cursorPosition - steps);
   const end = result.content.substring(
@@ -106,8 +106,8 @@ function removeFromTerminalAndCommandBuffer(
 
     if (isStartOfLine) {
       terminal.write("\b \b");
-      terminal.write(ansiEscapes.cursor.previousLine());
-      terminal.write(ansiEscapes.cursor.forward(terminal.cols));
+      terminal.write(ansi.cursor.previousLine());
+      terminal.write(ansi.cursor.forward(terminal.cols));
     } else {
       terminal.write("\b \b");
     }
@@ -131,7 +131,7 @@ function removeFromTerminalAndCommandBuffer(
     writeAndReturnToOriginalPosition(end + " ".repeat(steps), terminal);
   }
 
-  terminal.write(ansiEscapes.cursor.show);
+  terminal.write(ansi.cursor.show);
 
   return result;
 }
@@ -150,36 +150,36 @@ function writeAndReturnToOriginalPosition(content: string, terminal: Terminal) {
 function moveCursorBack(steps: number, terminal: Terminal) {
   const startingCursorX = terminal.buffer.active.cursorX;
 
-  if (steps > 1) terminal.write(ansiEscapes.cursor.hide);
+  if (steps > 1) terminal.write(ansi.cursor.hide);
   for (let i = 0; i < steps; i++) {
     const isBeforeStartOfLine = (startingCursorX - i) % terminal.cols === 0;
 
     if (isBeforeStartOfLine) {
-      terminal.write(ansiEscapes.cursor.hide);
-      terminal.write(ansiEscapes.cursor.previousLine());
-      terminal.write(ansiEscapes.cursor.forward(terminal.cols));
-      terminal.write(ansiEscapes.cursor.show);
+      terminal.write(ansi.cursor.hide);
+      terminal.write(ansi.cursor.previousLine());
+      terminal.write(ansi.cursor.forward(terminal.cols));
+      terminal.write(ansi.cursor.show);
     } else {
-      terminal.write(ansiEscapes.cursor.back());
+      terminal.write(ansi.cursor.back());
     }
   }
-  if (steps > 1) terminal.write(ansiEscapes.cursor.show);
+  if (steps > 1) terminal.write(ansi.cursor.show);
 }
 
 function moveCursorForward(steps: number, terminal: Terminal) {
   const startingCursorX = terminal.buffer.active.cursorX;
-  if (steps > 1) terminal.write(ansiEscapes.cursor.hide);
+  if (steps > 1) terminal.write(ansi.cursor.hide);
   for (let i = 0; i < steps; i++) {
     const isBeforeEndOfLine =
       (startingCursorX + i) % terminal.cols === terminal.cols - 1;
 
     if (isBeforeEndOfLine) {
-      terminal.write(ansiEscapes.cursor.nextLine());
+      terminal.write(ansi.cursor.nextLine());
     } else {
-      terminal.write(ansiEscapes.cursor.forward());
+      terminal.write(ansi.cursor.forward());
     }
   }
-  if (steps > 1) terminal.write(ansiEscapes.cursor.show);
+  if (steps > 1) terminal.write(ansi.cursor.show);
 }
 
 async function onCommand(
@@ -205,50 +205,38 @@ async function onCommand(
   const commandExists = queryForCommand !== undefined;
 
   if (commandExists) {
-    // terminal.writeln("");
-    // terminal.writeln("");
-    // terminal.writeln(
-    //   ansiEscapes.style.green +
-    //     "Known command " +
-    //     ansiEscapes.style.black +
-    //     "`" +
-    //     ansiEscapes.style.gray +
-    //     commandBuffer.content +
-    //     ansiEscapes.style.black +
-    //     "`" +
-    //     ansiEscapes.style.green +
-    //     "." +
-    //     ansiEscapes.style.reset
-    // );
-    // terminal.writeln("");
-    // terminal.writeln(
-    //   createEmphasize(all).highlight(
-    //     "json",
-    //     JSON.stringify(queryForCommand, null, 2)
-    //   ).value
-    // );
-
     commandCallbacks[queryForCommand.callbackName](
-      terminal,
-      COMMAND_LINE_PREFIX
-    ).then(() => {
-      terminal.write(COMMAND_LINE_PREFIX);
-    });
+      commandBuffer.content,
+      terminal
+    )
+      .catch((error: Error) => {
+        terminal.writeln(ansi.style.red + "Program threw an exception: ");
+        wrap(error.message, { width: terminal.cols, indent: "" })
+          .split("\n")
+          .forEach((line) => {
+            terminal.writeln(line);
+          });
+        terminal.write(ansi.style.reset);
+      })
+      .finally(() => {
+        terminal.writeln("");
+        terminal.write(COMMAND_LINE_PREFIX);
+      });
   } else {
     terminal.writeln("");
     terminal.writeln("");
     terminal.writeln(
-      ansiEscapes.style.red +
+      ansi.style.red +
         "Unknown command " +
-        ansiEscapes.style.black +
+        ansi.style.black +
         "`" +
-        ansiEscapes.style.gray +
+        ansi.style.gray +
         commandBuffer.content +
-        ansiEscapes.style.black +
+        ansi.style.black +
         "`" +
-        ansiEscapes.style.red +
+        ansi.style.red +
         "." +
-        ansiEscapes.style.reset
+        ansi.style.reset
     );
     terminal.writeln("");
     terminal.write(COMMAND_LINE_PREFIX);

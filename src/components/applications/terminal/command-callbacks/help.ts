@@ -1,4 +1,5 @@
 import type { Terminal } from "@xterm/xterm";
+import type { CommandCallback } from "./index";
 
 import ansi, { Style } from "ansi-escape-sequences";
 
@@ -20,7 +21,7 @@ const HORIZONTAL_SPACER = "═";
 const HORIZONTAL_SPACER_LEFT_JOINT = "╠";
 const HORIZONTAL_SPACER_RIGHT_JOINT = "╣";
 
-const HEADER_MARGIN = " ";
+const HEADER_MARGIN = "  ";
 
 const ITEM_SPACER = "─";
 const ITEM_SPACER_MARGIN = " ";
@@ -222,7 +223,7 @@ function constructFooter(width: number): string {
   return result;
 }
 
-export async function help(terminal: Terminal) {
+async function help(fullCommand: string, terminal: Terminal): Promise<void> {
   const width = terminal.cols;
 
   terminal.writeln("");
@@ -238,3 +239,5 @@ export async function help(terminal: Terminal) {
   terminal.writeln(constructFooter(width));
   terminal.writeln("");
 }
+
+export default help satisfies CommandCallback;

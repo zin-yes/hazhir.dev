@@ -14,5 +14,109 @@
     "aliases": [],
     "description": "Clears the terminal.",
     "callbackName": "clear"
+  },
+  {
+    "name": "help",
+    "usage": ["help <command?>", "? <command?>"],
+    "examples": ["help <TODO>"],
+    "aliases": ["?"],
+    "description": "Lists all of the commands available to the current user.",
+    "callbackName": "help"
+  },
+  {
+    "name": "help",
+    "usage": ["help <command?>", "? <command?>"],
+    "examples": ["help <TODO>"],
+    "aliases": ["?"],
+    "description": "Lists all of the commands available to the current user.",
+    "callbackName": "help"
+  },
+  {
+    "name": "help",
+    "usage": ["help <command?>", "? <command?>"],
+    "examples": ["help <TODO>"],
+    "aliases": ["?"],
+    "description": "Lists all of the commands available to the current user.",
+    "callbackName": "help"
+  },
+  {
+    "name": "help",
+    "usage": ["help <command?>", "? <command?>"],
+    "examples": ["help <TODO>"],
+    "aliases": ["?"],
+    "description": "Lists all of the commands available to the current user.",
+    "callbackName": "help"
+  },
+  {
+    "name": "help",
+    "usage": ["help <command?>", "? <command?>"],
+    "examples": ["help <TODO>"],
+    "aliases": ["?"],
+    "description": "Lists all of the commands available to the current user.",
+    "callbackName": "help"
+  },
+  {
+    "name": "help",
+    "usage": ["help <command?>", "? <command?>"],
+    "examples": ["help <TODO>"],
+    "aliases": ["?"],
+    "description": "Lists all of the commands available to the current user.",
+    "callbackName": "help"
+  },
+  {
+    "name": "help",
+    "usage": ["help <command?>", "? <command?>"],
+    "examples": ["help <TODO>"],
+    "aliases": ["?"],
+    "description": "Lists all of the commands available to the current user.",
+    "callbackName": "help"
+  },
+  {
+    "name": "help",
+    "usage": ["help <command?>", "? <command?>"],
+    "examples": ["help <TODO>"],
+    "aliases": ["?"],
+    "description": "Lists all of the commands available to the current user.",
+    "callbackName": "help"
+  },
+  {
+    "name": "help",
+    "usage": ["help <command?>", "? <command?>"],
+    "examples": ["help <TODO>"],
+    "aliases": ["?"],
+    "description": "Lists all of the commands available to the current user.",
+    "callbackName": "help"
+  },
+  {
+    "name": "help",
+    "usage": ["help <command?>", "? <command?>"],
+    "examples": ["help <TODO>"],
+    "aliases": ["?"],
+    "description": "Lists all of the commands available to the current user.",
+    "callbackName": "help"
+  },
+  {
+    "name": "help",
+    "usage": ["help <command?>", "? <command?>"],
+    "examples": ["help <TODO>"],
+    "aliases": ["?"],
+    "description": "Lists all of the commands available to the current user.",
+    "callbackName": "help"
+  },
+  {
+    "name": "help",
+    "usage": ["help <command?>", "? <command?>"],
+    "examples": ["help <TODO>"],
+    "aliases": ["?"],
+    "description": "Lists all of the commands available to the current user.",
+    "callbackName": "help"
+  },
+  {
+    "name": "help",
+    "usage": ["help <command?>", "? <command?>"],
+    "examples": ["help <TODO>"],
+    "aliases": ["?"],
+    "description": "Lists all of the commands available to the current user.",
+    "callbackName": "help"
   }
 ]
