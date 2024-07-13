@@ -219,7 +219,6 @@ async function onCommand(
         terminal.write(ansi.style.reset);
       })
       .finally(() => {
-        terminal.writeln("");
         terminal.write(COMMAND_LINE_PREFIX);
       });
   } else {
