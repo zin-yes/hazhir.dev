@@ -205,7 +205,7 @@ function constructItemText(
 
     const descriptionSpacesLeftOver =
       width - (LEFT_EDGE.length + RIGHT_EDGE.length);
-    wrap(item.description, { width: descriptionSpacesLeftOver, indent: "" })
+    wrap(item.description, { width: descriptionSpacesLeftOver - 2, indent: "" })
       .split("\n")
       .forEach((line) =>
         lines.push(

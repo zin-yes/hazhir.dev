@@ -150,7 +150,7 @@ function TerminalApplicationPane() {
       settings={{
         min_width: 400,
         min_height: 300,
-        starting_width: 917,
+        starting_width: 940,
         starting_height: 485,
         allow_overflow: false,
       }}

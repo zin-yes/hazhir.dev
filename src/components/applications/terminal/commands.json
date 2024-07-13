@@ -1,8 +1,8 @@
 [
   {
     "name": "help",
-    "usage": ["help <command?>", "? <command?>"],
-    "examples": ["help <TODO>"],
+    "usage": ["help <command?/page?>", "? <command?/page?>"],
+    "examples": ["help clear", "help 2"],
     "aliases": ["?"],
     "description": "Lists all of the commands available to the current user.",
     "callbackFunctionName": "help"
