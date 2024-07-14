@@ -12,6 +12,10 @@ const TerminalApplication = dynamic(
   () => import("@/components/applications/terminal"),
   { ssr: false }
 );
+const VoxelGameApplication = dynamic(
+  () => import("@/components/applications/voxel-game"),
+  { ssr: false }
+);
 const MockFileExplorerApplication = dynamic(
   () => import("@/components/mock-applications/file-explorer"),
   { ssr: false }
@@ -27,6 +31,7 @@ import {
 import {
   Calculator,
   FolderClosed,
+  Gamepad2,
   Settings,
   TerminalSquare,
 } from "lucide-react";
@@ -39,6 +44,7 @@ export default function OperatingSystemPage() {
     <TerminalApplicationPane key={1} />,
     // <MockSettingsApplicationPane key={2} />,
     // <MockFileExplorerApplicationPane key={3} />,
+    <VoxelGameApplicationPane key={4} />,
   ]);
 
   const addPane = (pane: React.ReactNode) => {
@@ -156,6 +162,28 @@ function TerminalApplicationPane() {
       }}
     >
       <TerminalApplication />
+    </Pane>
+  );
+}
+
+function VoxelGameApplicationPane() {
+  return (
+    <Pane
+      action_bar={{
+        title: "Voxel Game",
+        icon: {
+          svg: <Gamepad2 />,
+        },
+      }}
+      settings={{
+        min_width: 400,
+        min_height: 300,
+        starting_width: 940,
+        starting_height: 485,
+        allow_overflow: false,
+      }}
+    >
+      <VoxelGameApplication />
     </Pane>
   );
 }
