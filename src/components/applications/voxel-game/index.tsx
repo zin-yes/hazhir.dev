@@ -233,44 +233,46 @@ export default function VoxelGamePage() {
         containerRef.current.addEventListener(
           "mousedown",
           (event: MouseEvent) => {
-            raycaster.setFromCamera(pointer, camera);
+            if (controls.isLocked) {
+              raycaster.setFromCamera(pointer, camera);
 
-            const intersections = raycaster.intersectObjects(scene.children);
+              const intersections = raycaster.intersectObjects(scene.children);
 
-            if (intersections[0].object == sky) {
-              return;
-            }
-            if (event.button === 2) {
-              if (intersections.length > 0) {
-                const intersectedBlock = intersections[0];
-                const faceNormal = intersectedBlock.face?.normal;
-
-                const texture = textures[currentBlock];
-                const material = new THREE.MeshPhongMaterial({
-                  map: texture,
-                });
-
-                material.transparent = true;
-                const cube = new THREE.Mesh(geometry, material);
-                cube.translateX(
-                  intersectedBlock.object.position.x + faceNormal!.x
-                );
-                cube.translateY(
-                  intersectedBlock.object.position.y + faceNormal!.y
-                );
-                cube.translateZ(
-                  intersectedBlock.object.position.z + faceNormal!.z
-                );
-                scene.add(cube);
+              if (intersections[0].object == sky) {
+                return;
               }
-            } else if (event.button === 0) {
-              if (intersections.length > 0) {
-                intersections[0].object.removeFromParent();
-              }
+              if (event.button === 2) {
+                if (intersections.length > 0) {
+                  const intersectedBlock = intersections[0];
+                  const faceNormal = intersectedBlock.face?.normal;
 
-              // if (!controls.isLocked) {
-              //   controls.lock();
-              // }
+                  const texture = textures[currentBlock];
+                  const material = new THREE.MeshPhongMaterial({
+                    map: texture,
+                  });
+
+                  material.transparent = true;
+                  const cube = new THREE.Mesh(geometry, material);
+                  cube.translateX(
+                    intersectedBlock.object.position.x + faceNormal!.x
+                  );
+                  cube.translateY(
+                    intersectedBlock.object.position.y + faceNormal!.y
+                  );
+                  cube.translateZ(
+                    intersectedBlock.object.position.z + faceNormal!.z
+                  );
+                  scene.add(cube);
+                }
+              } else if (event.button === 0) {
+                if (intersections.length > 0) {
+                  intersections[0].object.removeFromParent();
+                }
+
+                // if (!controls.isLocked) {
+                //   controls.lock();
+                // }
+              }
             }
           }
         );
