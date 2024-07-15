@@ -23,7 +23,6 @@
     "@types/figlet": "^1.5.8",
     "@types/lodash": "^4.17.6",
     "@types/three": "^0.166.0",
-    "@types/three-nebula": "^10.0.4",
     "@xterm/addon-fit": "^0.10.0",
     "@xterm/xterm": "^5.5.0",
     "ansi-escape-sequences": "^6.2.2",
@@ -34,6 +33,7 @@
     "drizzle-orm": "^0.31.2",
     "emphasize": "^7.0.0",
     "evaluatex": "^2.2.0",
+    "fastnoise-lite": "^1.1.1",
     "figlet": "^1.7.0",
     "lodash": "^4.17.21",
     "lucide-react": "^0.400.0",
@@ -47,7 +47,6 @@
     "tailwind-merge": "^2.3.0",
     "tailwindcss-animate": "^1.0.7",
     "three": "^0.166.1",
-    "three-nebula": "^10.0.3",
     "word-wrap": "^1.2.5"
   },
   "devDependencies": {
