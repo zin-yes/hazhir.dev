@@ -77,7 +77,7 @@ export default function Hotbar({
           <div
             className={
               (currentBlock === 0 ? "bg-slate-100" : "") +
-              " transition-all duration-400 block rounded-xl  p-1.5"
+              " transition-all duration-200 block rounded-xl  p-1.5"
             }
           >
             <div
@@ -100,7 +100,7 @@ export default function Hotbar({
           <div
             className={
               (currentBlock === 1 ? "bg-slate-100" : "") +
-              " transition-all duration-400 block rounded-xl p-1.5"
+              " transition-all duration-200 block rounded-xl p-1.5"
             }
           >
             <div
@@ -123,7 +123,7 @@ export default function Hotbar({
           <div
             className={
               (currentBlock === 2 ? "bg-slate-100" : "") +
-              " transition-all duration-400 block rounded-xl  p-1.5"
+              " transition-all duration-200 block rounded-xl  p-1.5"
             }
           >
             <div
@@ -146,7 +146,7 @@ export default function Hotbar({
           <div
             className={
               (currentBlock === 3 ? "bg-slate-100" : "") +
-              " transition-all duration-400 block rounded-xl  p-1.5"
+              " transition-all duration-200 block rounded-xl  p-1.5"
             }
           >
             <div
@@ -169,7 +169,7 @@ export default function Hotbar({
           <div
             className={
               (currentBlock === 4 ? "bg-slate-100" : "") +
-              " transition-all duration-400 block rounded-xl p-1.5"
+              " transition-all duration-200 block rounded-xl p-1.5"
             }
           >
             <div
@@ -194,7 +194,7 @@ export default function Hotbar({
           <div
             className={
               (currentBlock === 5 ? "bg-slate-100" : "") +
-              " transition-all duration-400 block rounded-xl p-1.5"
+              " transition-all duration-200 block rounded-xl p-1.5"
             }
           >
             <div
@@ -219,7 +219,7 @@ export default function Hotbar({
           <div
             className={
               (currentBlock === 6 ? "bg-slate-100" : "") +
-              " transition-all duration-400 block rounded-xl p-1.5"
+              " transition-all duration-200 block rounded-xl p-1.5"
             }
           >
             <div
@@ -244,7 +244,7 @@ export default function Hotbar({
           <div
             className={
               (currentBlock === 7 ? "bg-slate-100" : "") +
-              " transition-all duration-400 block rounded-xl p-1.5"
+              " transition-all duration-200 block rounded-xl p-1.5"
             }
           >
             <div

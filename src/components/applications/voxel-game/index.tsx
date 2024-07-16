@@ -28,11 +28,11 @@ import FastNoiseLite from "fastnoise-lite";
 const font = Silkscreen({ subsets: ["latin"], weight: ["400", "700"] });
 
 const WORLD_WIDTH = 10;
-const WORLD_DEPTH = 10;
+const WORLD_LENGTH = 10;
 
-const CHUNK_WIDTH = 16;
+const CHUNK_WIDTH = 8;
 const CHUNK_HEIGHT = 256;
-const CHUNK_DEPTH = 16;
+const CHUNK_LENGTH = 8;
 
 export default function VoxelGameApplication() {
   enum BlockType {
@@ -45,9 +45,9 @@ export default function VoxelGameApplication() {
     GLASS,
     LOG,
     LEAVES,
-  }
-  interface Block {
-    type: BlockType;
+    STONE,
+    LIMESTONE,
+    GRASS_FLOWER,
   }
 
   const containerRef = useRef<HTMLDivElement>(null);
@@ -61,6 +61,8 @@ export default function VoxelGameApplication() {
     1000
   );
   let renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   let controls: PointerLockControls;
 
   const raycaster = new THREE.Raycaster();
@@ -179,6 +181,46 @@ export default function VoxelGameApplication() {
   LEAVES_TEXTURE.magFilter = THREE.NearestFilter;
   LEAVES_TEXTURE.colorSpace = THREE.SRGBColorSpace;
 
+  const STONE_TEXTURE = new THREE.TextureLoader().load(
+    "/voxel-game/blocks/stone.png"
+  );
+  STONE_TEXTURE.name = "stone";
+  STONE_TEXTURE.wrapS = THREE.RepeatWrapping;
+  STONE_TEXTURE.wrapT = THREE.RepeatWrapping;
+  STONE_TEXTURE.minFilter = THREE.NearestFilter;
+  STONE_TEXTURE.magFilter = THREE.NearestFilter;
+  STONE_TEXTURE.colorSpace = THREE.SRGBColorSpace;
+
+  const GRASS_TOP_FLOWER_TEXTURE = new THREE.TextureLoader().load(
+    "/voxel-game/blocks/grass_top_flowers.png"
+  );
+  GRASS_TOP_FLOWER_TEXTURE.name = "grass_top_flowers";
+  GRASS_TOP_FLOWER_TEXTURE.wrapS = THREE.RepeatWrapping;
+  GRASS_TOP_FLOWER_TEXTURE.wrapT = THREE.RepeatWrapping;
+  GRASS_TOP_FLOWER_TEXTURE.minFilter = THREE.NearestFilter;
+  GRASS_TOP_FLOWER_TEXTURE.magFilter = THREE.NearestFilter;
+  GRASS_TOP_FLOWER_TEXTURE.colorSpace = THREE.SRGBColorSpace;
+
+  const GRASS_FLOWER_SIDE_TEXTURE = new THREE.TextureLoader().load(
+    "/voxel-game/blocks/grass_side.png"
+  );
+  GRASS_FLOWER_SIDE_TEXTURE.name = "grass_side_flower";
+  GRASS_FLOWER_SIDE_TEXTURE.wrapS = THREE.RepeatWrapping;
+  GRASS_FLOWER_SIDE_TEXTURE.wrapT = THREE.RepeatWrapping;
+  GRASS_FLOWER_SIDE_TEXTURE.minFilter = THREE.NearestFilter;
+  GRASS_FLOWER_SIDE_TEXTURE.magFilter = THREE.NearestFilter;
+  GRASS_FLOWER_SIDE_TEXTURE.colorSpace = THREE.SRGBColorSpace;
+
+  const LIMESTONE_TEXTURE = new THREE.TextureLoader().load(
+    "/voxel-game/blocks/limestone.png"
+  );
+  LIMESTONE_TEXTURE.name = "limestone";
+  LIMESTONE_TEXTURE.wrapS = THREE.RepeatWrapping;
+  LIMESTONE_TEXTURE.wrapT = THREE.RepeatWrapping;
+  LIMESTONE_TEXTURE.minFilter = THREE.NearestFilter;
+  LIMESTONE_TEXTURE.magFilter = THREE.NearestFilter;
+  LIMESTONE_TEXTURE.colorSpace = THREE.SRGBColorSpace;
+
   textures.push(COBBLESTONE_TEXTURE);
   textures.push(DIRT_TEXTURE);
   textures.push(SAND_TEXTURE);
@@ -189,6 +231,9 @@ export default function VoxelGameApplication() {
   textures.push(LOG_TOP_BOTTOM_TEXTURE);
   textures.push(LOG_SIDE_TEXTURE);
   textures.push(LEAVES_TEXTURE);
+  textures.push(STONE_TEXTURE);
+  textures.push(GRASS_TOP_FLOWER_TEXTURE);
+  textures.push(LIMESTONE_TEXTURE);
 
   const initialized = useRef(false);
 
@@ -207,8 +252,6 @@ export default function VoxelGameApplication() {
     [containerRef, camera, renderer]
   );
 
-  const seed = 69420;
-
   useEffect(() => {
     if (containerRef.current) {
       if (!initialized.current) {
@@ -216,8 +259,9 @@ export default function VoxelGameApplication() {
 
         const indicatorGeometry = new THREE.BoxGeometry(1, 1, 1);
         const indicatorMaterial = new THREE.MeshBasicMaterial({
+          color: 0xffffff,
           wireframe: true,
-          aoMapIntensity: 0,
+          transparent: false,
         });
         indicatorGeometry.scale(1.01, 1.01, 1.01);
         const indicatorMesh = new THREE.Mesh(
@@ -229,9 +273,10 @@ export default function VoxelGameApplication() {
         scene.add(indicatorMesh);
 
         const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
+        directionalLight.castShadow = true;
         scene.add(directionalLight);
 
-        const ambientLight = new THREE.AmbientLight(0xffffff, 0.1);
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
         scene.add(ambientLight);
 
         controls = new PointerLockControls(camera, containerRef.current);
@@ -363,48 +408,227 @@ export default function VoxelGameApplication() {
         document.addEventListener("keydown", onKeyDown);
         document.addEventListener("keyup", onKeyUp);
 
-        camera.position.x = CHUNK_WIDTH / 2;
-        camera.position.y = 110;
-        camera.position.z = CHUNK_DEPTH / 2;
+        camera.position.x = (WORLD_WIDTH * CHUNK_WIDTH) / 2;
+        camera.position.y =
+          getSurfaceHeight(
+            seed,
+            (WORLD_WIDTH * CHUNK_WIDTH) / 2,
+            (WORLD_LENGTH * CHUNK_LENGTH) / 2
+          ) + 2;
+        camera.position.z = (WORLD_LENGTH * CHUNK_LENGTH) / 2;
 
         generateChunks(seed);
       }
     }
   }, [containerRef, overlay]);
 
-  const DIRT_HEIGHT = 10;
-  function generateBlock(seed: number, x: number, y: number, z: number): Block {
-    let noise = new FastNoiseLite();
+  function getDirtHeight(seed: number, x: number, z: number): number {
+    noise.SetNoiseType(FastNoiseLite.NoiseType.OpenSimplex2);
+    noise.SetFractalType(FastNoiseLite.FractalType.FBm);
+    noise.SetSeed(seed);
+    noise.SetFrequency(0.004);
+    noise.SetFractalOctaves(1);
+    noise.SetFractalLacunarity(0);
+    noise.SetFractalGain(0);
+    noise.SetFractalWeightedStrength(0);
+
+    const dirtHeight = 13 + noise.GetNoise(x, 0, z) * 5;
+    return dirtHeight;
+  }
+
+  const seed = Math.round(Math.random() * 1000);
+  //const seed = 69420;
+  let noise = new FastNoiseLite();
+  function getSurfaceHeight(seed: number, x: number, z: number): number {
     noise.SetSeed(seed);
     noise.SetNoiseType(FastNoiseLite.NoiseType.OpenSimplex2);
     noise.SetFractalType(FastNoiseLite.FractalType.FBm);
+    noise.SetFrequency(0.0035);
+    noise.SetFractalOctaves(4);
+    noise.SetFractalLacunarity(2.24);
+    noise.SetFractalGain(0.42);
+    noise.SetFractalWeightedStrength(0);
 
-    const surfaceY = 100 + noise.GetNoise(x, z) * 20;
+    const noiseValue = noise.GetNoise(x, 0, z);
+    let surfaceY = 0;
 
-    return {
-      type:
-        y < surfaceY
-          ? y > surfaceY - 1
-            ? BlockType.GRASS
-            : y > surfaceY - DIRT_HEIGHT
-            ? BlockType.DIRT
-            : BlockType.COBBLESTONE
-          : BlockType.AIR,
-    };
+    //y=mx+b
+    if (noiseValue >= -1 && noiseValue <= 0.3) {
+      surfaceY = 38.4615 * noiseValue + (88.4615 / 256) * CHUNK_HEIGHT;
+    } else if (noiseValue >= 0.3 && noiseValue <= 0.4) {
+      surfaceY = 500 * noiseValue + (-50 / 256) * CHUNK_HEIGHT;
+    } else if (noiseValue >= 0.4 && noiseValue <= 1.0) {
+      surfaceY = 20 * noiseValue - 7 + (150 / 256) * CHUNK_HEIGHT;
+    }
+
+    return surfaceY;
   }
 
-  let chunks: Block[][][][][] = [];
+  function getFlowerGrassNoise(seed: number, x: number, z: number): number {
+    noise.SetSeed(seed);
+    noise.SetNoiseType(FastNoiseLite.NoiseType.OpenSimplex2);
+    noise.SetFractalType("None");
+    noise.SetFrequency(0.005);
+    noise.SetFractalOctaves(1);
+    noise.SetFractalLacunarity(0);
+    noise.SetFractalGain(0);
+    noise.SetFractalWeightedStrength(0);
+    const noiseValue = noise.GetNoise(x, 0, z);
+    return noiseValue;
+  }
+
+  function getSplochNoise(
+    seed: number,
+    x: number,
+    y: number,
+    z: number
+  ): number {
+    noise.SetSeed(seed);
+    noise.SetNoiseType(FastNoiseLite.NoiseType.OpenSimplex2);
+    noise.SetFractalType("None");
+    noise.SetFrequency(0.04);
+    noise.SetFractalOctaves(1);
+    noise.SetFractalLacunarity(0);
+    noise.SetFractalGain(0);
+    noise.SetFractalWeightedStrength(0);
+
+    const noiseValue = noise.GetNoise(x, y, z);
+    return noiseValue;
+  }
+
+  function getTunnelCaveNoise(
+    seed: number,
+    x: number,
+    y: number,
+    z: number
+  ): number {
+    noise.SetSeed(seed);
+    noise.SetNoiseType(FastNoiseLite.NoiseType.OpenSimplex2);
+    noise.SetFractalType(FastNoiseLite.FractalType.PingPong);
+    noise.SetFrequency(0.01);
+    noise.SetFractalOctaves(1);
+    noise.SetFractalLacunarity(2.0);
+    noise.SetFractalGain(0.5);
+    noise.SetFractalWeightedStrength(0);
+    noise.SetFractalPingPongStrength(1.17);
+
+    const noiseValue = noise.GetNoise(x, y * 3, z);
+    return noiseValue;
+  }
+
+  function getChamberCaveNoise(
+    seed: number,
+    x: number,
+    y: number,
+    z: number
+  ): number {
+    noise.SetSeed(seed);
+    noise.SetNoiseType(FastNoiseLite.NoiseType.Cellular);
+    noise.SetFractalType(FastNoiseLite.FractalType.None);
+    noise.SetFrequency(0.03);
+    noise.SetFractalOctaves(1);
+    noise.SetFractalLacunarity(0);
+    noise.SetFractalGain(0);
+    noise.SetFractalWeightedStrength(0);
+    noise.SetCellularDistanceFunction(
+      FastNoiseLite.CellularDistanceFunction.Euclidean
+    );
+    noise.SetCellularReturnType(FastNoiseLite.CellularReturnType.Distance2Mul);
+
+    const noiseValue = noise.GetNoise(x, y * 3, z);
+    return noiseValue;
+  }
+
+  function getPorousnessNoise(
+    seed: number,
+    x: number,
+    y: number,
+    z: number
+  ): number {
+    noise.SetSeed(seed);
+    noise.SetNoiseType(FastNoiseLite.NoiseType.Perlin);
+    noise.SetFractalType(FastNoiseLite.FractalType.None);
+    noise.SetFrequency(0.009);
+
+    const noiseValue = noise.GetNoise(x, 0, z);
+    return noiseValue;
+  }
+
+  function generateBlock(
+    seed: number,
+    x: number,
+    y: number,
+    z: number
+  ): number {
+    const flowerGrassNoise = getFlowerGrassNoise(seed, x, z);
+    const splochNoise = getSplochNoise(seed, x, y, z);
+    const tunnelCaveNoise = getTunnelCaveNoise(seed, x, y, z);
+    const chamberCaveNoise = getChamberCaveNoise(seed, x, y, z);
+    const porousnessNoise = getPorousnessNoise(seed, x, y, z);
+
+    const surfaceY = getSurfaceHeight(seed, x, z);
+    const seaLevel = 80;
+    //const dirtHeight = 10;
+    const dirtHeight = getDirtHeight(seed, x, z);
+    const limestoneHeight = 40;
+    //return Math.random() > 0.5 ? BlockType.COBBLESTONE : BlockType.AIR;
+
+    let block = BlockType.AIR;
+
+    //const isTunnelCave = tunnelCaveNoise <= -0.88 + porousnessNoise * 0.2;
+    //const isTunnelCave = tunnelCaveNoise > -0.1 && tunnelCaveNoise < 0.1;
+    const isTunnelCave = false;
+
+    if (y < surfaceY) {
+      if (y > surfaceY - 1) {
+        if (flowerGrassNoise > 0.855) {
+          block = BlockType.GRASS_FLOWER;
+        } else {
+          block = BlockType.GRASS;
+        }
+      } else {
+        const isChamberCave = chamberCaveNoise > -0.7 + porousnessNoise * 0.2;
+        //const isChamberCave = chamberCaveNoise > 0.5 + porousnessNoise * 0.2;
+        //const isChamberCave = false;
+
+        if (y > surfaceY - dirtHeight) {
+          block = BlockType.DIRT;
+        } else if (y > surfaceY - dirtHeight - limestoneHeight) {
+          if (isChamberCave) return BlockType.AIR;
+          if (isTunnelCave) return BlockType.AIR;
+          block = BlockType.STONE;
+        } else {
+          if (isChamberCave) return BlockType.AIR;
+          if (isTunnelCave) return BlockType.AIR;
+          block = BlockType.LIMESTONE;
+        }
+
+        if (
+          (splochNoise >= 0.85 || splochNoise <= -0.85) &&
+          (block === BlockType.STONE || block === BlockType.LIMESTONE)
+        ) {
+          block = BlockType.COBBLESTONE;
+        }
+      }
+    }
+
+    if (block === BlockType.AIR && y < seaLevel) block = BlockType.GLASS;
+
+    if (block === BlockType.GLASS && y === surfaceY) block = BlockType.DIRT;
+
+    return block;
+  }
+
+  let chunks: number[][][][][] = [];
 
   function initiateChunk() {
     let chunk = [];
     for (let x = 0; x < CHUNK_WIDTH; x++) {
-      let arrayArray: Block[][] = [];
+      let arrayArray: number[][] = [];
       for (let y = 0; y < CHUNK_HEIGHT; y++) {
-        let array: Block[] = [];
-        for (let z = 0; z < CHUNK_DEPTH; z++) {
-          array.push({
-            type: BlockType.COBBLESTONE,
-          });
+        let array: number[] = [];
+        for (let z = 0; z < CHUNK_LENGTH; z++) {
+          array.push(BlockType.COBBLESTONE);
         }
         arrayArray.push(array);
       }
@@ -418,7 +642,7 @@ export default function VoxelGameApplication() {
     chunks = [];
     for (let chunkX = 0; chunkX < WORLD_WIDTH; chunkX++) {
       let chunkRow = [];
-      for (let chunkY = 0; chunkY < WORLD_DEPTH; chunkY++) {
+      for (let chunkY = 0; chunkY < WORLD_LENGTH; chunkY++) {
         chunkRow.push(initiateChunk());
       }
       chunks.push(chunkRow);
@@ -427,7 +651,7 @@ export default function VoxelGameApplication() {
   function generateChunks(seed: number) {
     initiateChunks();
     for (let chunkX = 0; chunkX < WORLD_WIDTH; chunkX++) {
-      for (let chunkY = 0; chunkY < WORLD_DEPTH; chunkY++) {
+      for (let chunkY = 0; chunkY < WORLD_LENGTH; chunkY++) {
         generateChunk(seed, chunkX, chunkY);
       }
     }
@@ -436,12 +660,12 @@ export default function VoxelGameApplication() {
   function generateChunk(seed: number, chunkX: number, chunkY: number) {
     for (let x = 0; x < CHUNK_WIDTH; x++) {
       for (let y = 0; y < CHUNK_HEIGHT; y++) {
-        for (let z = 0; z < CHUNK_DEPTH; z++) {
+        for (let z = 0; z < CHUNK_LENGTH; z++) {
           chunks[chunkX][chunkY][x][y][z] = generateBlock(
             seed,
             x + CHUNK_WIDTH * chunkX,
             y,
-            z + CHUNK_DEPTH * chunkY
+            z + CHUNK_LENGTH * chunkY
           );
         }
       }
@@ -485,7 +709,7 @@ export default function VoxelGameApplication() {
         z = Math.round(currentPoint.z);
 
         chunkX = Math.floor(x / CHUNK_WIDTH);
-        chunkY = Math.floor(z / CHUNK_DEPTH);
+        chunkY = Math.floor(z / CHUNK_LENGTH);
 
         currentPoint = currentPoint.add(
           new THREE.Vector3(
@@ -501,13 +725,13 @@ export default function VoxelGameApplication() {
         if (
           y >= CHUNK_HEIGHT ||
           chunkX >= WORLD_WIDTH ||
-          chunkY >= WORLD_DEPTH
+          chunkY >= WORLD_LENGTH
         ) {
           continue;
         }
         if (
-          chunks[chunkX][chunkY][x % CHUNK_WIDTH][y][z % CHUNK_DEPTH] &&
-          chunks[chunkX][chunkY][x % CHUNK_WIDTH][y][z % CHUNK_DEPTH].type !==
+          chunks[chunkX][chunkY][x % CHUNK_WIDTH][y][z % CHUNK_LENGTH] &&
+          chunks[chunkX][chunkY][x % CHUNK_WIDTH][y][z % CHUNK_LENGTH] !==
             BlockType.AIR
         ) {
           hit = true;
@@ -521,7 +745,7 @@ export default function VoxelGameApplication() {
         const newBlockZ = z + faceNormal.z;
 
         const newBlockChunkX = Math.floor(newBlockX / CHUNK_WIDTH);
-        const newBlockChunkY = Math.floor(newBlockZ / CHUNK_DEPTH);
+        const newBlockChunkY = Math.floor(newBlockZ / CHUNK_LENGTH);
 
         if (
           newBlockX < 0 ||
@@ -535,7 +759,7 @@ export default function VoxelGameApplication() {
         if (
           newBlockY >= CHUNK_HEIGHT ||
           newBlockChunkX >= WORLD_WIDTH ||
-          newBlockChunkY >= WORLD_DEPTH
+          newBlockChunkY >= WORLD_LENGTH
         ) {
           return;
         }
@@ -543,15 +767,28 @@ export default function VoxelGameApplication() {
         if (
           chunks[newBlockChunkX][newBlockChunkY][newBlockX % CHUNK_WIDTH][
             newBlockY
-          ][newBlockZ % CHUNK_DEPTH].type !== BlockType.AIR
+          ][newBlockZ % CHUNK_LENGTH] !== BlockType.AIR
         )
           return;
 
         chunks[newBlockChunkX][newBlockChunkY][newBlockX % CHUNK_WIDTH][
           newBlockY
-        ][newBlockZ % CHUNK_DEPTH].type = currentBlock + 1;
-
-        constructChunkMeshes(newBlockChunkX, newBlockChunkY);
+        ][newBlockZ % CHUNK_LENGTH] = currentBlock + 1;
+        if (currentBlock + 1 === BlockType.GLASS) {
+          constructChunkMesh(
+            TextureTypes.glass,
+            newBlockChunkX,
+            newBlockChunkY
+          );
+        } else if (currentBlock + 1 === BlockType.LEAVES) {
+          constructChunkMesh(
+            TextureTypes.leaves,
+            newBlockChunkX,
+            newBlockChunkY
+          );
+        } else {
+          constructChunkMeshes(newBlockChunkX, newBlockChunkY);
+        }
         updateIndicator();
       }
     }
@@ -581,7 +818,7 @@ export default function VoxelGameApplication() {
         z = Math.round(currentPoint.z);
 
         chunkX = Math.floor(x / CHUNK_WIDTH);
-        chunkY = Math.floor(z / CHUNK_DEPTH);
+        chunkY = Math.floor(z / CHUNK_LENGTH);
 
         currentPoint = currentPoint.add(
           new THREE.Vector3(
@@ -597,19 +834,19 @@ export default function VoxelGameApplication() {
         if (
           y >= CHUNK_HEIGHT ||
           chunkX >= WORLD_WIDTH ||
-          chunkY >= WORLD_DEPTH
+          chunkY >= WORLD_LENGTH
         ) {
           continue;
         }
         if (
-          chunks[chunkX][chunkY][x % CHUNK_WIDTH][y][z % CHUNK_DEPTH] &&
-          chunks[chunkX][chunkY][x % CHUNK_WIDTH][y][z % CHUNK_DEPTH].type !==
+          chunks[chunkX][chunkY][x % CHUNK_WIDTH][y][z % CHUNK_LENGTH] &&
+          chunks[chunkX][chunkY][x % CHUNK_WIDTH][y][z % CHUNK_LENGTH] !==
             BlockType.AIR
         ) {
           scene.getObjectByName("indicator")!.position.x = x;
           scene.getObjectByName("indicator")!.position.y = y;
           scene.getObjectByName("indicator")!.position.z = z;
-          result = chunks[chunkX][chunkY][x % CHUNK_WIDTH][y][z % CHUNK_DEPTH];
+          result = chunks[chunkX][chunkY][x % CHUNK_WIDTH][y][z % CHUNK_LENGTH];
           break;
         }
       }
@@ -646,7 +883,7 @@ export default function VoxelGameApplication() {
         z = Math.round(currentPoint.z);
 
         chunkX = Math.floor(x / CHUNK_WIDTH);
-        chunkY = Math.floor(z / CHUNK_DEPTH);
+        chunkY = Math.floor(z / CHUNK_LENGTH);
 
         currentPoint = currentPoint.add(
           new THREE.Vector3(
@@ -662,13 +899,13 @@ export default function VoxelGameApplication() {
         if (
           y >= CHUNK_HEIGHT ||
           chunkX >= WORLD_WIDTH ||
-          chunkY >= WORLD_DEPTH
+          chunkY >= WORLD_LENGTH
         ) {
           continue;
         }
         if (
-          chunks[chunkX][chunkY][x % CHUNK_WIDTH][y][z % CHUNK_DEPTH] &&
-          chunks[chunkX][chunkY][x % CHUNK_WIDTH][y][z % CHUNK_DEPTH].type !==
+          chunks[chunkX][chunkY][x % CHUNK_WIDTH][y][z % CHUNK_LENGTH] &&
+          chunks[chunkX][chunkY][x % CHUNK_WIDTH][y][z % CHUNK_LENGTH] !==
             BlockType.AIR
         ) {
           hit = true;
@@ -677,7 +914,7 @@ export default function VoxelGameApplication() {
       }
 
       if (hit) {
-        chunks[chunkX][chunkY][x % CHUNK_WIDTH][y][z % CHUNK_DEPTH].type =
+        chunks[chunkX][chunkY][x % CHUNK_WIDTH][y][z % CHUNK_LENGTH] =
           BlockType.AIR;
 
         let neighbors = [];
@@ -697,8 +934,14 @@ export default function VoxelGameApplication() {
     BACK_FACE,
   }
 
-  const TEXTURE_TYPES = [
-    {
+  interface TextureType {
+    type: BlockType;
+    appliesTo: BlockFace[];
+    texture: THREE.Texture;
+  }
+
+  const TextureTypes: any = {
+    cobblestone: {
       type: BlockType.COBBLESTONE,
       appliesTo: [
         BlockFace.TOP_FACE,
@@ -710,7 +953,31 @@ export default function VoxelGameApplication() {
       ],
       texture: COBBLESTONE_TEXTURE,
     },
-    {
+    stone: {
+      type: BlockType.STONE,
+      appliesTo: [
+        BlockFace.TOP_FACE,
+        BlockFace.BOTTOM_FACE,
+        BlockFace.LEFT_FACE,
+        BlockFace.RIGHT_FACE,
+        BlockFace.FRONT_FACE,
+        BlockFace.BACK_FACE,
+      ],
+      texture: STONE_TEXTURE,
+    },
+    limestone: {
+      type: BlockType.LIMESTONE,
+      appliesTo: [
+        BlockFace.TOP_FACE,
+        BlockFace.BOTTOM_FACE,
+        BlockFace.LEFT_FACE,
+        BlockFace.RIGHT_FACE,
+        BlockFace.FRONT_FACE,
+        BlockFace.BACK_FACE,
+      ],
+      texture: LIMESTONE_TEXTURE,
+    },
+    dirt: {
       type: BlockType.DIRT,
       appliesTo: [
         BlockFace.TOP_FACE,
@@ -722,7 +989,7 @@ export default function VoxelGameApplication() {
       ],
       texture: DIRT_TEXTURE,
     },
-    {
+    sand: {
       type: BlockType.SAND,
       appliesTo: [
         BlockFace.TOP_FACE,
@@ -734,7 +1001,7 @@ export default function VoxelGameApplication() {
       ],
       texture: SAND_TEXTURE,
     },
-    {
+    planks: {
       type: BlockType.PLANKS,
       appliesTo: [
         BlockFace.TOP_FACE,
@@ -746,7 +1013,7 @@ export default function VoxelGameApplication() {
       ],
       texture: PLANKS_TEXTURE,
     },
-    {
+    glass: {
       type: BlockType.GLASS,
       appliesTo: [
         BlockFace.TOP_FACE,
@@ -758,12 +1025,12 @@ export default function VoxelGameApplication() {
       ],
       texture: GLASS_TEXTURE,
     },
-    {
+    grass_top: {
       type: BlockType.GRASS,
       appliesTo: [BlockFace.TOP_FACE],
       texture: GRASS_TOP_TEXTURE,
     },
-    {
+    grass_side: {
       type: BlockType.GRASS,
       appliesTo: [
         BlockFace.LEFT_FACE,
@@ -773,12 +1040,32 @@ export default function VoxelGameApplication() {
       ],
       texture: GRASS_SIDE_TEXTURE,
     },
-    {
+    grass_bottom: {
       type: BlockType.GRASS,
       appliesTo: [BlockFace.BOTTOM_FACE],
       texture: GRASS_BOTTOM_TEXTURE,
     },
-    {
+    grass_flower_top: {
+      type: BlockType.GRASS_FLOWER,
+      appliesTo: [BlockFace.TOP_FACE],
+      texture: GRASS_TOP_FLOWER_TEXTURE,
+    },
+    grass_flower_side: {
+      type: BlockType.GRASS_FLOWER,
+      appliesTo: [
+        BlockFace.LEFT_FACE,
+        BlockFace.RIGHT_FACE,
+        BlockFace.FRONT_FACE,
+        BlockFace.BACK_FACE,
+      ],
+      texture: GRASS_FLOWER_SIDE_TEXTURE,
+    },
+    grass_flower_bottom: {
+      type: BlockType.GRASS_FLOWER,
+      appliesTo: [BlockFace.BOTTOM_FACE],
+      texture: GRASS_BOTTOM_TEXTURE,
+    },
+    leaves: {
       type: BlockType.LEAVES,
       appliesTo: [
         BlockFace.TOP_FACE,
@@ -790,12 +1077,12 @@ export default function VoxelGameApplication() {
       ],
       texture: LEAVES_TEXTURE,
     },
-    {
+    log_top_bottom: {
       type: BlockType.LOG,
       appliesTo: [BlockFace.TOP_FACE, BlockFace.BOTTOM_FACE],
       texture: LOG_TOP_BOTTOM_TEXTURE,
     },
-    {
+    log_side: {
       type: BlockType.LOG,
       appliesTo: [
         BlockFace.LEFT_FACE,
@@ -805,39 +1092,30 @@ export default function VoxelGameApplication() {
       ],
       texture: LOG_SIDE_TEXTURE,
     },
-  ];
+  };
 
   function constructChunkMeshes(chunkX: number, chunkY: number) {
-    for (
-      let textureTypeIndex = 0;
-      textureTypeIndex < TEXTURE_TYPES.length;
-      textureTypeIndex++
-    ) {
-      constructChunkMesh(textureTypeIndex, chunkX, chunkY);
-    }
+    Object.keys(TextureTypes).forEach((textureType) => {
+      constructChunkMesh(TextureTypes[textureType], chunkX, chunkY);
+    });
+    constructChunkMesh(TextureTypes.cobblestone, chunkX, chunkY);
   }
 
   function constructChunkMesh(
-    textureTypeIndex: number,
+    textureType: TextureType,
     chunkX: number,
     chunkY: number
   ) {
-    const currentTextureType = TEXTURE_TYPES[textureTypeIndex];
-
     let chunkGeometry: THREE.BufferGeometry | null = null;
 
     let geometries: THREE.BufferGeometry[] = [];
 
     for (let x = 0; x < CHUNK_WIDTH; x++) {
       for (let y = 0; y < CHUNK_HEIGHT; y++) {
-        for (let z = 0; z < CHUNK_DEPTH; z++) {
+        for (let z = 0; z < CHUNK_LENGTH; z++) {
           const block = chunks[chunkX][chunkY][x][y][z];
 
-          if (
-            block.type !== currentTextureType.type ||
-            block.type === BlockType.AIR
-          )
-            continue;
+          if (block !== textureType.type || block === BlockType.AIR) continue;
 
           const isTopEdge = y === CHUNK_HEIGHT - 1;
           const isBottomEdge = y === 0;
@@ -846,44 +1124,44 @@ export default function VoxelGameApplication() {
           const isLeftEdge = x === 0;
 
           const isFrontEdge = z === 0;
-          const isBackEdge = z === CHUNK_DEPTH - 1;
+          const isBackEdge = z === CHUNK_LENGTH - 1;
 
           const hasBlockAbove =
             !isTopEdge &&
-            chunks[chunkX][chunkY][x][y + 1][z].type !== BlockType.AIR &&
-            chunks[chunkX][chunkY][x][y + 1][z].type !== BlockType.GLASS &&
-            chunks[chunkX][chunkY][x][y + 1][z].type !== BlockType.LEAVES;
+            chunks[chunkX][chunkY][x][y + 1][z] !== BlockType.AIR &&
+            chunks[chunkX][chunkY][x][y + 1][z] !== BlockType.GLASS &&
+            chunks[chunkX][chunkY][x][y + 1][z] !== BlockType.LEAVES;
           const hasBlockBelow =
             !isBottomEdge &&
-            chunks[chunkX][chunkY][x][y - 1][z].type !== BlockType.AIR &&
-            chunks[chunkX][chunkY][x][y - 1][z].type !== BlockType.GLASS &&
-            chunks[chunkX][chunkY][x][y - 1][z].type !== BlockType.LEAVES;
+            chunks[chunkX][chunkY][x][y - 1][z] !== BlockType.AIR &&
+            chunks[chunkX][chunkY][x][y - 1][z] !== BlockType.GLASS &&
+            chunks[chunkX][chunkY][x][y - 1][z] !== BlockType.LEAVES;
           const hasBlockToTheLeft =
             !isLeftEdge &&
-            chunks[chunkX][chunkY][x - 1][y][z].type !== BlockType.AIR &&
-            chunks[chunkX][chunkY][x - 1][y][z].type !== BlockType.GLASS &&
-            chunks[chunkX][chunkY][x - 1][y][z].type !== BlockType.LEAVES;
+            chunks[chunkX][chunkY][x - 1][y][z] !== BlockType.AIR &&
+            chunks[chunkX][chunkY][x - 1][y][z] !== BlockType.GLASS &&
+            chunks[chunkX][chunkY][x - 1][y][z] !== BlockType.LEAVES;
           const hasBlockToTheRight =
             !isRightEdge &&
-            chunks[chunkX][chunkY][x + 1][y][z].type !== BlockType.AIR &&
-            chunks[chunkX][chunkY][x + 1][y][z].type !== BlockType.GLASS &&
-            chunks[chunkX][chunkY][x + 1][y][z].type !== BlockType.LEAVES;
+            chunks[chunkX][chunkY][x + 1][y][z] !== BlockType.AIR &&
+            chunks[chunkX][chunkY][x + 1][y][z] !== BlockType.GLASS &&
+            chunks[chunkX][chunkY][x + 1][y][z] !== BlockType.LEAVES;
           const hasBlockInfront =
             !isFrontEdge &&
-            chunks[chunkX][chunkY][x][y][z - 1].type !== BlockType.AIR &&
-            chunks[chunkX][chunkY][x][y][z - 1].type !== BlockType.GLASS &&
-            chunks[chunkX][chunkY][x][y][z - 1].type !== BlockType.LEAVES;
+            chunks[chunkX][chunkY][x][y][z - 1] !== BlockType.AIR &&
+            chunks[chunkX][chunkY][x][y][z - 1] !== BlockType.GLASS &&
+            chunks[chunkX][chunkY][x][y][z - 1] !== BlockType.LEAVES;
           const hasBlockBehind =
             !isBackEdge &&
-            chunks[chunkX][chunkY][x][y][z + 1].type !== BlockType.AIR &&
-            chunks[chunkX][chunkY][x][y][z + 1].type !== BlockType.GLASS &&
-            chunks[chunkX][chunkY][x][y][z + 1].type !== BlockType.LEAVES;
+            chunks[chunkX][chunkY][x][y][z + 1] !== BlockType.AIR &&
+            chunks[chunkX][chunkY][x][y][z + 1] !== BlockType.GLASS &&
+            chunks[chunkX][chunkY][x][y][z + 1] !== BlockType.LEAVES;
 
           let faces = [];
 
           if (
             !hasBlockAbove &&
-            currentTextureType.appliesTo.includes(BlockFace.TOP_FACE)
+            textureType.appliesTo.includes(BlockFace.TOP_FACE)
           ) {
             const face = TOP_FACE;
 
@@ -892,7 +1170,7 @@ export default function VoxelGameApplication() {
 
           if (
             !hasBlockBelow &&
-            currentTextureType.appliesTo.includes(BlockFace.BOTTOM_FACE)
+            textureType.appliesTo.includes(BlockFace.BOTTOM_FACE)
           ) {
             const face = BOTTOM_FACE;
 
@@ -901,7 +1179,7 @@ export default function VoxelGameApplication() {
 
           if (
             !hasBlockInfront &&
-            currentTextureType.appliesTo.includes(BlockFace.FRONT_FACE)
+            textureType.appliesTo.includes(BlockFace.FRONT_FACE)
           ) {
             const face = FRONT_FACE;
 
@@ -910,7 +1188,7 @@ export default function VoxelGameApplication() {
 
           if (
             !hasBlockBehind &&
-            currentTextureType.appliesTo.includes(BlockFace.BACK_FACE)
+            textureType.appliesTo.includes(BlockFace.BACK_FACE)
           ) {
             const face = BACK_FACE;
 
@@ -919,7 +1197,7 @@ export default function VoxelGameApplication() {
 
           if (
             !hasBlockToTheLeft &&
-            currentTextureType.appliesTo.includes(BlockFace.LEFT_FACE)
+            textureType.appliesTo.includes(BlockFace.LEFT_FACE)
           ) {
             const face = LEFT_FACE;
 
@@ -928,7 +1206,7 @@ export default function VoxelGameApplication() {
 
           if (
             !hasBlockToTheRight &&
-            currentTextureType.appliesTo.includes(BlockFace.RIGHT_FACE)
+            textureType.appliesTo.includes(BlockFace.RIGHT_FACE)
           ) {
             const face = RIGHT_FACE;
 
@@ -938,7 +1216,6 @@ export default function VoxelGameApplication() {
           if (faces.length > 0) {
             const facesGeometry = BufferGeometryUtils.mergeGeometries(faces);
             facesGeometry.translate(x, y, z);
-            facesGeometry.computeVertexNormals();
             geometries.push(facesGeometry);
           }
         }
@@ -947,38 +1224,30 @@ export default function VoxelGameApplication() {
 
     scene
       .getObjectByName(
-        "chunk" +
-          chunkX +
-          "x" +
-          chunkY +
-          "t" +
-          TEXTURE_TYPES[textureTypeIndex].texture.name
+        "chunk" + chunkX + "x" + chunkY + "t" + textureType.texture.name
       )
       ?.removeFromParent();
     if (geometries.length > 0) {
       chunkGeometry = BufferGeometryUtils.mergeGeometries(geometries);
 
-      chunkGeometry.translate(CHUNK_WIDTH * chunkX, 0, CHUNK_DEPTH * chunkY);
+      chunkGeometry.translate(CHUNK_WIDTH * chunkX, 0, CHUNK_LENGTH * chunkY);
       chunkGeometry.computeVertexNormals();
 
-      const material = new THREE.MeshBasicMaterial({
-        map: currentTextureType.texture,
+      const material = new THREE.MeshPhongMaterial({
+        map: textureType.texture,
       });
 
       if (
-        currentTextureType.texture.name === "glass" ||
-        currentTextureType.texture.name === "leaves"
+        textureType.texture.name === "glass" ||
+        textureType.texture.name === "leaves"
       )
         material.transparent = true;
 
       const chunkMesh = new THREE.Mesh(chunkGeometry, material);
       chunkMesh.name =
-        "chunk" +
-        chunkX +
-        "x" +
-        chunkY +
-        "t" +
-        TEXTURE_TYPES[textureTypeIndex].texture.name;
+        "chunk" + chunkX + "x" + chunkY + "t" + textureType.texture.name;
+      chunkMesh.castShadow = true;
+      chunkMesh.receiveShadow = true;
 
       scene.add(chunkMesh);
     }
@@ -1001,17 +1270,17 @@ export default function VoxelGameApplication() {
 
       if (moveLeft || moveRight) {
         updateIndicator();
-        controls.moveRight((Number(moveRight) - Number(moveLeft)) * 10 * delta);
+        controls.moveRight((Number(moveRight) - Number(moveLeft)) * 50 * delta);
       }
       if (moveUp || moveDown) {
         updateIndicator();
         controls.getObject().position.y -=
-          (Number(moveDown) - Number(moveUp)) * 10 * delta;
+          (Number(moveDown) - Number(moveUp)) * 50 * delta;
       }
       if (moveForward || moveBackward) {
         updateIndicator();
         controls.moveForward(
-          (Number(moveForward) - Number(moveBackward)) * 10 * delta
+          (Number(moveForward) - Number(moveBackward)) * 50 * delta
         );
       }
     }
