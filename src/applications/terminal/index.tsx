@@ -14,6 +14,7 @@ import { COMMAND_LINE_PREFIX, parseCommand } from "./command-line-routine";
 import { useSession } from "next-auth/react";
 
 import ansi from "ansi-escape-sequences";
+import figlet from "figlet";
 
 export default function TerminalApplication({
   windowIdentifier,
@@ -100,11 +101,40 @@ export default function TerminalApplication({
             ? session.data.user.name + " " ?? session.data.user.id + " "
             : "";
 
-        terminal.write(COMMAND_LINE_PREFIX.replaceAll("%username", username));
+        figlet(
+          "hazhir.dev",
+          { font: "Doom", width: terminal.cols, horizontalLayout: "default" },
+          (error, result: string | undefined) => {
+            if (!error) {
+              result?.split("\n").forEach((line) => {
+                terminal.writeln(line);
+              });
+              terminal.writeln(
+                ansi.style.reset +
+                  "Unknown command " +
+                  ansi.style.black +
+                  "`" +
+                  ansi.style.gray +
+                  "help" +
+                  ansi.style.black +
+                  "`" +
+                  ansi.style.reset +
+                  "." +
+                  ansi.style.reset
+              );
+              terminal.writeln("");
+              terminal.writeln("");
+            }
 
-        terminal.onKey(async (event) => {
-          await parseCommand(terminal, event, session, windowIdentifier);
-        });
+            terminal.write(
+              COMMAND_LINE_PREFIX.replaceAll("%username", username)
+            );
+
+            terminal.onKey(async (event) => {
+              await parseCommand(terminal, event, session, windowIdentifier);
+            });
+          }
+        );
 
         terminal.onData(() => {});
       }
@@ -126,7 +156,7 @@ export default function TerminalApplication({
     >
       <div ref={terminalRef} className="w-full h-full"></div>
       {resizeMessage !== "" ? (
-        <div className="absolute top-0 bottom-0 left-0 right-0 flex justify-center items-center pointer-events-none z-40  bg-[${terminalTheme.background}]">
+        <div className="absolute top-0 bottom-0 left-0 right-0 flex justify-center items-center pointer-events-none z-40">
           <h3 className="text-xl bg-card rounded-lg p-1 px-4">
             {resizeMessage}
           </h3>

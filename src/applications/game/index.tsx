@@ -425,6 +425,7 @@ export default function Game() {
           case "Escape":
             if (initialLoadCompletion === 1 && !controls.isLocked) {
               controls.lock();
+              document.getElementById("infoLayer")!.style.display = "none";
             } else {
               controls.unlock();
             }
@@ -897,7 +898,7 @@ export default function Game() {
   };
 
   return (
-    <div className="text-md w-full h-full" ref={containerRef}>
+    <div className="text-md w-full h-full bg-background" ref={containerRef}>
       <UILayer />
     </div>
   );

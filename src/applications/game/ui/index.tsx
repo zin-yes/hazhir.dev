@@ -19,11 +19,11 @@ export default function UILayer({}) {
       ref={uiLayerRef}
     >
       <div
-        className="w-full h-full flex justify-center items-center flex-col transition-all duration-1000 bg-black z-4"
+        className="w-full h-full flex justify-center items-center flex-col transition-all duration-1000 bg-black z-10"
         id={"loadingLayer"}
       >
         <div
-          className="absolute top-0 bottom-0 left-0 right-0 z-9 flex flex-row flex-wrap h-fit"
+          className="absolute top-0 bottom-0 left-0 right-0 z-10 flex flex-row flex-wrap h-fit"
           id={"loadingLayerBackground"}
         ></div>
         <div className="z-10 flex flex-col justify-center items-center">
@@ -36,11 +36,40 @@ export default function UILayer({}) {
 
       <div
         className={
-          "absolute top-0 bottom-0 right-0 left-0 flex items-center justify-center pointer-events-none mix-blend-difference text-3xl font-normal z- 1"
+          "absolute top-0 bottom-0 right-0 left-0 flex items-center justify-center pointer-events-none mix-blend-difference text-3xl font-normal z-1"
         }
         id={"crosshairLayer"}
       >
         +
+      </div>
+      <div
+        className={
+          "absolute top-0 bottom-0 right-0 left-0 flex flex-col items-center justify-center pointer-events-none text-md font-normal z-2"
+        }
+        id={"infoLayer"}
+      >
+        <div className="w-[70%] flex flex-col justify-center gap-4">
+          <div className="bg-black p-6 px-8">
+            <h2 className="text-center font-bold text-lg">Controls</h2>
+            <p>
+              You can look around using your mouse, use{" "}
+              <span className="bg-white text-black px-2">LEFT CLICK</span> to
+              break a block and{" "}
+              <span className="bg-white text-black px-2">RIGHT CLICK</span> to
+              place a block.
+              <span className="bg-white text-black px-2">WASD</span> keys.
+            </p>
+          </div>
+          <div className="bg-black p-6 px-8">
+            <h2 className="text-center font-bold text-lg">
+              To start playing...
+            </h2>
+            <p>
+              Focus the window by clicking, then press escape to start playing
+              (and do the same if you want to have your mouse back).
+            </p>
+          </div>
+        </div>
       </div>
     </div>
   );
