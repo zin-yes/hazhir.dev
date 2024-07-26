@@ -1,0 +1,42 @@
+[
+  {
+    "name": "help",
+    "usage": ["help <command?/page?>", "? <command?/page?>"],
+    "examples": ["help clear", "help 2"],
+    "aliases": ["?"],
+    "description": "Lists all of the commands available to the current user.",
+    "callbackFunctionName": "help"
+  },
+  {
+    "name": "clear",
+    "usage": ["clear"],
+    "examples": ["clear"],
+    "aliases": [],
+    "description": "Clears the terminal.",
+    "callbackFunctionName": "clear"
+  },
+  {
+    "name": "signin",
+    "usage": ["signin"],
+    "examples": ["signin"],
+    "aliases": [],
+    "description": "Redirects you to the sign in page.",
+    "callbackFunctionName": "signin"
+  },
+  {
+    "name": "signout",
+    "usage": ["signout"],
+    "examples": ["signout"],
+    "aliases": [],
+    "description": "Signs out the currently signed in user.",
+    "callbackFunctionName": "signout"
+  },
+  {
+    "name": "exit",
+    "usage": ["exit"],
+    "examples": ["exit"],
+    "aliases": [],
+    "description": "Closes the terminal window.",
+    "callbackFunctionName": "exit"
+  }
+]

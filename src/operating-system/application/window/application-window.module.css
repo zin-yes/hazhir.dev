@@ -1,0 +1,268 @@
+.pane {
+  position: absolute;
+
+  left: -10px;
+  top: -10px;
+
+  opacity: 0;
+  transition-property: opacity, transform;
+  transition-duration: 0.6s;
+  transition-timing-function: ease-in-out;
+  z-index: 1;
+}
+
+.pane_in_focus {
+  box-shadow: 0px 0px 20px -2px var(--pane-in-focus-shadow-color);
+}
+
+.top_group,
+.bottom_group {
+  display: flex;
+  flex-direction: row;
+  width: 100%;
+  height: 10px;
+}
+
+.middle_group {
+  height: 100%;
+  display: flex;
+  flex-direction: row;
+  width: 100%;
+}
+
+.titlebar {
+  color: white;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+
+  transition: 0.6s height;
+
+  height: 45px;
+}
+
+.icon {
+  width: 14px;
+  aspect-ratio: 1/1;
+}
+
+.title {
+  padding: 0 1.2em;
+  font-weight: 600;
+  height: 35px;
+  width: 100%;
+  min-width: 0;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 0.55em;
+  font-size: 16px;
+}
+
+.title > span {
+  overflow: hidden;
+  white-space: nowrap;
+  text-wrap: nowrap;
+  text-overflow: ellipsis;
+}
+
+.actions {
+  display: flex;
+  flex-direction: row;
+  min-width: fit-content;
+  height: 100%;
+  justify-content: center;
+  align-items: center;
+}
+
+.actions > div {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 100%;
+  aspect-ratio: 1/1 !important;
+  cursor: pointer;
+  transition: 0.3s;
+}
+
+.actions > div:hover {
+  background: hsl(var(--background));
+  color: hsl(var(--foreground));
+}
+
+.actions > div:last-child:hover {
+  background: red;
+  color: white;
+}
+
+.body {
+  width: calc(100% - 20px);
+
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  user-select: all;
+
+  overflow: hidden;
+  border-radius: 0.7em;
+  border: 1.5px solid hsl(var(--accent));
+  transition: 0.2s box-shadow;
+  transition: 0.5s filter;
+  z-index: 2;
+}
+
+.pane:hover .body {
+  filter: none !important;
+}
+
+.content {
+  overflow: hidden;
+  position: relative;
+  height: 100%;
+}
+
+.overflow_allowed {
+  overflow-y: scroll;
+}
+
+.bottom_left_resize_handle,
+.bottom_right_resize_handle,
+.top_left_resize_handle,
+.top_right_resize_handle {
+  width: 10px;
+  display: block;
+  position: relative;
+  aspect-ratio: 1/1;
+  transform: scale(2);
+  z-index: 1;
+}
+
+.bottom_left_resize_handle {
+  display: inline-block;
+  position: relative;
+  width: 10px;
+  aspect-ratio: 1/1;
+  text-decoration: none;
+}
+
+.bottom_left_resize_handle:before,
+.bottom_right_resize_handle:before,
+.top_left_resize_handle:before,
+.top_right_resize_handle:before {
+  content: "";
+  display: block;
+  z-index: -1;
+  position: absolute;
+  height: 100%;
+  top: 0;
+  right: 0;
+  left: 0;
+  background: white;
+  opacity: 0;
+  transition: 1s;
+  pointer-events: none;
+}
+
+.bottom_resize_handle:hover,
+.top_resize_handle:hover,
+.left_resize_handle:hover,
+.right_resize_handle:hover,
+.bottom_resize_handle:active,
+.top_resize_handle:active,
+.left_resize_handle:active,
+.right_resize_handle:active,
+.bottom_left_resize_handle:hover:before,
+.bottom_right_resize_handle:hover:before,
+.top_left_resize_handle:hover:before,
+.top_right_resize_handle:hover:before,
+.bottom_left_resize_handle:active:before,
+.bottom_right_resize_handle:active:before,
+.top_left_resize_handle:active:before,
+.top_right_resize_handle:active:before {
+  background: hsl(var(--foreground));
+  opacity: 0.1;
+  transition-property: opacity, transform;
+  transition-duration: 0.6s;
+  transition-delay: 1s border-radius;
+  border-radius: 15px;
+}
+
+.bottom_left_resize_handle:hover:before,
+.bottom_right_resize_handle:hover:before,
+.top_left_resize_handle:hover:before,
+.top_right_resize_handle:hover:before,
+.bottom_left_resize_handle:active:before,
+.bottom_right_resize_handle:active:before,
+.top_left_resize_handle:active:before,
+.top_right_resize_handle:active:before {
+  border-radius: 1.7px;
+}
+
+.bottom_left_resize_handle:hover:before {
+  transform: translate(13.5px, -13.5px) scale(3);
+}
+.bottom_right_resize_handle:hover:before {
+  transform: translate(-13.5px, -13.5px) scale(3);
+}
+.top_left_resize_handle:hover:before {
+  transform: translate(13.5px, 13.5px) scale(3);
+}
+.top_right_resize_handle:hover:before {
+  transform: translate(-13.5px, 13.5px) scale(3);
+}
+
+.bottom_left_resize_handle:active:before {
+  transform: translate(10.5px, -10.5px) scale(2.4);
+}
+.bottom_right_resize_handle:active:before {
+  transform: translate(-10.5px, -10.5px) scale(2.4);
+}
+.top_left_resize_handle:active:before {
+  transform: translate(10.5px, 10.5px) scale(2.4);
+}
+.top_right_resize_handle:active:before {
+  transform: translate(-10.5px, 10.5px) scale(2.4);
+}
+
+.bottom_resize_handle:hover,
+.top_resize_handle:hover,
+.left_resize_handle:hover,
+.right_resize_handle:hover {
+  transform: scale(0.95);
+}
+
+.bottom_resize_handle:active,
+.top_resize_handle:active,
+.left_resize_handle:active,
+.right_resize_handle:active {
+  transform: scale(0.92);
+}
+
+.bottom_left_resize_handle,
+.top_right_resize_handle {
+  cursor: nesw-resize;
+}
+
+.bottom_right_resize_handle,
+.top_left_resize_handle {
+  cursor: nwse-resize;
+}
+
+.bottom_resize_handle,
+.top_resize_handle {
+  width: 100%;
+  height: 10px;
+  cursor: ns-resize;
+
+  opacity: 0;
+  transition-duration: 1s;
+}
+
+.left_resize_handle,
+.right_resize_handle {
+  cursor: ew-resize;
+  width: 10px;
+  opacity: 0;
+  transition-duration: 1s;
+}
