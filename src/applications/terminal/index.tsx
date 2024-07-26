@@ -111,7 +111,7 @@ export default function TerminalApplication({
               });
               terminal.writeln(
                 ansi.style.reset +
-                  "Unknown command " +
+                  "For a list of commands type " +
                   ansi.style.black +
                   "`" +
                   ansi.style.gray +
