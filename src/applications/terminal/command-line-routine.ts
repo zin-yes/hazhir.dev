@@ -278,6 +278,36 @@ export async function parseCommand(
     return;
   }
 
+  if (content === "^z") {
+    const username =
+      session.status === "authenticated"
+        ? session.data.user.name + " " ?? session.data.user.id + " "
+        : "";
+    terminal.writeln("");
+    terminal.write(COMMAND_LINE_PREFIX.replaceAll("%username", username));
+    _commandBuffer = {
+      content: "",
+      cursorPosition: 0,
+    };
+    return;
+  }
+
+  if (content === "^c") {
+    navigator.clipboard.writeText(terminal.getSelection());
+    return;
+  }
+
+  if (content === "^v") {
+    navigator.clipboard.readText().then((clipboardContents) => {
+      _commandBuffer = writeToTerminalAndCommandBuffer(
+        clipboardContents.replaceAll("\n", ""),
+        _commandBuffer,
+        terminal
+      );
+    });
+    return;
+  }
+
   switch (event.domEvent.key) {
     case "Backspace":
       if (
