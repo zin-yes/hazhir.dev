@@ -1,4 +1,4 @@
-import { ThemeProvider } from "@/components/providers/theme-proivider";
+import { ThemeProvider } from "@/providers/theme-proivider";
 
 import "./global.css";
 
@@ -10,7 +10,7 @@ const default_font = Montserrat({
 });
 
 import type { Metadata } from "next";
-import { NextAuthSessionProvider } from "@/components/providers/session-provider";
+import { NextAuthSessionProvider } from "@/providers/session-provider";
 export const metadata: Metadata = {
   title: "hazhir.dev",
   description:
