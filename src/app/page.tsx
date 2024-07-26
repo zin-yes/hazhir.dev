@@ -91,96 +91,98 @@ export default function OperatingSystemPage() {
   }, []);
 
   return (
-    <ContextMenu>
-      <ContextMenuTrigger>
-        <main className="w-[100vw] h-[100vh] absolute top-0 bottom-0 left-0 right-0 overflow-hidden">
-          <div
-            className={
-              "absolute top-0 left-0 right-0 z-[1] flex flex-row justify-between m-2 p-1 text-white rounded-xl shadow-md bg-primary"
-            }
+    <>
+      {/* <ContextMenu>
+         <ContextMenuTrigger> */}
+      <main className="w-[100vw] h-[100vh] absolute top-0 bottom-0 left-0 right-0 overflow-hidden">
+        <div
+          className={
+            "absolute top-0 left-0 right-0 z-[1] flex flex-row justify-between m-2 p-1 text-white rounded-xl shadow-md bg-primary"
+          }
+        >
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant={"ghost"}
+                className="h-7 rounded-[10px] px-4 text-base hover:bg-white hover:text-primary"
+              >
+                Applications
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent className="ml-2 mt-2 w-80 p-1 rounded-xl bg-background/40 backdrop-blur-xl flex flex-col gap-1">
+              <DropdownMenuItem
+                className="rounded-[10px] p-3.5 py-2 text-base"
+                onClick={() => {
+                  addPane(
+                    <TerminalApplicationPane
+                      identifier={v4()}
+                      key={panes.length + 1}
+                    />
+                  );
+                }}
+              >
+                Start new terminal window
+                <DropdownMenuShortcut>
+                  <TerminalSquare size={18} />
+                </DropdownMenuShortcut>
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                className="rounded-[10px] p-3.5 py-2 text-base"
+                onClick={() => {
+                  addPane(<GameApplicationPane key={panes.length + 1} />);
+                }}
+              >
+                Start new voxel game window
+                <DropdownMenuShortcut>
+                  <Gamepad2 size={18} />
+                </DropdownMenuShortcut>
+              </DropdownMenuItem>
+              {/* <DropdownMenuItem
+                className="rounded-[10px] p-3.5 py-2 text-base"
+                onClick={() => {
+                  addPane(
+                    <ApplicationWindow
+                      action_bar={{
+                        title: "Loading",
+                      }}
+                      settings={{
+                        min_width: 300,
+                        min_height: 440,
+                        starting_width: 350,
+                        starting_height: 460,
+                        allow_overflow: false,
+                      }}
+                      key={panes.length + 1}
+                    >
+                      <LoadingWindow />
+                    </ApplicationWindow>
+                  );
+                }}
+              >
+                Start new loading window
+                <DropdownMenuShortcut>
+                  <AppWindow size={18} />
+                </DropdownMenuShortcut>
+              </DropdownMenuItem> */}
+            </DropdownMenuContent>
+          </DropdownMenu>
+          <CalendarDropdown time={time} />
+          <Button
+            variant={"ghost"}
+            className="h-7 rounded-[10px] px-4 text-base bg-black/20 hover:bg-white hover:text-primary"
+            disabled
           >
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button
-                  variant={"ghost"}
-                  className="h-7 rounded-[10px] px-4 text-base hover:bg-white hover:text-primary"
-                >
-                  Applications
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent className="ml-2 mt-2 w-80 p-1 rounded-xl bg-background/40 backdrop-blur-xl flex flex-col gap-1">
-                <DropdownMenuItem
-                  className="rounded-[10px] p-3.5 py-2 text-base"
-                  onClick={() => {
-                    addPane(
-                      <TerminalApplicationPane
-                        identifier={v4()}
-                        key={panes.length + 1}
-                      />
-                    );
-                  }}
-                >
-                  Start new terminal window
-                  <DropdownMenuShortcut>
-                    <TerminalSquare size={18} />
-                  </DropdownMenuShortcut>
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  className="rounded-[10px] p-3.5 py-2 text-base"
-                  onClick={() => {
-                    addPane(<GameApplicationPane key={panes.length + 1} />);
-                  }}
-                >
-                  Start new voxel game window
-                  <DropdownMenuShortcut>
-                    <Gamepad2 size={18} />
-                  </DropdownMenuShortcut>
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  className="rounded-[10px] p-3.5 py-2 text-base"
-                  onClick={() => {
-                    addPane(
-                      <ApplicationWindow
-                        action_bar={{
-                          title: "Loading",
-                        }}
-                        settings={{
-                          min_width: 300,
-                          min_height: 440,
-                          starting_width: 350,
-                          starting_height: 460,
-                          allow_overflow: false,
-                        }}
-                        key={panes.length + 1}
-                      >
-                        <LoadingWindow />
-                      </ApplicationWindow>
-                    );
-                  }}
-                >
-                  Start new loading window
-                  <DropdownMenuShortcut>
-                    <AppWindow size={18} />
-                  </DropdownMenuShortcut>
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-            <CalendarDropdown time={time} />
-            <Button
-              variant={"ghost"}
-              className="h-7 rounded-[10px] px-4 text-base  hover:bg-white hover:text-primary"
-            >
-              Settings
-            </Button>
-          </div>
+            Settings
+          </Button>
+        </div>
 
-          <div className="w-[100vw] h-[100vh]" id="operating-system-container">
-            {panes.map((item, index) => {
-              return <React.Fragment key={index}>{item}</React.Fragment>;
-            })}
-          </div>
-        </main>
-      </ContextMenuTrigger>
+        <div className="w-[100vw] h-[100vh]" id="operating-system-container">
+          {panes.map((item, index) => {
+            return <React.Fragment key={index}>{item}</React.Fragment>;
+          })}
+        </div>
+      </main>
+      {/* </ContextMenuTrigger>
       <ContextMenuContent className="z-[10000] rounded-xl bg-background/40 backdrop-blur-xl">
         <ContextMenuItem
           className="rounded-[10px] p-3.5 py-2 text-base"
@@ -204,7 +206,8 @@ export default function OperatingSystemPage() {
           Open new voxel game instance
         </ContextMenuItem>
       </ContextMenuContent>
-    </ContextMenu>
+    </ContextMenu> */}
+    </>
   );
 }
 
