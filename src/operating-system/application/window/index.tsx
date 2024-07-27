@@ -22,6 +22,7 @@ import {
 } from "@/operating-system/application/window/resizability";
 import { AppWindowIcon, Maximize2, Minimize2, X } from "lucide-react";
 import { v4 } from "uuid";
+import { ApplicationWindowType } from "@/hooks/use-operating-system";
 
 // TODO: Add a way to have "system" configs (e.g. desktop 'wallpaper', accent color, text size/scaling options).
 // TODO: Refactor this into a class and split the repeatable chunks of logic up into other files.
@@ -36,6 +37,7 @@ import { v4 } from "uuid";
 
 export default function ApplicationWindow({
   identifier,
+  type,
   children,
   className,
   action_bar = {},
@@ -48,6 +50,7 @@ export default function ApplicationWindow({
   },
 }: {
   identifier?: string;
+  type?: ApplicationWindowType;
   children?: React.ReactNode;
   className?: string;
   action_bar?: {
@@ -76,6 +79,7 @@ export default function ApplicationWindow({
     if (ref.current) {
       focusPane();
       ref.current.id = identifier ?? _identifier;
+      ref.current.setAttribute("applicationType", type ?? "UNDEFINED");
       setTimeout(() => {
         center();
       }, 300);

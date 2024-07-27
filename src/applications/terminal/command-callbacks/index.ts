@@ -6,6 +6,9 @@ import { useSession } from "next-auth/react";
 import signin from "./signin";
 import signout from "./signout";
 import exit from "./exit";
+import application from "./application";
+import reload from "./reload";
+import session from "./session";
 
 export type CommandCallback = (
   fullCommand: string,
@@ -20,6 +23,9 @@ const commandCallbacks: Record<string, CommandCallback> = {
   signin: signin,
   signout: signout,
   exit: exit,
+  application: application,
+  reload: reload,
+  session: session,
 };
 
 export default commandCallbacks;
