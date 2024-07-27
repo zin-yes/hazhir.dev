@@ -226,16 +226,18 @@ async function onCommand(
       windowIdentifier
     )
       .catch((error: Error) => {
-        terminal.writeln(ansi.style.red + "Program threw an exception: ");
-        wrap(error.message, { width: terminal.cols, indent: "" })
-          .split("\n")
-          .forEach((line) => {
-            terminal.writeln(line);
-          });
+        terminal.writeln("");
+        terminal.writeln(ansi.style.red);
+        terminal.write(error.message);
         terminal.write(ansi.style.reset);
+        terminal.writeln("");
+        terminal.writeln("");
       })
       .finally(() => {
-        if (queryForCommand.name !== "exit") {
+        if (
+          queryForCommand.name !== "exit" &&
+          queryForCommand.name !== "reload"
+        ) {
           terminal.write(COMMAND_LINE_PREFIX.replaceAll("%username", username));
         }
       });
@@ -278,7 +280,7 @@ export async function parseCommand(
     return;
   }
 
-  if (content === "^z") {
+  if (content.toLowerCase() === "^z") {
     const username =
       session.status === "authenticated"
         ? session.data.user.name + " " ?? session.data.user.id + " "

@@ -16,7 +16,7 @@
     "brightMagenta": "#c792ea",
     "brightCyan": "#89ddff",
     "brightWhite": "#ffffff",
-    "background": "#000000",
+    "background": "#212121",
     "foreground": "#eeffff",
     "selectionBackground": "#eeffff",
     "cursor": "#ffffff"

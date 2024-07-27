@@ -109,7 +109,7 @@ export default function OperatingSystemPage() {
                 Applications
               </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent className="ml-2 mt-2 w-80 p-1 rounded-xl bg-background/40 backdrop-blur-xl flex flex-col gap-1">
+            <DropdownMenuContent className="ml-2 mt-2 w-80 p-1 rounded-xl bg-background/40 backdrop-blur-xl flex flex-col gap-1 z-[9999]">
               <DropdownMenuItem
                 className="rounded-[10px] p-3.5 py-2 text-base"
                 onClick={() => {
@@ -223,7 +223,7 @@ function CalendarDropdown({ time }: { time: string }) {
           {time}
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent className="ml-2 mt-2 w-fit p-1 rounded-xl shadow-md flex flex-col gap-1 transition-all duration-500 bg-background/40 backdrop-blur-xl">
+      <DropdownMenuContent className="ml-2 mt-2 w-fit p-1 rounded-xl shadow-md flex flex-col gap-1 transition-all duration-500 bg-background/40 backdrop-blur-xl z-[9999]">
         <Calendar
           mode="default"
           className="rounded-[8px] text-base transition-all duration-500"
@@ -308,11 +308,12 @@ function TerminalApplicationPane({ identifier }: { identifier: string }) {
           svg: <TerminalSquare />,
         },
       }}
+      type={"TERMINAL"}
       settings={{
-        min_width: 400,
-        min_height: 300,
-        starting_width: 940,
-        starting_height: 485,
+        min_width: Math.min(400, window.innerWidth - 40),
+        min_height: Math.min(300, window.innerHeight - 40),
+        starting_width: Math.min(940, window.innerWidth - 40),
+        starting_height: Math.min(485, window.innerHeight - 40),
         allow_overflow: false,
       }}
       identifier={identifier}
@@ -331,11 +332,12 @@ function GameApplicationPane() {
           svg: <Gamepad2 />,
         },
       }}
+      type={"VOXEL_GAME"}
       settings={{
-        min_width: 400,
-        min_height: 300,
-        starting_width: 940,
-        starting_height: 485,
+        min_width: Math.min(400, window.innerWidth - 40),
+        min_height: Math.min(300, window.innerHeight - 40),
+        starting_width: Math.min(940, window.innerWidth - 40),
+        starting_height: Math.min(485, window.innerHeight - 40),
         allow_overflow: false,
       }}
     >

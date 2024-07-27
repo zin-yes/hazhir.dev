@@ -38,5 +38,33 @@
     "aliases": [],
     "description": "Closes the terminal window.",
     "callbackFunctionName": "exit"
+  },
+  {
+    "name": "application",
+    "usage": ["application <info/close/list> [uuid?]"],
+    "examples": [
+      "application info c2e69119-d46d-4e90-833a-d478b73c5b10",
+      "application close cac7282a-fa26-41e1-9628-f58c25d0a533",
+      "application list"
+    ],
+    "aliases": [],
+    "description": "Closes an application or displays an application's info.",
+    "callbackFunctionName": "application"
+  },
+  {
+    "name": "reload",
+    "usage": ["reload"],
+    "examples": ["reload"],
+    "aliases": [],
+    "description": "Reloads the web page.",
+    "callbackFunctionName": "reload"
+  },
+  {
+    "name": "session",
+    "usage": ["session <status/data>"],
+    "examples": ["session status", "status data"],
+    "aliases": [],
+    "description": "Displays information about the authentication session.",
+    "callbackFunctionName": "session"
   }
 ]

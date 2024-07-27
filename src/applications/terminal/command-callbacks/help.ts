@@ -283,9 +283,9 @@ async function help(fullCommand: string, terminal: Terminal): Promise<void> {
     currentPage * COMMANDS_PER_PAGE + COMMANDS_PER_PAGE
   );
 
-  terminal.writeln("");
-  terminal.writeln("");
   if (currentPageCommands.length > 0) {
+    terminal.writeln("");
+    terminal.writeln("");
     terminal.writeln(constructHeaderText("HELP", width));
     currentPageCommands.map((item, index) => {
       if (item.name.length > 0) {
@@ -315,10 +315,16 @@ async function help(fullCommand: string, terminal: Terminal): Promise<void> {
         )
       );
     }
+    terminal.writeln("");
   } else {
-    terminal.writeln(`Page ${args[1]} does not exist.`);
+    const commandInfo = commands.find((command) => command.name === "help");
+    throw new Error(
+      "Incorrect command usage; usage & examples: \n\nUsage(s):\n - " +
+        commandInfo?.usage.join("\n - ") +
+        "\n\nExample(s):\n - " +
+        commandInfo?.examples.join("\n - ")
+    );
   }
-  terminal.writeln("");
 }
 
 export default help satisfies CommandCallback;
