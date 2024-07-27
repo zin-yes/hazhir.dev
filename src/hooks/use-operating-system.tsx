@@ -13,7 +13,7 @@ export interface ApplicationWindowInfo {
   y: number;
 }
 
-export default function useOperatingSystem() {
+export default function UseOperatingSystem() {
   function getApplicationWindow(
     window: HTMLDivElement | string
   ): ApplicationWindowInfo {

@@ -6,7 +6,6 @@ import { useSession } from "next-auth/react";
 import commands from "../commands.json";
 
 import { all, createEmphasize } from "emphasize";
-import useOperatingSystem from "@/hooks/use-operating-system";
 
 import ansi from "ansi-escape-sequences";
 

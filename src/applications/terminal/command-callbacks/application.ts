@@ -6,7 +6,7 @@ import { useSession } from "next-auth/react";
 import commands from "../commands.json";
 
 import { all, createEmphasize } from "emphasize";
-import useOperatingSystem from "@/hooks/use-operating-system";
+import UseOperatingSystem from "@/hooks/use-operating-system";
 
 import styles from "@/operating-system/application/window/application-window.module.css";
 
@@ -22,7 +22,7 @@ async function application(
 
   const args = fullCommand.split(" ");
 
-  const { getApplicationWindows, getApplicationWindow } = useOperatingSystem();
+  const { getApplicationWindows, getApplicationWindow } = UseOperatingSystem();
 
   if (trimmedCommand.toLowerCase().startsWith("application info")) {
     if (args.length === 3) {
