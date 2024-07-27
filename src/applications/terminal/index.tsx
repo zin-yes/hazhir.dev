@@ -39,7 +39,6 @@ export default function TerminalApplication({
       fontSize: 18,
       theme: terminalTheme,
       convertEol: true,
-      cursorStyle: "bar",
     });
   }, []);
 
