@@ -7,6 +7,8 @@ import commandCallbacks from "./command-callbacks";
 import commands from "./commands.json";
 import { useSession } from "next-auth/react";
 
+import Fuse from "fuse.js";
+
 // FIXME: When resizing the lines dont unwrap and wrap properly.
 
 // TODO: Add command history.
@@ -242,23 +244,64 @@ async function onCommand(
         }
       });
   } else {
-    terminal.writeln("");
-    terminal.writeln("");
-    terminal.writeln(
-      ansi.style.red +
-        "Unknown command " +
-        ansi.style.black +
-        "`" +
-        ansi.style.gray +
-        commandBuffer.content +
-        ansi.style.black +
-        "`" +
-        ansi.style.red +
-        "." +
-        ansi.style.reset
+    const commandList: string[] = [];
+
+    commands.forEach((command) => {
+      commandList.push(command.name);
+      command.aliases.forEach((alias) => {
+        commandList.push(alias);
+      });
+    });
+
+    const searchResult = new Fuse(commandList, {}).search(
+      commandBuffer.content
     );
-    terminal.writeln("");
-    terminal.write(COMMAND_LINE_PREFIX.replaceAll("%username", username));
+
+    if (searchResult.length > 0) {
+      terminal.writeln("");
+      terminal.writeln("");
+      terminal.writeln(
+        ansi.style.red +
+          "Unknown command " +
+          ansi.style.black +
+          "`" +
+          ansi.style.gray +
+          commandBuffer.content +
+          ansi.style.black +
+          "`" +
+          ansi.style.red +
+          ". Did you mean " +
+          ansi.style.black +
+          "`" +
+          ansi.style.gray +
+          searchResult[0].item +
+          ansi.style.black +
+          "`" +
+          ansi.style.red +
+          "?" +
+          ansi.style.reset
+      );
+      terminal.writeln("");
+      terminal.write(COMMAND_LINE_PREFIX.replaceAll("%username", username));
+    } else {
+      terminal.writeln("");
+      terminal.writeln("");
+      terminal.writeln(
+        ansi.style.red +
+          "Unknown command " +
+          ansi.style.black +
+          "`" +
+          ansi.style.gray +
+          commandBuffer.content +
+          ansi.style.black +
+          "`" +
+          ansi.style.red +
+          "." +
+          ansi.style.reset
+      );
+      terminal.writeln("");
+      terminal.write(COMMAND_LINE_PREFIX.replaceAll("%username", username));
+    }
   }
 
   return {

@@ -69,6 +69,7 @@ import {
 import { BackgroundGradientAnimation } from "@/components/ui/background-gradient-animation";
 import { Calendar } from "@/components/ui/calendar";
 import { v4 } from "uuid";
+import useOperatingSystem from "@/hooks/use-operating-system";
 export default function OperatingSystemPage() {
   const [panes, setPanes] = useState<React.ReactNode[]>([
     // <MockCalculatorApplicationPane key={0} />,
