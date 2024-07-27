@@ -113,7 +113,7 @@ function getChamberCaveNoise(
 ): number {
   noiseGenerator.SetNoiseType(FastNoiseLite.NoiseType.Cellular);
   noiseGenerator.SetFractalType(FastNoiseLite.FractalType.None);
-  noiseGenerator.SetFrequency(0.03 * GENERATION_FREQUENCY_MULTIPLIER);
+  noiseGenerator.SetFrequency(0.03);
   noiseGenerator.SetFractalOctaves(1);
   noiseGenerator.SetFractalLacunarity(0);
   noiseGenerator.SetFractalGain(0);

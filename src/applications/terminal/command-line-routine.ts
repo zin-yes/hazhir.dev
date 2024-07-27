@@ -323,7 +323,13 @@ export async function parseCommand(
     return;
   }
 
-  if (content.toLowerCase() === "^z") {
+  if (content === "^z") {
+    _commandBuffer = writeToTerminalAndCommandBuffer(
+      content,
+      _commandBuffer,
+      terminal
+    );
+
     const username =
       session.status === "authenticated"
         ? session.data.user.name + " " ?? session.data.user.id + " "
@@ -345,7 +351,7 @@ export async function parseCommand(
   if (content === "^v") {
     navigator.clipboard.readText().then((clipboardContents) => {
       _commandBuffer = writeToTerminalAndCommandBuffer(
-        clipboardContents.replaceAll("\n", ""),
+        clipboardContents.replaceAll("\n", "").replaceAll("\r", ""),
         _commandBuffer,
         terminal
       );

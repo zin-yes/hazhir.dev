@@ -70,6 +70,7 @@ import { BackgroundGradientAnimation } from "@/components/ui/background-gradient
 import { Calendar } from "@/components/ui/calendar";
 import { v4 } from "uuid";
 import UseOperatingSystem from "@/hooks/use-operating-system";
+import Desktop from "./desktop";
 export default function OperatingSystemPage() {
   const [panes, setPanes] = useState<React.ReactNode[]>([
     // <MockCalculatorApplicationPane key={0} />,
@@ -96,6 +97,7 @@ export default function OperatingSystemPage() {
       {/* <ContextMenu>
          <ContextMenuTrigger> */}
       <main className="w-[100vw] h-[100vh] absolute top-0 bottom-0 left-0 right-0 overflow-hidden">
+        <Desktop addPane={addPane} />
         <div
           className={
             "absolute top-0 left-0 right-0 z-[1] flex flex-row justify-between m-2 p-1 text-white rounded-xl shadow-md bg-primary"
@@ -105,9 +107,10 @@ export default function OperatingSystemPage() {
             <DropdownMenuTrigger asChild>
               <Button
                 variant={"ghost"}
-                className="h-7 rounded-[10px] px-4 text-base hover:bg-white hover:text-primary"
+                className="h-7 rounded-[10px] px-4 text-base bg-black/20 hover:bg-white hover:text-primary"
+                disabled
               >
-                Applications
+                Activites
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent className="ml-2 mt-2 w-80 p-1 rounded-xl bg-background/40 backdrop-blur-xl flex flex-col gap-1 z-[9999]">
@@ -212,7 +215,7 @@ export default function OperatingSystemPage() {
   );
 }
 
-function CalendarDropdown({ time }: { time: string }) {
+export function CalendarDropdown({ time }: { time: string }) {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -234,7 +237,7 @@ function CalendarDropdown({ time }: { time: string }) {
   );
 }
 
-function MockCalculatorApplicationPane() {
+export function MockCalculatorApplicationPane() {
   return (
     <ApplicationWindow
       action_bar={{
@@ -256,7 +259,7 @@ function MockCalculatorApplicationPane() {
   );
 }
 
-function MockSettingsApplicationPane() {
+export function MockSettingsApplicationPane() {
   return (
     <ApplicationWindow
       action_bar={{
@@ -278,7 +281,7 @@ function MockSettingsApplicationPane() {
   );
 }
 
-function MockFileExplorerApplicationPane() {
+export function MockFileExplorerApplicationPane() {
   return (
     <ApplicationWindow
       action_bar={{
@@ -300,7 +303,11 @@ function MockFileExplorerApplicationPane() {
   );
 }
 
-function TerminalApplicationPane({ identifier }: { identifier: string }) {
+export function TerminalApplicationPane({
+  identifier,
+}: {
+  identifier: string;
+}) {
   return (
     <ApplicationWindow
       action_bar={{
@@ -312,7 +319,7 @@ function TerminalApplicationPane({ identifier }: { identifier: string }) {
       type={"TERMINAL"}
       settings={{
         min_width: Math.min(400, window.innerWidth - 40),
-        min_height: Math.min(300, window.innerHeight - 40),
+        min_height: Math.min(290, window.innerHeight - 40),
         starting_width: Math.min(940, window.innerWidth - 40),
         starting_height: Math.min(485, window.innerHeight - 40),
         allow_overflow: false,
@@ -324,7 +331,7 @@ function TerminalApplicationPane({ identifier }: { identifier: string }) {
   );
 }
 
-function GameApplicationPane() {
+export function GameApplicationPane() {
   return (
     <ApplicationWindow
       action_bar={{
