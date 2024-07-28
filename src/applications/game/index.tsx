@@ -70,6 +70,16 @@ export default function Game() {
       }),
     []
   );
+  const TextureArrayWorkerURL = new WorkerUrl(
+    new URL("./workers/texture-array.ts", import.meta.url)
+  );
+  const textureArrayWorkerPool = useMemo(
+    () =>
+      WorkerPool.pool(TextureArrayWorkerURL.toString(), {
+        maxWorkers: 1,
+      }),
+    []
+  );
 
   const renderer = new THREE.WebGLRenderer({
     // antialias: true,
@@ -269,122 +279,134 @@ export default function Game() {
         }
       }
 
-      loadTextureArray().then((result) => {
-        if (result) {
-          textureArray = new THREE.DataArrayTexture(
-            result.data,
-            TEXTURE_SIZE,
-            TEXTURE_SIZE,
-            result.length
-          );
-          textureArray.format = THREE.RGBAFormat;
-          textureArray.colorSpace = THREE.SRGBColorSpace;
-          textureArray.minFilter = THREE.LinearMipMapNearestFilter;
-          textureArray.magFilter = THREE.NearestFilter;
-          textureArray.generateMipmaps = true;
-          textureArray.needsUpdate = true;
+      textureArrayWorkerPool
+        .exec("loadTextureArray", [])
+        .then((result) => {
+          if (result) {
+            textureArray = new THREE.DataArrayTexture(
+              result.data,
+              TEXTURE_SIZE,
+              TEXTURE_SIZE,
+              result.length
+            );
+            textureArray.format = THREE.RGBAFormat;
+            textureArray.colorSpace = THREE.SRGBColorSpace;
+            textureArray.minFilter = THREE.LinearMipMapNearestFilter;
+            textureArray.magFilter = THREE.NearestFilter;
+            textureArray.generateMipmaps = true;
+            textureArray.needsUpdate = true;
 
-          shaderMaterial = new THREE.ShaderMaterial({
-            uniforms: {
-              Texture: {
-                value: textureArray,
+            shaderMaterial = new THREE.ShaderMaterial({
+              uniforms: {
+                Texture: {
+                  value: textureArray,
+                },
               },
-            },
-            vertexShader: VERTEX_SHADER,
-            fragmentShader: FRAGMENT_SHADER,
-            blending: THREE.NormalBlending,
-            blendSrcAlpha: THREE.OneFactor,
-            transparent: true,
-          });
+              vertexShader: VERTEX_SHADER,
+              fragmentShader: FRAGMENT_SHADER,
+              blending: THREE.NormalBlending,
+              blendSrcAlpha: THREE.OneFactor,
+              transparent: true,
+            });
 
-          let initialLoadTasks =
-            (POSITIVE_X_RENDER_DISTANCE + NEGATIVE_X_RENDER_DISTANCE) *
-            (POSITIVE_Y_RENDER_DISTANCE + NEGATIVE_Y_RENDER_DISTANCE) *
-            (POSITIVE_Z_RENDER_DISTANCE + NEGATIVE_Z_RENDER_DISTANCE);
+            let initialLoadTasks =
+              (POSITIVE_X_RENDER_DISTANCE + NEGATIVE_X_RENDER_DISTANCE) *
+              (POSITIVE_Y_RENDER_DISTANCE + NEGATIVE_Y_RENDER_DISTANCE) *
+              (POSITIVE_Z_RENDER_DISTANCE + NEGATIVE_Z_RENDER_DISTANCE);
 
-          let tasksDone = 0;
+            let tasksDone = 0;
 
-          for (
-            let chunkX = -NEGATIVE_X_RENDER_DISTANCE;
-            chunkX < POSITIVE_X_RENDER_DISTANCE;
-            chunkX++
-          ) {
             for (
-              let chunkY = POSITIVE_Y_RENDER_DISTANCE;
-              chunkY > -NEGATIVE_Y_RENDER_DISTANCE;
-              chunkY--
+              let chunkX = -NEGATIVE_X_RENDER_DISTANCE;
+              chunkX < POSITIVE_X_RENDER_DISTANCE;
+              chunkX++
             ) {
               for (
-                let chunkZ = -NEGATIVE_Z_RENDER_DISTANCE;
-                chunkZ < POSITIVE_Z_RENDER_DISTANCE;
-                chunkZ++
+                let chunkY = POSITIVE_Y_RENDER_DISTANCE;
+                chunkY > -NEGATIVE_Y_RENDER_DISTANCE;
+                chunkY--
               ) {
-                generationWorkerPool
-                  .exec("generateChunk", [seed, chunkX, chunkY, chunkZ])
-                  .then((result: ArrayBuffer) => {
-                    const chunk = new Uint8Array(result);
-                    const chunkName = generateChunkName(chunkX, chunkY, chunkZ);
-                    chunks[chunkName] = chunk;
+                for (
+                  let chunkZ = -NEGATIVE_Z_RENDER_DISTANCE;
+                  chunkZ < POSITIVE_Z_RENDER_DISTANCE;
+                  chunkZ++
+                ) {
+                  generationWorkerPool
+                    .exec("generateChunk", [seed, chunkX, chunkY, chunkZ])
+                    .then((result: ArrayBuffer) => {
+                      const chunk = new Uint8Array(result);
+                      const chunkName = generateChunkName(
+                        chunkX,
+                        chunkY,
+                        chunkZ
+                      );
+                      chunks[chunkName] = chunk;
 
-                    meshWorkerPool
-                      .exec("generateMesh", [result])
-                      .then(
-                        ({
-                          positions,
-                          normals,
-                          indices,
-                          uvs,
-                          textureIndices,
-                        }: {
-                          positions: ArrayBuffer;
-                          normals: ArrayBuffer;
-                          indices: ArrayBuffer;
-                          uvs: ArrayBuffer;
-                          textureIndices: ArrayBuffer;
-                        }) => {
-                          addChunkMesh(
+                      meshWorkerPool
+                        .exec("generateMesh", [result])
+                        .then(
+                          ({
                             positions,
                             normals,
                             indices,
                             uvs,
                             textureIndices,
-                            chunkName,
-                            chunkX,
-                            chunkY,
-                            chunkZ
-                          );
+                          }: {
+                            positions: ArrayBuffer;
+                            normals: ArrayBuffer;
+                            indices: ArrayBuffer;
+                            uvs: ArrayBuffer;
+                            textureIndices: ArrayBuffer;
+                          }) => {
+                            addChunkMesh(
+                              positions,
+                              normals,
+                              indices,
+                              uvs,
+                              textureIndices,
+                              chunkName,
+                              chunkX,
+                              chunkY,
+                              chunkZ
+                            );
 
-                          tasksDone++;
+                            tasksDone++;
 
-                          setInitialLoadCompletion(
-                            tasksDone / initialLoadTasks
-                          );
-                        }
-                      )
-                      .catch((err) => {
-                        console.error(err);
-                      });
-                  })
-                  .catch((err) => {
-                    console.error(err);
-                  });
+                            setInitialLoadCompletion(
+                              tasksDone / initialLoadTasks
+                            );
+                          }
+                        )
+                        .catch((err) => {
+                          console.error(err);
+                        });
+                    })
+                    .catch((err) => {
+                      console.error(err);
+                    });
+                }
               }
             }
           }
-        }
 
-        setInterval(() => {
-          const playerChunkX = Math.round(camera.position.x / CHUNK_WIDTH);
-          const playerChunkY = Math.round(camera.position.y / CHUNK_HEIGHT);
-          const playerChunkZ = Math.round(camera.position.z / CHUNK_LENGTH);
+          setInterval(() => {
+            const playerChunkX = Math.round(camera.position.x / CHUNK_WIDTH);
+            const playerChunkY = Math.round(camera.position.y / CHUNK_HEIGHT);
+            const playerChunkZ = Math.round(camera.position.z / CHUNK_LENGTH);
 
-          pruneChunks(playerChunkX, playerChunkY, playerChunkZ);
+            pruneChunks(playerChunkX, playerChunkY, playerChunkZ);
 
-          generateNearbyChunks(playerChunkX, playerChunkY, playerChunkZ);
-        }, 500);
+            generateNearbyChunks(playerChunkX, playerChunkY, playerChunkZ);
+          }, 500);
 
-        renderer.setAnimationLoop(render);
-      });
+          renderer.setAnimationLoop(render);
+        })
+        .catch((error) => {
+          console.error(error);
+        })
+        .then(() => {
+          textureArrayWorkerPool.terminate();
+        });
 
       camera.position.y = getSurfaceHeightFromSeed(seed, 0, 0) + 2;
       //camera.position.y = 3;
