@@ -569,6 +569,7 @@ export async function parseCommand(
       break;
     // TODO: Add delete key functionality.
     case "Delete":
+      break;
     default:
       _commandBuffer = writeToTerminalAndCommandBuffer(
         content,

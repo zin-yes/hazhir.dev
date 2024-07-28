@@ -56,8 +56,9 @@ export default function UILayer({}) {
               <span className="bg-white text-black px-2">LEFT CLICK</span> to
               break a block and{" "}
               <span className="bg-white text-black px-2">RIGHT CLICK</span> to
-              place a block.
-              <span className="bg-white text-black px-2">WASD</span> keys.
+              place a block. Use your
+              <span className="bg-white text-black px-2">WASD</span> keys to
+              move around.
             </p>
           </div>
           <div className="bg-black p-6 px-8">
