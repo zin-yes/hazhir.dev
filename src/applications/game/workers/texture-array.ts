@@ -26,9 +26,7 @@ async function loadTextureArray() {
       const image = await loadImage(
         (process.env.NODE_ENV === "development"
           ? "http://localhost:3000"
-          : "https://" + process.env.VERCEL_URL!) +
-          "/game/" +
-          texturesToLoad[i]
+          : "https://hazhir.dev/game/") + texturesToLoad[i]
       );
 
       context.drawImage(image, 0, 0);
