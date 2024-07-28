@@ -71,6 +71,8 @@ import { Calendar } from "@/components/ui/calendar";
 import { v4 } from "uuid";
 import UseOperatingSystem from "@/hooks/use-operating-system";
 import Desktop from "./desktop";
+import { useSession } from "next-auth/react";
+import Image from "next/image";
 export default function OperatingSystemPage() {
   const [panes, setPanes] = useState<React.ReactNode[]>([
     // <MockCalculatorApplicationPane key={0} />,
@@ -91,6 +93,8 @@ export default function OperatingSystemPage() {
       setTime(new Date().toLocaleTimeString());
     }, 1000);
   }, []);
+
+  const session = useSession();
 
   return (
     <>
@@ -171,13 +175,26 @@ export default function OperatingSystemPage() {
             </DropdownMenuContent>
           </DropdownMenu>
           <CalendarDropdown time={time} />
-          <Button
-            variant={"ghost"}
-            className="h-7 rounded-[10px] px-4 text-base bg-black/20 hover:bg-white hover:text-primary"
-            disabled
-          >
-            Settings
-          </Button>
+          <div className="h-fit flex flex-row gap-2">
+            <Button
+              variant={"ghost"}
+              className="h-7 rounded-[10px] px-4 text-base bg-black/20 hover:bg-white hover:text-primary"
+              disabled
+            >
+              Settings
+            </Button>
+            {session.data?.user.image && (
+              <div>
+                <Image
+                  width={28}
+                  height={28}
+                  src={session.data?.user.image}
+                  alt={"Profile picture."}
+                  className="rounded-full m-0 p-0"
+                />
+              </div>
+            )}
+          </div>
         </div>
 
         <div className="w-[100vw] h-[100vh]" id="operating-system-container">

@@ -111,7 +111,7 @@ export default function TerminalApplication({
               });
               terminal.writeln(
                 ansi.style.reset +
-                  "For a list of commands type " +
+                  `${`Welcome ${username.trim()}. `}For a list of commands type ` +
                   ansi.style.black +
                   "`" +
                   ansi.style.gray +
@@ -122,8 +122,7 @@ export default function TerminalApplication({
                   "." +
                   ansi.style.reset
               );
-              terminal.writeln("");
-              terminal.writeln("");
+              terminal.writeln(" ".repeat(terminal.cols));
             }
 
             terminal.write(

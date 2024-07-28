@@ -29,15 +29,14 @@ async function application(
       const result = getApplicationWindow(args[2]) ?? {};
 
       if (result.identifier !== "NULL") {
-        terminal.writeln("");
-        terminal.writeln("");
+        terminal.writeln(" ".repeat(terminal.cols));
         terminal.writeln(
           createEmphasize(all).highlight(
             "json",
             JSON.stringify(result, null, 2)
           ).value
         );
-        terminal.writeln("");
+        terminal.writeln(" ".repeat(terminal.cols));
       } else {
         throw new Error(
           "An invalid identifier was provided, and an application was not found."
@@ -55,21 +54,19 @@ async function application(
       );
     }
   } else if (trimmedCommand.toLowerCase().startsWith("application list")) {
-    terminal.writeln("");
-    terminal.writeln("");
+    terminal.writeln(" ".repeat(terminal.cols));
     terminal.writeln(
       createEmphasize(all).highlight(
         "json",
         JSON.stringify(getApplicationWindows() ?? {}, null, 2)
       ).value
     );
-    terminal.writeln("");
+    terminal.writeln(" ".repeat(terminal.cols));
   } else if (trimmedCommand.toLowerCase().startsWith("application close")) {
     const result = getApplicationWindow(args[2]) ?? {};
 
     if (result.identifier !== "NULL") {
-      terminal.writeln("");
-      terminal.writeln("");
+      terminal.writeln(" ".repeat(terminal.cols));
       terminal.writeln(
         "Closing application " +
           ansi.style.black +
@@ -82,7 +79,7 @@ async function application(
           "."
       );
       close(result.identifier);
-      terminal.writeln("");
+      terminal.writeln(" ".repeat(terminal.cols));
     } else {
       throw new Error(
         "An invalid identifier was provided, and the application could not be closed."

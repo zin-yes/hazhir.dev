@@ -18,20 +18,18 @@ async function session(
   const trimmedCommand = fullCommand.trim();
 
   if (trimmedCommand.toLowerCase().startsWith("session status")) {
-    terminal.writeln("");
-    terminal.writeln("");
+    terminal.writeln(" ".repeat(terminal.cols));
     terminal.writeln("Session status: " + session.status);
-    terminal.writeln("");
+    terminal.writeln(" ".repeat(terminal.cols));
   } else if (trimmedCommand.toLowerCase().startsWith("session data")) {
-    terminal.writeln("");
-    terminal.writeln("");
+    terminal.writeln(" ".repeat(terminal.cols));
     terminal.writeln(
       createEmphasize(all).highlight(
         "json",
         JSON.stringify(session.data ?? {}, null, 2)
       ).value
     );
-    terminal.writeln("");
+    terminal.writeln(" ".repeat(terminal.cols));
   } else {
     const commandInfo = commands.find((command) => command.name === "session");
     throw new Error(

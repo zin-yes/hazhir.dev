@@ -203,8 +203,9 @@ async function onCommand(
       : "";
 
   if (commandBuffer.content.length === 0) {
-    terminal.writeln("");
-    terminal.write(COMMAND_LINE_PREFIX.replaceAll("%username", username));
+    terminal.write(
+      "\n" + COMMAND_LINE_PREFIX.replaceAll("%username", username)
+    );
     return {
       content: "",
       cursorPosition: 0,
@@ -221,6 +222,7 @@ async function onCommand(
   const commandExists = queryForCommand !== undefined;
 
   if (commandExists) {
+    terminal.write(ansi.cursor.hide);
     commandCallbacks[queryForCommand.callbackFunctionName](
       commandBuffer.content,
       terminal,
@@ -228,14 +230,16 @@ async function onCommand(
       windowIdentifier
     )
       .catch((error: Error) => {
-        terminal.writeln("");
-        terminal.writeln(ansi.style.red);
+        terminal.writeln(" ".repeat(terminal.cols));
+        terminal.write(ansi.style.red);
         terminal.write(error.message);
         terminal.write(ansi.style.reset);
-        terminal.writeln("");
-        terminal.writeln("");
+        terminal.writeln(" ".repeat(terminal.cols));
+
+        terminal.write(ansi.cursor.show);
       })
       .finally(() => {
+        terminal.write(ansi.cursor.show);
         if (
           queryForCommand.name !== "exit" &&
           queryForCommand.name !== "reload"
@@ -258,8 +262,7 @@ async function onCommand(
     );
 
     if (searchResult.length > 0) {
-      terminal.writeln("");
-      terminal.writeln("");
+      terminal.writeln(" ".repeat(terminal.cols));
       terminal.writeln(
         ansi.style.red +
           "Unknown command " +
@@ -281,11 +284,10 @@ async function onCommand(
           "?" +
           ansi.style.reset
       );
-      terminal.writeln("");
+      terminal.writeln(" ".repeat(terminal.cols));
       terminal.write(COMMAND_LINE_PREFIX.replaceAll("%username", username));
     } else {
-      terminal.writeln("");
-      terminal.writeln("");
+      terminal.writeln(" ".repeat(terminal.cols));
       terminal.writeln(
         ansi.style.red +
           "Unknown command " +
@@ -299,7 +301,7 @@ async function onCommand(
           "." +
           ansi.style.reset
       );
-      terminal.writeln("");
+      terminal.writeln(" ".repeat(terminal.cols));
       terminal.write(COMMAND_LINE_PREFIX.replaceAll("%username", username));
     }
   }
@@ -324,18 +326,17 @@ export async function parseCommand(
   }
 
   if (content === "^z") {
-    _commandBuffer = writeToTerminalAndCommandBuffer(
-      content,
-      _commandBuffer,
-      terminal
-    );
+    terminal.write(ansi.style.gray + content + ansi.style.reset);
 
     const username =
       session.status === "authenticated"
         ? session.data.user.name + " " ?? session.data.user.id + " "
         : "";
-    terminal.writeln("");
-    terminal.write(COMMAND_LINE_PREFIX.replaceAll("%username", username));
+
+    terminal.write(
+      "\n" + COMMAND_LINE_PREFIX.replaceAll("%username", username)
+    );
+
     _commandBuffer = {
       content: "",
       cursorPosition: 0,
@@ -356,6 +357,15 @@ export async function parseCommand(
         terminal
       );
     });
+    return;
+  }
+
+  if (content === "^a") {
+    terminal.select(
+      terminal.buffer.active.cursorX - _commandBuffer.cursorPosition,
+      terminal.buffer.active.cursorY,
+      _commandBuffer.content.length
+    );
     return;
   }
 
@@ -424,11 +434,80 @@ export async function parseCommand(
       _commandBuffer.cursorPosition -= start.length;
       break;
     case "Tab":
-      _commandBuffer = writeToTerminalAndCommandBuffer(
-        "    ",
-        _commandBuffer,
-        terminal
-      );
+      const args = _commandBuffer.content.trim().split(" ");
+
+      if (args.length === 1) {
+        const commandList: string[] = [];
+
+        commands.forEach((command) => {
+          commandList.push(command.name);
+          command.aliases.forEach((alias) => {
+            commandList.push(alias);
+          });
+        });
+
+        const searchResult = new Fuse(commandList, { threshold: 0.005 }).search(
+          _commandBuffer.content
+        );
+
+        if (searchResult.length === 1) {
+          const cursorStartedOnASpace =
+            _commandBuffer.content.charAt(_commandBuffer.cursorPosition) ===
+            " ";
+
+          if (!cursorStartedOnASpace) {
+            let toStep = 0;
+            // Count the number of spaces or characters to the left (depending on cursorStartingOnASpace) until we've hit something different.
+            for (
+              let i = 0;
+              i < _commandBuffer.content.length - _commandBuffer.cursorPosition;
+              i++
+            ) {
+              const cursorCurrentlyOnASpace =
+                _commandBuffer.content.charAt(
+                  _commandBuffer.cursorPosition + i
+                ) === " ";
+
+              if (cursorCurrentlyOnASpace !== cursorStartedOnASpace) break;
+
+              toStep++;
+            }
+
+            _commandBuffer.cursorPosition += toStep;
+            moveCursorForward(toStep, terminal);
+          }
+
+          _commandBuffer = removeFromTerminalAndCommandBuffer(
+            _commandBuffer.cursorPosition,
+            _commandBuffer,
+            terminal
+          );
+
+          _commandBuffer = writeToTerminalAndCommandBuffer(
+            searchResult[0].item,
+            _commandBuffer,
+            terminal
+          );
+        } else if (searchResult.length > 1) {
+          terminal.write(cursor.savePosition);
+
+          terminal.writeln(" ".repeat(terminal.cols));
+          searchResult
+            .map((item) => item.item)
+            .forEach((command, index) =>
+              terminal.write(
+                command + (index !== searchResult.length ? "  " : "")
+              )
+            );
+          terminal.write(cursor.returnToSavedPosition);
+        }
+      } else {
+        _commandBuffer = writeToTerminalAndCommandBuffer(
+          "    ",
+          _commandBuffer,
+          terminal
+        );
+      }
       break;
     case "Escape":
       break;

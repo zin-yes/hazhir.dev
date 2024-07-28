@@ -11,15 +11,13 @@ async function template(
   session: ReturnType<typeof useSession>
 ): Promise<void> {
   if (session.status === "authenticated") {
-    terminal.writeln("");
-    terminal.writeln("");
+    terminal.writeln(" ".repeat(terminal.cols));
     terminal.writeln("Signing you out, and refreshing the page...");
-    terminal.writeln("");
+    terminal.writeln(" ".repeat(terminal.cols));
 
     signOut({ callbackUrl: "/" });
   } else {
-    terminal.writeln("");
-    terminal.writeln("");
+    terminal.writeln(" ".repeat(terminal.cols));
     terminal.writeln(
       ansi.style.red +
         "You are not signed in, to sign in use the " +
@@ -33,7 +31,7 @@ async function template(
         "command." +
         ansi.style.reset
     );
-    terminal.writeln("");
+    terminal.writeln(" ".repeat(terminal.cols));
   }
 }
 
