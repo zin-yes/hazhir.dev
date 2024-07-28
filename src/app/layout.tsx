@@ -14,7 +14,7 @@ import { NextAuthSessionProvider } from "@/providers/session-provider";
 export const metadata: Metadata = {
   title: "hazhir.dev",
   description:
-    "Some cool projects that I have worked on, in a retro operating system theme.",
+    "My personal web dev portfolio, presented using a operating system theme.",
 };
 
 export default function RootLayout({
