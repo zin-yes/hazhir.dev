@@ -239,13 +239,13 @@ async function onCommand(
         terminal.write(ansi.cursor.show);
       })
       .finally(() => {
-        terminal.write(ansi.cursor.show);
         if (
           queryForCommand.name !== "exit" &&
           queryForCommand.name !== "reload"
         ) {
           terminal.write(COMMAND_LINE_PREFIX.replaceAll("%username", username));
         }
+        terminal.write(ansi.cursor.show);
       });
   } else {
     const commandList: string[] = [];
@@ -434,9 +434,18 @@ export async function parseCommand(
       _commandBuffer.cursorPosition -= start.length;
       break;
     case "Tab":
-      const args = _commandBuffer.content.trim().split(" ");
+      const args = _commandBuffer.content.split(" ");
 
-      if (args.length === 1) {
+      const cursorAtEndOfCommandBuffer =
+        _commandBuffer.content.length === _commandBuffer.cursorPosition;
+      const cursorNotOnASpace =
+        _commandBuffer.content.charAt(_commandBuffer.cursorPosition) !== " ";
+
+      if (
+        args.length === 1 &&
+        cursorAtEndOfCommandBuffer &&
+        cursorNotOnASpace
+      ) {
         const commandList: string[] = [];
 
         commands.forEach((command) => {
@@ -451,40 +460,11 @@ export async function parseCommand(
         );
 
         if (searchResult.length === 1) {
-          const cursorStartedOnASpace =
-            _commandBuffer.content.charAt(_commandBuffer.cursorPosition) ===
-            " ";
-
-          if (!cursorStartedOnASpace) {
-            let toStep = 0;
-            // Count the number of spaces or characters to the left (depending on cursorStartingOnASpace) until we've hit something different.
-            for (
-              let i = 0;
-              i < _commandBuffer.content.length - _commandBuffer.cursorPosition;
-              i++
-            ) {
-              const cursorCurrentlyOnASpace =
-                _commandBuffer.content.charAt(
-                  _commandBuffer.cursorPosition + i
-                ) === " ";
-
-              if (cursorCurrentlyOnASpace !== cursorStartedOnASpace) break;
-
-              toStep++;
-            }
-
-            _commandBuffer.cursorPosition += toStep;
-            moveCursorForward(toStep, terminal);
-          }
-
-          _commandBuffer = removeFromTerminalAndCommandBuffer(
-            _commandBuffer.cursorPosition,
-            _commandBuffer,
-            terminal
-          );
-
           _commandBuffer = writeToTerminalAndCommandBuffer(
-            searchResult[0].item,
+            searchResult[0].item.substring(
+              _commandBuffer.cursorPosition,
+              searchResult[0].item.length
+            ),
             _commandBuffer,
             terminal
           );
