@@ -9,10 +9,13 @@ import {
 
 import { CardBody, CardContainer, CardItem } from "@/components/ui/3d-card";
 
-import { GameApplicationPane, TerminalApplicationPane } from "./page";
 import { ReactNode } from "react";
 import { v4 } from "uuid";
 import dynamic from "next/dynamic";
+import {
+  GameApplicationPane,
+  TerminalApplicationPane,
+} from "./application-windows";
 
 const Wallpaper = dynamic(() => import("./wallpaper"), {
   ssr: false,
