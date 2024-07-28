@@ -284,8 +284,7 @@ async function help(fullCommand: string, terminal: Terminal): Promise<void> {
   );
 
   if (currentPageCommands.length > 0) {
-    terminal.writeln("");
-    terminal.writeln("");
+    terminal.writeln(" ".repeat(terminal.cols));
     terminal.writeln(constructHeaderText("HELP", width));
     currentPageCommands.map((item, index) => {
       if (item.name.length > 0) {
@@ -315,7 +314,7 @@ async function help(fullCommand: string, terminal: Terminal): Promise<void> {
         )
       );
     }
-    terminal.writeln("");
+    terminal.writeln(" ".repeat(terminal.cols));
   } else {
     const commandInfo = commands.find((command) => command.name === "help");
     throw new Error(

@@ -11,15 +11,13 @@ async function signin(
   session: ReturnType<typeof useSession>
 ): Promise<void> {
   if (session.status === "unauthenticated") {
-    terminal.writeln("");
-    terminal.writeln("");
+    terminal.writeln(" ".repeat(terminal.cols));
     terminal.writeln("Redirecting you to the sign in page...");
-    terminal.writeln("");
+    terminal.writeln(" ".repeat(terminal.cols));
 
     signIn(undefined, { callbackUrl: "/" });
   } else {
-    terminal.writeln("");
-    terminal.writeln("");
+    terminal.writeln(" ".repeat(terminal.cols));
     terminal.writeln(
       ansi.style.red +
         "You are already signed in. To sign out use the " +
@@ -33,7 +31,7 @@ async function signin(
         "command." +
         ansi.style.reset
     );
-    terminal.writeln("");
+    terminal.writeln(" ".repeat(terminal.cols));
   }
 }
 

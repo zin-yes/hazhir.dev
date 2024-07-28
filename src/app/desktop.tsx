@@ -47,7 +47,7 @@ export default function Desktop({
 function DesktopIcon({ icon, title }: { icon: ReactNode; title: string }) {
   return (
     <CardContainer className=" transition-all duration-500 w-fit h-fit mt-[-80px]  cursor-pointer">
-      <CardBody className="max-w-25 max-h-28 bg-white/15 hover:bg-white/110 backdrop-blur-xl transition-all duration-500 rounded-2xl p-4 flex flex-col gap-2 justify-start items-center hover:scale-105 active:scale-[1.15]">
+      <CardBody className="max-w-25 max-h-28 bg-white/15 hover:bg-white/110 backdrop-blur-xl transition-all duration-500 rounded-2xl p-4 flex flex-col gap-2 justify-start items-center hover:scale-105 active:scale-[1.15] active:bg-white/25 text-white">
         <CardItem className="h-[30px] w-20 flex justify-center items-center ">
           {icon}
         </CardItem>
