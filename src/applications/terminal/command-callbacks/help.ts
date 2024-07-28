@@ -272,7 +272,6 @@ async function help(fullCommand: string, terminal: Terminal): Promise<void> {
   let currentPage = 0;
 
   if (args.length > 1) {
-    console.log(args);
     currentPage = Number(args[1]) - 1;
   }
 
