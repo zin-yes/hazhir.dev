@@ -16,22 +16,22 @@ import Desktop from "./desktop";
 import { useSession } from "next-auth/react";
 import Image from "next/image";
 import {
-  CalendarDropdown,
-  GameApplicationPane,
-  TerminalApplicationPane,
+  GameApplicationWindow,
+  TerminalApplicationWindow,
 } from "./application-windows";
+import { Calendar } from "@/components/ui/calendar";
 
 export default function OperatingSystemPage() {
-  const [panes, setPanes] = useState<React.ReactNode[]>([
-    // <MockCalculatorApplicationPane key={0} />,
-    // <TerminalApplicationPane key={1} />,
-    // <MockSettingsApplicationPane key={2} />,
-    // <MockFileExplorerApplicationPane key={3} />,
-    // <GameApplicationPane key={4} />,
+  const [panes, setWindows] = useState<React.ReactNode[]>([
+    // <MockCalculatorApplicationWindow key={0} />,
+    // <TerminalApplicationWindow key={1} />,
+    // <MockSettingsApplicationWindow key={2} />,
+    // <MockFileExplorerApplicationWindow key={3} />,
+    // <GameApplicationWindow key={4} />,
   ]);
 
-  const addPane = (pane: React.ReactNode) => {
-    setPanes([...panes, pane]);
+  const addWindow = (pane: React.ReactNode) => {
+    setWindows([...panes, pane]);
   };
 
   const [time, setTime] = useState<string>(new Date().toLocaleTimeString());
@@ -49,7 +49,7 @@ export default function OperatingSystemPage() {
       {/* <ContextMenu>
          <ContextMenuTrigger> */}
       <main className="w-[100vw] h-[100vh] absolute top-0 bottom-0 left-0 right-0 overflow-hidden">
-        <Desktop addPane={addPane} />
+        <Desktop addWindow={addWindow} />
         <div
           className={
             "absolute top-0 left-0 right-0 z-[1] flex flex-row justify-between m-2 p-1 text-white rounded-xl shadow-md bg-primary"
@@ -69,8 +69,8 @@ export default function OperatingSystemPage() {
               <DropdownMenuItem
                 className="rounded-[10px] p-3.5 py-2 text-base"
                 onClick={() => {
-                  addPane(
-                    <TerminalApplicationPane
+                  addWindow(
+                    <TerminalApplicationWindow
                       identifier={v4()}
                       key={panes.length + 1}
                     />
@@ -85,7 +85,7 @@ export default function OperatingSystemPage() {
               <DropdownMenuItem
                 className="rounded-[10px] p-3.5 py-2 text-base"
                 onClick={() => {
-                  addPane(<GameApplicationPane key={panes.length + 1} />);
+                  addWindow(<GameApplicationWindow key={panes.length + 1} />);
                 }}
               >
                 Start new voxel game window
@@ -96,7 +96,7 @@ export default function OperatingSystemPage() {
               {/* <DropdownMenuItem
                 className="rounded-[10px] p-3.5 py-2 text-base"
                 onClick={() => {
-                  addPane(
+                  addWindow(
                     <ApplicationWindow
                       action_bar={{
                         title: "Loading",
@@ -156,8 +156,8 @@ export default function OperatingSystemPage() {
         <ContextMenuItem
           className="rounded-[10px] p-3.5 py-2 text-base"
           onClick={() => {
-            addPane(
-              <TerminalApplicationPane
+            addWindow(
+              <TerminalApplicationWindow
                 identifier={v4()}
                 key={panes.length + 1}
               />
@@ -169,7 +169,7 @@ export default function OperatingSystemPage() {
         <ContextMenuItem
           className="rounded-[10px] p-3.5 py-2 text-base"
           onClick={() => {
-            addPane(<GameApplicationPane key={panes.length + 1} />);
+            addWindow(<GameApplicationWindow key={panes.length + 1} />);
           }}
         >
           Open new voxel game instance
@@ -177,5 +177,27 @@ export default function OperatingSystemPage() {
       </ContextMenuContent>
     </ContextMenu> */}
     </>
+  );
+}
+
+export function CalendarDropdown({ time }: { time: string }) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          variant={"ghost"}
+          className="h-7 rounded-[10px] px-4 text-base hover:bg-white hover:text-primary"
+          suppressHydrationWarning
+        >
+          {time}
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent className="ml-2 mt-2 w-fit p-1 rounded-xl shadow-md flex flex-col gap-1 transition-all duration-500 bg-background/40 backdrop-blur-xl z-[9999]">
+        <Calendar
+          mode="default"
+          className="rounded-[8px] text-base transition-all duration-500"
+        />
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
