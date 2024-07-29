@@ -1,6 +1,8 @@
 "use client";
 
 import {
+  FolderClosed,
+  FolderIcon,
   Gamepad2,
   SquareTerminal,
   TerminalSquare,
@@ -13,8 +15,9 @@ import { ReactNode } from "react";
 import { v4 } from "uuid";
 import dynamic from "next/dynamic";
 import {
-  GameApplicationPane,
-  TerminalApplicationPane,
+  FileExplorerApplicationWindow,
+  GameApplicationWindow,
+  TerminalApplicationWindow,
 } from "./application-windows";
 
 const Wallpaper = dynamic(() => import("./wallpaper"), {
@@ -22,9 +25,9 @@ const Wallpaper = dynamic(() => import("./wallpaper"), {
 });
 
 export default function Desktop({
-  addPane,
+  addWindow,
 }: {
-  addPane: (node: ReactNode) => void;
+  addWindow: (node: ReactNode) => void;
 }) {
   return (
     <div className="w-[100vw] h-[100vh] absolute top-0 bottom-0 left-0 right-0 overflow-hidden z-0">
@@ -33,13 +36,23 @@ export default function Desktop({
         <div className="w-full h-full flex flex-row gap-4 items-start ">
           <div
             onClick={() =>
-              addPane(<TerminalApplicationPane identifier={v4()} />)
+              addWindow(<TerminalApplicationWindow identifier={v4()} />)
             }
           >
             <DesktopIcon icon={<SquareTerminal size={30} />} title="Terminal" />
           </div>
-          <div onClick={() => addPane(<GameApplicationPane />)}>
+          <div onClick={() => addWindow(<GameApplicationWindow />)}>
             <DesktopIcon icon={<Gamepad2 size={30} />} title="Voxel Game" />
+          </div>
+          <div
+            onClick={() =>
+              addWindow(<FileExplorerApplicationWindow addWindow={addWindow} />)
+            }
+          >
+            <DesktopIcon
+              icon={<FolderClosed size={30} />}
+              title="File Explorer"
+            />
           </div>
         </div>
       </div>
@@ -54,7 +67,9 @@ function DesktopIcon({ icon, title }: { icon: ReactNode; title: string }) {
         <CardItem className="h-[30px] w-20 flex justify-center items-center ">
           {icon}
         </CardItem>
-        <CardItem className="font-medium w-20 text-center ">{title}</CardItem>
+        <CardItem className="font-medium w-20 text-center break-words">
+          {title}
+        </CardItem>
       </CardBody>
     </CardContainer>
   );

@@ -20,6 +20,8 @@ import ApplicationWindow from "@/operating-system/application/window";
 import LoadingWindow from "@/operating-system/application/window/loading";
 import dynamic from "next/dynamic";
 import { Button } from "@/components/ui/button";
+import { OperatingSystemFile } from "@/hooks/use-operating-system";
+import { ReactNode } from "react";
 
 const MockCalculatorApplication = dynamic(
   () => import("@/mock-applications/calculator"),
@@ -41,34 +43,46 @@ const GameApplication = dynamic(() => import("@/applications/game"), {
   ssr: false,
 });
 
-const MockFileExplorerApplication = dynamic(
-  () => import("@/mock-applications/file-explorer"),
+const FileExplorerApplication = dynamic(
+  () => import("@/applications/file-explorer"),
   { loading: () => <LoadingWindow />, ssr: false }
 );
 
-export function CalendarDropdown({ time }: { time: string }) {
+const TextEditorApplication = dynamic(
+  () => import("@/applications/text-editor"),
+  {
+    ssr: false,
+  }
+);
+
+export function TextEditorApplicationWindow({
+  file,
+}: {
+  file: OperatingSystemFile;
+}) {
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button
-          variant={"ghost"}
-          className="h-7 rounded-[10px] px-4 text-base hover:bg-white hover:text-primary"
-          suppressHydrationWarning
-        >
-          {time}
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent className="ml-2 mt-2 w-fit p-1 rounded-xl shadow-md flex flex-col gap-1 transition-all duration-500 bg-background/40 backdrop-blur-xl z-[9999]">
-        <Calendar
-          mode="default"
-          className="rounded-[8px] text-base transition-all duration-500"
-        />
-      </DropdownMenuContent>
-    </DropdownMenu>
+    <ApplicationWindow
+      action_bar={{
+        title: "Text editor",
+        icon: {
+          svg: <Gamepad2 />,
+        },
+      }}
+      type={"TEXT_EDITOR"}
+      settings={{
+        min_width: Math.min(400, window.innerWidth - 40),
+        min_height: Math.min(300, window.innerHeight - 40),
+        starting_width: Math.min(940, window.innerWidth - 40),
+        starting_height: Math.min(485, window.innerHeight - 40),
+        allow_overflow: false,
+      }}
+    >
+      <TextEditorApplication file={file} />
+    </ApplicationWindow>
   );
 }
 
-export function MockCalculatorApplicationPane() {
+export function MockCalculatorApplicationWindow() {
   return (
     <ApplicationWindow
       action_bar={{
@@ -90,7 +104,7 @@ export function MockCalculatorApplicationPane() {
   );
 }
 
-export function MockSettingsApplicationPane() {
+export function MockSettingsApplicationWindow() {
   return (
     <ApplicationWindow
       action_bar={{
@@ -112,7 +126,11 @@ export function MockSettingsApplicationPane() {
   );
 }
 
-export function MockFileExplorerApplicationPane() {
+export function FileExplorerApplicationWindow({
+  addWindow,
+}: {
+  addWindow: (node: ReactNode) => void;
+}) {
   return (
     <ApplicationWindow
       action_bar={{
@@ -129,12 +147,12 @@ export function MockFileExplorerApplicationPane() {
         allow_overflow: false,
       }}
     >
-      <MockFileExplorerApplication />
+      <FileExplorerApplication addWindow={addWindow} />
     </ApplicationWindow>
   );
 }
 
-export function TerminalApplicationPane({
+export function TerminalApplicationWindow({
   identifier,
 }: {
   identifier: string;
@@ -162,7 +180,7 @@ export function TerminalApplicationPane({
   );
 }
 
-export function GameApplicationPane() {
+export function GameApplicationWindow() {
   return (
     <ApplicationWindow
       action_bar={{
