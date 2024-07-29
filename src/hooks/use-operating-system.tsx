@@ -1,6 +1,7 @@
 export type ApplicationWindowType =
   | "TERMINAL"
   | "VOXEL_GAME"
+  | "TEXT_EDITOR"
   | "UNDEFINED"
   | string;
 
@@ -11,6 +12,15 @@ export interface ApplicationWindowInfo {
   height: number;
   x: number;
   y: number;
+}
+
+export const OperatingSystemFileExtentions = {
+  TEXT_DOCUMENT: ".txt",
+};
+
+export interface OperatingSystemFile {
+  fileName: string;
+  contents: string;
 }
 
 export default function UseOperatingSystem() {
@@ -65,5 +75,62 @@ export default function UseOperatingSystem() {
     return applicationWindows;
   }
 
-  return { getApplicationWindows, getApplicationWindow };
+  function fileExists(fileName: string) {
+    const files = getFiles();
+
+    return files.filter((file) => file.fileName == fileName).length > 0;
+  }
+
+  function saveFile(fileName: string, contents: string): boolean {
+    if (fileName.length < 3 || !fileName.includes(".")) return false;
+
+    const files: OperatingSystemFile[] = getFiles();
+
+    if (files.filter((file) => file.fileName == fileName).length === 0) {
+      files.push({
+        fileName,
+        contents,
+      });
+
+      localStorage.setItem("files", JSON.stringify(files));
+      return true;
+    }
+    return false;
+  }
+
+  function getFiles(): OperatingSystemFile[] {
+    return JSON.parse(localStorage.getItem("files") ?? "[]");
+  }
+
+  function deleteFile(fileName: string): boolean {
+    const files: OperatingSystemFile[] = getFiles();
+    if (files.filter((file) => file.fileName == fileName).length > 0) {
+      localStorage.setItem(
+        "files",
+        JSON.stringify(files.filter((file) => file.fileName !== fileName))
+      );
+      return true;
+    }
+    return false;
+  }
+
+  function getFile(fileName: string): OperatingSystemFile | undefined {
+    const files: OperatingSystemFile[] = getFiles();
+
+    const result = files.filter((file) => file.fileName === fileName);
+
+    if (result.length > 0) return result[0];
+
+    return undefined;
+  }
+
+  return {
+    getApplicationWindows,
+    getApplicationWindow,
+    getFile,
+    getFiles,
+    saveFile,
+    deleteFile,
+    fileExists,
+  };
 }
