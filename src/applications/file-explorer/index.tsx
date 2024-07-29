@@ -73,7 +73,7 @@ export default function FileExplorerApplication({
     const portal = createPortal(
       <TextEditorApplicationWindow file={file} />,
       document.getElementById("operating-system-container") as HTMLDivElement,
-      useId()
+      operatingSystem.getFiles().length + ""
     );
 
     setChildWindows([...childWindows, portal]);
