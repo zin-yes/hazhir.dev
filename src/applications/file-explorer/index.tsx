@@ -21,7 +21,7 @@ import {
 import UseOperatingSystem, {
   OperatingSystemFile,
 } from "@/hooks/use-operating-system";
-import { ReactNode, ReactPortal, useState } from "react";
+import { ReactNode, ReactPortal, useId, useState } from "react";
 import { createPortal } from "react-dom";
 
 import { IoDocumentTextOutline } from "react-icons/io5";
@@ -73,7 +73,7 @@ export default function FileExplorerApplication({
     const portal = createPortal(
       <TextEditorApplicationWindow file={file} />,
       document.getElementById("operating-system-container") as HTMLDivElement,
-      ""
+      useId()
     );
 
     setChildWindows([...childWindows, portal]);
