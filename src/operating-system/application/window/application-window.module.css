@@ -15,6 +15,9 @@
   box-shadow: 0px 0px 20px -2px var(--pane-in-focus-shadow-color);
 }
 
+.titleText {
+}
+
 .top_group,
 .bottom_group {
   display: flex;

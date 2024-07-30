@@ -394,7 +394,9 @@ export default function ApplicationWindow({
               ) : (
                 <AppWindowIcon size={20} />
               )}
-              <span>{action_bar.title ?? "Untitled pane"}</span>
+              <span className={styles.titleText}>
+                {action_bar.title ?? "Untitled pane"}
+              </span>
             </div>
             <div className={styles.actions}>
               {/* <div className={styles.minimize}></div> */}

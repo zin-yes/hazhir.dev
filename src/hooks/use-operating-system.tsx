@@ -1,3 +1,5 @@
+import styles from "@/operating-system/application/window/application-window.module.css";
+
 export type ApplicationWindowType =
   | "TERMINAL"
   | "VOXEL_GAME"
@@ -75,6 +77,16 @@ export default function UseOperatingSystem() {
     return applicationWindows;
   }
 
+  function setApplicationWindowTitle(identifier: string, title: string) {
+    const element = document.getElementById(identifier) as HTMLDivElement;
+
+    if (element) {
+      (
+        element.getElementsByClassName(styles.titleText)[0] as HTMLDivElement
+      ).innerHTML = title;
+    }
+  }
+
   function fileExists(fileName: string) {
     const files = getFiles();
 
@@ -82,33 +94,30 @@ export default function UseOperatingSystem() {
   }
 
   function saveFile(fileName: string, contents: string): boolean {
-    if (fileName.length < 3 || !fileName.includes(".")) return false;
+    let files: OperatingSystemFile[] = getFiles().filter(
+      (file) => file.fileName !== fileName
+    );
 
-    const files: OperatingSystemFile[] = getFiles();
+    files.push({ fileName, contents });
 
-    if (files.filter((file) => file.fileName == fileName).length === 0) {
-      files.push({
-        fileName,
-        contents,
-      });
+    window.localStorage.setItem("files", JSON.stringify(files));
+    window.dispatchEvent(new Event("storage"));
 
-      localStorage.setItem("files", JSON.stringify(files));
-      return true;
-    }
-    return false;
+    return true;
   }
 
   function getFiles(): OperatingSystemFile[] {
-    return JSON.parse(localStorage.getItem("files") ?? "[]");
+    return JSON.parse(window.localStorage.getItem("files") ?? "[]");
   }
 
   function deleteFile(fileName: string): boolean {
     const files: OperatingSystemFile[] = getFiles();
     if (files.filter((file) => file.fileName == fileName).length > 0) {
-      localStorage.setItem(
+      window.localStorage.setItem(
         "files",
         JSON.stringify(files.filter((file) => file.fileName !== fileName))
       );
+      window.dispatchEvent(new Event("storage"));
       return true;
     }
     return false;
@@ -127,6 +136,7 @@ export default function UseOperatingSystem() {
   return {
     getApplicationWindows,
     getApplicationWindow,
+    setApplicationWindowTitle,
     getFile,
     getFiles,
     saveFile,

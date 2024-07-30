@@ -9,6 +9,7 @@ import { Calendar } from "@/components/ui/calendar";
 
 import {
   Calculator,
+  EditIcon,
   FolderClosed,
   Gamepad2,
   Settings,
@@ -22,6 +23,7 @@ import dynamic from "next/dynamic";
 import { Button } from "@/components/ui/button";
 import { OperatingSystemFile } from "@/hooks/use-operating-system";
 import { ReactNode } from "react";
+import { v4 } from "uuid";
 
 const MockCalculatorApplication = dynamic(
   () => import("@/mock-applications/calculator"),
@@ -60,14 +62,16 @@ export function TextEditorApplicationWindow({
 }: {
   file: OperatingSystemFile;
 }) {
+  const identifier = v4();
   return (
     <ApplicationWindow
       action_bar={{
-        title: "Text editor",
+        title: "Text Editor",
         icon: {
-          svg: <Gamepad2 />,
+          svg: <EditIcon />,
         },
       }}
+      identifier={identifier}
       type={"TEXT_EDITOR"}
       settings={{
         min_width: Math.min(400, window.innerWidth - 40),
@@ -77,7 +81,7 @@ export function TextEditorApplicationWindow({
         allow_overflow: false,
       }}
     >
-      <TextEditorApplication file={file} />
+      <TextEditorApplication file={file} identifier={identifier} />
     </ApplicationWindow>
   );
 }
@@ -147,7 +151,7 @@ export function FileExplorerApplicationWindow({
         allow_overflow: false,
       }}
     >
-      <FileExplorerApplication addWindow={addWindow} />
+      <FileExplorerApplication />
     </ApplicationWindow>
   );
 }

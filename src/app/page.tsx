@@ -20,18 +20,13 @@ import {
   TerminalApplicationWindow,
 } from "./application-windows";
 import { Calendar } from "@/components/ui/calendar";
+import UseOperatingSystem from "@/hooks/use-operating-system";
 
 export default function OperatingSystemPage() {
-  const [panes, setWindows] = useState<React.ReactNode[]>([
-    // <MockCalculatorApplicationWindow key={0} />,
-    // <TerminalApplicationWindow key={1} />,
-    // <MockSettingsApplicationWindow key={2} />,
-    // <MockFileExplorerApplicationWindow key={3} />,
-    // <GameApplicationWindow key={4} />,
-  ]);
+  const [windows, setWindows] = useState<React.ReactNode[]>([]);
 
   const addWindow = (pane: React.ReactNode) => {
-    setWindows([...panes, pane]);
+    setWindows([...windows, pane]);
   };
 
   const [time, setTime] = useState<string>(new Date().toLocaleTimeString());
@@ -43,6 +38,8 @@ export default function OperatingSystemPage() {
   }, []);
 
   const session = useSession();
+
+  const operatingSystem = UseOperatingSystem();
 
   return (
     <>
@@ -72,7 +69,7 @@ export default function OperatingSystemPage() {
                   addWindow(
                     <TerminalApplicationWindow
                       identifier={v4()}
-                      key={panes.length + 1}
+                      key={operatingSystem.getApplicationWindows().length}
                     />
                   );
                 }}
@@ -85,7 +82,11 @@ export default function OperatingSystemPage() {
               <DropdownMenuItem
                 className="rounded-[10px] p-3.5 py-2 text-base"
                 onClick={() => {
-                  addWindow(<GameApplicationWindow key={panes.length + 1} />);
+                  addWindow(
+                    <GameApplicationWindow
+                      key={operatingSystem.getApplicationWindows().length}
+                    />
+                  );
                 }}
               >
                 Start new voxel game window
@@ -108,7 +109,7 @@ export default function OperatingSystemPage() {
                         starting_height: 460,
                         allow_overflow: false,
                       }}
-                      key={panes.length + 1}
+                      key={windows.length + 1}
                     >
                       <LoadingWindow />
                     </ApplicationWindow>
@@ -134,6 +135,9 @@ export default function OperatingSystemPage() {
             {session.data?.user.image && (
               <div>
                 <Image
+                  loader={({ src, width, quality }) =>
+                    `${src}?w=${width}&q=${quality || 75}`
+                  }
                   width={28}
                   height={28}
                   src={session.data?.user.image}
@@ -146,7 +150,7 @@ export default function OperatingSystemPage() {
         </div>
 
         <div className="w-[100vw] h-[100vh]" id="operating-system-container">
-          {panes.map((item, index) => {
+          {windows.map((item, index) => {
             return <React.Fragment key={index}>{item}</React.Fragment>;
           })}
         </div>
@@ -159,7 +163,7 @@ export default function OperatingSystemPage() {
             addWindow(
               <TerminalApplicationWindow
                 identifier={v4()}
-                key={panes.length + 1}
+                key={windows.length + 1}
               />
             );
           }}
@@ -169,7 +173,7 @@ export default function OperatingSystemPage() {
         <ContextMenuItem
           className="rounded-[10px] p-3.5 py-2 text-base"
           onClick={() => {
-            addWindow(<GameApplicationWindow key={panes.length + 1} />);
+            addWindow(<GameApplicationWindow key={windows.length + 1} />);
           }}
         >
           Open new voxel game instance
