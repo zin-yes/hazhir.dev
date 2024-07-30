@@ -303,7 +303,9 @@ function FileExplorerIconCard({
             event.stopPropagation();
             if (inputRef.current) {
               setTimeout(() => {
-                inputRef.current.focus();
+                if (inputRef.current) {
+                  inputRef.current.focus();
+                }
               }, 400);
             }
           }}
