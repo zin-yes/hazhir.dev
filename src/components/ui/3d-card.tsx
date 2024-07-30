@@ -18,10 +18,12 @@ export const CardContainer = ({
   children,
   className,
   containerClassName,
+  onClick,
 }: {
   children?: React.ReactNode;
   className?: string;
   containerClassName?: string;
+  onClick?: (event: React.MouseEvent<HTMLDivElement>) => void;
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const [isMouseEntered, setIsMouseEntered] = useState(false);
@@ -30,8 +32,8 @@ export const CardContainer = ({
     if (!containerRef.current) return;
     const { left, top, width, height } =
       containerRef.current.getBoundingClientRect();
-    const x = -(e.clientX - left - width / 2) / 2;
-    const y = (e.clientY - top - height / 2) / 4;
+    const x = -(e.clientX - left - width / 2) / 4;
+    const y = (e.clientY - top - height / 2) / 16;
     containerRef.current.style.transform = `rotateY(${x}deg) rotateX(${y}deg)`;
   };
 
@@ -61,6 +63,11 @@ export const CardContainer = ({
           onMouseEnter={handleMouseEnter}
           onMouseMove={handleMouseMove}
           onMouseLeave={handleMouseLeave}
+          onClick={(event) => {
+            if (isMouseEntered && onClick) {
+              onClick(event);
+            }
+          }}
           className={cn(
             "flex items-center justify-center relative transition-all duration-200 ease-linear",
             className
