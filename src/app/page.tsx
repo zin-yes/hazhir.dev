@@ -184,7 +184,7 @@ export default function OperatingSystemPage() {
   );
 }
 
-export function CalendarDropdown({ time }: { time: string }) {
+function CalendarDropdown({ time }: { time: string }) {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
