@@ -23,7 +23,7 @@ Once cloned/downloaded, run the install command for provided by the package mana
 
 You then finally should fill in the environment variables by copying the `.env.example` or renaming it to `.env`.
 
-My setup of the project is configured for using [Turso](https://turso.tech/) (database provider) and [Discord](https://discord.com/developers/docs/topics/oauth2) (as the authentication provider) but you can easily modify these to work with whichever services you choose to go with since the project uses [Drizzle ORM](https://orm.drizzle.team/docs/overview), and [NextAuth/Auth.js](https://authjs.dev/reference/nextjs).
+My setup of the project is configured for using [Turso](https://turso.tech/) (database provider) and [Discord](https://discord.com/developers/docs/topics/oauth2) (authentication provider) but you can easily modify these to work with whichever services you choose to go with, since the project uses [Drizzle ORM](https://orm.drizzle.team/docs/overview), and [NextAuth/Auth.js](https://authjs.dev/reference/nextjs).
 
 ## Finally
 
