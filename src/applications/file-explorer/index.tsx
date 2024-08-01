@@ -51,7 +51,7 @@ import { RiDeleteBin7Line } from "react-icons/ri";
 import { RiEdit2Line } from "react-icons/ri";
 import { v4 } from "uuid";
 
-function humanFileSize(bytes: number, si = false, dp = 1) {
+export function humanFileSize(bytes: number, si = false, dp = 1) {
   const thresh = si ? 1000 : 1024;
 
   if (Math.abs(bytes) < thresh) {
@@ -113,20 +113,26 @@ export default function FileExplorerApplication() {
           <div className="w-full h-full bg-background">
             <div className="w-full p-4 bg-background text-foreground flex flex-row flex-wrap  gap-4">
               {childWindows}
-              {files.map((file) => {
-                return (
-                  <FileExplorerIcon
-                    key={file.fileName}
-                    editFile={() => {
-                      editFile(operatingSystem.getFile(file.fileName)!);
-                    }}
-                    deleteFile={() => {
-                      operatingSystem.deleteFile(file.fileName);
-                    }}
-                    file={file}
-                  />
-                );
-              })}
+              {files.length > 0 ? (
+                files.map((file) => {
+                  return (
+                    <FileExplorerIcon
+                      key={file.fileName}
+                      editFile={() => {
+                        editFile(operatingSystem.getFile(file.fileName)!);
+                      }}
+                      deleteFile={() => {
+                        operatingSystem.deleteFile(file.fileName);
+                      }}
+                      file={file}
+                    />
+                  );
+                })
+              ) : (
+                <span className="text-muted-foreground">
+                  Right click to see a list of possible actions...
+                </span>
+              )}
             </div>
           </div>
         </ContextMenuTrigger>
