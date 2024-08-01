@@ -66,5 +66,13 @@
     "aliases": [],
     "description": "Displays information about the authentication session.",
     "callbackFunctionName": "session"
+  },
+  {
+    "name": "ls",
+    "usage": ["ls"],
+    "examples": ["ls"],
+    "aliases": [],
+    "description": "Displays a list of all the files on the operating system.",
+    "callbackFunctionName": "ls"
   }
 ]

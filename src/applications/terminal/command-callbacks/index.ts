@@ -9,6 +9,7 @@ import exit from "./exit";
 import application from "./application";
 import reload from "./reload";
 import session from "./session";
+import ls from "./ls";
 
 export type CommandCallback = (
   fullCommand: string,
@@ -26,6 +27,7 @@ const commandCallbacks: Record<string, CommandCallback> = {
   application: application,
   reload: reload,
   session: session,
+  ls: ls,
 };
 
 export default commandCallbacks;
