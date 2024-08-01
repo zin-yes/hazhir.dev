@@ -1,5 +1,4 @@
-import { ThemeProvider } from "@/providers/theme-proivider";
-import { NextAuthSessionProvider } from "@/providers/session-provider";
+import { ThemeProvider } from "@/providers/theme-provider";
 
 import "./global.css";
 
