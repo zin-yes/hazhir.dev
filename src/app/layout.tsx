@@ -10,6 +10,7 @@ const default_font = Montserrat({
 });
 
 import type { Metadata } from "next";
+import { NextAuthSessionProvider } from "@/providers/session-provider";
 export const metadata: Metadata = {
   title: "hazhir.dev",
   description:
