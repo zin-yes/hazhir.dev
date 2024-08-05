@@ -21,6 +21,7 @@ export const OperatingSystemFileExtentions = {
 };
 
 export interface OperatingSystemFile {
+  directory: string[];
   fileName: string;
   contents: string;
 }
@@ -87,46 +88,83 @@ export default function UseOperatingSystem() {
     }
   }
 
-  function fileExists(fileName: string) {
-    const files = getFiles();
+  function fileExists(directory: string[], fileName: string) {
+    const files = getFiles(directory);
 
     return files.filter((file) => file.fileName == fileName).length > 0;
   }
 
-  function saveFile(fileName: string, contents: string): boolean {
-    let files: OperatingSystemFile[] = getFiles().filter(
-      (file) => file.fileName !== fileName
+  function getAbsolutePath(directory: string[], fileName: string) {
+    return directory.join("/") + "/" + fileName;
+  }
+
+  function saveFile(
+    directory: string[],
+    fileName: string,
+    contents: string
+  ): boolean {
+    const allFiles = getAllFiles().filter(
+      (file) =>
+        getAbsolutePath(file.directory, file.fileName) !==
+        getAbsolutePath(directory, fileName)
     );
 
-    files.push({ fileName, contents });
+    allFiles.push({ directory, fileName, contents });
 
-    window.localStorage.setItem("files", JSON.stringify(files));
+    window.localStorage.setItem("files", JSON.stringify(allFiles));
     window.dispatchEvent(new Event("storage"));
 
     return true;
   }
 
-  function getFiles(): OperatingSystemFile[] {
+  function getFiles(directory: string[]): OperatingSystemFile[] {
+    let result = JSON.parse(
+      window.localStorage.getItem("files") ?? "[]"
+    ) as OperatingSystemFile[];
+
+    return result.filter((file) => {
+      return file.directory.join("/") === directory.join("/");
+    });
+  }
+  function getAllFiles(): OperatingSystemFile[] {
     return JSON.parse(window.localStorage.getItem("files") ?? "[]");
   }
 
-  function deleteFile(fileName: string): boolean {
-    const files: OperatingSystemFile[] = getFiles();
-    if (files.filter((file) => file.fileName == fileName).length > 0) {
+  function deleteFile(directory: string[], fileName: string): boolean {
+    const files: OperatingSystemFile[] = getAllFiles();
+    if (
+      files.filter(
+        (file) =>
+          getAbsolutePath(file.directory, file.fileName) ===
+          getAbsolutePath(directory, fileName)
+      ).length > 0
+    ) {
       window.localStorage.setItem(
         "files",
-        JSON.stringify(files.filter((file) => file.fileName !== fileName))
+        JSON.stringify(
+          files.filter(
+            (file) =>
+              getAbsolutePath(file.directory, file.fileName) !==
+              getAbsolutePath(directory, fileName)
+          )
+        )
       );
       window.dispatchEvent(new Event("storage"));
       return true;
     }
+    window.dispatchEvent(new Event("storage"));
     return false;
   }
 
-  function getFile(fileName: string): OperatingSystemFile | undefined {
-    const files: OperatingSystemFile[] = getFiles();
-
-    const result = files.filter((file) => file.fileName === fileName);
+  function getFile(
+    directory: string[],
+    fileName: string
+  ): OperatingSystemFile | undefined {
+    const result = getAllFiles().filter(
+      (file) =>
+        getAbsolutePath(file.directory, file.fileName) ===
+        getAbsolutePath(directory, fileName)
+    );
 
     if (result.length > 0) return result[0];
 
