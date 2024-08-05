@@ -25,8 +25,8 @@ import { OperatingSystemFile } from "@/hooks/use-operating-system";
 import { ReactNode } from "react";
 import { v4 } from "uuid";
 
-const MockCalculatorApplication = dynamic(
-  () => import("@/mock-applications/calculator"),
+const CalculatorApplication = dynamic(
+  () => import("@/applications/calculator"),
   { loading: () => <LoadingWindow />, ssr: false }
 );
 
@@ -86,7 +86,7 @@ export function TextEditorApplicationWindow({
   );
 }
 
-export function MockCalculatorApplicationWindow() {
+export function CalculatorApplicationWindow() {
   return (
     <ApplicationWindow
       action_bar={{
@@ -103,7 +103,7 @@ export function MockCalculatorApplicationWindow() {
         allow_overflow: false,
       }}
     >
-      <MockCalculatorApplication />
+      <CalculatorApplication />
     </ApplicationWindow>
   );
 }

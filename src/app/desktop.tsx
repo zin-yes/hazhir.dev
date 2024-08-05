@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  Calculator,
   FolderClosed,
   FolderIcon,
   Gamepad2,
@@ -15,6 +16,7 @@ import { ReactNode } from "react";
 import { v4 } from "uuid";
 import dynamic from "next/dynamic";
 import {
+  CalculatorApplicationWindow,
   FileExplorerApplicationWindow,
   GameApplicationWindow,
   TerminalApplicationWindow,
@@ -61,6 +63,13 @@ export default function Desktop({
               }
             />
           </div>
+          <div className="h-fit">
+            <DesktopIcon
+              icon={<Calculator size={30} />}
+              title="Calculator"
+              onClick={() => addWindow(<CalculatorApplicationWindow />)}
+            />
+          </div>
         </div>
       </div>
     </div>
@@ -81,11 +90,11 @@ function DesktopIcon({
       className="transition-all duration-500 w-fit h-fit cursor-pointer"
       onClick={onClick}
     >
-      <CardBody className="max-w-25 max-h-28 h-fit bg-white/15 mt-[-80px] hover:bg-white/110 backdrop-blur-xl transition-all duration-500 rounded-2xl p-4 flex flex-col gap-2 justify-start items-center hover:scale-105 active:scale-[1.15] active:bg-white/25 text-white">
+      <CardBody className="max-h-28 h-fit bg-white/15 mt-[-80px] hover:bg-white/110 backdrop-blur-xl transition-all duration-500 rounded-2xl p-4 flex flex-col gap-2 justify-start items-center hover:scale-105 active:scale-[1.15] active:bg-white/25 text-white">
         <CardItem className="h-[30px] w-20 flex justify-center items-center ">
           {icon}
         </CardItem>
-        <CardItem className="font-medium w-20 text-center break-words">
+        <CardItem className="font-medium w-[85px] text-center break-words">
           {title}
         </CardItem>
       </CardBody>
