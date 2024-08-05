@@ -175,6 +175,7 @@ export default function UseOperatingSystem() {
     getApplicationWindows,
     getApplicationWindow,
     setApplicationWindowTitle,
+    getAbsolutePath,
     getFile,
     getFiles,
     getAllFiles,
