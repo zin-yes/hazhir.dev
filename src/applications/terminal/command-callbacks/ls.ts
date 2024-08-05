@@ -19,10 +19,14 @@ async function ls(
 
   files.forEach((file) => {
     const fileSize = humanFileSize(new Blob([file.contents]).size);
-    const characterCount = file.fileName.length + ("" + fileSize).length;
+    const characterCount =
+      operatingSystem.getAbsolutePath(file.directory, file.fileName).length +
+      ("" + fileSize).length;
 
     terminal.writeln(
-      file.fileName + " ".repeat(width - characterCount) + fileSize
+      operatingSystem.getAbsolutePath(file.directory, file.fileName) +
+        " ".repeat(width - characterCount) +
+        fileSize
     );
   });
   terminal.writeln(" ".repeat(terminal.cols));
