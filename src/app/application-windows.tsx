@@ -20,7 +20,6 @@ import ApplicationWindow from "@/operating-system/application/window";
 
 import LoadingWindow from "@/operating-system/application/window/loading";
 import dynamic from "next/dynamic";
-import { Button } from "@/components/ui/button";
 import { OperatingSystemFile } from "@/hooks/use-operating-system";
 import { ReactNode } from "react";
 import { v4 } from "uuid";
