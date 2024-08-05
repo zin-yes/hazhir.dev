@@ -91,7 +91,6 @@ export default function FileExplorerApplication() {
   }, []);
 
   function updateFiles() {
-    console.log(directory.current);
     setFiles(operatingSystem.getFiles(directory.current) ?? []);
   }
 

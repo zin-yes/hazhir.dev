@@ -177,6 +177,7 @@ export default function UseOperatingSystem() {
     setApplicationWindowTitle,
     getFile,
     getFiles,
+    getAllFiles,
     saveFile,
     deleteFile,
     fileExists,

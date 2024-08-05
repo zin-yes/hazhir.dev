@@ -12,7 +12,7 @@ async function ls(
   windowIdentifier: string
 ): Promise<void> {
   const operatingSystem = UseOperatingSystem();
-  const files = operatingSystem.getFiles([]);
+  const files = operatingSystem.getAllFiles();
 
   terminal.writeln(" ".repeat(terminal.cols));
   const width = Math.min(terminal.cols, 40);
