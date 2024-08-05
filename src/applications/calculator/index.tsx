@@ -217,7 +217,6 @@ export default function CalculatorApplication() {
         }
         break;
       case "equals":
-        console.log(inputFieldValue.replaceAll("⋅", "*"));
         if (inputFieldValue === "") break;
         try {
           const result = evaluatex(
@@ -243,6 +242,7 @@ export default function CalculatorApplication() {
     if (inputFieldRef.current) {
       inputFieldRef.current.addEventListener("change", (event) => {
         setInputFieldValue(inputFieldRef.current?.getValue("ascii-math") ?? "");
+        inputFieldRef.current?.focus();
       });
     }
   }, [inputFieldRef]);
@@ -300,7 +300,7 @@ function Keypad({
         )
       </KeypadKey>
       <KeypadKey keyPressCallback={keyPressCallback} keyCode="divide">
-        /
+        {"÷"}
       </KeypadKey>
       <KeypadKey keyPressCallback={keyPressCallback} keyCode="7">
         7
@@ -312,7 +312,7 @@ function Keypad({
         9
       </KeypadKey>
       <KeypadKey keyPressCallback={keyPressCallback} keyCode="multiply">
-        *
+        {"⋅"}
       </KeypadKey>
       <KeypadKey keyPressCallback={keyPressCallback} keyCode="4">
         4
@@ -324,7 +324,7 @@ function Keypad({
         6
       </KeypadKey>
       <KeypadKey keyPressCallback={keyPressCallback} keyCode="subtract">
-        -
+        {"−"}
       </KeypadKey>
       <KeypadKey keyPressCallback={keyPressCallback} keyCode="1">
         1
