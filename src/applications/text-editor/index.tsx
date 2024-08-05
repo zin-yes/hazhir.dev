@@ -29,7 +29,7 @@ export default function TextEditorApplication({
       initialized.current = true;
       window.addEventListener("storage", (event) => {
         if (file) {
-          const _file = operatingSystem.getFile(file.fileName);
+          const _file = operatingSystem.getFile(file.directory, file.fileName);
           if (_file) setContents(_file.contents);
         } else {
           operatingSystem.setApplicationWindowTitle(
@@ -50,7 +50,7 @@ export default function TextEditorApplication({
 
   useEffect(() => {
     if (file) {
-      const _file = operatingSystem.getFile(file.fileName);
+      const _file = operatingSystem.getFile(file.directory, file.fileName);
       if (_file ? _file.contents !== contents : true) {
         operatingSystem.setApplicationWindowTitle(
           identifier,
@@ -67,9 +67,9 @@ export default function TextEditorApplication({
 
   function saveFile() {
     if (file) {
-      operatingSystem.saveFile(file.fileName, contents);
+      operatingSystem.saveFile(file.directory, file.fileName, contents);
 
-      const _file = operatingSystem.getFile(file.fileName);
+      const _file = operatingSystem.getFile(file.directory, file.fileName);
       if (_file ? _file.contents !== contents : true) {
         operatingSystem.setApplicationWindowTitle(
           identifier,

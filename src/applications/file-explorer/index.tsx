@@ -78,8 +78,10 @@ export function humanFileSize(bytes: number, si = false, dp = 1) {
 export default function FileExplorerApplication() {
   const operatingSystem = UseOperatingSystem();
 
+  const directory = useRef<string[]>([]);
+  const [directoryURL, setDirectoryURL] = useState<string>("/");
   const [files, setFiles] = useState<OperatingSystemFile[]>(
-    operatingSystem.getFiles()
+    operatingSystem.getFiles([])
   );
 
   useEffect(() => {
@@ -89,7 +91,8 @@ export default function FileExplorerApplication() {
   }, []);
 
   function updateFiles() {
-    setFiles(operatingSystem.getFiles());
+    console.log(directory.current);
+    setFiles(operatingSystem.getFiles(directory.current) ?? []);
   }
 
   function editFile(file: OperatingSystemFile) {
@@ -111,18 +114,38 @@ export default function FileExplorerApplication() {
       <ContextMenu>
         <ContextMenuTrigger>
           <div className="w-full h-full bg-background">
-            <div className="w-full p-4 bg-background text-foreground flex flex-row flex-wrap  gap-4">
+            <Input
+              value={directoryURL}
+              onChange={(event) => {
+                setDirectoryURL(event.target.value);
+                const _directory = event.target.value
+                  .split("/")
+                  .filter((folder) => folder !== "");
+                directory.current = _directory;
+                setFiles(operatingSystem.getFiles(_directory));
+              }}
+            />
+            <div className="w-full p-4 bg-background text-foreground flex flex-row flex-wrap gap-4">
               {childWindows}
               {files.length > 0 ? (
                 files.map((file) => {
                   return (
                     <FileExplorerIcon
                       key={file.fileName}
+                      directory={directory.current}
                       editFile={() => {
-                        editFile(operatingSystem.getFile(file.fileName)!);
+                        editFile(
+                          operatingSystem.getFile(
+                            directory.current,
+                            file.fileName
+                          )!
+                        );
                       }}
                       deleteFile={() => {
-                        operatingSystem.deleteFile(file.fileName);
+                        operatingSystem.deleteFile(
+                          directory.current,
+                          file.fileName
+                        );
                       }}
                       file={file}
                     />
@@ -139,11 +162,13 @@ export default function FileExplorerApplication() {
         <ContextMenuContent className="z-[9999] w-56">
           <ContextMenuItem
             key={1}
-            onClick={() => {
+            onClick={(event) => {
+              event.stopPropagation();
               const newFiles = operatingSystem
-                .getFiles()
+                .getFiles(directory.current)
                 .filter((file) => file.fileName.includes("new_document"));
               operatingSystem.saveFile(
+                directory.current,
                 `new_document${
                   newFiles.length > 0 ? "_" + newFiles.length : ""
                 }.txt`,
@@ -162,64 +187,14 @@ export default function FileExplorerApplication() {
   );
 }
 
-function NewFileForm() {
-  const operatingSystem = UseOperatingSystem();
-
-  const [fileName, setFileName] = useState<string>("");
-  const [contents, setContents] = useState<string>("");
-
-  return (
-    <div className="w-full h-fit flex flex-col gap-2">
-      <Label>File Name</Label>
-      <Input
-        type="text"
-        placeholder="File name"
-        autoComplete="false"
-        value={fileName}
-        onChange={(event) => {
-          setFileName(event.target.value);
-        }}
-      />
-      <Label>Contents</Label>
-      <Textarea
-        placeholder="Contents"
-        autoComplete="false"
-        value={contents}
-        onChange={(event) => {
-          setContents(event.target.value);
-        }}
-      />
-      <div className="flex flex-row gap-2">
-        <Button
-          onClick={() => {
-            operatingSystem.saveFile(fileName, contents);
-            setContents("");
-            setFileName("");
-          }}
-        >
-          Save
-        </Button>
-        <Button
-          onClick={() => {
-            operatingSystem.deleteFile(fileName);
-            setContents("");
-            setFileName("");
-          }}
-          disabled={!operatingSystem.fileExists(fileName)}
-        >
-          Delete
-        </Button>
-      </div>
-    </div>
-  );
-}
-
 function FileExplorerIconCard({
   file,
-  deleteFile,
+  directory,
   editFile,
+  deleteFile,
 }: {
   file: OperatingSystemFile;
+  directory: string[];
   deleteFile: () => void;
   editFile: () => void;
 }) {
@@ -232,9 +207,9 @@ function FileExplorerIconCard({
   useEffect(() => {
     if (inputRef.current) {
       inputRef.current.addEventListener("focusout", () => {
-        if (!operatingSystem.fileExists(fileName)) {
-          operatingSystem.saveFile(fileName, file.contents);
-          operatingSystem.deleteFile(file.fileName);
+        if (!operatingSystem.fileExists(directory, fileName)) {
+          operatingSystem.saveFile(directory, fileName, file.contents);
+          operatingSystem.deleteFile(directory, file.fileName);
         } else {
           setFileName(file.fileName);
         }
@@ -245,7 +220,12 @@ function FileExplorerIconCard({
   return (
     <ContextMenu>
       <ContextMenuTrigger>
-        <div className="bg-primary transition-all duration-400 text-white w-fit h-fit px-2 py-4 rounded-xl cursor-pointer">
+        <div
+          className="bg-primary transition-all duration-400 text-white w-fit h-fit px-2 py-4 rounded-xl cursor-pointer"
+          onClick={(event) => {
+            editFile();
+          }}
+        >
           <div className="h-[30px] w-20 flex justify-center items-center ">
             {file.fileName.endsWith(".txt") ? (
               <IoDocumentTextOutline size={30} />
@@ -259,9 +239,9 @@ function FileExplorerIconCard({
                 event.stopPropagation();
                 event.preventDefault();
 
-                if (!operatingSystem.fileExists(fileName)) {
-                  operatingSystem.saveFile(fileName, file.contents);
-                  operatingSystem.deleteFile(file.fileName);
+                if (!operatingSystem.fileExists(directory, fileName)) {
+                  operatingSystem.saveFile(directory, fileName, file.contents);
+                  operatingSystem.deleteFile(directory, file.fileName);
                 } else {
                   setFileName(file.fileName);
                 }
@@ -286,11 +266,13 @@ function FileExplorerIconCard({
       <ContextMenuContent className="z-[9999] w-56">
         <ContextMenuItem
           key={1}
-          onClick={() => {
+          onClick={(event) => {
+            event.stopPropagation();
             const newFiles = operatingSystem
-              .getFiles()
+              .getFiles(directory)
               .filter((file) => file.fileName.includes("new_document"));
             operatingSystem.saveFile(
+              directory,
               `new_document${
                 newFiles.length > 0 ? "_" + newFiles.length : ""
               }.txt`,
@@ -324,7 +306,8 @@ function FileExplorerIconCard({
 
         <ContextMenuItem
           key={3}
-          onClick={() => {
+          onClick={(event) => {
+            event.stopPropagation();
             deleteFile();
           }}
         >
@@ -342,23 +325,21 @@ function FileExplorerIcon({
   file,
   deleteFile,
   editFile,
+  directory,
 }: {
   file: OperatingSystemFile;
   deleteFile: () => void;
   editFile: () => void;
+  directory: string[];
 }) {
   if (new Blob([file.contents]).size === 0)
     return (
       <div className="w-fit h-fit">
         <ContextMenu>
-          <ContextMenuTrigger asChild>
-            <div
-              onClick={() => {
-                editFile();
-              }}
-              className="w-fit h-fit"
-            >
+          <ContextMenuTrigger>
+            <div className="w-fit h-fit">
               <FileExplorerIconCard
+                directory={directory}
                 deleteFile={deleteFile}
                 editFile={editFile}
                 file={file}
@@ -384,13 +365,9 @@ function FileExplorerIcon({
         <div className="w-fit h-fit">
           <ContextMenu>
             <ContextMenuTrigger asChild>
-              <div
-                onClick={() => {
-                  editFile();
-                }}
-                className="w-fit h-fit"
-              >
+              <div className="w-fit h-fit">
                 <FileExplorerIconCard
+                  directory={directory}
                   deleteFile={deleteFile}
                   editFile={editFile}
                   file={file}
