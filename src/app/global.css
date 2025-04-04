@@ -3,6 +3,7 @@
 @tailwind utilities;
 
 @layer base {
+  /*
   :root {
     --pane-in-focus-shadow-color: hsla(20, 14.3%, 4.1%, 0.08);
     --background: 0 0% 100%;
@@ -25,8 +26,9 @@
     --input: 20 5.9% 90%;
     --ring: 24.6 95% 53.1%;
     --radius: 0.7rem;
-  }
+  } */
 
+  :root,
   .dark,
   :root[class~="dark"] {
     --pane-in-focus-shadow-color: hsla(60, 9.1%, 97.8%, 0.07);

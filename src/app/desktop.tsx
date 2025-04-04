@@ -35,7 +35,7 @@ export default function Desktop({
     <div className="w-[100vw] h-[100vh] absolute top-0 bottom-0 left-0 right-0 overflow-hidden z-0">
       <Wallpaper />
       <div className="h-[calc(100vh-52px)] w-full bottom-0 left-0 right-0 absolute p-4">
-        <div className="w-full  flex flex-row gap-4 items-start ">
+        <div className="w-full  flex flex-row gap-4 items-start">
           <div>
             <DesktopIcon
               icon={<SquareTerminal size={30} />}
