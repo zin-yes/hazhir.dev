@@ -99,7 +99,7 @@ export default function TerminalApplication({
 
         const username =
           session.status === "authenticated"
-            ? session.data.user.name + " " ?? session.data.user.id + " "
+            ? session.data.user.name ?? session.data.user.id + " "
             : "";
 
         figlet(
