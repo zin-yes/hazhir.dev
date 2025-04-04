@@ -488,7 +488,15 @@ export default function Game() {
         if (event.button === 0) {
           breakBlock();
         } else if (event.button === 2) {
-          placeBlock(BlockType.LOG);
+          // TODO: add block selection UI
+          let randomBlock = Math.floor(Math.random() * 22);
+          while (
+            NON_SOLID_BLOCKS.includes(randomBlock) ||
+            randomBlock === BlockType.WATER
+          ) {
+            randomBlock = Math.floor(Math.random() * 22);
+          }
+          placeBlock(randomBlock);
         }
       };
 

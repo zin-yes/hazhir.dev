@@ -25,7 +25,13 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <body className={default_font.className}>
-        <ThemeProvider enableSystem storageKey="currentTheme" attribute="class">
+        <ThemeProvider
+          enableSystem
+          storageKey="currentTheme"
+          attribute="class"
+          defaultTheme="dark"
+          forcedTheme="dark"
+        >
           <NextAuthSessionProvider>{children}</NextAuthSessionProvider>
         </ThemeProvider>
       </body>

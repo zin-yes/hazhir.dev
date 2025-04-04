@@ -32,7 +32,8 @@ export default function TerminalApplication({
 
   const { systemTheme: theme } = useTheme();
 
-  const terminalTheme: ITheme = theme === "dark" ? themes.dark : themes.light;
+  // const terminalTheme: ITheme = theme === "dark" ? themes.dark : themes.light;
+  const terminalTheme: ITheme = themes.dark;
 
   const terminal = useMemo<Terminal>(() => {
     return new Terminal({
