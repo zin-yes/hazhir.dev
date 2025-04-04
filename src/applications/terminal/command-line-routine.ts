@@ -199,7 +199,7 @@ async function onCommand(
 ): Promise<CommandBuffer> {
   const username =
     session.status === "authenticated"
-      ? session.data.user.name + " " ?? session.data.user.id + " "
+      ? session.data.user.name ?? session.data.user.id + " "
       : "";
 
   if (commandBuffer.content.length === 0) {
@@ -330,7 +330,7 @@ export async function parseCommand(
 
     const username =
       session.status === "authenticated"
-        ? session.data.user.name + " " ?? session.data.user.id + " "
+        ? session.data.user.name ?? session.data.user.id + " "
         : "";
 
     terminal.write(
