@@ -14,44 +14,69 @@ export class PhysicsEngine {
     position: THREE.Vector3,
     velocity: THREE.Vector3,
     playerBox: THREE.Box3,
-    delta: number
+    delta: number,
+    eyeHeight: number = 1.62,
+    isShifting: boolean = false
   ): void {
+    const wasOnGround = this.isOnGround(position, eyeHeight);
+
     // Apply X movement
+    const originalX = position.x;
     position.x += velocity.x * delta;
-    this.updatePlayerBox(playerBox, position);
+    this.updatePlayerBox(playerBox, position, eyeHeight);
     if (this.checkCollision(playerBox)) {
-      position.x -= velocity.x * delta;
+      position.x = originalX;
+      velocity.x = 0;
+    } else if (
+      isShifting &&
+      wasOnGround &&
+      velocity.y <= 0 &&
+      !this.isOnGround(position, eyeHeight)
+    ) {
+      position.x = originalX;
       velocity.x = 0;
     }
 
     // Apply Z movement
+    const originalZ = position.z;
     position.z += velocity.z * delta;
-    this.updatePlayerBox(playerBox, position);
+    this.updatePlayerBox(playerBox, position, eyeHeight);
     if (this.checkCollision(playerBox)) {
-      position.z -= velocity.z * delta;
+      position.z = originalZ;
+      velocity.z = 0;
+    } else if (
+      isShifting &&
+      wasOnGround &&
+      velocity.y <= 0 &&
+      !this.isOnGround(position, eyeHeight)
+    ) {
+      position.z = originalZ;
       velocity.z = 0;
     }
 
     // Apply Y movement
     position.y += velocity.y * delta;
-    this.updatePlayerBox(playerBox, position);
+    this.updatePlayerBox(playerBox, position, eyeHeight);
     if (this.checkCollision(playerBox)) {
       position.y -= velocity.y * delta;
       velocity.y = 0;
     }
   }
 
-  public isOnGround(position: THREE.Vector3): boolean {
+  public isOnGround(
+    position: THREE.Vector3,
+    eyeHeight: number = 1.62
+  ): boolean {
     const box = new THREE.Box3();
-    this.updatePlayerBox(box, position);
+    this.updatePlayerBox(box, position, eyeHeight);
     box.min.y -= 0.05;
     box.max.y = box.min.y + 0.05;
     return this.checkCollision(box);
   }
 
-  public isInWater(position: THREE.Vector3): boolean {
+  public isInWater(position: THREE.Vector3, eyeHeight: number = 1.62): boolean {
     const box = new THREE.Box3();
-    this.updatePlayerBox(box, position);
+    this.updatePlayerBox(box, position, eyeHeight);
     const minX = Math.round(box.min.x);
     const maxX = Math.round(box.max.x);
     const minY = Math.round(box.min.y);
@@ -70,15 +95,19 @@ export class PhysicsEngine {
     return false;
   }
 
-  public updatePlayerBox(box: THREE.Box3, position: THREE.Vector3) {
+  public updatePlayerBox(
+    box: THREE.Box3,
+    position: THREE.Vector3,
+    eyeHeight: number = 1.62
+  ) {
     const halfWidth = this.playerSize.x / 2;
     const halfDepth = this.playerSize.z / 2;
 
     box.min.x = position.x - halfWidth;
     box.max.x = position.x + halfWidth;
 
-    box.min.y = position.y - this.eyeHeight;
-    box.max.y = position.y - this.eyeHeight + this.playerSize.y;
+    box.min.y = position.y - eyeHeight;
+    box.max.y = position.y - eyeHeight + this.playerSize.y;
 
     box.min.z = position.z - halfDepth;
     box.max.z = position.z + halfDepth;
