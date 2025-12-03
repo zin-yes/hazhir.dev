@@ -49,7 +49,7 @@ export class PhysicsEngine {
     return this.checkCollision(box);
   }
 
-  private updatePlayerBox(box: THREE.Box3, position: THREE.Vector3) {
+  public updatePlayerBox(box: THREE.Box3, position: THREE.Vector3) {
     const halfWidth = this.playerSize.x / 2;
     const halfDepth = this.playerSize.z / 2;
 

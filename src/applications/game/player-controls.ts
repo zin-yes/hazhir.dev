@@ -12,7 +12,10 @@ export class PlayerControls {
   private moveBackward = false;
   private moveLeft = false;
   private moveRight = false;
+  private moveUp = false;
+  private moveDown = false;
   private canJump = false;
+  private isFlying = false;
 
   private readonly speed = 5;
   private readonly jumpForce = 9.5;
@@ -39,6 +42,8 @@ export class PlayerControls {
       this.moveBackward = false;
       this.moveLeft = false;
       this.moveRight = false;
+      this.moveUp = false;
+      this.moveDown = false;
       this.canJump = false;
     });
   }
@@ -64,10 +69,22 @@ export class PlayerControls {
         this.moveRight = true;
         break;
       case "Space":
-        if (this.canJump) {
+        if (this.isFlying) {
+          this.moveUp = true;
+        } else if (this.canJump) {
           this.velocity.y = this.jumpForce;
           this.canJump = false;
         }
+        break;
+      case "ShiftLeft":
+      case "ShiftRight":
+        if (this.isFlying) {
+          this.moveDown = true;
+        }
+        break;
+      case "KeyV":
+        this.isFlying = !this.isFlying;
+        this.velocity.set(0, 0, 0);
         break;
     }
   };
@@ -90,6 +107,13 @@ export class PlayerControls {
       case "KeyD":
         this.moveRight = false;
         break;
+      case "Space":
+        this.moveUp = false;
+        break;
+      case "ShiftLeft":
+      case "ShiftRight":
+        this.moveDown = false;
+        break;
     }
   };
 
@@ -105,6 +129,40 @@ export class PlayerControls {
   }
 
   public update(delta: number) {
+    if (this.isFlying) {
+      if (this.controls.isLocked) {
+        const forward = new THREE.Vector3();
+        const right = new THREE.Vector3();
+
+        this.controls.getObject().getWorldDirection(forward);
+        forward.y = 0;
+        forward.normalize();
+
+        right.crossVectors(forward, this.controls.getObject().up).normalize();
+
+        const desiredVelocity = new THREE.Vector3();
+        if (this.moveForward) desiredVelocity.add(forward);
+        if (this.moveBackward) desiredVelocity.sub(forward);
+        if (this.moveRight) desiredVelocity.add(right);
+        if (this.moveLeft) desiredVelocity.sub(right);
+        if (this.moveUp) desiredVelocity.y += 1;
+        if (this.moveDown) desiredVelocity.y -= 1;
+
+        if (desiredVelocity.lengthSq() > 0) {
+          desiredVelocity.normalize().multiplyScalar(this.speed * 3);
+        }
+
+        this.velocity.copy(desiredVelocity);
+      } else {
+        this.velocity.set(0, 0, 0);
+      }
+
+      const position = this.controls.getObject().position;
+      position.addScaledVector(this.velocity, delta);
+      this.physics.updatePlayerBox(this.playerBox, position);
+      return;
+    }
+
     // Apply Gravity
     this.velocity.y -= this.gravity * delta;
 

@@ -291,8 +291,10 @@ export default function Game() {
               const chunkName = generateChunkName(chunkX, chunkY, chunkZ);
               chunks.current[chunkName] = chunk;
 
+              const borders = getChunkBorders(chunkX, chunkY, chunkZ);
+
               meshWorkerPool
-                .exec("generateMesh", [result])
+                .exec("generateMesh", [result, borders])
                 .then(
                   ({
                     positions,
@@ -645,8 +647,26 @@ export default function Game() {
         const chunkName = generateChunkName(chunkX, chunkY, chunkZ);
         chunks.current[chunkName] = chunk;
 
+        const adjChunks = {
+          left: chunks.current[generateChunkName(chunkX - 1, chunkY, chunkZ)],
+          right: chunks.current[generateChunkName(chunkX + 1, chunkY, chunkZ)],
+          bottom: chunks.current[generateChunkName(chunkX, chunkY - 1, chunkZ)],
+          top: chunks.current[generateChunkName(chunkX, chunkY + 1, chunkZ)],
+          back: chunks.current[generateChunkName(chunkX, chunkY, chunkZ - 1)],
+          front: chunks.current[generateChunkName(chunkX, chunkY, chunkZ + 1)],
+        };
+
+        if (adjChunks.left) regenerateChunkMesh(chunkX - 1, chunkY, chunkZ);
+        if (adjChunks.right) regenerateChunkMesh(chunkX + 1, chunkY, chunkZ);
+        if (adjChunks.bottom) regenerateChunkMesh(chunkX, chunkY - 1, chunkZ);
+        if (adjChunks.top) regenerateChunkMesh(chunkX, chunkY + 1, chunkZ);
+        if (adjChunks.back) regenerateChunkMesh(chunkX, chunkY, chunkZ - 1);
+        if (adjChunks.front) regenerateChunkMesh(chunkX, chunkY, chunkZ + 1);
+
+        const borders = getChunkBorders(chunkX, chunkY, chunkZ);
+
         meshWorkerPool
-          .exec("generateMesh", [result])
+          .exec("generateMesh", [result, borders])
           .then(
             ({
               positions,
@@ -906,6 +926,16 @@ export default function Game() {
 
     regenerateChunkMesh(chunkX, chunkY, chunkZ);
 
+    if (blockChunkX === 0) regenerateChunkMesh(chunkX - 1, chunkY, chunkZ);
+    if (blockChunkX === CHUNK_WIDTH - 1)
+      regenerateChunkMesh(chunkX + 1, chunkY, chunkZ);
+    if (blockChunkY === 0) regenerateChunkMesh(chunkX, chunkY - 1, chunkZ);
+    if (blockChunkY === CHUNK_HEIGHT - 1)
+      regenerateChunkMesh(chunkX, chunkY + 1, chunkZ);
+    if (blockChunkZ === 0) regenerateChunkMesh(chunkX, chunkY, chunkZ - 1);
+    if (blockChunkZ === CHUNK_LENGTH - 1)
+      regenerateChunkMesh(chunkX, chunkY, chunkZ + 1);
+
     if (broadcast && networkManager.current.myPeerId) {
       networkManager.current.send({
         type: "BLOCK_UPDATE",
@@ -917,13 +947,109 @@ export default function Game() {
     }
   }
 
+  function getChunkBorders(chunkX: number, chunkY: number, chunkZ: number) {
+    const borders: {
+      top?: ArrayBuffer;
+      bottom?: ArrayBuffer;
+      left?: ArrayBuffer;
+      right?: ArrayBuffer;
+      front?: ArrayBuffer;
+      back?: ArrayBuffer;
+    } = {};
+
+    // Top (y+1), need y=0
+    const topChunk =
+      chunks.current[generateChunkName(chunkX, chunkY + 1, chunkZ)];
+    if (topChunk) {
+      const border = new Uint8Array(CHUNK_WIDTH * CHUNK_LENGTH);
+      for (let x = 0; x < CHUNK_WIDTH; x++) {
+        for (let z = 0; z < CHUNK_LENGTH; z++) {
+          border[x * CHUNK_LENGTH + z] = topChunk[calculateOffset(x, 0, z)];
+        }
+      }
+      borders.top = border.buffer;
+    }
+
+    // Bottom (y-1), need y=HEIGHT-1
+    const bottomChunk =
+      chunks.current[generateChunkName(chunkX, chunkY - 1, chunkZ)];
+    if (bottomChunk) {
+      const border = new Uint8Array(CHUNK_WIDTH * CHUNK_LENGTH);
+      for (let x = 0; x < CHUNK_WIDTH; x++) {
+        for (let z = 0; z < CHUNK_LENGTH; z++) {
+          border[x * CHUNK_LENGTH + z] =
+            bottomChunk[calculateOffset(x, CHUNK_HEIGHT - 1, z)];
+        }
+      }
+      borders.bottom = border.buffer;
+    }
+
+    // Front (z+1), need z=0
+    const frontChunk =
+      chunks.current[generateChunkName(chunkX, chunkY, chunkZ + 1)];
+    if (frontChunk) {
+      const border = new Uint8Array(CHUNK_WIDTH * CHUNK_HEIGHT);
+      for (let x = 0; x < CHUNK_WIDTH; x++) {
+        for (let y = 0; y < CHUNK_HEIGHT; y++) {
+          border[x * CHUNK_HEIGHT + y] = frontChunk[calculateOffset(x, y, 0)];
+        }
+      }
+      borders.front = border.buffer;
+    }
+
+    // Back (z-1), need z=LENGTH-1
+    const backChunk =
+      chunks.current[generateChunkName(chunkX, chunkY, chunkZ - 1)];
+    if (backChunk) {
+      const border = new Uint8Array(CHUNK_WIDTH * CHUNK_HEIGHT);
+      for (let x = 0; x < CHUNK_WIDTH; x++) {
+        for (let y = 0; y < CHUNK_HEIGHT; y++) {
+          border[x * CHUNK_HEIGHT + y] =
+            backChunk[calculateOffset(x, y, CHUNK_LENGTH - 1)];
+        }
+      }
+      borders.back = border.buffer;
+    }
+
+    // Right (x+1), need x=0
+    const rightChunk =
+      chunks.current[generateChunkName(chunkX + 1, chunkY, chunkZ)];
+    if (rightChunk) {
+      const border = new Uint8Array(CHUNK_HEIGHT * CHUNK_LENGTH);
+      for (let y = 0; y < CHUNK_HEIGHT; y++) {
+        for (let z = 0; z < CHUNK_LENGTH; z++) {
+          border[y * CHUNK_LENGTH + z] = rightChunk[calculateOffset(0, y, z)];
+        }
+      }
+      borders.right = border.buffer;
+    }
+
+    // Left (x-1), need x=WIDTH-1
+    const leftChunk =
+      chunks.current[generateChunkName(chunkX - 1, chunkY, chunkZ)];
+    if (leftChunk) {
+      const border = new Uint8Array(CHUNK_HEIGHT * CHUNK_LENGTH);
+      for (let y = 0; y < CHUNK_HEIGHT; y++) {
+        for (let z = 0; z < CHUNK_LENGTH; z++) {
+          border[y * CHUNK_LENGTH + z] =
+            leftChunk[calculateOffset(CHUNK_WIDTH - 1, y, z)];
+        }
+      }
+      borders.left = border.buffer;
+    }
+
+    return borders;
+  }
+
   function regenerateChunkMesh(chunkX: number, chunkY: number, chunkZ: number) {
     if (shaderMaterial) {
       const chunkName = generateChunkName(chunkX, chunkY, chunkZ);
       const currentVersion = chunkVersions.current[chunkName];
 
+      const borders = getChunkBorders(chunkX, chunkY, chunkZ);
+
       meshWorkerPool
-        .exec("generateMesh", [chunks.current[chunkName]])
+        .exec("generateMesh", [chunks.current[chunkName], borders])
         .then(
           ({
             positions,
