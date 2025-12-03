@@ -24,7 +24,6 @@ import * as THREE from "three";
 import {
   BlockType,
   LOADING_SCREEN_TEXTURES,
-  NON_SOLID_BLOCKS,
   Texture,
 } from "@/applications/game/blocks";
 import { BlockHighlighter } from "./block-highlighter";
@@ -181,7 +180,76 @@ export default function Game() {
     }
   }
 
-  let playerControls: PlayerControls;
+  const [selectedSlot, setSelectedSlot] = useState(0);
+  const selectedSlotRef = useRef(0);
+  const [hotbarSlots, setHotbarSlots] = useState<BlockType[]>([
+    BlockType.DIRT,
+    BlockType.GRASS,
+    BlockType.STONE,
+    BlockType.LOG,
+    BlockType.PLANKS,
+    BlockType.LEAVES,
+    BlockType.GLASS,
+    BlockType.SAND,
+    BlockType.COBBLESTONE,
+  ]);
+  const hotbarSlotsRef = useRef(hotbarSlots);
+  const [isInventoryOpen, setIsInventoryOpen] = useState(false);
+  const isInventoryOpenRef = useRef(false);
+
+  const playerControlsRef = useRef<PlayerControls | null>(null);
+
+  useEffect(() => {
+    selectedSlotRef.current = selectedSlot;
+  }, [selectedSlot]);
+
+  useEffect(() => {
+    hotbarSlotsRef.current = hotbarSlots;
+  }, [hotbarSlots]);
+
+  useEffect(() => {
+    isInventoryOpenRef.current = isInventoryOpen;
+  }, [isInventoryOpen]);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.code === "KeyE") {
+        if (isInventoryOpen) {
+          setIsInventoryOpen(false);
+          playerControlsRef.current?.controls.lock();
+        } else {
+          setIsInventoryOpen(true);
+          playerControlsRef.current?.controls.unlock();
+        }
+      }
+
+      if (!isInventoryOpen && playerControlsRef.current?.controls.isLocked) {
+        if (event.key >= "1" && event.key <= "9") {
+          setSelectedSlot(parseInt(event.key) - 1);
+        }
+      }
+    };
+
+    const onWheel = (event: WheelEvent) => {
+      if (!isInventoryOpen && playerControlsRef.current?.controls.isLocked) {
+        const direction = Math.sign(event.deltaY);
+        setSelectedSlot((prev) => {
+          let next = prev + direction;
+          if (next < 0) next = 8;
+          if (next > 8) next = 0;
+          return next;
+        });
+      }
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("wheel", onWheel);
+
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("wheel", onWheel);
+    };
+  }, [isInventoryOpen]);
 
   let textureArray: THREE.DataArrayTexture;
   let shaderMaterial: THREE.ShaderMaterial;
@@ -353,7 +421,7 @@ export default function Game() {
       containerRef.current.appendChild(renderer.domElement);
 
       const physics = new PhysicsEngine(getBlock);
-      playerControls = new PlayerControls(
+      playerControlsRef.current = new PlayerControls(
         camera,
         containerRef.current,
         physics
@@ -427,14 +495,21 @@ export default function Game() {
       const onKeyUp = function (event: KeyboardEvent) {
         switch (event.code) {
           case "Escape":
+            if (isInventoryOpenRef.current) {
+              setIsInventoryOpen(false);
+              playerControlsRef.current?.controls.lock();
+              break;
+            }
+
             if (
               initialLoadCompletion === 1 &&
-              !playerControls.controls.isLocked
+              !playerControlsRef.current?.controls.isLocked
             ) {
-              playerControls.controls.lock();
+              playerControlsRef.current?.controls.lock();
               document.getElementById("infoLayer")!.style.display = "none";
+              setIsInventoryOpen(false);
             } else {
-              playerControls.controls.unlock();
+              playerControlsRef.current?.controls.unlock();
             }
             break;
         }
@@ -445,19 +520,14 @@ export default function Game() {
       };
 
       const onMouseDown = (event: MouseEvent) => {
-        if (!playerControls.controls.isLocked) return;
+        if (!playerControlsRef.current?.controls.isLocked) return;
         if (event.button === 0) {
           breakBlock();
         } else if (event.button === 2) {
-          // TODO: add block selection UI
-          let randomBlock = Math.floor(Math.random() * 22);
-          while (
-            NON_SOLID_BLOCKS.includes(randomBlock) ||
-            randomBlock === BlockType.WATER
-          ) {
-            randomBlock = Math.floor(Math.random() * 22);
+          const blockType = hotbarSlotsRef.current[selectedSlotRef.current];
+          if (blockType) {
+            placeBlock(blockType);
           }
-          placeBlock(randomBlock);
         }
       };
 
@@ -548,8 +618,8 @@ export default function Game() {
           }
         });
 
-        if (playerControls) {
-          playerControls.dispose();
+        if (playerControlsRef.current) {
+          playerControlsRef.current.dispose();
         }
 
         resizeObserver.disconnect();
@@ -612,7 +682,7 @@ export default function Game() {
   }
 
   function updateIndicator() {
-    if (playerControls.controls.isLocked) {
+    if (playerControlsRef.current?.controls.isLocked) {
       let cameraDirection: THREE.Vector3 = new THREE.Vector3();
       camera.getWorldDirection(cameraDirection);
       cameraDirection.normalize();
@@ -652,7 +722,7 @@ export default function Game() {
   const pointer = new THREE.Vector2(0.5 * 2 - 1, -0.5 * 2 + 1);
 
   function placeBlock(type: BlockType) {
-    if (playerControls.controls.isLocked) {
+    if (playerControlsRef.current?.controls.isLocked) {
       raycaster.setFromCamera(pointer, camera);
 
       const intersections = raycaster.intersectObjects(
@@ -708,7 +778,8 @@ export default function Game() {
             new THREE.Vector3(newBlockX + 0.5, newBlockY + 0.5, newBlockZ + 0.5)
           );
 
-          if (blockBox.intersectsBox(playerControls.getPlayerBox())) return;
+          if (blockBox.intersectsBox(playerControlsRef.current!.getPlayerBox()))
+            return;
 
           setBlock(newBlockX, newBlockY, newBlockZ, type);
 
@@ -720,7 +791,7 @@ export default function Game() {
   }
 
   function breakBlock() {
-    if (playerControls.controls.isLocked) {
+    if (playerControlsRef.current?.controls.isLocked) {
       let cameraDirection: THREE.Vector3 = new THREE.Vector3();
       camera.getWorldDirection(cameraDirection);
       cameraDirection.normalize();
@@ -986,11 +1057,11 @@ export default function Game() {
     //   scene.children.length * CHUNK_WIDTH * CHUNK_HEIGHT * CHUNK_LENGTH
     // }`;
 
-    if (playerControls) {
-      playerControls.update(delta);
+    if (playerControlsRef.current) {
+      playerControlsRef.current.update(delta);
 
       if (networkManager.current.myPeerId) {
-        const obj = playerControls.controls.getObject();
+        const obj = playerControlsRef.current.controls.getObject();
         networkManager.current.send({
           type: "PLAYER_UPDATE",
           id: networkManager.current.myPeerId,
@@ -1018,6 +1089,14 @@ export default function Game() {
           networkManager.current.joinGame(id);
         }}
         peerId={peerId}
+        selectedSlot={selectedSlot}
+        hotbarSlots={hotbarSlots}
+        isInventoryOpen={isInventoryOpen}
+        onSelectBlock={(block) => {
+          const newSlots = [...hotbarSlots];
+          newSlots[selectedSlot] = block;
+          setHotbarSlots(newSlots);
+        }}
       />
     </div>
   );
