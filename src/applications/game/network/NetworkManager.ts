@@ -99,6 +99,14 @@ export class NetworkManager {
     }
   }
 
+  public broadcast(packet: NetworkPacket, excludeId?: string) {
+    this.connections.forEach((conn, id) => {
+      if (conn.open && id !== excludeId) {
+        conn.send(packet);
+      }
+    });
+  }
+
   public disconnect() {
     this.connections.forEach((conn) => conn.close());
     this.connections.clear();

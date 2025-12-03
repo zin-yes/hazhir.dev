@@ -12,6 +12,8 @@ const DEFAULT_UI_FONT = Silkscreen({
 interface UILayerProps {
   onHost?: () => void;
   onJoin?: (id: string) => void;
+  onSave?: () => void;
+  onLoad?: () => void;
   peerId?: string;
   selectedSlot: number;
   hotbarSlots: BlockType[];
@@ -22,6 +24,8 @@ interface UILayerProps {
 export default function UILayer({
   onHost,
   onJoin,
+  onSave,
+  onLoad,
   peerId,
   selectedSlot,
   hotbarSlots,
@@ -96,6 +100,23 @@ export default function UILayer({
               Focus the window by clicking, then press escape to start playing
               (and do the same if you want to have your mouse back).
             </p>
+          </div>
+          <div className="bg-black p-6 px-8 pointer-events-auto">
+            <h2 className="text-center font-bold text-lg">World Management</h2>
+            <div className="flex flex-col gap-2 mt-2">
+              <button
+                onClick={onSave}
+                className="bg-white text-black px-4 py-2 hover:bg-gray-200"
+              >
+                Save World
+              </button>
+              <button
+                onClick={onLoad}
+                className="bg-white text-black px-4 py-2 hover:bg-gray-200"
+              >
+                Load World
+              </button>
+            </div>
           </div>
           <div className="bg-black p-6 px-8 pointer-events-auto">
             <h2 className="text-center font-bold text-lg">Multiplayer</h2>

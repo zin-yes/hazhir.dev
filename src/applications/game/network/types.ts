@@ -2,7 +2,8 @@ export type PacketType =
   | "HANDSHAKE"
   | "PLAYER_UPDATE"
   | "BLOCK_UPDATE"
-  | "PLAYER_DISCONNECT";
+  | "PLAYER_DISCONNECT"
+  | "WORLD_STATE";
 
 export interface BasePacket {
   type: PacketType;
@@ -12,6 +13,11 @@ export interface HandshakePacket extends BasePacket {
   type: "HANDSHAKE";
   seed: number;
   initialPosition: { x: number; y: number; z: number };
+}
+
+export interface WorldStatePacket extends BasePacket {
+  type: "WORLD_STATE";
+  blocks: { x: number; y: number; z: number; blockType: number }[];
 }
 
 export interface PlayerUpdatePacket extends BasePacket {
@@ -38,4 +44,5 @@ export type NetworkPacket =
   | HandshakePacket
   | PlayerUpdatePacket
   | BlockUpdatePacket
-  | PlayerDisconnectPacket;
+  | PlayerDisconnectPacket
+  | WorldStatePacket;
