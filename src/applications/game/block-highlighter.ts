@@ -11,7 +11,7 @@ export class BlockHighlighter extends THREE.LineSegments {
 
     super(edges, material);
 
-    this.scale.set(1.001, 1.001, 1.001);
+    this.scale.set(1.002, 1.002, 1.002);
     this.visible = false;
     this.name = "indicator";
   }
