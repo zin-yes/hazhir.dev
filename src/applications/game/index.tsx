@@ -2,6 +2,8 @@
 
 import { useEffect, useMemo, useRef } from "react";
 
+import { Sky } from "three/addons/objects/Sky.js";
+
 import {
   CHUNK_HEIGHT,
   CHUNK_LENGTH,
@@ -19,15 +21,15 @@ import { WorkerPool } from "./worker-pool";
 
 import * as THREE from "three";
 
-import { BlockHighlighter } from "./block-highlighter";
 import {
   BlockType,
   LOADING_SCREEN_TEXTURES,
   NON_SOLID_BLOCKS,
   Texture,
 } from "@/applications/game/blocks";
-import { PointerLockControls } from "three/addons/controls/PointerLockControls.js";
-import { Sky } from "three/addons/objects/Sky.js";
+import { BlockHighlighter } from "./block-highlighter";
+import { PhysicsEngine } from "./physics-engine";
+import { PlayerControls } from "./player-controls";
 import { FRAGMENT_SHADER, VERTEX_SHADER } from "./shaders/chunk";
 import UILayer from "./ui";
 import { calculateOffset, getSurfaceHeightFromSeed } from "./utils";
@@ -161,14 +163,7 @@ export default function Game() {
     }
   }
 
-  let controls: PointerLockControls;
-
-  let moveForward = false;
-  let moveBackward = false;
-  let moveLeft = false;
-  let moveRight = false;
-  let moveUp = false;
-  let moveDown = false;
+  let playerControls: PlayerControls;
 
   let textureArray: THREE.DataArrayTexture;
   let shaderMaterial: THREE.ShaderMaterial;
@@ -247,7 +242,12 @@ export default function Game() {
       renderer.setPixelRatio(window.devicePixelRatio);
       containerRef.current.appendChild(renderer.domElement);
 
-      controls = new PointerLockControls(camera, containerRef.current);
+      const physics = new PhysicsEngine(getBlock);
+      playerControls = new PlayerControls(
+        camera,
+        containerRef.current,
+        physics
+      );
 
       for (
         let chunkX = -NEGATIVE_X_RENDER_DISTANCE;
@@ -401,71 +401,18 @@ export default function Game() {
       camera.position.y = getSurfaceHeightFromSeed(seed, 0, 0) + 2;
       //camera.position.y = 3;
 
-      const onKeyDown = function (event: KeyboardEvent) {
-        switch (event.code) {
-          case "ArrowUp":
-          case "KeyW":
-            moveForward = true;
-            break;
-
-          case "ArrowLeft":
-          case "KeyA":
-            moveLeft = true;
-            break;
-
-          case "ArrowDown":
-          case "KeyS":
-            moveBackward = true;
-            break;
-
-          case "ArrowRight":
-          case "KeyD":
-            moveRight = true;
-            break;
-          case "Space":
-            moveUp = true;
-            break;
-          case "ShiftLeft":
-            moveDown = true;
-            break;
-        }
-      };
-
       const onKeyUp = function (event: KeyboardEvent) {
         switch (event.code) {
-          case "ArrowUp":
           case "Escape":
-            if (initialLoadCompletion === 1 && !controls.isLocked) {
-              controls.lock();
+            if (
+              initialLoadCompletion === 1 &&
+              !playerControls.controls.isLocked
+            ) {
+              playerControls.controls.lock();
               document.getElementById("infoLayer")!.style.display = "none";
             } else {
-              controls.unlock();
+              playerControls.controls.unlock();
             }
-            break;
-          case "ArrowUp":
-          case "KeyW":
-            moveForward = false;
-            break;
-
-          case "ArrowLeft":
-          case "KeyA":
-            moveLeft = false;
-            break;
-
-          case "ArrowDown":
-          case "KeyS":
-            moveBackward = false;
-            break;
-
-          case "ArrowRight":
-          case "KeyD":
-            moveRight = false;
-            break;
-          case "Space":
-            moveUp = false;
-            break;
-          case "ShiftLeft":
-            moveDown = false;
             break;
         }
       };
@@ -493,7 +440,7 @@ export default function Game() {
       containerRef.current.addEventListener("contextmenu", onContextMenu);
       containerRef.current.addEventListener("mousedown", onMouseDown);
 
-      document.addEventListener("keydown", onKeyDown);
+      // document.addEventListener("keydown", onKeyDown);
       document.addEventListener("keyup", onKeyUp);
 
       // return () => {
@@ -554,7 +501,7 @@ export default function Game() {
   }
 
   function updateIndicator() {
-    if (controls.isLocked) {
+    if (playerControls.controls.isLocked) {
       let cameraDirection: THREE.Vector3 = new THREE.Vector3();
       camera.getWorldDirection(cameraDirection);
       cameraDirection.normalize();
@@ -594,7 +541,7 @@ export default function Game() {
   const pointer = new THREE.Vector2(0.5 * 2 - 1, -0.5 * 2 + 1);
 
   function placeBlock(type: BlockType) {
-    if (controls.isLocked) {
+    if (playerControls.controls.isLocked) {
       raycaster.setFromCamera(pointer, camera);
 
       const intersections = raycaster.intersectObjects(
@@ -651,7 +598,7 @@ export default function Game() {
   }
 
   function breakBlock() {
-    if (controls.isLocked) {
+    if (playerControls.controls.isLocked) {
       let cameraDirection: THREE.Vector3 = new THREE.Vector3();
       camera.getWorldDirection(cameraDirection);
       cameraDirection.normalize();
@@ -894,23 +841,10 @@ export default function Game() {
     //   scene.children.length * CHUNK_WIDTH * CHUNK_HEIGHT * CHUNK_LENGTH
     // }`;
 
-    if (controls.isLocked === true) {
+    if (playerControls && playerControls.controls.isLocked === true) {
       const delta = (time - prevTime) / 1000;
 
-      if (moveLeft || moveRight) {
-        controls.moveRight(
-          (Number(moveRight) - Number(moveLeft)) * FLYING_SPEED * delta
-        );
-      }
-      if (moveUp || moveDown) {
-        controls.getObject().position.y -=
-          (Number(moveDown) - Number(moveUp)) * FLYING_SPEED * delta;
-      }
-      if (moveForward || moveBackward) {
-        controls.moveForward(
-          (Number(moveForward) - Number(moveBackward)) * FLYING_SPEED * delta
-        );
-      }
+      playerControls.update(delta);
     }
 
     prevTime = time;
