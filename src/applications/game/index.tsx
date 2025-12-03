@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { Sky } from "three/addons/objects/Sky.js";
 
@@ -28,10 +28,12 @@ import {
   Texture,
 } from "@/applications/game/blocks";
 import { BlockHighlighter } from "./block-highlighter";
+import { NetworkManager } from "./network/NetworkManager";
+import { RemotePlayer } from "./network/RemotePlayer";
 import { PhysicsEngine } from "./physics-engine";
 import { PlayerControls } from "./player-controls";
 import { FRAGMENT_SHADER, VERTEX_SHADER } from "./shaders/chunk";
-import UILayer from "./ui";
+import UILayer from "./ui/index";
 import { calculateOffset, getSurfaceHeightFromSeed } from "./utils";
 
 const FLYING_SPEED = 10;
@@ -48,10 +50,18 @@ export default function Game() {
   // document.body.appendChild(stats.dom);
   const containerRef = useRef<HTMLDivElement>(null);
 
-  let seed = Math.floor(Math.random() * 100000000);
+  const seedRef = useRef(Math.floor(Math.random() * 100000000));
+  const networkManager = useRef(new NetworkManager());
+  const remotePlayers = useRef<Map<string, RemotePlayer>>(new Map());
+  const [peerId, setPeerId] = useState<string>("");
+  const [connectedToHost, setConnectedToHost] = useState(false);
+  const intervalRef = useRef<Timer | null>(null);
 
-  let chunkPositions: { chunkX: number; chunkY: number; chunkZ: number }[] = [];
-  let chunks: { [chunkName: string]: Uint8Array } = {};
+  const chunkPositions = useRef<
+    { chunkX: number; chunkY: number; chunkZ: number }[]
+  >([]);
+  const chunks = useRef<{ [chunkName: string]: Uint8Array }>({});
+  const chunkVersions = useRef<{ [chunkName: string]: number }>({});
   const generationWorkerPool = useMemo(
     () =>
       new WorkerPool(
@@ -168,6 +178,98 @@ export default function Game() {
   let textureArray: THREE.DataArrayTexture;
   let shaderMaterial: THREE.ShaderMaterial;
 
+  function startWorldGeneration(currentSeed: number) {
+    if (intervalRef.current) clearInterval(intervalRef.current);
+
+    // Clear chunks
+    Object.keys(chunks.current).forEach((key) => pruneChunkMesh(key));
+    chunks.current = {};
+    chunkPositions.current = [];
+
+    let initialLoadTasks =
+      (POSITIVE_X_RENDER_DISTANCE + NEGATIVE_X_RENDER_DISTANCE) *
+      (POSITIVE_Y_RENDER_DISTANCE + NEGATIVE_Y_RENDER_DISTANCE) *
+      (POSITIVE_Z_RENDER_DISTANCE + NEGATIVE_Z_RENDER_DISTANCE);
+
+    let tasksDone = 0;
+
+    for (
+      let chunkX = -NEGATIVE_X_RENDER_DISTANCE;
+      chunkX < POSITIVE_X_RENDER_DISTANCE;
+      chunkX++
+    ) {
+      for (
+        let chunkY = POSITIVE_Y_RENDER_DISTANCE;
+        chunkY > -NEGATIVE_Y_RENDER_DISTANCE;
+        chunkY--
+      ) {
+        for (
+          let chunkZ = -NEGATIVE_Z_RENDER_DISTANCE;
+          chunkZ < POSITIVE_Z_RENDER_DISTANCE;
+          chunkZ++
+        ) {
+          generationWorkerPool
+            .exec("generateChunk", [currentSeed, chunkX, chunkY, chunkZ])
+            .then((result: ArrayBuffer) => {
+              const chunk = new Uint8Array(result);
+              const chunkName = generateChunkName(chunkX, chunkY, chunkZ);
+              chunks.current[chunkName] = chunk;
+
+              meshWorkerPool
+                .exec("generateMesh", [result])
+                .then(
+                  ({
+                    positions,
+                    normals,
+                    indices,
+                    uvs,
+                    textureIndices,
+                  }: {
+                    positions: ArrayBuffer;
+                    normals: ArrayBuffer;
+                    indices: ArrayBuffer;
+                    uvs: ArrayBuffer;
+                    textureIndices: ArrayBuffer;
+                  }) => {
+                    addChunkMesh(
+                      positions,
+                      normals,
+                      indices,
+                      uvs,
+                      textureIndices,
+                      chunkName,
+                      chunkX,
+                      chunkY,
+                      chunkZ
+                    );
+
+                    tasksDone++;
+
+                    setInitialLoadCompletion(tasksDone / initialLoadTasks);
+                  }
+                )
+                .catch((err) => {
+                  console.error(err);
+                });
+            })
+            .catch((err) => {
+              console.error(err);
+            });
+        }
+      }
+    }
+
+    intervalRef.current = setInterval(() => {
+      const playerChunkX = Math.round(camera.position.x / CHUNK_WIDTH);
+      const playerChunkY = Math.round(camera.position.y / CHUNK_HEIGHT);
+      const playerChunkZ = Math.round(camera.position.z / CHUNK_LENGTH);
+
+      pruneChunks(playerChunkX, playerChunkY, playerChunkZ);
+
+      generateNearbyChunks(playerChunkX, playerChunkY, playerChunkZ);
+    }, 500);
+  }
+
   async function loadTextureArray() {
     const loader = new THREE.ImageLoader();
 
@@ -264,13 +366,13 @@ export default function Game() {
             chunkZ < POSITIVE_Z_RENDER_DISTANCE;
             chunkZ++
           ) {
-            chunkPositions.push({ chunkX, chunkY, chunkZ });
+            chunkPositions.current.push({ chunkX, chunkY, chunkZ });
           }
         }
       }
 
       textureArrayWorkerPool
-        .exec("loadTextureArray", [])
+        .exec("loadTextureArray", [window.location.origin])
         .then((result) => {
           if (result) {
             textureArray = new THREE.DataArrayTexture(
@@ -299,95 +401,8 @@ export default function Game() {
               transparent: true,
             });
 
-            let initialLoadTasks =
-              (POSITIVE_X_RENDER_DISTANCE + NEGATIVE_X_RENDER_DISTANCE) *
-              (POSITIVE_Y_RENDER_DISTANCE + NEGATIVE_Y_RENDER_DISTANCE) *
-              (POSITIVE_Z_RENDER_DISTANCE + NEGATIVE_Z_RENDER_DISTANCE);
-
-            let tasksDone = 0;
-
-            for (
-              let chunkX = -NEGATIVE_X_RENDER_DISTANCE;
-              chunkX < POSITIVE_X_RENDER_DISTANCE;
-              chunkX++
-            ) {
-              for (
-                let chunkY = POSITIVE_Y_RENDER_DISTANCE;
-                chunkY > -NEGATIVE_Y_RENDER_DISTANCE;
-                chunkY--
-              ) {
-                for (
-                  let chunkZ = -NEGATIVE_Z_RENDER_DISTANCE;
-                  chunkZ < POSITIVE_Z_RENDER_DISTANCE;
-                  chunkZ++
-                ) {
-                  generationWorkerPool
-                    .exec("generateChunk", [seed, chunkX, chunkY, chunkZ])
-                    .then((result: ArrayBuffer) => {
-                      const chunk = new Uint8Array(result);
-                      const chunkName = generateChunkName(
-                        chunkX,
-                        chunkY,
-                        chunkZ
-                      );
-                      chunks[chunkName] = chunk;
-
-                      meshWorkerPool
-                        .exec("generateMesh", [result])
-                        .then(
-                          ({
-                            positions,
-                            normals,
-                            indices,
-                            uvs,
-                            textureIndices,
-                          }: {
-                            positions: ArrayBuffer;
-                            normals: ArrayBuffer;
-                            indices: ArrayBuffer;
-                            uvs: ArrayBuffer;
-                            textureIndices: ArrayBuffer;
-                          }) => {
-                            addChunkMesh(
-                              positions,
-                              normals,
-                              indices,
-                              uvs,
-                              textureIndices,
-                              chunkName,
-                              chunkX,
-                              chunkY,
-                              chunkZ
-                            );
-
-                            tasksDone++;
-
-                            setInitialLoadCompletion(
-                              tasksDone / initialLoadTasks
-                            );
-                          }
-                        )
-                        .catch((err) => {
-                          console.error(err);
-                        });
-                    })
-                    .catch((err) => {
-                      console.error(err);
-                    });
-                }
-              }
-            }
+            startWorldGeneration(seedRef.current);
           }
-
-          setInterval(() => {
-            const playerChunkX = Math.round(camera.position.x / CHUNK_WIDTH);
-            const playerChunkY = Math.round(camera.position.y / CHUNK_HEIGHT);
-            const playerChunkZ = Math.round(camera.position.z / CHUNK_LENGTH);
-
-            pruneChunks(playerChunkX, playerChunkY, playerChunkZ);
-
-            generateNearbyChunks(playerChunkX, playerChunkY, playerChunkZ);
-          }, 500);
 
           renderer.setAnimationLoop(render);
         })
@@ -398,7 +413,7 @@ export default function Game() {
           textureArrayWorkerPool.terminate();
         });
 
-      camera.position.y = getSurfaceHeightFromSeed(seed, 0, 0) + 2;
+      camera.position.y = getSurfaceHeightFromSeed(seedRef.current, 0, 0) + 2;
       //camera.position.y = 3;
 
       const onKeyUp = function (event: KeyboardEvent) {
@@ -443,24 +458,80 @@ export default function Game() {
       // document.addEventListener("keydown", onKeyDown);
       document.addEventListener("keyup", onKeyUp);
 
-      // return () => {
-      //   document.removeEventListener("keydown", onKeyDown);
-      //   document.removeEventListener("keyup", onKeyUp);
-      //   document.removeEventListener("contextmenu", onContextMenu);
-      //   document.removeEventListener("mousedown", onMouseDown);
-      // };
+      const nm = networkManager.current;
+
+      nm.onPlayerJoin = (id) => {
+        console.log("Player joined:", id);
+        // Send handshake
+        nm.send(
+          {
+            type: "HANDSHAKE",
+            seed: seedRef.current,
+            initialPosition: { x: 0, y: 100, z: 0 },
+          },
+          id
+        );
+
+        const rp = new RemotePlayer(id, scene, new THREE.Vector3(0, 100, 0));
+        remotePlayers.current.set(id, rp);
+      };
+
+      nm.onConnectedToHost = (hostId) => {
+        console.log("Connected to host:", hostId);
+        setConnectedToHost(true);
+      };
+
+      nm.onPlayerLeave = (id) => {
+        const rp = remotePlayers.current.get(id);
+        if (rp) {
+          rp.dispose(scene);
+          remotePlayers.current.delete(id);
+        }
+      };
+
+      nm.onData = (data, senderId) => {
+        if (data.type === "HANDSHAKE") {
+          seedRef.current = data.seed;
+          startWorldGeneration(data.seed);
+        } else if (data.type === "PLAYER_UPDATE") {
+          let rp = remotePlayers.current.get(data.id);
+          if (!rp) {
+            rp = new RemotePlayer(
+              data.id,
+              scene,
+              new THREE.Vector3(
+                data.position.x,
+                data.position.y,
+                data.position.z
+              )
+            );
+            remotePlayers.current.set(data.id, rp);
+          }
+          rp.updatePosition(data.position, data.rotation);
+        } else if (data.type === "BLOCK_UPDATE") {
+          setBlock(data.x, data.y, data.z, data.blockType, false);
+        }
+      };
+
+      return () => {
+        //   document.removeEventListener("keydown", onKeyDown);
+        //   document.removeEventListener("keyup", onKeyUp);
+        //   document.removeEventListener("contextmenu", onContextMenu);
+        //   document.removeEventListener("mousedown", onMouseDown);
+        nm.disconnect();
+      };
     }
   }, [containerRef]);
 
   function addChunkToQueue(chunkX: number, chunkY: number, chunkZ: number) {
-    chunkPositions.push({ chunkX, chunkY, chunkZ });
+    chunkPositions.current.push({ chunkX, chunkY, chunkZ });
 
     generationWorkerPool
-      .exec("generateChunk", [seed, chunkX, chunkY, chunkZ])
+      .exec("generateChunk", [seedRef.current, chunkX, chunkY, chunkZ])
       .then((result: ArrayBuffer) => {
         const chunk = new Uint8Array(result);
         const chunkName = generateChunkName(chunkX, chunkY, chunkZ);
-        chunks[chunkName] = chunk;
+        chunks.current[chunkName] = chunk;
 
         meshWorkerPool
           .exec("generateMesh", [result])
@@ -684,9 +755,9 @@ export default function Game() {
     const chunkZ = Math.floor(z / CHUNK_LENGTH);
 
     const chunkName = generateChunkName(chunkX, chunkY, chunkZ);
-    const chunk = chunks[chunkName];
+    const chunk = chunks.current[chunkName];
 
-    if (!chunk) return BlockType.AIR;
+    if (!chunk) return null;
 
     const blockChunkX = x - chunkX * CHUNK_WIDTH;
     const blockChunkY = y - chunkY * CHUNK_HEIGHT;
@@ -695,13 +766,19 @@ export default function Game() {
     return chunk[calculateOffset(blockChunkX, blockChunkY, blockChunkZ)];
   }
 
-  function setBlock(x: number, y: number, z: number, type: number) {
+  function setBlock(
+    x: number,
+    y: number,
+    z: number,
+    type: number,
+    broadcast: boolean = true
+  ) {
     const chunkX = Math.floor(x / CHUNK_WIDTH);
     const chunkY = Math.floor(y / CHUNK_HEIGHT);
     const chunkZ = Math.floor(z / CHUNK_LENGTH);
 
     const chunkName = generateChunkName(chunkX, chunkY, chunkZ);
-    const chunk = chunks[chunkName];
+    const chunk = chunks.current[chunkName];
 
     if (!chunk) return BlockType.AIR;
 
@@ -711,14 +788,29 @@ export default function Game() {
 
     chunk[calculateOffset(blockChunkX, blockChunkY, blockChunkZ)] = type;
 
+    if (!chunkVersions.current[chunkName]) chunkVersions.current[chunkName] = 0;
+    chunkVersions.current[chunkName]++;
+
     regenerateChunkMesh(chunkX, chunkY, chunkZ);
+
+    if (broadcast && networkManager.current.myPeerId) {
+      networkManager.current.send({
+        type: "BLOCK_UPDATE",
+        x,
+        y,
+        z,
+        blockType: type,
+      });
+    }
   }
 
   function regenerateChunkMesh(chunkX: number, chunkY: number, chunkZ: number) {
     if (shaderMaterial) {
       const chunkName = generateChunkName(chunkX, chunkY, chunkZ);
+      const currentVersion = chunkVersions.current[chunkName];
+
       meshWorkerPool
-        .exec("generateMesh", [chunks[chunkName]])
+        .exec("generateMesh", [chunks.current[chunkName]])
         .then(
           ({
             positions,
@@ -733,18 +825,20 @@ export default function Game() {
             uvs: ArrayBuffer;
             textureIndices: ArrayBuffer;
           }) => {
-            pruneChunkMesh(chunkName);
-            addChunkMesh(
-              positions,
-              normals,
-              indices,
-              uvs,
-              textureIndices,
-              chunkName,
-              chunkX,
-              chunkY,
-              chunkZ
-            );
+            if (chunkVersions.current[chunkName] === currentVersion) {
+              pruneChunkMesh(chunkName);
+              addChunkMesh(
+                positions,
+                normals,
+                indices,
+                uvs,
+                textureIndices,
+                chunkName,
+                chunkX,
+                chunkY,
+                chunkZ
+              );
+            }
           }
         )
         .catch((err) => {
@@ -760,12 +854,11 @@ export default function Game() {
   let prevTime = performance.now();
 
   function pruneChunkMesh(chunkName: string) {
-    const mesh = scene.getObjectByName(chunkName) as THREE.Mesh;
-    if (mesh) {
+    let mesh = scene.getObjectByName(chunkName) as THREE.Mesh;
+    while (mesh) {
       mesh.geometry.dispose();
-      (mesh.material as THREE.ShaderMaterial).dispose();
-      mesh.remove();
       mesh.removeFromParent();
+      mesh = scene.getObjectByName(chunkName) as THREE.Mesh;
     }
   }
 
@@ -774,9 +867,9 @@ export default function Game() {
     playerChunkY: number,
     playerChunkZ: number
   ) {
-    let prunedChunkPositions: typeof chunkPositions = [];
-    let prunedChunks: typeof chunks = {};
-    chunkPositions.forEach((chunkPosition) => {
+    let prunedChunkPositions: typeof chunkPositions.current = [];
+    let prunedChunks: typeof chunks.current = {};
+    chunkPositions.current.forEach((chunkPosition) => {
       const chunkName = generateChunkName(
         chunkPosition.chunkX,
         chunkPosition.chunkY,
@@ -794,11 +887,11 @@ export default function Game() {
         pruneChunkMesh(chunkName);
       } else {
         prunedChunkPositions.push(chunkPosition);
-        prunedChunks[chunkName] = chunks[chunkName];
+        prunedChunks[chunkName] = chunks.current[chunkName];
       }
     });
-    chunks = prunedChunks;
-    chunkPositions = prunedChunkPositions;
+    chunks.current = prunedChunks;
+    chunkPositions.current = prunedChunkPositions;
   }
 
   function generateNearbyChunks(
@@ -822,7 +915,7 @@ export default function Game() {
           chunkZ++
         ) {
           let foundAMatch = false;
-          chunkPositions.forEach((chunkPosition) => {
+          chunkPositions.current.forEach((chunkPosition) => {
             if (
               chunkPosition.chunkX === chunkX &&
               chunkPosition.chunkY === chunkY &&
@@ -843,6 +936,7 @@ export default function Game() {
   const render = () => {
     // stats.begin();
     const time = performance.now();
+    const delta = (time - prevTime) / 1000;
 
     updateIndicator();
 
@@ -852,11 +946,21 @@ export default function Game() {
     //   scene.children.length * CHUNK_WIDTH * CHUNK_HEIGHT * CHUNK_LENGTH
     // }`;
 
-    if (playerControls && playerControls.controls.isLocked === true) {
-      const delta = (time - prevTime) / 1000;
-
+    if (playerControls) {
       playerControls.update(delta);
+
+      if (networkManager.current.myPeerId) {
+        const obj = playerControls.controls.getObject();
+        networkManager.current.send({
+          type: "PLAYER_UPDATE",
+          id: networkManager.current.myPeerId,
+          position: { x: obj.position.x, y: obj.position.y, z: obj.position.z },
+          rotation: { x: obj.rotation.x, y: obj.rotation.y, z: obj.rotation.z },
+        });
+      }
     }
+
+    remotePlayers.current.forEach((rp) => rp.update(delta));
 
     prevTime = time;
 
@@ -866,7 +970,15 @@ export default function Game() {
 
   return (
     <div className="text-md w-full h-full bg-background" ref={containerRef}>
-      <UILayer />
+      <UILayer
+        onHost={() => {
+          networkManager.current.hostGame().then((id) => setPeerId(id));
+        }}
+        onJoin={(id) => {
+          networkManager.current.joinGame(id);
+        }}
+        peerId={peerId}
+      />
     </div>
   );
 }

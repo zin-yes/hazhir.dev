@@ -11,7 +11,7 @@ addEventListener("message", async (event: MessageEvent) => {
     } else if (method === "generateMesh") {
       result = generateMesh(params[0]);
     } else if (method === "loadTextureArray") {
-      result = await loadTextureArray();
+      result = await loadTextureArray(params[0]);
     } else {
       throw new Error(`Unknown method: ${method}`);
     }
