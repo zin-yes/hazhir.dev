@@ -14,9 +14,9 @@ export class PlayerControls {
   private moveRight = false;
   private canJump = false;
 
-  private readonly speed = 10;
-  private readonly jumpForce = 11;
-  private readonly gravity = 45;
+  private readonly speed = 5;
+  private readonly jumpForce = 9.5;
+  private readonly gravity = 37.5;
 
   private playerBox = new THREE.Box3();
 
