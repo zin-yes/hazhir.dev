@@ -19,6 +19,7 @@ import { WorkerPool } from "./worker-pool";
 
 import * as THREE from "three";
 
+import { BlockHighlighter } from "./block-highlighter";
 import {
   BlockType,
   LOADING_SCREEN_TEXTURES,
@@ -224,20 +225,7 @@ export default function Game() {
 
       resizeObserver.observe(containerRef.current);
 
-      const indicatorGeometry = new THREE.BoxGeometry(1, 1, 1);
-      const indicatorMaterial = new THREE.MeshBasicMaterial({
-        color: 0xffffff,
-        wireframe: true,
-        transparent: false,
-      });
-      indicatorGeometry.scale(1.01, 1.01, 1.01);
-      const indicatorMesh = new THREE.Mesh(
-        indicatorGeometry,
-        indicatorMaterial
-      );
-      indicatorMesh.visible = false;
-      indicatorMesh.name = "indicator";
-
+      const indicatorMesh = new BlockHighlighter();
       scene.add(indicatorMesh);
 
       const sky = new Sky();
@@ -609,7 +597,9 @@ export default function Game() {
     if (controls.isLocked) {
       raycaster.setFromCamera(pointer, camera);
 
-      const intersections = raycaster.intersectObjects(scene.children);
+      const intersections = raycaster.intersectObjects(
+        scene.children.filter((obj) => obj.name !== "indicator")
+      );
 
       let faceNormal = new THREE.Vector3();
       if (intersections && intersections.length > 0) {

@@ -48,4 +48,3 @@ export async function loadTextureArray() {
   }
   return null;
 }
-

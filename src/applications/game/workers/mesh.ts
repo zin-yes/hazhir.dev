@@ -342,4 +342,3 @@ export function generateMesh(_chunk: ArrayBuffer): {
     textureIndices: new Int32Array(textureIndices).buffer,
   };
 }
-

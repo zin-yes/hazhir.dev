@@ -372,4 +372,3 @@ export function generateChunk(
 
   return new Uint8Array(chunk).buffer;
 }
-

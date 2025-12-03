@@ -18,6 +18,9 @@ addEventListener("message", async (event: MessageEvent) => {
     postMessage({ id, result });
   } catch (error) {
     console.error("Worker Error:", error);
-    postMessage({ id, error: error instanceof Error ? error.message : String(error) });
+    postMessage({
+      id,
+      error: error instanceof Error ? error.message : String(error),
+    });
   }
 });
