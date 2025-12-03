@@ -16,10 +16,14 @@ export class PlayerControls {
   private moveDown = false;
   private canJump = false;
   private isFlying = false;
+  private isShifting = false;
 
   private readonly speed = 5;
   private readonly jumpForce = 9.5;
   private readonly gravity = 37.5;
+  private readonly standingEyeHeight = 1.62;
+  private readonly shiftingEyeHeight = 1.42;
+  private currentEyeHeight = 1.62;
 
   private playerBox = new THREE.Box3();
 
@@ -71,7 +75,12 @@ export class PlayerControls {
       case "Space":
         if (this.isFlying) {
           this.moveUp = true;
-        } else if (this.physics.isInWater(this.controls.getObject().position)) {
+        } else if (
+          this.physics.isInWater(
+            this.controls.getObject().position,
+            this.currentEyeHeight
+          )
+        ) {
           this.moveUp = true;
         } else if (this.canJump) {
           this.velocity.y = this.jumpForce;
@@ -80,9 +89,13 @@ export class PlayerControls {
         break;
       case "ShiftLeft":
       case "ShiftRight":
+        this.isShifting = true;
         if (
           this.isFlying ||
-          this.physics.isInWater(this.controls.getObject().position)
+          this.physics.isInWater(
+            this.controls.getObject().position,
+            this.currentEyeHeight
+          )
         ) {
           this.moveDown = true;
         }
@@ -117,6 +130,7 @@ export class PlayerControls {
         break;
       case "ShiftLeft":
       case "ShiftRight":
+        this.isShifting = false;
         this.moveDown = false;
         break;
     }
@@ -134,6 +148,21 @@ export class PlayerControls {
   }
 
   public update(delta: number) {
+    const lastEyeHeight = this.currentEyeHeight;
+    // Interpolate eye height
+    const targetEyeHeight = this.isShifting
+      ? this.shiftingEyeHeight
+      : this.standingEyeHeight;
+    this.currentEyeHeight = THREE.MathUtils.lerp(
+      this.currentEyeHeight,
+      targetEyeHeight,
+      delta * 10
+    );
+
+    // Compensate camera position to keep feet planted
+    const diff = this.currentEyeHeight - lastEyeHeight;
+    this.controls.getObject().position.y += diff;
+
     if (this.isFlying) {
       if (this.controls.isLocked) {
         const forward = new THREE.Vector3();
@@ -164,13 +193,17 @@ export class PlayerControls {
 
       const position = this.controls.getObject().position;
       position.addScaledVector(this.velocity, delta);
-      this.physics.updatePlayerBox(this.playerBox, position);
+      this.physics.updatePlayerBox(
+        this.playerBox,
+        position,
+        this.currentEyeHeight
+      );
       return;
     }
 
     const position = this.controls.getObject().position;
 
-    if (this.physics.isInWater(position)) {
+    if (this.physics.isInWater(position, this.currentEyeHeight)) {
       this.velocity.y -= this.gravity * delta * 0.1;
       this.velocity.multiplyScalar(0.9);
 
@@ -201,7 +234,8 @@ export class PlayerControls {
         position,
         this.velocity,
         this.playerBox,
-        delta
+        delta,
+        this.currentEyeHeight
       );
       return;
     }
@@ -227,7 +261,8 @@ export class PlayerControls {
       if (this.moveLeft) desiredVelocity.sub(right);
 
       if (desiredVelocity.lengthSq() > 0) {
-        desiredVelocity.normalize().multiplyScalar(this.speed);
+        const currentSpeed = this.isShifting ? this.speed * 0.3 : this.speed;
+        desiredVelocity.normalize().multiplyScalar(currentSpeed);
       }
 
       this.velocity.x = desiredVelocity.x;
@@ -241,10 +276,15 @@ export class PlayerControls {
       position,
       this.velocity,
       this.playerBox,
-      delta
+      delta,
+      this.currentEyeHeight,
+      this.isShifting
     );
 
-    if (this.physics.isOnGround(position) && this.velocity.y <= 0) {
+    if (
+      this.physics.isOnGround(position, this.currentEyeHeight) &&
+      this.velocity.y <= 0
+    ) {
       this.canJump = true;
       this.velocity.y = 0;
     } else {

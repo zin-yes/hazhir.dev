@@ -24,6 +24,7 @@ import * as THREE from "three";
 import {
   BlockType,
   LOADING_SCREEN_TEXTURES,
+  NON_COLLIDABLE_BLOCKS,
   TRANSPARENT_BLOCKS,
   Texture,
 } from "@/applications/game/blocks";
@@ -834,8 +835,23 @@ export default function Game() {
             new THREE.Vector3(newBlockX + 0.5, newBlockY + 0.5, newBlockZ + 0.5)
           );
 
-          if (blockBox.intersectsBox(playerControlsRef.current!.getPlayerBox()))
-            return;
+          const playerBox = playerControlsRef.current!.getPlayerBox().clone();
+
+          const blockBelow = getBlock(newBlockX, newBlockY - 1, newBlockZ);
+          const isBlockBelowCollidable =
+            blockBelow !== null && !NON_COLLIDABLE_BLOCKS.includes(blockBelow);
+
+          if (!isBlockBelowCollidable) {
+            // Shrink box for placement check to allow placing blocks while on edge
+            playerBox.min.x += 0.2;
+            playerBox.max.x -= 0.2;
+            playerBox.min.z += 0.2;
+            playerBox.max.z -= 0.2;
+            playerBox.min.y += 0.1;
+            playerBox.max.y -= 0.1;
+          }
+
+          if (blockBox.intersectsBox(playerBox)) return;
 
           setBlock(newBlockX, newBlockY, newBlockZ, type);
 
