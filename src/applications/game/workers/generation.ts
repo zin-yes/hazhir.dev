@@ -342,6 +342,89 @@ function generateBlock(
   return block;
 }
 
+function pseudoRandom(x: number, z: number, seed: number): number {
+  const val = Math.sin(x * 12.9898 + z * 78.233 + seed) * 43758.5453;
+  return val - Math.floor(val);
+}
+
+function placeTreeInChunk(
+  chunk: Uint8Array,
+  chunkX: number,
+  chunkY: number,
+  chunkZ: number,
+  localX: number,
+  rootGlobalY: number,
+  localZ: number,
+  seed: number
+) {
+  const globalX = chunkX * CHUNK_WIDTH + localX;
+  const globalZ = chunkZ * CHUNK_LENGTH + localZ;
+
+  const rnd = (offset: number) => {
+    const val =
+      Math.sin(globalX * 12.9898 + globalZ * 78.233 + seed + offset) *
+      43758.5453;
+    return val - Math.floor(val);
+  };
+
+  const height = 4 + Math.floor(rnd(0) * 3); // 4 to 6
+
+  const trySet = (dx: number, dy: number, dz: number, type: number) => {
+    const targetLocalX = localX + dx;
+    const targetLocalY = rootGlobalY + dy - chunkY * CHUNK_HEIGHT;
+    const targetLocalZ = localZ + dz;
+
+    if (
+      targetLocalX >= 0 &&
+      targetLocalX < CHUNK_WIDTH &&
+      targetLocalY >= 0 &&
+      targetLocalY < CHUNK_HEIGHT &&
+      targetLocalZ >= 0 &&
+      targetLocalZ < CHUNK_LENGTH
+    ) {
+      const index = calculateOffset(targetLocalX, targetLocalY, targetLocalZ);
+      if (chunk[index] === BlockType.AIR || chunk[index] === BlockType.LEAVES) {
+        chunk[index] = type;
+      }
+    }
+  };
+
+  // Trunk
+  for (let i = 0; i < height; i++) {
+    trySet(0, i, 0, BlockType.LOG);
+  }
+
+  // Leaves
+  // Top (y+height)
+  trySet(0, height, 0, BlockType.LEAVES);
+  trySet(1, height, 0, BlockType.LEAVES);
+  trySet(-1, height, 0, BlockType.LEAVES);
+  trySet(0, height, 1, BlockType.LEAVES);
+  trySet(0, height, -1, BlockType.LEAVES);
+
+  // Layer 2 (y+height-1)
+  for (let dx = -2; dx <= 2; dx++) {
+    for (let dz = -2; dz <= 2; dz++) {
+      if (Math.abs(dx) === 2 && Math.abs(dz) === 2) {
+        if (rnd(dx * dz) > 0.5) continue;
+      }
+      if (dx === 0 && dz === 0) continue; // Trunk
+      trySet(dx, height - 1, dz, BlockType.LEAVES);
+    }
+  }
+
+  // Layer 3 (y+height-2)
+  for (let dx = -2; dx <= 2; dx++) {
+    for (let dz = -2; dz <= 2; dz++) {
+      if (Math.abs(dx) === 2 && Math.abs(dz) === 2) {
+        if (rnd(dx * dz + 10) > 0.5) continue;
+      }
+      if (dx === 0 && dz === 0) continue; // Trunk
+      trySet(dx, height - 2, dz, BlockType.LEAVES);
+    }
+  }
+}
+
 export function generateChunk(
   seed: number,
   chunkX: number,
@@ -366,6 +449,41 @@ export function generateChunk(
           y + CHUNK_HEIGHT * chunkY,
           z + CHUNK_LENGTH * chunkZ
         );
+      }
+    }
+  }
+
+  const treeRadius = 2;
+  for (let x = -treeRadius; x < CHUNK_WIDTH + treeRadius; x++) {
+    for (let z = -treeRadius; z < CHUNK_LENGTH + treeRadius; z++) {
+      const globalX = x + CHUNK_WIDTH * chunkX;
+      const globalZ = z + CHUNK_LENGTH * chunkZ;
+
+      const treeRnd = pseudoRandom(globalX, globalZ, seed);
+
+      if (treeRnd > 0.98) {
+        const surfaceY = getSurfaceHeight(noiseGenerator, globalX, globalZ);
+        const grassY = Math.floor(surfaceY);
+
+        const potentialGrass = generateBlock(
+          noiseGenerator,
+          globalX,
+          grassY,
+          globalZ
+        );
+
+        if (potentialGrass === BlockType.GRASS) {
+          placeTreeInChunk(
+            chunk,
+            chunkX,
+            chunkY,
+            chunkZ,
+            x,
+            grassY + 1,
+            z,
+            seed
+          );
+        }
       }
     }
   }
