@@ -24,6 +24,7 @@ import * as THREE from "three";
 import {
   BlockType,
   LOADING_SCREEN_TEXTURES,
+  TRANSPARENT_BLOCKS,
   Texture,
 } from "@/applications/game/blocks";
 import { BlockHighlighter } from "./block-highlighter";
@@ -54,6 +55,7 @@ export default function Game() {
   const remotePlayers = useRef<Map<string, RemotePlayer>>(new Map());
   const [peerId, setPeerId] = useState<string>("");
   const [connectedToHost, setConnectedToHost] = useState(false);
+  const connectedToHostRef = useRef(false);
   const intervalRef = useRef<Timer | null>(null);
 
   const chunkPositions = useRef<
@@ -252,8 +254,10 @@ export default function Game() {
   }, [isInventoryOpen]);
 
   let textureArray: THREE.DataArrayTexture;
-  let opaqueShaderMaterial: THREE.ShaderMaterial;
-  let transparentShaderMaterial: THREE.ShaderMaterial;
+  const materialsRef = useRef<{
+    opaque?: THREE.ShaderMaterial;
+    transparent?: THREE.ShaderMaterial;
+  }>({});
 
   function startWorldGeneration(currentSeed: number) {
     if (intervalRef.current) clearInterval(intervalRef.current);
@@ -285,6 +289,7 @@ export default function Game() {
           chunkZ < POSITIVE_Z_RENDER_DISTANCE;
           chunkZ++
         ) {
+          chunkPositions.current.push({ chunkX, chunkY, chunkZ });
           generationWorkerPool
             .exec("generateChunk", [currentSeed, chunkX, chunkY, chunkZ])
             .then((result: ArrayBuffer) => {
@@ -475,7 +480,7 @@ export default function Game() {
               Texture.WATER
             );
 
-            opaqueShaderMaterial = new THREE.ShaderMaterial({
+            materialsRef.current.opaque = new THREE.ShaderMaterial({
               uniforms: {
                 Texture: {
                   value: textureArray,
@@ -492,7 +497,7 @@ export default function Game() {
               depthWrite: true,
             });
 
-            transparentShaderMaterial = new THREE.ShaderMaterial({
+            materialsRef.current.transparent = new THREE.ShaderMaterial({
               uniforms: {
                 Texture: {
                   value: textureArray,
@@ -591,6 +596,7 @@ export default function Game() {
       nm.onConnectedToHost = (hostId) => {
         console.log("Connected to host:", hostId);
         setConnectedToHost(true);
+        connectedToHostRef.current = true;
       };
 
       nm.onPlayerLeave = (id) => {
@@ -893,6 +899,9 @@ export default function Game() {
     chunkY: number,
     chunkZ: number
   ) {
+    if (!materialsRef.current.opaque || !materialsRef.current.transparent)
+      return;
+
     // Opaque Mesh
     const opaqueGeometry = new THREE.BufferGeometry();
     opaqueGeometry.setAttribute(
@@ -912,7 +921,10 @@ export default function Game() {
       new THREE.Int32BufferAttribute(opaque.textureIndices, 1)
     );
     opaqueGeometry.setIndex(new THREE.Uint32BufferAttribute(opaque.indices, 1));
-    const opaqueMesh = new THREE.Mesh(opaqueGeometry, opaqueShaderMaterial);
+    const opaqueMesh = new THREE.Mesh(
+      opaqueGeometry,
+      materialsRef.current.opaque
+    );
     opaqueMesh.translateX(chunkX * CHUNK_WIDTH - 0.5);
     opaqueMesh.translateY(chunkY * CHUNK_HEIGHT - 0.5);
     opaqueMesh.translateZ(chunkZ * CHUNK_LENGTH - 0.5);
@@ -946,7 +958,7 @@ export default function Game() {
     );
     const transparentMesh = new THREE.Mesh(
       transparentGeometry,
-      transparentShaderMaterial
+      materialsRef.current.transparent
     );
     transparentMesh.translateX(chunkX * CHUNK_WIDTH - 0.5);
     transparentMesh.translateY(chunkY * CHUNK_HEIGHT - 0.5);
@@ -1119,7 +1131,7 @@ export default function Game() {
   }
 
   function regenerateChunkMesh(chunkX: number, chunkY: number, chunkZ: number) {
-    if (opaqueShaderMaterial && transparentShaderMaterial) {
+    if (materialsRef.current.opaque && materialsRef.current.transparent) {
       const chunkName = generateChunkName(chunkX, chunkY, chunkZ);
       const currentVersion = chunkVersions.current[chunkName];
 
@@ -1217,7 +1229,9 @@ export default function Game() {
         pruneChunkMesh(chunkName);
       } else {
         prunedChunkPositions.push(chunkPosition);
-        prunedChunks[chunkName] = chunks.current[chunkName];
+        if (chunks.current[chunkName]) {
+          prunedChunks[chunkName] = chunks.current[chunkName];
+        }
       }
     });
     chunks.current = prunedChunks;
@@ -1262,6 +1276,71 @@ export default function Game() {
       }
     }
   }
+
+  function tickChunks() {
+    if (connectedToHostRef.current) return;
+    Object.keys(chunks.current).forEach((chunkName) => {
+      if (!chunks.current[chunkName]) return;
+      const [chunkX, chunkY, chunkZ] = chunkName.split(",").map(Number);
+
+      // 30 random ticks per chunk
+      for (let i = 0; i < 100; i++) {
+        const x = Math.floor(Math.random() * CHUNK_WIDTH);
+        const y = Math.floor(Math.random() * CHUNK_HEIGHT);
+        const z = Math.floor(Math.random() * CHUNK_LENGTH);
+
+        const block = chunks.current[chunkName][calculateOffset(x, y, z)];
+
+        const globalX = chunkX * CHUNK_WIDTH + x;
+        const globalY = chunkY * CHUNK_HEIGHT + y;
+        const globalZ = chunkZ * CHUNK_LENGTH + z;
+
+        if (block === BlockType.GRASS) {
+          // Grass death
+          const blockAbove = getBlock(globalX, globalY + 1, globalZ);
+          if (
+            blockAbove !== BlockType.AIR &&
+            blockAbove !== null &&
+            !TRANSPARENT_BLOCKS.includes(blockAbove)
+          ) {
+            setBlock(globalX, globalY, globalZ, BlockType.DIRT);
+          } else {
+            // Grass spread
+            // Try one random neighbor
+            const dx = Math.floor(Math.random() * 3) - 1;
+            const dy = Math.floor(Math.random() * 3) - 1;
+            const dz = Math.floor(Math.random() * 3) - 1;
+
+            if (dx === 0 && dy === 0 && dz === 0) continue;
+
+            const targetX = globalX + dx;
+            const targetY = globalY + dy;
+            const targetZ = globalZ + dz;
+
+            const targetBlock = getBlock(targetX, targetY, targetZ);
+            const blockAboveTarget = getBlock(targetX, targetY + 1, targetZ);
+
+            if (
+              targetBlock === BlockType.DIRT &&
+              (blockAboveTarget === BlockType.AIR ||
+                (blockAboveTarget !== null &&
+                  TRANSPARENT_BLOCKS.includes(blockAboveTarget)))
+            ) {
+              setBlock(targetX, targetY, targetZ, BlockType.GRASS);
+            }
+          }
+        }
+      }
+    });
+  }
+
+  useEffect(() => {
+    const tickInterval = setInterval(() => {
+      tickChunks();
+    }, 50); // 20 ticks per second
+
+    return () => clearInterval(tickInterval);
+  }, []);
 
   const render = () => {
     // stats.begin();
