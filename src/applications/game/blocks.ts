@@ -163,13 +163,21 @@ BLOCK_TEXTURES[BlockType.LOG] = {
   SIDES: getTextureIndexByName("LOG_SIDE"),
 };
 
-export const NON_SOLID_BLOCKS = [
+export const TRANSPARENT_BLOCKS = [
   BlockType.AIR,
   BlockType.GLASS,
   BlockType.LEAVES,
   BlockType.DECORATIVE_GLASS,
-  // BlockType.WATER,
-  BlockType.LEAVES,
+  BlockType.WATER,
+  // BlockType.ANEMONE_FLOWER,
+  // BlockType.PUMPOM_FLOWER,
+  // BlockType.FORGETMENOTS_FLOWER,
+  // BlockType.BELLIS_FLOWER,
+];
+
+export const NON_COLLIDABLE_BLOCKS = [
+  BlockType.AIR,
+  BlockType.WATER,
   // BlockType.ANEMONE_FLOWER,
   // BlockType.PUMPOM_FLOWER,
   // BlockType.FORGETMENOTS_FLOWER,

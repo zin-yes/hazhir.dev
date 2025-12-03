@@ -12,7 +12,7 @@ export async function loadTextureArray(baseUrl: string) {
   const canvas = new OffscreenCanvas(TEXTURE_SIZE, TEXTURE_SIZE);
   const context = canvas.getContext("2d", {
     colorSpace: THREE.SRGBColorSpace,
-    alpha: false,
+    alpha: true,
     willReadFrequently: true,
   });
   if (context) {
@@ -23,6 +23,7 @@ export async function loadTextureArray(baseUrl: string) {
     for (let i = 0; i < texturesToLoad.length; i++) {
       const image = await loadImage(baseUrl + "/game/" + texturesToLoad[i]);
 
+      context.clearRect(0, 0, TEXTURE_SIZE, TEXTURE_SIZE);
       context.drawImage(image, 0, 0);
       const imageData = context.getImageData(0, 0, TEXTURE_SIZE, TEXTURE_SIZE);
 
