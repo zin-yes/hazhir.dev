@@ -127,9 +127,33 @@ export class PhysicsEngine {
         for (let z = minZ; z <= maxZ; z++) {
           const block = this.getBlock(x, y, z);
           if (block === null) return true;
-          if (!NON_COLLIDABLE_BLOCKS.includes(block)) {
-            return true;
+          if (NON_COLLIDABLE_BLOCKS.includes(block)) {
+            continue;
           }
+
+          let maxYOffset = 0.5;
+          let minYOffset = 0.0;
+
+          if (
+            block === BlockType.PLANKS_SLAB ||
+            block === BlockType.COBBLESTONE_SLAB ||
+            block === BlockType.STONE_SLAB
+          ) {
+            maxYOffset = 0.0;
+          } else if (
+            block === BlockType.PLANKS_SLAB_TOP ||
+            block === BlockType.COBBLESTONE_SLAB_TOP ||
+            block === BlockType.STONE_SLAB_TOP
+          ) {
+            minYOffset = 0.5;
+          }
+
+          const blockBox = new THREE.Box3(
+            new THREE.Vector3(x - 0.5, y - 0.5 + minYOffset, z - 0.5),
+            new THREE.Vector3(x + 0.5, y + maxYOffset, z + 0.5)
+          );
+
+          if (box.intersectsBox(blockBox)) return true;
         }
       }
     }
