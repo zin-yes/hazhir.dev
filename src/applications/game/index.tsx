@@ -1,9 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef } from "react";
 
-import WorkerPool from "workerpool";
-import { WorkerUrl } from "worker-url";
 import {
   CHUNK_HEIGHT,
   CHUNK_LENGTH,
@@ -17,20 +15,21 @@ import {
   POSITIVE_Z_RENDER_DISTANCE,
   TEXTURE_SIZE,
 } from "./config";
+import { WorkerPool } from "./worker-pool";
 
 import * as THREE from "three";
 
-import { PointerLockControls } from "three/addons/controls/PointerLockControls.js";
 import {
   BlockType,
   LOADING_SCREEN_TEXTURES,
   NON_SOLID_BLOCKS,
   Texture,
 } from "@/applications/game/blocks";
+import { PointerLockControls } from "three/addons/controls/PointerLockControls.js";
 import { Sky } from "three/addons/objects/Sky.js";
-import { calculateOffset, getSurfaceHeightFromSeed } from "./utils";
-import UILayer from "./ui";
 import { FRAGMENT_SHADER, VERTEX_SHADER } from "./shaders/chunk";
+import UILayer from "./ui";
+import { calculateOffset, getSurfaceHeightFromSeed } from "./utils";
 
 const FLYING_SPEED = 10;
 
@@ -50,34 +49,37 @@ export default function Game() {
 
   let chunkPositions: { chunkX: number; chunkY: number; chunkZ: number }[] = [];
   let chunks: { [chunkName: string]: Uint8Array } = {};
-  const GenerationWorkerURL = new WorkerUrl(
-    new URL("./workers/generation.ts", import.meta.url)
-  );
   const generationWorkerPool = useMemo(
     () =>
-      WorkerPool.pool(GenerationWorkerURL.toString(), {
-        maxWorkers: 3,
-      }),
+      new WorkerPool(
+        () =>
+          new Worker(new URL("./workers/unified-worker.ts", import.meta.url), {
+            name: "generation",
+          }),
+        3
+      ),
     []
-  );
-  const MeshWorkerURL = new WorkerUrl(
-    new URL("./workers/mesh.ts", import.meta.url)
   );
   const meshWorkerPool = useMemo(
     () =>
-      WorkerPool.pool(MeshWorkerURL.toString(), {
-        maxWorkers: 3,
-      }),
+      new WorkerPool(
+        () =>
+          new Worker(new URL("./workers/unified-worker.ts", import.meta.url), {
+            name: "mesh",
+          }),
+        3
+      ),
     []
-  );
-  const TextureArrayWorkerURL = new WorkerUrl(
-    new URL("./workers/texture-array.ts", import.meta.url)
   );
   const textureArrayWorkerPool = useMemo(
     () =>
-      WorkerPool.pool(TextureArrayWorkerURL.toString(), {
-        maxWorkers: 1,
-      }),
+      new WorkerPool(
+        () =>
+          new Worker(new URL("./workers/unified-worker.ts", import.meta.url), {
+            name: "texture-array",
+          }),
+        1
+      ),
     []
   );
 

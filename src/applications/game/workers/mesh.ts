@@ -8,11 +8,10 @@ import {
   CHUNK_LENGTH,
   CHUNK_WIDTH,
 } from "@/applications/game/config";
-import workerpool from "workerpool";
 
 import { calculateOffset } from "../utils";
 
-function generateMesh(_chunk: ArrayBuffer): {
+export function generateMesh(_chunk: ArrayBuffer): {
   positions: ArrayBuffer;
   normals: ArrayBuffer;
   indices: ArrayBuffer;
@@ -344,6 +343,3 @@ function generateMesh(_chunk: ArrayBuffer): {
   };
 }
 
-workerpool.worker({
-  generateMesh: generateMesh,
-});

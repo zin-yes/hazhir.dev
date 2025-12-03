@@ -1,8 +1,6 @@
-import workerpool from "workerpool";
-
 import * as THREE from "three";
-import { TEXTURE_SIZE } from "../config";
 import { Texture } from "../blocks";
+import { TEXTURE_SIZE } from "../config";
 
 async function loadImage(url: string) {
   const image = await (await fetch(url)).blob();
@@ -10,7 +8,7 @@ async function loadImage(url: string) {
   return await createImageBitmap(image);
 }
 
-async function loadTextureArray() {
+export async function loadTextureArray() {
   const canvas = new OffscreenCanvas(TEXTURE_SIZE, TEXTURE_SIZE);
   const context = canvas.getContext("2d", {
     colorSpace: THREE.SRGBColorSpace,
@@ -51,6 +49,3 @@ async function loadTextureArray() {
   return null;
 }
 
-workerpool.worker({
-  loadTextureArray: loadTextureArray,
-});
