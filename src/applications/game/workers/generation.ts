@@ -1,12 +1,10 @@
-import workerpool from "workerpool";
-
+import { BlockType } from "@/applications/game/blocks";
 import {
-  CHUNK_WIDTH,
   CHUNK_HEIGHT,
   CHUNK_LENGTH,
+  CHUNK_WIDTH,
   GENERATION_FREQUENCY_MULTIPLIER,
 } from "@/applications/game/config";
-import { BlockType } from "@/applications/game/blocks";
 
 //@ts-ignore
 import FastNoiseLite from "fastnoise-lite";
@@ -344,7 +342,7 @@ function generateBlock(
   return block;
 }
 
-function generateChunk(
+export function generateChunk(
   seed: number,
   chunkX: number,
   chunkY: number,
@@ -375,6 +373,3 @@ function generateChunk(
   return new Uint8Array(chunk).buffer;
 }
 
-workerpool.worker({
-  generateChunk: generateChunk,
-});
