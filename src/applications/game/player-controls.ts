@@ -15,10 +15,14 @@ export class PlayerControls {
   private canJump = false;
 
   private readonly speed = 10;
-  private readonly jumpForce = 12.5;
-  private readonly gravity = 50;
+  private readonly jumpForce = 11;
+  private readonly gravity = 45;
 
   private playerBox = new THREE.Box3();
+
+  public getPlayerBox() {
+    return this.playerBox;
+  }
 
   constructor(
     camera: THREE.Camera,
