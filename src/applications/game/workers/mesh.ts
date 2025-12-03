@@ -157,6 +157,10 @@ export function generateMesh(
         const textureIndexLeft = BLOCK_TEXTURES[block].LEFT_FACE;
         const textureIndexRight = BLOCK_TEXTURES[block].RIGHT_FACE;
 
+        const blockHeight =
+          block === BlockType.WATER && blockAbove !== BlockType.WATER ? 0.8 : 1;
+        const yh = y + blockHeight;
+
         if (
           TRANSPARENT_BLOCKS.includes(blockAbove) &&
           !(block === BlockType.WATER && blockAbove === BlockType.WATER)
@@ -173,16 +177,16 @@ export function generateMesh(
 
           target.positions.push(
             x,
-            1 + y,
+            yh,
             1 + z,
             1 + x,
-            1 + y,
+            yh,
             1 + z,
             x,
-            1 + y,
+            yh,
             z,
             1 + x,
-            1 + y,
+            yh,
             z
           );
           target.normals.push(0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0);
@@ -272,10 +276,10 @@ export function generateMesh(
             y,
             1 + z,
             x,
-            1 + y,
+            yh,
             1 + z,
             1 + x,
-            1 + y,
+            yh,
             1 + z
           );
           target.normals.push(0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1);
@@ -328,10 +332,10 @@ export function generateMesh(
             y,
             z,
             1 + x,
-            1 + y,
+            yh,
             z,
             x,
-            1 + y,
+            yh,
             z
           );
           target.normals.push(0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1);
@@ -378,13 +382,13 @@ export function generateMesh(
 
           target.positions.push(
             x,
-            1 + y,
+            yh,
             z,
             x,
             y,
             z,
             x,
-            1 + y,
+            yh,
             1 + z,
             x,
             y,
@@ -434,13 +438,13 @@ export function generateMesh(
 
           target.positions.push(
             1 + x,
-            1 + y,
+            yh,
             1 + z,
             1 + x,
             y,
             1 + z,
             1 + x,
-            1 + y,
+            yh,
             z,
             1 + x,
             y,
