@@ -49,6 +49,27 @@ export class PhysicsEngine {
     return this.checkCollision(box);
   }
 
+  public isInWater(position: THREE.Vector3): boolean {
+    const box = new THREE.Box3();
+    this.updatePlayerBox(box, position);
+    const minX = Math.round(box.min.x);
+    const maxX = Math.round(box.max.x);
+    const minY = Math.round(box.min.y);
+    const maxY = Math.round(box.max.y);
+    const minZ = Math.round(box.min.z);
+    const maxZ = Math.round(box.max.z);
+
+    for (let x = minX; x <= maxX; x++) {
+      for (let y = minY; y <= maxY; y++) {
+        for (let z = minZ; z <= maxZ; z++) {
+          const block = this.getBlock(x, y, z);
+          if (block === BlockType.WATER) return true;
+        }
+      }
+    }
+    return false;
+  }
+
   public updatePlayerBox(box: THREE.Box3, position: THREE.Vector3) {
     const halfWidth = this.playerSize.x / 2;
     const halfDepth = this.playerSize.z / 2;

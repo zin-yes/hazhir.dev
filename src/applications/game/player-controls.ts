@@ -71,6 +71,8 @@ export class PlayerControls {
       case "Space":
         if (this.isFlying) {
           this.moveUp = true;
+        } else if (this.physics.isInWater(this.controls.getObject().position)) {
+          this.moveUp = true;
         } else if (this.canJump) {
           this.velocity.y = this.jumpForce;
           this.canJump = false;
@@ -78,7 +80,10 @@ export class PlayerControls {
         break;
       case "ShiftLeft":
       case "ShiftRight":
-        if (this.isFlying) {
+        if (
+          this.isFlying ||
+          this.physics.isInWater(this.controls.getObject().position)
+        ) {
           this.moveDown = true;
         }
         break;
@@ -163,6 +168,44 @@ export class PlayerControls {
       return;
     }
 
+    const position = this.controls.getObject().position;
+
+    if (this.physics.isInWater(position)) {
+      this.velocity.y -= this.gravity * delta * 0.1;
+      this.velocity.multiplyScalar(0.9);
+
+      if (this.controls.isLocked) {
+        const forward = new THREE.Vector3();
+        const right = new THREE.Vector3();
+
+        this.controls.getObject().getWorldDirection(forward);
+        forward.normalize();
+
+        right.crossVectors(forward, this.controls.getObject().up).normalize();
+
+        const desiredVelocity = new THREE.Vector3();
+        if (this.moveForward) desiredVelocity.add(forward);
+        if (this.moveBackward) desiredVelocity.sub(forward);
+        if (this.moveRight) desiredVelocity.add(right);
+        if (this.moveLeft) desiredVelocity.sub(right);
+        if (this.moveUp) desiredVelocity.y += 0.5;
+        if (this.moveDown) desiredVelocity.y -= 0.5;
+
+        if (desiredVelocity.lengthSq() > 0) {
+          desiredVelocity.normalize().multiplyScalar(this.speed * 0.5);
+          this.velocity.add(desiredVelocity.multiplyScalar(delta * 10));
+        }
+      }
+
+      this.physics.resolveCollision(
+        position,
+        this.velocity,
+        this.playerBox,
+        delta
+      );
+      return;
+    }
+
     // Apply Gravity
     this.velocity.y -= this.gravity * delta;
 
@@ -193,8 +236,6 @@ export class PlayerControls {
       this.velocity.x = 0;
       this.velocity.z = 0;
     }
-
-    const position = this.controls.getObject().position;
 
     this.physics.resolveCollision(
       position,
