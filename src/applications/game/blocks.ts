@@ -175,6 +175,12 @@ export const TRANSPARENT_BLOCKS = [
   // BlockType.BELLIS_FLOWER,
 ];
 
+export const TRANSLUCENT_BLOCKS = [
+  BlockType.WATER,
+  BlockType.GLASS,
+  BlockType.DECORATIVE_GLASS,
+];
+
 export const NON_COLLIDABLE_BLOCKS = [
   BlockType.AIR,
   BlockType.WATER,

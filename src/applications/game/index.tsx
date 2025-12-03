@@ -252,7 +252,8 @@ export default function Game() {
   }, [isInventoryOpen]);
 
   let textureArray: THREE.DataArrayTexture;
-  let shaderMaterial: THREE.ShaderMaterial;
+  let opaqueShaderMaterial: THREE.ShaderMaterial;
+  let transparentShaderMaterial: THREE.ShaderMaterial;
 
   function startWorldGeneration(currentSeed: number) {
     if (intervalRef.current) clearInterval(intervalRef.current);
@@ -297,24 +298,27 @@ export default function Game() {
                 .exec("generateMesh", [result, borders])
                 .then(
                   ({
-                    positions,
-                    normals,
-                    indices,
-                    uvs,
-                    textureIndices,
+                    opaque,
+                    transparent,
                   }: {
-                    positions: ArrayBuffer;
-                    normals: ArrayBuffer;
-                    indices: ArrayBuffer;
-                    uvs: ArrayBuffer;
-                    textureIndices: ArrayBuffer;
+                    opaque: {
+                      positions: ArrayBuffer;
+                      normals: ArrayBuffer;
+                      indices: ArrayBuffer;
+                      uvs: ArrayBuffer;
+                      textureIndices: ArrayBuffer;
+                    };
+                    transparent: {
+                      positions: ArrayBuffer;
+                      normals: ArrayBuffer;
+                      indices: ArrayBuffer;
+                      uvs: ArrayBuffer;
+                      textureIndices: ArrayBuffer;
+                    };
                   }) => {
                     addChunkMesh(
-                      positions,
-                      normals,
-                      indices,
-                      uvs,
-                      textureIndices,
+                      opaque,
+                      transparent,
                       chunkName,
                       chunkX,
                       chunkY,
@@ -467,10 +471,34 @@ export default function Game() {
             textureArray.generateMipmaps = true;
             textureArray.needsUpdate = true;
 
-            shaderMaterial = new THREE.ShaderMaterial({
+            const waterTextureIndex = Object.values(Texture).indexOf(
+              Texture.WATER
+            );
+
+            opaqueShaderMaterial = new THREE.ShaderMaterial({
               uniforms: {
                 Texture: {
                   value: textureArray,
+                },
+                waterTextureIndex: {
+                  value: waterTextureIndex,
+                },
+              },
+              vertexShader: VERTEX_SHADER,
+              fragmentShader: FRAGMENT_SHADER,
+              blending: THREE.NormalBlending,
+              blendSrcAlpha: THREE.OneFactor,
+              transparent: false,
+              depthWrite: true,
+            });
+
+            transparentShaderMaterial = new THREE.ShaderMaterial({
+              uniforms: {
+                Texture: {
+                  value: textureArray,
+                },
+                waterTextureIndex: {
+                  value: waterTextureIndex,
                 },
               },
               vertexShader: VERTEX_SHADER,
@@ -478,7 +506,7 @@ export default function Game() {
               blending: THREE.NormalBlending,
               blendSrcAlpha: THREE.OneFactor,
               transparent: true,
-              depthWrite: true,
+              depthWrite: false,
             });
 
             startWorldGeneration(seedRef.current);
@@ -846,40 +874,89 @@ export default function Game() {
   }
 
   function addChunkMesh(
-    positions: ArrayBuffer,
-    normals: ArrayBuffer,
-    indices: ArrayBuffer,
-    uvs: ArrayBuffer,
-    textureIndices: ArrayBuffer,
+    opaque: {
+      positions: ArrayBuffer;
+      normals: ArrayBuffer;
+      indices: ArrayBuffer;
+      uvs: ArrayBuffer;
+      textureIndices: ArrayBuffer;
+    },
+    transparent: {
+      positions: ArrayBuffer;
+      normals: ArrayBuffer;
+      indices: ArrayBuffer;
+      uvs: ArrayBuffer;
+      textureIndices: ArrayBuffer;
+    },
     chunkName: string,
     chunkX: number,
     chunkY: number,
     chunkZ: number
   ) {
-    const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute(
+    // Opaque Mesh
+    const opaqueGeometry = new THREE.BufferGeometry();
+    opaqueGeometry.setAttribute(
       "position",
-      new THREE.Float32BufferAttribute(positions, 3)
+      new THREE.Float32BufferAttribute(opaque.positions, 3)
     );
-    geometry.setAttribute(
+    opaqueGeometry.setAttribute(
       "normal",
-      new THREE.Float32BufferAttribute(normals, 3)
+      new THREE.Float32BufferAttribute(opaque.normals, 3)
     );
-    geometry.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
-    geometry.setAttribute(
+    opaqueGeometry.setAttribute(
+      "uv",
+      new THREE.Float32BufferAttribute(opaque.uvs, 2)
+    );
+    opaqueGeometry.setAttribute(
       "textureIndex",
-      new THREE.Int32BufferAttribute(textureIndices, 1)
+      new THREE.Int32BufferAttribute(opaque.textureIndices, 1)
     );
-    geometry.setIndex(new THREE.Uint32BufferAttribute(indices, 1));
-    const mesh = new THREE.Mesh(geometry, shaderMaterial);
-    mesh.translateX(chunkX * CHUNK_WIDTH - 0.5);
-    mesh.translateY(chunkY * CHUNK_HEIGHT - 0.5);
-    mesh.translateZ(chunkZ * CHUNK_LENGTH - 0.5);
+    opaqueGeometry.setIndex(new THREE.Uint32BufferAttribute(opaque.indices, 1));
+    const opaqueMesh = new THREE.Mesh(opaqueGeometry, opaqueShaderMaterial);
+    opaqueMesh.translateX(chunkX * CHUNK_WIDTH - 0.5);
+    opaqueMesh.translateY(chunkY * CHUNK_HEIGHT - 0.5);
+    opaqueMesh.translateZ(chunkZ * CHUNK_LENGTH - 0.5);
 
-    mesh.frustumCulled = true;
-    mesh.name = chunkName;
+    opaqueMesh.frustumCulled = true;
+    opaqueMesh.name = chunkName;
+    opaqueMesh.renderOrder = 0;
 
-    scene.add(mesh);
+    scene.add(opaqueMesh);
+
+    // Transparent Mesh
+    const transparentGeometry = new THREE.BufferGeometry();
+    transparentGeometry.setAttribute(
+      "position",
+      new THREE.Float32BufferAttribute(transparent.positions, 3)
+    );
+    transparentGeometry.setAttribute(
+      "normal",
+      new THREE.Float32BufferAttribute(transparent.normals, 3)
+    );
+    transparentGeometry.setAttribute(
+      "uv",
+      new THREE.Float32BufferAttribute(transparent.uvs, 2)
+    );
+    transparentGeometry.setAttribute(
+      "textureIndex",
+      new THREE.Int32BufferAttribute(transparent.textureIndices, 1)
+    );
+    transparentGeometry.setIndex(
+      new THREE.Uint32BufferAttribute(transparent.indices, 1)
+    );
+    const transparentMesh = new THREE.Mesh(
+      transparentGeometry,
+      transparentShaderMaterial
+    );
+    transparentMesh.translateX(chunkX * CHUNK_WIDTH - 0.5);
+    transparentMesh.translateY(chunkY * CHUNK_HEIGHT - 0.5);
+    transparentMesh.translateZ(chunkZ * CHUNK_LENGTH - 0.5);
+
+    transparentMesh.frustumCulled = true;
+    transparentMesh.name = chunkName + "_transparent";
+    transparentMesh.renderOrder = 1;
+
+    scene.add(transparentMesh);
   }
 
   function getBlock(x: number, y: number, z: number) {
@@ -1042,7 +1119,7 @@ export default function Game() {
   }
 
   function regenerateChunkMesh(chunkX: number, chunkY: number, chunkZ: number) {
-    if (shaderMaterial) {
+    if (opaqueShaderMaterial && transparentShaderMaterial) {
       const chunkName = generateChunkName(chunkX, chunkY, chunkZ);
       const currentVersion = chunkVersions.current[chunkName];
 
@@ -1052,26 +1129,29 @@ export default function Game() {
         .exec("generateMesh", [chunks.current[chunkName], borders])
         .then(
           ({
-            positions,
-            normals,
-            indices,
-            uvs,
-            textureIndices,
+            opaque,
+            transparent,
           }: {
-            positions: ArrayBuffer;
-            normals: ArrayBuffer;
-            indices: ArrayBuffer;
-            uvs: ArrayBuffer;
-            textureIndices: ArrayBuffer;
+            opaque: {
+              positions: ArrayBuffer;
+              normals: ArrayBuffer;
+              indices: ArrayBuffer;
+              uvs: ArrayBuffer;
+              textureIndices: ArrayBuffer;
+            };
+            transparent: {
+              positions: ArrayBuffer;
+              normals: ArrayBuffer;
+              indices: ArrayBuffer;
+              uvs: ArrayBuffer;
+              textureIndices: ArrayBuffer;
+            };
           }) => {
             if (chunkVersions.current[chunkName] === currentVersion) {
               pruneChunkMesh(chunkName);
               addChunkMesh(
-                positions,
-                normals,
-                indices,
-                uvs,
-                textureIndices,
+                opaque,
+                transparent,
                 chunkName,
                 chunkX,
                 chunkY,
@@ -1098,6 +1178,17 @@ export default function Game() {
       mesh.geometry.dispose();
       mesh.removeFromParent();
       mesh = scene.getObjectByName(chunkName) as THREE.Mesh;
+    }
+
+    let transparentMesh = scene.getObjectByName(
+      chunkName + "_transparent"
+    ) as THREE.Mesh;
+    while (transparentMesh) {
+      transparentMesh.geometry.dispose();
+      transparentMesh.removeFromParent();
+      transparentMesh = scene.getObjectByName(
+        chunkName + "_transparent"
+      ) as THREE.Mesh;
     }
   }
 
