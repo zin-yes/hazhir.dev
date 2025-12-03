@@ -588,6 +588,21 @@ export default function Game() {
           if (getBlock(newBlockX, newBlockY, newBlockZ) !== BlockType.AIR)
             return;
 
+          const blockBox = new THREE.Box3(
+            new THREE.Vector3(
+              newBlockX - 0.5,
+              newBlockY - 0.5,
+              newBlockZ - 0.5
+            ),
+            new THREE.Vector3(
+              newBlockX + 0.5,
+              newBlockY + 0.5,
+              newBlockZ + 0.5
+            )
+          );
+
+          if (blockBox.intersectsBox(playerControls.getPlayerBox())) return;
+
           setBlock(newBlockX, newBlockY, newBlockZ, type);
 
           updateIndicator();
