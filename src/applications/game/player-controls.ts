@@ -89,33 +89,36 @@ export class PlayerControls {
   }
 
   public update(delta: number) {
-    if (!this.controls.isLocked) return;
-
     // Apply Gravity
     this.velocity.y -= this.gravity * delta;
 
-    // Calculate desired horizontal velocity
-    const forward = new THREE.Vector3();
-    const right = new THREE.Vector3();
+    if (this.controls.isLocked) {
+      // Calculate desired horizontal velocity
+      const forward = new THREE.Vector3();
+      const right = new THREE.Vector3();
 
-    this.controls.getObject().getWorldDirection(forward);
-    forward.y = 0;
-    forward.normalize();
+      this.controls.getObject().getWorldDirection(forward);
+      forward.y = 0;
+      forward.normalize();
 
-    right.crossVectors(forward, this.controls.getObject().up).normalize();
+      right.crossVectors(forward, this.controls.getObject().up).normalize();
 
-    const desiredVelocity = new THREE.Vector3();
-    if (this.moveForward) desiredVelocity.add(forward);
-    if (this.moveBackward) desiredVelocity.sub(forward);
-    if (this.moveRight) desiredVelocity.add(right);
-    if (this.moveLeft) desiredVelocity.sub(right);
+      const desiredVelocity = new THREE.Vector3();
+      if (this.moveForward) desiredVelocity.add(forward);
+      if (this.moveBackward) desiredVelocity.sub(forward);
+      if (this.moveRight) desiredVelocity.add(right);
+      if (this.moveLeft) desiredVelocity.sub(right);
 
-    if (desiredVelocity.lengthSq() > 0) {
-      desiredVelocity.normalize().multiplyScalar(this.speed);
+      if (desiredVelocity.lengthSq() > 0) {
+        desiredVelocity.normalize().multiplyScalar(this.speed);
+      }
+
+      this.velocity.x = desiredVelocity.x;
+      this.velocity.z = desiredVelocity.z;
+    } else {
+      this.velocity.x = 0;
+      this.velocity.z = 0;
     }
-
-    this.velocity.x = desiredVelocity.x;
-    this.velocity.z = desiredVelocity.z;
 
     const position = this.controls.getObject().position;
 

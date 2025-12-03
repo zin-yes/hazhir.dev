@@ -8,7 +8,7 @@ async function loadImage(url: string) {
   return await createImageBitmap(image);
 }
 
-export async function loadTextureArray() {
+export async function loadTextureArray(baseUrl: string) {
   const canvas = new OffscreenCanvas(TEXTURE_SIZE, TEXTURE_SIZE);
   const context = canvas.getContext("2d", {
     colorSpace: THREE.SRGBColorSpace,
@@ -21,11 +21,7 @@ export async function loadTextureArray() {
     const texturesToLoad: string[] = Object.values(Texture);
 
     for (let i = 0; i < texturesToLoad.length; i++) {
-      const image = await loadImage(
-        (process.env.NODE_ENV === "production"
-          ? "https://hazhir.dev/game/"
-          : "http://localhost:3000/game/") + texturesToLoad[i]
-      );
+      const image = await loadImage(baseUrl + "/game/" + texturesToLoad[i]);
 
       context.drawImage(image, 0, 0);
       const imageData = context.getImageData(0, 0, TEXTURE_SIZE, TEXTURE_SIZE);

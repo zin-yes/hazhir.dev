@@ -2,11 +2,11 @@ import * as THREE from "three";
 import { BlockType, NON_SOLID_BLOCKS } from "./blocks";
 
 export class PhysicsEngine {
-  private getBlock: (x: number, y: number, z: number) => BlockType;
+  private getBlock: (x: number, y: number, z: number) => BlockType | null;
   private playerSize = new THREE.Vector3(0.6, 1.8, 0.6);
   private eyeHeight = 1.62;
 
-  constructor(getBlock: (x: number, y: number, z: number) => BlockType) {
+  constructor(getBlock: (x: number, y: number, z: number) => BlockType | null) {
     this.getBlock = getBlock;
   }
 
@@ -76,6 +76,7 @@ export class PhysicsEngine {
       for (let y = minY; y <= maxY; y++) {
         for (let z = minZ; z <= maxZ; z++) {
           const block = this.getBlock(x, y, z);
+          if (block === null) return true;
           if (!NON_SOLID_BLOCKS.includes(block)) {
             return true;
           }

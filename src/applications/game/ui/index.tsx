@@ -1,14 +1,19 @@
 import { Silkscreen } from "next/font/google";
-import { NON_SOLID_BLOCKS, LOADING_SCREEN_TEXTURES } from "../blocks";
-import Image from "next/image";
-import { useRef } from "react";
+import { useRef, useState } from "react";
 const DEFAULT_UI_FONT = Silkscreen({
   weight: ["400", "700"],
   subsets: ["latin"],
 });
 
-export default function UILayer({}) {
+interface UILayerProps {
+  onHost?: () => void;
+  onJoin?: (id: string) => void;
+  peerId?: string;
+}
+
+export default function UILayer({ onHost, onJoin, peerId }: UILayerProps) {
   const uiLayerRef = useRef<HTMLDivElement>(null);
+  const [joinId, setJoinId] = useState("");
 
   return (
     <div
@@ -69,6 +74,42 @@ export default function UILayer({}) {
               Focus the window by clicking, then press escape to start playing
               (and do the same if you want to have your mouse back).
             </p>
+          </div>
+          <div className="bg-black p-6 px-8 pointer-events-auto">
+            <h2 className="text-center font-bold text-lg">Multiplayer</h2>
+            <div className="flex flex-col gap-2 mt-2">
+              {peerId ? (
+                <p>
+                  Your ID:{" "}
+                  <span className="select-all bg-white text-black px-1">
+                    {peerId}
+                  </span>
+                </p>
+              ) : (
+                <button
+                  onClick={onHost}
+                  className="bg-white text-black px-4 py-2 hover:bg-gray-200"
+                >
+                  Host Game
+                </button>
+              )}
+
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  placeholder="Enter Host ID"
+                  className="text-black px-2 py-1 flex-grow"
+                  value={joinId}
+                  onChange={(e) => setJoinId(e.target.value)}
+                />
+                <button
+                  onClick={() => onJoin && onJoin(joinId)}
+                  className="bg-white text-black px-4 py-1 hover:bg-gray-200"
+                >
+                  Join
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       </div>
