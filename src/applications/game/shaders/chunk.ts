@@ -29,10 +29,8 @@ void main() {
 
   vec4 textureColor = texture(Texture, vec3(TextureCoordinates, TextureIndex));
   
-  gl_FragColor = vec4((vec4(diffuse, 1.0) * textureColor).rgb, 1.0);
-
-  //if(TextureIndex == 16) {
-  //  gl_FragColor = vec4(gl_FragColor.rgb, 0.05);
-  //}
+  if (textureColor.a < 0.5) discard;
+  
+  gl_FragColor = vec4((vec4(diffuse, 1.0) * textureColor).rgb, textureColor.a);
 }
 `;

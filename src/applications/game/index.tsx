@@ -354,7 +354,7 @@ export default function Game() {
     canvas.height = TEXTURE_SIZE;
     const context = canvas.getContext("2d", {
       colorSpace: THREE.SRGBColorSpace,
-      alpha: false,
+      alpha: true,
       willReadFrequently: true,
     });
     if (context) {
@@ -364,6 +364,7 @@ export default function Game() {
 
       for (let i = 0; i < texturesToLoad.length; i++) {
         const image = await loader.loadAsync("game/" + texturesToLoad[i]);
+        context.clearRect(0, 0, TEXTURE_SIZE, TEXTURE_SIZE);
         context.drawImage(image, 0, 0);
         const imageData = context.getImageData(
           0,
@@ -475,6 +476,7 @@ export default function Game() {
               blending: THREE.NormalBlending,
               blendSrcAlpha: THREE.OneFactor,
               transparent: true,
+              depthWrite: true,
             });
 
             startWorldGeneration(seedRef.current);

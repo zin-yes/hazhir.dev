@@ -1,7 +1,7 @@
 import {
   BLOCK_TEXTURES,
   BlockType,
-  NON_SOLID_BLOCKS,
+  TRANSPARENT_BLOCKS,
 } from "@/applications/game/blocks";
 import {
   CHUNK_HEIGHT,
@@ -71,7 +71,7 @@ export function generateMesh(_chunk: ArrayBuffer): {
         const textureIndexLeft = BLOCK_TEXTURES[block].LEFT_FACE;
         const textureIndexRight = BLOCK_TEXTURES[block].RIGHT_FACE;
 
-        if (NON_SOLID_BLOCKS.includes(blockAbove)) {
+        if (TRANSPARENT_BLOCKS.includes(blockAbove)) {
           const index = positions.length / 3;
           indices.push(
             index,
@@ -114,7 +114,7 @@ export function generateMesh(_chunk: ArrayBuffer): {
             );
           }
         }
-        if (NON_SOLID_BLOCKS.includes(blockBelow)) {
+        if (TRANSPARENT_BLOCKS.includes(blockBelow)) {
           const index = positions.length / 3;
           indices.push(
             index,
@@ -145,7 +145,7 @@ export function generateMesh(_chunk: ArrayBuffer): {
           }
         }
 
-        if (NON_SOLID_BLOCKS.includes(blockInfront)) {
+        if (TRANSPARENT_BLOCKS.includes(blockInfront)) {
           const index = positions.length / 3;
           indices.push(
             index,
@@ -198,7 +198,7 @@ export function generateMesh(_chunk: ArrayBuffer): {
           }
         }
 
-        if (NON_SOLID_BLOCKS.includes(blockBehind)) {
+        if (TRANSPARENT_BLOCKS.includes(blockBehind)) {
           const index = positions.length / 3;
           indices.push(
             index,
@@ -238,7 +238,7 @@ export function generateMesh(_chunk: ArrayBuffer): {
           }
         }
 
-        if (NON_SOLID_BLOCKS.includes(blockToTheLeft)) {
+        if (TRANSPARENT_BLOCKS.includes(blockToTheLeft)) {
           const index = positions.length / 3;
           indices.push(
             index,
@@ -278,7 +278,7 @@ export function generateMesh(_chunk: ArrayBuffer): {
           }
         }
 
-        if (NON_SOLID_BLOCKS.includes(blockToTheRight)) {
+        if (TRANSPARENT_BLOCKS.includes(blockToTheRight)) {
           const index = positions.length / 3;
           indices.push(
             index,

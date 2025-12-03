@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { BlockType, NON_SOLID_BLOCKS } from "./blocks";
+import { BlockType, NON_COLLIDABLE_BLOCKS } from "./blocks";
 
 export class PhysicsEngine {
   private getBlock: (x: number, y: number, z: number) => BlockType | null;
@@ -77,7 +77,7 @@ export class PhysicsEngine {
         for (let z = minZ; z <= maxZ; z++) {
           const block = this.getBlock(x, y, z);
           if (block === null) return true;
-          if (!NON_SOLID_BLOCKS.includes(block)) {
+          if (!NON_COLLIDABLE_BLOCKS.includes(block)) {
             return true;
           }
         }
