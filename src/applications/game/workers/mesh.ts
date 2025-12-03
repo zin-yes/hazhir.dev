@@ -254,10 +254,22 @@ export function generateMesh(
           }
         }
 
-        if (
-          TRANSPARENT_BLOCKS.includes(blockInfront) &&
-          !(block === BlockType.WATER && blockInfront === BlockType.WATER)
-        ) {
+        let cullFront = false;
+        if (block === BlockType.WATER && blockInfront === BlockType.WATER) {
+          let neighborAbove = BlockType.AIR;
+          if (!isFrontEdge) {
+            if (!isTopEdge)
+              neighborAbove = chunk[calculateOffset(x, y + 1, z + 1)];
+            else if (topBorder)
+              neighborAbove = topBorder[x * CHUNK_LENGTH + (z + 1)];
+          } else if (frontBorder && !isTopEdge) {
+            neighborAbove = frontBorder[x * CHUNK_HEIGHT + (y + 1)];
+          }
+          const neighborHeight = neighborAbove !== BlockType.WATER ? 0.8 : 1;
+          if (blockHeight <= neighborHeight) cullFront = true;
+        }
+
+        if (TRANSPARENT_BLOCKS.includes(blockInfront) && !cullFront) {
           const index = target.positions.length / 3;
           target.indices.push(
             index,
@@ -310,10 +322,22 @@ export function generateMesh(
           }
         }
 
-        if (
-          TRANSPARENT_BLOCKS.includes(blockBehind) &&
-          !(block === BlockType.WATER && blockBehind === BlockType.WATER)
-        ) {
+        let cullBack = false;
+        if (block === BlockType.WATER && blockBehind === BlockType.WATER) {
+          let neighborAbove = BlockType.AIR;
+          if (!isBackEdge) {
+            if (!isTopEdge)
+              neighborAbove = chunk[calculateOffset(x, y + 1, z - 1)];
+            else if (topBorder)
+              neighborAbove = topBorder[x * CHUNK_LENGTH + (z - 1)];
+          } else if (backBorder && !isTopEdge) {
+            neighborAbove = backBorder[x * CHUNK_HEIGHT + (y + 1)];
+          }
+          const neighborHeight = neighborAbove !== BlockType.WATER ? 0.8 : 1;
+          if (blockHeight <= neighborHeight) cullBack = true;
+        }
+
+        if (TRANSPARENT_BLOCKS.includes(blockBehind) && !cullBack) {
           const index = target.positions.length / 3;
           target.indices.push(
             index,
@@ -324,20 +348,7 @@ export function generateMesh(
             index + 3
           );
 
-          target.positions.push(
-            1 + x,
-            y,
-            z,
-            x,
-            y,
-            z,
-            1 + x,
-            yh,
-            z,
-            x,
-            yh,
-            z
-          );
+          target.positions.push(1 + x, y, z, x, y, z, 1 + x, yh, z, x, yh, z);
           target.normals.push(0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1);
           target.uvs.push(1, 1, 0, 1, 1, 0, 0, 0);
           if (textureIndexBack) {
@@ -366,10 +377,22 @@ export function generateMesh(
           }
         }
 
-        if (
-          TRANSPARENT_BLOCKS.includes(blockToTheLeft) &&
-          !(block === BlockType.WATER && blockToTheLeft === BlockType.WATER)
-        ) {
+        let cullLeft = false;
+        if (block === BlockType.WATER && blockToTheLeft === BlockType.WATER) {
+          let neighborAbove = BlockType.AIR;
+          if (!isLeftEdge) {
+            if (!isTopEdge)
+              neighborAbove = chunk[calculateOffset(x - 1, y + 1, z)];
+            else if (topBorder)
+              neighborAbove = topBorder[(x - 1) * CHUNK_LENGTH + z];
+          } else if (leftBorder && !isTopEdge) {
+            neighborAbove = leftBorder[(y + 1) * CHUNK_LENGTH + z];
+          }
+          const neighborHeight = neighborAbove !== BlockType.WATER ? 0.8 : 1;
+          if (blockHeight <= neighborHeight) cullLeft = true;
+        }
+
+        if (TRANSPARENT_BLOCKS.includes(blockToTheLeft) && !cullLeft) {
           const index = target.positions.length / 3;
           target.indices.push(
             index,
@@ -380,20 +403,7 @@ export function generateMesh(
             index + 3
           );
 
-          target.positions.push(
-            x,
-            yh,
-            z,
-            x,
-            y,
-            z,
-            x,
-            yh,
-            1 + z,
-            x,
-            y,
-            1 + z
-          );
+          target.positions.push(x, yh, z, x, y, z, x, yh, 1 + z, x, y, 1 + z);
           target.normals.push(-1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0);
           target.uvs.push(0, 0, 0, 1, 1, 0, 1, 1);
           if (textureIndexLeft) {
@@ -422,10 +432,22 @@ export function generateMesh(
           }
         }
 
-        if (
-          TRANSPARENT_BLOCKS.includes(blockToTheRight) &&
-          !(block === BlockType.WATER && blockToTheRight === BlockType.WATER)
-        ) {
+        let cullRight = false;
+        if (block === BlockType.WATER && blockToTheRight === BlockType.WATER) {
+          let neighborAbove = BlockType.AIR;
+          if (!isRightEdge) {
+            if (!isTopEdge)
+              neighborAbove = chunk[calculateOffset(x + 1, y + 1, z)];
+            else if (topBorder)
+              neighborAbove = topBorder[(x + 1) * CHUNK_LENGTH + z];
+          } else if (rightBorder && !isTopEdge) {
+            neighborAbove = rightBorder[(y + 1) * CHUNK_LENGTH + z];
+          }
+          const neighborHeight = neighborAbove !== BlockType.WATER ? 0.8 : 1;
+          if (blockHeight <= neighborHeight) cullRight = true;
+        }
+
+        if (TRANSPARENT_BLOCKS.includes(blockToTheRight) && !cullRight) {
           const index = target.positions.length / 3;
           target.indices.push(
             index,
