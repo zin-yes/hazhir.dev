@@ -216,10 +216,21 @@ export function generateMesh(
           : block === BlockType.WATER && blockAbove !== BlockType.WATER
           ? 0.8
           : 1;
-        
+
         const yOffset = isTopSlab(block) ? 0.5 : 0;
         const yh = y + blockHeight + yOffset;
         const yl = y + yOffset;
+
+        let vRowTop = 0;
+        let vRowBottom = 1;
+
+        if (isSlab(block)) {
+          if (isTopSlab(block)) {
+            vRowBottom = 0.5;
+          } else {
+            vRowTop = 0.5;
+          }
+        }
 
         if (!shouldCull(block, blockAbove, "UP")) {
           const index = target.positions.length / 3;
@@ -334,7 +345,7 @@ export function generateMesh(
             1 + z
           );
           target.normals.push(0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1);
-          target.uvs.push(1, 1, 0, 1, 1, 0, 0, 0);
+          target.uvs.push(1, vRowBottom, 0, vRowBottom, 1, vRowTop, 0, vRowTop);
           if (textureIndexFront) {
             target.textureIndices.push(
               textureIndexFront,
@@ -374,7 +385,7 @@ export function generateMesh(
 
           target.positions.push(1 + x, yl, z, x, yl, z, 1 + x, yh, z, x, yh, z);
           target.normals.push(0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1);
-          target.uvs.push(1, 1, 0, 1, 1, 0, 0, 0);
+          target.uvs.push(1, vRowBottom, 0, vRowBottom, 1, vRowTop, 0, vRowTop);
           if (textureIndexBack) {
             target.textureIndices.push(
               textureIndexBack,
@@ -414,7 +425,7 @@ export function generateMesh(
 
           target.positions.push(x, yh, z, x, yl, z, x, yh, 1 + z, x, yl, 1 + z);
           target.normals.push(-1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0);
-          target.uvs.push(0, 0, 0, 1, 1, 0, 1, 1);
+          target.uvs.push(0, vRowTop, 0, vRowBottom, 1, vRowTop, 1, vRowBottom);
           if (textureIndexLeft) {
             target.textureIndices.push(
               textureIndexLeft,
@@ -467,7 +478,7 @@ export function generateMesh(
             z
           );
           target.normals.push(1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0);
-          target.uvs.push(0, 0, 0, 1, 1, 0, 1, 1);
+          target.uvs.push(0, vRowTop, 0, vRowBottom, 1, vRowTop, 1, vRowBottom);
           if (textureIndexRight) {
             target.textureIndices.push(
               textureIndexRight,

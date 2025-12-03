@@ -64,6 +64,7 @@ export default function Game() {
   >([]);
   const chunks = useRef<{ [chunkName: string]: Uint8Array }>({});
   const chunkVersions = useRef<{ [chunkName: string]: number }>({});
+  const modifiedChunks = useRef<Map<string, Map<number, number>>>(new Map());
   const generationWorkerPool = useMemo(
     () =>
       new WorkerPool(
@@ -301,6 +302,14 @@ export default function Game() {
               const chunkName = generateChunkName(chunkX, chunkY, chunkZ);
               chunks.current[chunkName] = chunk;
 
+              if (modifiedChunks.current.has(chunkName)) {
+                modifiedChunks.current
+                  .get(chunkName)!
+                  .forEach((type, index) => {
+                    chunk[index] = type;
+                  });
+              }
+
               const borders = getChunkBorders(chunkX, chunkY, chunkZ);
 
               meshWorkerPool
@@ -443,6 +452,16 @@ export default function Game() {
         physics
       );
 
+      playerControlsRef.current.controls.addEventListener("lock", () => {
+        const infoLayer = document.getElementById("infoLayer");
+        if (infoLayer) infoLayer.style.display = "none";
+      });
+
+      playerControlsRef.current.controls.addEventListener("unlock", () => {
+        const infoLayer = document.getElementById("infoLayer");
+        if (infoLayer) infoLayer.style.display = "flex";
+      });
+
       for (
         let chunkX = -NEGATIVE_X_RENDER_DISTANCE;
         chunkX < POSITIVE_X_RENDER_DISTANCE;
@@ -547,7 +566,6 @@ export default function Game() {
               !playerControlsRef.current?.controls.isLocked
             ) {
               playerControlsRef.current?.controls.lock();
-              document.getElementById("infoLayer")!.style.display = "none";
               setIsInventoryOpen(false);
             } else {
               playerControlsRef.current?.controls.unlock();
@@ -593,6 +611,40 @@ export default function Game() {
           id
         );
 
+        const blocks: { x: number; y: number; z: number; blockType: number }[] =
+          [];
+        modifiedChunks.current.forEach((modifications, chunkName) => {
+          const [cx, cy, cz] = chunkName.split(",").map(Number);
+          modifications.forEach((type, index) => {
+            const z = index % CHUNK_HEIGHT;
+            const y = Math.floor(index / CHUNK_HEIGHT) % CHUNK_WIDTH;
+            const x = Math.floor(
+              Math.floor(index / CHUNK_HEIGHT) / CHUNK_WIDTH
+            );
+
+            const globalX = cx * CHUNK_WIDTH + x;
+            const globalY = cy * CHUNK_HEIGHT + y;
+            const globalZ = cz * CHUNK_LENGTH + z;
+
+            blocks.push({
+              x: globalX,
+              y: globalY,
+              z: globalZ,
+              blockType: type,
+            });
+          });
+        });
+
+        if (blocks.length > 0) {
+          nm.send(
+            {
+              type: "WORLD_STATE",
+              blocks,
+            },
+            id
+          );
+        }
+
         const rp = new RemotePlayer(id, scene, new THREE.Vector3(0, 100, 0));
         remotePlayers.current.set(id, rp);
       };
@@ -632,6 +684,69 @@ export default function Game() {
           rp.updatePosition(data.position, data.rotation);
         } else if (data.type === "BLOCK_UPDATE") {
           setBlock(data.x, data.y, data.z, data.blockType, false);
+        } else if (data.type === "WORLD_STATE") {
+          const chunksToUpdate = new Set<string>();
+          data.blocks.forEach((b) => {
+            const chunkX = Math.floor(b.x / CHUNK_WIDTH);
+            const chunkY = Math.floor(b.y / CHUNK_HEIGHT);
+            const chunkZ = Math.floor(b.z / CHUNK_LENGTH);
+            const chunkName = generateChunkName(chunkX, chunkY, chunkZ);
+            const blockChunkX = b.x - chunkX * CHUNK_WIDTH;
+            const blockChunkY = b.y - chunkY * CHUNK_HEIGHT;
+            const blockChunkZ = b.z - chunkZ * CHUNK_LENGTH;
+            const index = calculateOffset(
+              blockChunkX,
+              blockChunkY,
+              blockChunkZ
+            );
+
+            if (!modifiedChunks.current.has(chunkName)) {
+              modifiedChunks.current.set(chunkName, new Map());
+            }
+            modifiedChunks.current.get(chunkName)!.set(index, b.blockType);
+
+            if (chunks.current[chunkName]) {
+              chunks.current[chunkName][index] = b.blockType;
+              chunksToUpdate.add(chunkName);
+
+              if (blockChunkX === 0)
+                chunksToUpdate.add(
+                  generateChunkName(chunkX - 1, chunkY, chunkZ)
+                );
+              if (blockChunkX === CHUNK_WIDTH - 1)
+                chunksToUpdate.add(
+                  generateChunkName(chunkX + 1, chunkY, chunkZ)
+                );
+              if (blockChunkY === 0)
+                chunksToUpdate.add(
+                  generateChunkName(chunkX, chunkY - 1, chunkZ)
+                );
+              if (blockChunkY === CHUNK_HEIGHT - 1)
+                chunksToUpdate.add(
+                  generateChunkName(chunkX, chunkY + 1, chunkZ)
+                );
+              if (blockChunkZ === 0)
+                chunksToUpdate.add(
+                  generateChunkName(chunkX, chunkY, chunkZ - 1)
+                );
+              if (blockChunkZ === CHUNK_LENGTH - 1)
+                chunksToUpdate.add(
+                  generateChunkName(chunkX, chunkY, chunkZ + 1)
+                );
+            }
+          });
+
+          chunksToUpdate.forEach((chunkName) => {
+            const [cx, cy, cz] = chunkName.split(",").map(Number);
+            if (!chunkVersions.current[chunkName])
+              chunkVersions.current[chunkName] = 0;
+            chunkVersions.current[chunkName]++;
+            regenerateChunkMesh(cx, cy, cz);
+          });
+        }
+
+        if (nm.isHost && data.type !== "HANDSHAKE") {
+          nm.broadcast(data, senderId);
         }
       };
 
@@ -684,6 +799,12 @@ export default function Game() {
         const chunk = new Uint8Array(result);
         const chunkName = generateChunkName(chunkX, chunkY, chunkZ);
         chunks.current[chunkName] = chunk;
+
+        if (modifiedChunks.current.has(chunkName)) {
+          modifiedChunks.current.get(chunkName)!.forEach((type, index) => {
+            chunk[index] = type;
+          });
+        }
 
         const adjChunks = {
           left: chunks.current[generateChunkName(chunkX - 1, chunkY, chunkZ)],
@@ -869,7 +990,8 @@ export default function Game() {
               let fullBlockType = BlockType.PLANKS;
               if (type === BlockType.COBBLESTONE_SLAB)
                 fullBlockType = BlockType.COBBLESTONE;
-              if (type === BlockType.STONE_SLAB) fullBlockType = BlockType.STONE;
+              if (type === BlockType.STONE_SLAB)
+                fullBlockType = BlockType.STONE;
 
               setBlock(x, y, z, fullBlockType);
               updateIndicator();
@@ -914,7 +1036,11 @@ export default function Game() {
           }
 
           // Handle stacking for top slabs (placing a bottom slab on a top slab)
-          const targetBlockForTopSlab = getBlock(newBlockX, newBlockY, newBlockZ);
+          const targetBlockForTopSlab = getBlock(
+            newBlockX,
+            newBlockY,
+            newBlockZ
+          );
           if (
             (targetBlockForTopSlab === BlockType.PLANKS_SLAB_TOP &&
               type === BlockType.PLANKS_SLAB) ||
@@ -1096,15 +1222,23 @@ export default function Game() {
     const chunkZ = Math.floor(z / CHUNK_LENGTH);
 
     const chunkName = generateChunkName(chunkX, chunkY, chunkZ);
-    const chunk = chunks.current[chunkName];
-
-    if (!chunk) return BlockType.AIR;
 
     const blockChunkX = x - chunkX * CHUNK_WIDTH;
     const blockChunkY = y - chunkY * CHUNK_HEIGHT;
     const blockChunkZ = z - chunkZ * CHUNK_LENGTH;
 
-    chunk[calculateOffset(blockChunkX, blockChunkY, blockChunkZ)] = type;
+    const blockIndex = calculateOffset(blockChunkX, blockChunkY, blockChunkZ);
+
+    if (!modifiedChunks.current.has(chunkName)) {
+      modifiedChunks.current.set(chunkName, new Map());
+    }
+    modifiedChunks.current.get(chunkName)!.set(blockIndex, type);
+
+    const chunk = chunks.current[chunkName];
+
+    if (!chunk) return BlockType.AIR;
+
+    chunk[blockIndex] = type;
 
     if (!chunkVersions.current[chunkName]) chunkVersions.current[chunkName] = 0;
     chunkVersions.current[chunkName]++;
@@ -1438,6 +1572,71 @@ export default function Game() {
     return () => clearInterval(tickInterval);
   }, []);
 
+  function saveWorld() {
+    if (!playerControlsRef.current) return;
+    const playerObj = playerControlsRef.current.controls.getObject();
+    const saveData = {
+      seed: seedRef.current,
+      modifiedChunks: Array.from(modifiedChunks.current.entries()).map(
+        ([key, map]) => [key, Array.from(map.entries())]
+      ),
+      position: {
+        x: playerObj.position.x,
+        y: playerObj.position.y,
+        z: playerObj.position.z,
+      },
+      rotation: {
+        x: playerObj.rotation.x,
+        y: playerObj.rotation.y,
+        z: playerObj.rotation.z,
+      },
+      hotbarSlots: hotbarSlotsRef.current,
+    };
+    localStorage.setItem("hazhir-dev-save", JSON.stringify(saveData));
+    alert("World saved!");
+  }
+
+  function loadWorld() {
+    const saveString = localStorage.getItem("hazhir-dev-save");
+    if (!saveString) {
+      alert("No save found!");
+      return;
+    }
+    try {
+      const saveData = JSON.parse(saveString);
+      seedRef.current = saveData.seed;
+      modifiedChunks.current = new Map(
+        saveData.modifiedChunks.map(
+          ([key, entries]: [string, [number, number][]]) => [
+            key,
+            new Map(entries),
+          ]
+        )
+      );
+      setHotbarSlots(saveData.hotbarSlots);
+
+      if (playerControlsRef.current) {
+        const playerObj = playerControlsRef.current.controls.getObject();
+        playerObj.position.set(
+          saveData.position.x,
+          saveData.position.y,
+          saveData.position.z
+        );
+        playerObj.rotation.set(
+          saveData.rotation.x,
+          saveData.rotation.y,
+          saveData.rotation.z
+        );
+      }
+
+      startWorldGeneration(seedRef.current);
+      alert("World loaded!");
+    } catch (e) {
+      console.error("Failed to load save:", e);
+      alert("Failed to load save!");
+    }
+  }
+
   const render = () => {
     // stats.begin();
     const time = performance.now();
@@ -1482,6 +1681,8 @@ export default function Game() {
         onJoin={(id) => {
           networkManager.current.joinGame(id);
         }}
+        onSave={saveWorld}
+        onLoad={loadWorld}
         peerId={peerId}
         selectedSlot={selectedSlot}
         hotbarSlots={hotbarSlots}
