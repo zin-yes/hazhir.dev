@@ -554,6 +554,9 @@ export default function Game() {
 
       const onKeyUp = function (event: KeyboardEvent) {
         switch (event.code) {
+          case "KeyT":
+            placeTree();
+            break;
           case "Escape":
             if (isInventoryOpenRef.current) {
               setIsInventoryOpen(false);
@@ -901,6 +904,77 @@ export default function Game() {
 
   const raycaster = new THREE.Raycaster();
   const pointer = new THREE.Vector2(0.5 * 2 - 1, -0.5 * 2 + 1);
+
+  function generateTree(x: number, y: number, z: number) {
+    const seed = seedRef.current;
+    const rnd = (offset: number) => {
+      const val =
+        Math.sin(x * 12.9898 + z * 78.233 + seed + offset) * 43758.5453;
+      return val - Math.floor(val);
+    };
+
+    const height = 4 + Math.floor(rnd(0) * 3); // 4 to 6
+
+    // Trunk
+    for (let i = 0; i < height; i++) {
+      setBlock(x, y + i, z, BlockType.LOG);
+    }
+
+    // Leaves
+    // Top (y+height)
+    setBlock(x, y + height, z, BlockType.LEAVES);
+    setBlock(x + 1, y + height, z, BlockType.LEAVES);
+    setBlock(x - 1, y + height, z, BlockType.LEAVES);
+    setBlock(x, y + height, z + 1, BlockType.LEAVES);
+    setBlock(x, y + height, z - 1, BlockType.LEAVES);
+
+    // Layer 2 (y+height-1)
+    for (let dx = -2; dx <= 2; dx++) {
+      for (let dz = -2; dz <= 2; dz++) {
+        if (Math.abs(dx) === 2 && Math.abs(dz) === 2) {
+          if (rnd(dx * dz) > 0.5) continue;
+        }
+        if (dx === 0 && dz === 0) continue; // Trunk
+        setBlock(x + dx, y + height - 1, z + dz, BlockType.LEAVES);
+      }
+    }
+
+    // Layer 3 (y+height-2)
+    for (let dx = -2; dx <= 2; dx++) {
+      for (let dz = -2; dz <= 2; dz++) {
+        if (Math.abs(dx) === 2 && Math.abs(dz) === 2) {
+          if (rnd(dx * dz + 10) > 0.5) continue;
+        }
+        if (dx === 0 && dz === 0) continue; // Trunk
+        setBlock(x + dx, y + height - 2, z + dz, BlockType.LEAVES);
+      }
+    }
+  }
+
+  function placeTree() {
+    if (playerControlsRef.current?.controls.isLocked) {
+      raycaster.setFromCamera(pointer, camera);
+
+      const intersections = raycaster.intersectObjects(
+        scene.children.filter((obj) => obj.name !== "indicator")
+      );
+
+      if (intersections.length === 0) return;
+
+      const intersect = intersections[0];
+      const faceNormal = intersect.face!.normal;
+
+      const targetX = Math.round(intersect.point.x + faceNormal.x * 0.01);
+      const targetY = Math.round(intersect.point.y + faceNormal.y * 0.01);
+      const targetZ = Math.round(intersect.point.z + faceNormal.z * 0.01);
+
+      const blockBelow = getBlock(targetX, targetY - 1, targetZ);
+
+      if (blockBelow === BlockType.GRASS) {
+        generateTree(targetX, targetY, targetZ);
+      }
+    }
+  }
 
   function placeBlock(type: BlockType) {
     if (playerControlsRef.current?.controls.isLocked) {
