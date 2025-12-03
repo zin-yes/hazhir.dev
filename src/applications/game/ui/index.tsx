@@ -1,5 +1,9 @@
 import { Silkscreen } from "next/font/google";
 import { useRef, useState } from "react";
+import { BlockType } from "../blocks";
+import { Hotbar } from "./hotbar";
+import { Inventory } from "./inventory";
+
 const DEFAULT_UI_FONT = Silkscreen({
   weight: ["400", "700"],
   subsets: ["latin"],
@@ -9,9 +13,21 @@ interface UILayerProps {
   onHost?: () => void;
   onJoin?: (id: string) => void;
   peerId?: string;
+  selectedSlot: number;
+  hotbarSlots: BlockType[];
+  isInventoryOpen: boolean;
+  onSelectBlock: (block: BlockType) => void;
 }
 
-export default function UILayer({ onHost, onJoin, peerId }: UILayerProps) {
+export default function UILayer({
+  onHost,
+  onJoin,
+  peerId,
+  selectedSlot,
+  hotbarSlots,
+  isInventoryOpen,
+  onSelectBlock,
+}: UILayerProps) {
   const uiLayerRef = useRef<HTMLDivElement>(null);
   const [joinId, setJoinId] = useState("");
 
@@ -39,14 +55,20 @@ export default function UILayer({ onHost, onJoin, peerId }: UILayerProps) {
         </div>
       </div>
 
-      <div
-        className={
-          "absolute top-0 bottom-0 right-0 left-0 flex items-center justify-center pointer-events-none mix-blend-difference text-3xl font-normal z-1"
-        }
-        id={"crosshairLayer"}
-      >
-        +
-      </div>
+      {!isInventoryOpen && (
+        <div
+          className={
+            "absolute top-0 bottom-0 right-0 left-0 flex items-center justify-center pointer-events-none mix-blend-difference text-3xl font-normal z-1"
+          }
+          id={"crosshairLayer"}
+        >
+          +
+        </div>
+      )}
+
+      <Hotbar selectedSlot={selectedSlot} slots={hotbarSlots} />
+      <Inventory isOpen={isInventoryOpen} onSelectBlock={onSelectBlock} />
+
       <div
         className={
           "absolute top-0 bottom-0 right-0 left-0 flex flex-col items-center justify-center pointer-events-none text-md font-normal z-2"
