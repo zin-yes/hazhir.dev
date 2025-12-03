@@ -1,6 +1,7 @@
 import {
   BLOCK_TEXTURES,
   BlockType,
+  TRANSLUCENT_BLOCKS,
   TRANSPARENT_BLOCKS,
 } from "@/applications/game/blocks";
 import {
@@ -22,17 +23,36 @@ export function generateMesh(
     back?: ArrayBuffer;
   } = {}
 ): {
-  positions: ArrayBuffer;
-  normals: ArrayBuffer;
-  indices: ArrayBuffer;
-  uvs: ArrayBuffer;
-  textureIndices: ArrayBuffer;
+  opaque: {
+    positions: ArrayBuffer;
+    normals: ArrayBuffer;
+    indices: ArrayBuffer;
+    uvs: ArrayBuffer;
+    textureIndices: ArrayBuffer;
+  };
+  transparent: {
+    positions: ArrayBuffer;
+    normals: ArrayBuffer;
+    indices: ArrayBuffer;
+    uvs: ArrayBuffer;
+    textureIndices: ArrayBuffer;
+  };
 } {
-  const positions: number[] = [];
-  const normals: number[] = [];
-  const indices: number[] = [];
-  const uvs: number[] = [];
-  const textureIndices: number[] = [];
+  const opaque = {
+    positions: [] as number[],
+    normals: [] as number[],
+    indices: [] as number[],
+    uvs: [] as number[],
+    textureIndices: [] as number[],
+  };
+
+  const transparent = {
+    positions: [] as number[],
+    normals: [] as number[],
+    indices: [] as number[],
+    uvs: [] as number[],
+    textureIndices: [] as number[],
+  };
 
   const chunk = new Uint8Array(_chunk);
 
@@ -49,6 +69,9 @@ export function generateMesh(
         const block = chunk[calculateOffset(x, y, z)];
 
         if (block === BlockType.AIR) continue;
+
+        const isTranslucent = TRANSLUCENT_BLOCKS.includes(block);
+        const target = isTranslucent ? transparent : opaque;
 
         const isLeftEdge = x === 0;
         const isRightEdge = x === CHUNK_WIDTH - 1;
@@ -138,8 +161,8 @@ export function generateMesh(
           TRANSPARENT_BLOCKS.includes(blockAbove) &&
           !(block === BlockType.WATER && blockAbove === BlockType.WATER)
         ) {
-          const index = positions.length / 3;
-          indices.push(
+          const index = target.positions.length / 3;
+          target.indices.push(
             index,
             index + 1,
             index + 2,
@@ -148,7 +171,7 @@ export function generateMesh(
             index + 3
           );
 
-          positions.push(
+          target.positions.push(
             x,
             1 + y,
             1 + z,
@@ -162,17 +185,17 @@ export function generateMesh(
             1 + y,
             z
           );
-          normals.push(0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0);
-          uvs.push(1, 1, 0, 1, 1, 0, 0, 0);
+          target.normals.push(0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0);
+          target.uvs.push(1, 1, 0, 1, 1, 0, 0, 0);
           if (textureIndexTop) {
-            textureIndices.push(
+            target.textureIndices.push(
               textureIndexTop,
               textureIndexTop,
               textureIndexTop,
               textureIndexTop
             );
           } else {
-            textureIndices.push(
+            target.textureIndices.push(
               textureIndexDefault,
               textureIndexDefault,
               textureIndexDefault,
@@ -184,8 +207,8 @@ export function generateMesh(
           TRANSPARENT_BLOCKS.includes(blockBelow) &&
           !(block === BlockType.WATER && blockBelow === BlockType.WATER)
         ) {
-          const index = positions.length / 3;
-          indices.push(
+          const index = target.positions.length / 3;
+          target.indices.push(
             index,
             index + 1,
             index + 2,
@@ -194,18 +217,31 @@ export function generateMesh(
             index + 3
           );
 
-          positions.push(x + 1, y, z + 1, x, y, z + 1, x + 1, y, z, x, y, z);
-          normals.push(0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0);
-          uvs.push(1, 0, 0, 0, 1, 1, 0, 1);
+          target.positions.push(
+            x + 1,
+            y,
+            z + 1,
+            x,
+            y,
+            z + 1,
+            x + 1,
+            y,
+            z,
+            x,
+            y,
+            z
+          );
+          target.normals.push(0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0);
+          target.uvs.push(1, 0, 0, 0, 1, 1, 0, 1);
           if (textureIndexBottom) {
-            textureIndices.push(
+            target.textureIndices.push(
               textureIndexBottom,
               textureIndexBottom,
               textureIndexBottom,
               textureIndexBottom
             );
           } else {
-            textureIndices.push(
+            target.textureIndices.push(
               textureIndexDefault,
               textureIndexDefault,
               textureIndexDefault,
@@ -218,8 +254,8 @@ export function generateMesh(
           TRANSPARENT_BLOCKS.includes(blockInfront) &&
           !(block === BlockType.WATER && blockInfront === BlockType.WATER)
         ) {
-          const index = positions.length / 3;
-          indices.push(
+          const index = target.positions.length / 3;
+          target.indices.push(
             index,
             index + 1,
             index + 2,
@@ -228,7 +264,7 @@ export function generateMesh(
             index + 3
           );
 
-          positions.push(
+          target.positions.push(
             x,
             y,
             1 + z,
@@ -242,10 +278,10 @@ export function generateMesh(
             1 + y,
             1 + z
           );
-          normals.push(0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1);
-          uvs.push(1, 1, 0, 1, 1, 0, 0, 0);
+          target.normals.push(0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1);
+          target.uvs.push(1, 1, 0, 1, 1, 0, 0, 0);
           if (textureIndexFront) {
-            textureIndices.push(
+            target.textureIndices.push(
               textureIndexFront,
               textureIndexFront,
               textureIndexFront,
@@ -253,14 +289,14 @@ export function generateMesh(
             );
           } else {
             if (textureIndexSides) {
-              textureIndices.push(
+              target.textureIndices.push(
                 textureIndexSides,
                 textureIndexSides,
                 textureIndexSides,
                 textureIndexSides
               );
             } else {
-              textureIndices.push(
+              target.textureIndices.push(
                 textureIndexDefault,
                 textureIndexDefault,
                 textureIndexDefault,
@@ -274,8 +310,8 @@ export function generateMesh(
           TRANSPARENT_BLOCKS.includes(blockBehind) &&
           !(block === BlockType.WATER && blockBehind === BlockType.WATER)
         ) {
-          const index = positions.length / 3;
-          indices.push(
+          const index = target.positions.length / 3;
+          target.indices.push(
             index,
             index + 1,
             index + 2,
@@ -284,11 +320,24 @@ export function generateMesh(
             index + 3
           );
 
-          positions.push(1 + x, y, z, x, y, z, 1 + x, 1 + y, z, x, 1 + y, z);
-          normals.push(0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1);
-          uvs.push(1, 1, 0, 1, 1, 0, 0, 0);
+          target.positions.push(
+            1 + x,
+            y,
+            z,
+            x,
+            y,
+            z,
+            1 + x,
+            1 + y,
+            z,
+            x,
+            1 + y,
+            z
+          );
+          target.normals.push(0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1);
+          target.uvs.push(1, 1, 0, 1, 1, 0, 0, 0);
           if (textureIndexBack) {
-            textureIndices.push(
+            target.textureIndices.push(
               textureIndexBack,
               textureIndexBack,
               textureIndexBack,
@@ -296,14 +345,14 @@ export function generateMesh(
             );
           } else {
             if (textureIndexSides) {
-              textureIndices.push(
+              target.textureIndices.push(
                 textureIndexSides,
                 textureIndexSides,
                 textureIndexSides,
                 textureIndexSides
               );
             } else {
-              textureIndices.push(
+              target.textureIndices.push(
                 textureIndexDefault,
                 textureIndexDefault,
                 textureIndexDefault,
@@ -317,8 +366,8 @@ export function generateMesh(
           TRANSPARENT_BLOCKS.includes(blockToTheLeft) &&
           !(block === BlockType.WATER && blockToTheLeft === BlockType.WATER)
         ) {
-          const index = positions.length / 3;
-          indices.push(
+          const index = target.positions.length / 3;
+          target.indices.push(
             index,
             index + 1,
             index + 2,
@@ -327,11 +376,24 @@ export function generateMesh(
             index + 3
           );
 
-          positions.push(x, 1 + y, z, x, y, z, x, 1 + y, 1 + z, x, y, 1 + z);
-          normals.push(-1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0);
-          uvs.push(0, 0, 0, 1, 1, 0, 1, 1);
+          target.positions.push(
+            x,
+            1 + y,
+            z,
+            x,
+            y,
+            z,
+            x,
+            1 + y,
+            1 + z,
+            x,
+            y,
+            1 + z
+          );
+          target.normals.push(-1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0);
+          target.uvs.push(0, 0, 0, 1, 1, 0, 1, 1);
           if (textureIndexLeft) {
-            textureIndices.push(
+            target.textureIndices.push(
               textureIndexLeft,
               textureIndexLeft,
               textureIndexLeft,
@@ -339,14 +401,14 @@ export function generateMesh(
             );
           } else {
             if (textureIndexSides) {
-              textureIndices.push(
+              target.textureIndices.push(
                 textureIndexSides,
                 textureIndexSides,
                 textureIndexSides,
                 textureIndexSides
               );
             } else {
-              textureIndices.push(
+              target.textureIndices.push(
                 textureIndexDefault,
                 textureIndexDefault,
                 textureIndexDefault,
@@ -360,8 +422,8 @@ export function generateMesh(
           TRANSPARENT_BLOCKS.includes(blockToTheRight) &&
           !(block === BlockType.WATER && blockToTheRight === BlockType.WATER)
         ) {
-          const index = positions.length / 3;
-          indices.push(
+          const index = target.positions.length / 3;
+          target.indices.push(
             index,
             index + 1,
             index + 2,
@@ -370,7 +432,7 @@ export function generateMesh(
             index + 3
           );
 
-          positions.push(
+          target.positions.push(
             1 + x,
             1 + y,
             1 + z,
@@ -384,10 +446,10 @@ export function generateMesh(
             y,
             z
           );
-          normals.push(1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0);
-          uvs.push(0, 0, 0, 1, 1, 0, 1, 1);
+          target.normals.push(1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0);
+          target.uvs.push(0, 0, 0, 1, 1, 0, 1, 1);
           if (textureIndexRight) {
-            textureIndices.push(
+            target.textureIndices.push(
               textureIndexRight,
               textureIndexRight,
               textureIndexRight,
@@ -395,14 +457,14 @@ export function generateMesh(
             );
           } else {
             if (textureIndexSides) {
-              textureIndices.push(
+              target.textureIndices.push(
                 textureIndexSides,
                 textureIndexSides,
                 textureIndexSides,
                 textureIndexSides
               );
             } else {
-              textureIndices.push(
+              target.textureIndices.push(
                 textureIndexDefault,
                 textureIndexDefault,
                 textureIndexDefault,
@@ -416,10 +478,19 @@ export function generateMesh(
   }
 
   return {
-    positions: new Float32Array(positions).buffer,
-    normals: new Float32Array(normals).buffer,
-    indices: new Uint32Array(indices).buffer,
-    uvs: new Float32Array(uvs).buffer,
-    textureIndices: new Int32Array(textureIndices).buffer,
+    opaque: {
+      positions: new Float32Array(opaque.positions).buffer,
+      normals: new Float32Array(opaque.normals).buffer,
+      indices: new Uint32Array(opaque.indices).buffer,
+      uvs: new Float32Array(opaque.uvs).buffer,
+      textureIndices: new Int32Array(opaque.textureIndices).buffer,
+    },
+    transparent: {
+      positions: new Float32Array(transparent.positions).buffer,
+      normals: new Float32Array(transparent.normals).buffer,
+      indices: new Uint32Array(transparent.indices).buffer,
+      uvs: new Float32Array(transparent.uvs).buffer,
+      textureIndices: new Int32Array(transparent.textureIndices).buffer,
+    },
   };
 }
