@@ -96,19 +96,27 @@ export default function Game() {
     []
   );
 
-  const renderer = new THREE.WebGLRenderer({
-    // antialias: true,
-    alpha: true,
-    // logarithmicDepthBuffer: true,
-  });
+  const renderer = useMemo(
+    () =>
+      new THREE.WebGLRenderer({
+        // antialias: true,
+        alpha: true,
+        // logarithmicDepthBuffer: true,
+      }),
+    []
+  );
 
-  const scene = new THREE.Scene();
+  const scene = useMemo(() => new THREE.Scene(), []);
 
-  const camera = new THREE.PerspectiveCamera(
-    85,
-    window.innerWidth / window.innerHeight,
-    0.1,
-    10000
+  const camera = useMemo(
+    () =>
+      new THREE.PerspectiveCamera(
+        85,
+        window.innerWidth / window.innerHeight,
+        0.1,
+        10000
+      ),
+    []
   );
 
   let initialLoadCompletion = 0;
@@ -437,6 +445,7 @@ export default function Game() {
       };
 
       const onMouseDown = (event: MouseEvent) => {
+        if (!playerControls.controls.isLocked) return;
         if (event.button === 0) {
           breakBlock();
         } else if (event.button === 2) {
@@ -452,8 +461,9 @@ export default function Game() {
         }
       };
 
-      containerRef.current.addEventListener("contextmenu", onContextMenu);
-      containerRef.current.addEventListener("mousedown", onMouseDown);
+      const container = containerRef.current;
+      container.addEventListener("contextmenu", onContextMenu);
+      container.addEventListener("mousedown", onMouseDown);
 
       // document.addEventListener("keydown", onKeyDown);
       document.addEventListener("keyup", onKeyUp);
@@ -514,11 +524,41 @@ export default function Game() {
       };
 
       return () => {
-        //   document.removeEventListener("keydown", onKeyDown);
-        //   document.removeEventListener("keyup", onKeyUp);
-        //   document.removeEventListener("contextmenu", onContextMenu);
-        //   document.removeEventListener("mousedown", onMouseDown);
+        if (intervalRef.current) clearInterval(intervalRef.current);
+
+        document.removeEventListener("keyup", onKeyUp);
+        if (container) {
+          container.removeEventListener("contextmenu", onContextMenu);
+          container.removeEventListener("mousedown", onMouseDown);
+        }
+
         nm.disconnect();
+
+        renderer.setAnimationLoop(null);
+        renderer.dispose();
+
+        scene.traverse((object) => {
+          if (object instanceof THREE.Mesh) {
+            object.geometry.dispose();
+            if (object.material instanceof THREE.Material) {
+              object.material.dispose();
+            } else if (Array.isArray(object.material)) {
+              object.material.forEach((m) => m.dispose());
+            }
+          }
+        });
+
+        if (playerControls) {
+          playerControls.dispose();
+        }
+
+        resizeObserver.disconnect();
+
+        generationWorkerPool.terminate();
+        meshWorkerPool.terminate();
+        textureArrayWorkerPool.terminate();
+
+        initialized.current = false;
       };
     }
   }, [containerRef]);

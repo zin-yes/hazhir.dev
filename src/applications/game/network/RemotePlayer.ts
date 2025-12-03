@@ -18,7 +18,7 @@ export class RemotePlayer {
 
     this.mesh.position.copy(initialPosition);
     // Adjust pivot if necessary, but center is fine for now if we offset y by half height
-    this.mesh.position.y -= 0.72;
+    this.mesh.position.y -= 1.0;
 
     scene.add(this.mesh);
   }
@@ -48,7 +48,7 @@ export class RemotePlayer {
     // So the mesh center should be at targetPosition.y + 0.9
 
     const renderPos = this.targetPosition.clone();
-    renderPos.y -= 0.72;
+    renderPos.y -= 1.0;
 
     this.mesh.position.lerp(renderPos, 10 * delta);
   }

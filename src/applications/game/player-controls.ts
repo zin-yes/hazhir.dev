@@ -33,59 +33,75 @@ export class PlayerControls {
     this.physics = physics;
 
     this.initInputListeners();
+
+    this.controls.addEventListener("unlock", () => {
+      this.moveForward = false;
+      this.moveBackward = false;
+      this.moveLeft = false;
+      this.moveRight = false;
+      this.canJump = false;
+    });
   }
 
+  private onKeyDown = (event: KeyboardEvent) => {
+    if (!this.controls.isLocked) return;
+
+    switch (event.code) {
+      case "ArrowUp":
+      case "KeyW":
+        this.moveForward = true;
+        break;
+      case "ArrowLeft":
+      case "KeyA":
+        this.moveLeft = true;
+        break;
+      case "ArrowDown":
+      case "KeyS":
+        this.moveBackward = true;
+        break;
+      case "ArrowRight":
+      case "KeyD":
+        this.moveRight = true;
+        break;
+      case "Space":
+        if (this.canJump) {
+          this.velocity.y = this.jumpForce;
+          this.canJump = false;
+        }
+        break;
+    }
+  };
+
+  private onKeyUp = (event: KeyboardEvent) => {
+    switch (event.code) {
+      case "ArrowUp":
+      case "KeyW":
+        this.moveForward = false;
+        break;
+      case "ArrowLeft":
+      case "KeyA":
+        this.moveLeft = false;
+        break;
+      case "ArrowDown":
+      case "KeyS":
+        this.moveBackward = false;
+        break;
+      case "ArrowRight":
+      case "KeyD":
+        this.moveRight = false;
+        break;
+    }
+  };
+
   private initInputListeners() {
-    const onKeyDown = (event: KeyboardEvent) => {
-      switch (event.code) {
-        case "ArrowUp":
-        case "KeyW":
-          this.moveForward = true;
-          break;
-        case "ArrowLeft":
-        case "KeyA":
-          this.moveLeft = true;
-          break;
-        case "ArrowDown":
-        case "KeyS":
-          this.moveBackward = true;
-          break;
-        case "ArrowRight":
-        case "KeyD":
-          this.moveRight = true;
-          break;
-        case "Space":
-          if (this.canJump) {
-            this.velocity.y = this.jumpForce;
-            this.canJump = false;
-          }
-          break;
-      }
-    };
+    document.addEventListener("keydown", this.onKeyDown);
+    document.addEventListener("keyup", this.onKeyUp);
+  }
 
-    const onKeyUp = (event: KeyboardEvent) => {
-      switch (event.code) {
-        case "ArrowUp":
-        case "KeyW":
-          this.moveForward = false;
-          break;
-        case "ArrowLeft":
-        case "KeyA":
-          this.moveLeft = false;
-          break;
-        case "ArrowDown":
-        case "KeyS":
-          this.moveBackward = false;
-          break;
-        case "ArrowRight":
-        case "KeyD":
-          this.moveRight = false;
-          break;
-      }
-    };
-
-    document.addEventListener("keydown", onKeyDown);
-    document.addEventListener("keyup", onKeyUp);
+  public dispose() {
+    document.removeEventListener("keydown", this.onKeyDown);
+    document.removeEventListener("keyup", this.onKeyUp);
+    this.controls.dispose();
   }
 
   public update(delta: number) {
