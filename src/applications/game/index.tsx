@@ -195,6 +195,9 @@ export default function Game() {
     BlockType.GLASS,
     BlockType.SAND,
     BlockType.COBBLESTONE,
+    BlockType.PLANKS_SLAB,
+    BlockType.COBBLESTONE_SLAB,
+    BlockType.STONE_SLAB,
   ]);
   const hotbarSlotsRef = useRef(hotbarSlots);
   const [isInventoryOpen, setIsInventoryOpen] = useState(false);
@@ -852,6 +855,83 @@ export default function Game() {
           }
 
           if (blockBox.intersectsBox(playerBox)) return;
+
+          // Handle slab stacking
+          const targetBlock = getBlock(x, y, z);
+          if (
+            targetBlock === type &&
+            (type === BlockType.PLANKS_SLAB ||
+              type === BlockType.COBBLESTONE_SLAB ||
+              type === BlockType.STONE_SLAB)
+          ) {
+            if (faceNormal.y === 1) {
+              // Stacking on top of a slab -> Full block
+              let fullBlockType = BlockType.PLANKS;
+              if (type === BlockType.COBBLESTONE_SLAB)
+                fullBlockType = BlockType.COBBLESTONE;
+              if (type === BlockType.STONE_SLAB) fullBlockType = BlockType.STONE;
+
+              setBlock(x, y, z, fullBlockType);
+              updateIndicator();
+              return;
+            }
+          }
+
+          // Handle top slab placement
+          if (
+            type === BlockType.PLANKS_SLAB ||
+            type === BlockType.COBBLESTONE_SLAB ||
+            type === BlockType.STONE_SLAB
+          ) {
+            // Check if we are placing on the top half of a block
+            const point = intersections[0].point;
+            // Calculate relative Y position within the block
+            // The block center is at x, y, z. The block bounds are [y-0.5, y+0.5]
+            // But wait, x,y,z are integers.
+            // If we clicked on a face, we need to know which block we clicked.
+            // intersections[0].point is in world coordinates.
+
+            // If we clicked on the side of a block
+            if (faceNormal.y === 0) {
+              const relativeY = point.y - (y - 0.5);
+              if (relativeY > 0.5) {
+                if (type === BlockType.PLANKS_SLAB)
+                  type = BlockType.PLANKS_SLAB_TOP;
+                if (type === BlockType.COBBLESTONE_SLAB)
+                  type = BlockType.COBBLESTONE_SLAB_TOP;
+                if (type === BlockType.STONE_SLAB)
+                  type = BlockType.STONE_SLAB_TOP;
+              }
+            } else if (faceNormal.y === -1) {
+              // Clicking on the bottom face of a block -> Top Slab
+              if (type === BlockType.PLANKS_SLAB)
+                type = BlockType.PLANKS_SLAB_TOP;
+              if (type === BlockType.COBBLESTONE_SLAB)
+                type = BlockType.COBBLESTONE_SLAB_TOP;
+              if (type === BlockType.STONE_SLAB)
+                type = BlockType.STONE_SLAB_TOP;
+            }
+          }
+
+          // Handle stacking for top slabs (placing a bottom slab on a top slab)
+          const targetBlockForTopSlab = getBlock(newBlockX, newBlockY, newBlockZ);
+          if (
+            (targetBlockForTopSlab === BlockType.PLANKS_SLAB_TOP &&
+              type === BlockType.PLANKS_SLAB) ||
+            (targetBlockForTopSlab === BlockType.COBBLESTONE_SLAB_TOP &&
+              type === BlockType.COBBLESTONE_SLAB) ||
+            (targetBlockForTopSlab === BlockType.STONE_SLAB_TOP &&
+              type === BlockType.STONE_SLAB)
+          ) {
+            let fullBlockType = BlockType.PLANKS;
+            if (type === BlockType.COBBLESTONE_SLAB)
+              fullBlockType = BlockType.COBBLESTONE;
+            if (type === BlockType.STONE_SLAB) fullBlockType = BlockType.STONE;
+
+            setBlock(newBlockX, newBlockY, newBlockZ, fullBlockType);
+            updateIndicator();
+            return;
+          }
 
           setBlock(newBlockX, newBlockY, newBlockZ, type);
 

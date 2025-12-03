@@ -21,6 +21,12 @@ export enum BlockType {
   GRASS,
   PLANKS,
   LOG,
+  PLANKS_SLAB,
+  COBBLESTONE_SLAB,
+  STONE_SLAB,
+  PLANKS_SLAB_TOP,
+  COBBLESTONE_SLAB_TOP,
+  STONE_SLAB_TOP,
 }
 
 export const Texture = {
@@ -162,6 +168,24 @@ BLOCK_TEXTURES[BlockType.LOG] = {
   DEFAULT: getTextureIndexByName("LOG_TOP_BOTTOM"),
   SIDES: getTextureIndexByName("LOG_SIDE"),
 };
+BLOCK_TEXTURES[BlockType.PLANKS_SLAB] = {
+  DEFAULT: getTextureIndexByName("PLANKS"),
+};
+BLOCK_TEXTURES[BlockType.COBBLESTONE_SLAB] = {
+  DEFAULT: getTextureIndexByName("COBBLESTONE"),
+};
+BLOCK_TEXTURES[BlockType.STONE_SLAB] = {
+  DEFAULT: getTextureIndexByName("STONE"),
+};
+BLOCK_TEXTURES[BlockType.PLANKS_SLAB_TOP] = {
+  DEFAULT: getTextureIndexByName("PLANKS"),
+};
+BLOCK_TEXTURES[BlockType.COBBLESTONE_SLAB_TOP] = {
+  DEFAULT: getTextureIndexByName("COBBLESTONE"),
+};
+BLOCK_TEXTURES[BlockType.STONE_SLAB_TOP] = {
+  DEFAULT: getTextureIndexByName("STONE"),
+};
 
 export const TRANSPARENT_BLOCKS = [
   BlockType.AIR,
@@ -169,6 +193,12 @@ export const TRANSPARENT_BLOCKS = [
   BlockType.LEAVES,
   BlockType.DECORATIVE_GLASS,
   BlockType.WATER,
+  BlockType.PLANKS_SLAB,
+  BlockType.COBBLESTONE_SLAB,
+  BlockType.STONE_SLAB,
+  BlockType.PLANKS_SLAB_TOP,
+  BlockType.COBBLESTONE_SLAB_TOP,
+  BlockType.STONE_SLAB_TOP,
   // BlockType.ANEMONE_FLOWER,
   // BlockType.PUMPOM_FLOWER,
   // BlockType.FORGETMENOTS_FLOWER,

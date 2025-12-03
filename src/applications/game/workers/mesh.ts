@@ -63,6 +63,60 @@ export function generateMesh(
   const frontBorder = borders.front ? new Uint8Array(borders.front) : null;
   const backBorder = borders.back ? new Uint8Array(borders.back) : null;
 
+  const isSlab = (block: BlockType) => {
+    return (
+      block === BlockType.PLANKS_SLAB ||
+      block === BlockType.COBBLESTONE_SLAB ||
+      block === BlockType.STONE_SLAB ||
+      block === BlockType.PLANKS_SLAB_TOP ||
+      block === BlockType.COBBLESTONE_SLAB_TOP ||
+      block === BlockType.STONE_SLAB_TOP
+    );
+  };
+
+  const isTopSlab = (block: BlockType) => {
+    return (
+      block === BlockType.PLANKS_SLAB_TOP ||
+      block === BlockType.COBBLESTONE_SLAB_TOP ||
+      block === BlockType.STONE_SLAB_TOP
+    );
+  };
+
+  const shouldCull = (
+    block: BlockType,
+    neighbor: BlockType,
+    face: "UP" | "DOWN" | "SIDE"
+  ) => {
+    if (neighbor === BlockType.AIR) return false;
+
+    // If I am a bottom slab, my top face is never covered by the block above
+    if (face === "UP" && isSlab(block) && !isTopSlab(block)) return false;
+
+    // If I am a top slab, my bottom face is never covered by the block below
+    if (face === "DOWN" && isTopSlab(block)) return false;
+
+    // If the neighbor below is a bottom slab, it never covers my bottom face
+    if (face === "DOWN" && isSlab(neighbor) && !isTopSlab(neighbor))
+      return false;
+
+    // If the neighbor above is a top slab, it never covers my top face
+    if (face === "UP" && isTopSlab(neighbor)) return false;
+
+    if (!TRANSPARENT_BLOCKS.includes(neighbor)) return true;
+
+    if (isSlab(block) && isSlab(neighbor)) {
+      // Slabs only cull each other on the sides if they are the same type (both top or both bottom)
+      if (face === "SIDE") {
+        return isTopSlab(block) === isTopSlab(neighbor);
+      }
+    }
+
+    if (block === BlockType.WATER && neighbor === BlockType.WATER) return true;
+    if (block === BlockType.GLASS && neighbor === BlockType.GLASS) return true;
+
+    return false;
+  };
+
   for (let x = 0; x < CHUNK_WIDTH; x++) {
     for (let y = 0; y < CHUNK_HEIGHT; y++) {
       for (let z = 0; z < CHUNK_LENGTH; z++) {
@@ -157,14 +211,17 @@ export function generateMesh(
         const textureIndexLeft = BLOCK_TEXTURES[block].LEFT_FACE;
         const textureIndexRight = BLOCK_TEXTURES[block].RIGHT_FACE;
 
-        const blockHeight =
-          block === BlockType.WATER && blockAbove !== BlockType.WATER ? 0.8 : 1;
-        const yh = y + blockHeight;
+        const blockHeight = isSlab(block)
+          ? 0.5
+          : block === BlockType.WATER && blockAbove !== BlockType.WATER
+          ? 0.8
+          : 1;
+        
+        const yOffset = isTopSlab(block) ? 0.5 : 0;
+        const yh = y + blockHeight + yOffset;
+        const yl = y + yOffset;
 
-        if (
-          TRANSPARENT_BLOCKS.includes(blockAbove) &&
-          !(block === BlockType.WATER && blockAbove === BlockType.WATER)
-        ) {
+        if (!shouldCull(block, blockAbove, "UP")) {
           const index = target.positions.length / 3;
           target.indices.push(
             index,
@@ -207,10 +264,7 @@ export function generateMesh(
             );
           }
         }
-        if (
-          TRANSPARENT_BLOCKS.includes(blockBelow) &&
-          !(block === BlockType.WATER && blockBelow === BlockType.WATER)
-        ) {
+        if (!shouldCull(block, blockBelow, "DOWN")) {
           const index = target.positions.length / 3;
           target.indices.push(
             index,
@@ -223,16 +277,16 @@ export function generateMesh(
 
           target.positions.push(
             x + 1,
-            y,
+            yl,
             z + 1,
             x,
-            y,
+            yl,
             z + 1,
             x + 1,
-            y,
+            yl,
             z,
             x,
-            y,
+            yl,
             z
           );
           target.normals.push(0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0);
@@ -254,22 +308,7 @@ export function generateMesh(
           }
         }
 
-        let cullFront = false;
-        if (block === BlockType.WATER && blockInfront === BlockType.WATER) {
-          let neighborAbove = BlockType.AIR;
-          if (!isFrontEdge) {
-            if (!isTopEdge)
-              neighborAbove = chunk[calculateOffset(x, y + 1, z + 1)];
-            else if (topBorder)
-              neighborAbove = topBorder[x * CHUNK_LENGTH + (z + 1)];
-          } else if (frontBorder && !isTopEdge) {
-            neighborAbove = frontBorder[x * CHUNK_HEIGHT + (y + 1)];
-          }
-          const neighborHeight = neighborAbove !== BlockType.WATER ? 0.8 : 1;
-          if (blockHeight <= neighborHeight) cullFront = true;
-        }
-
-        if (TRANSPARENT_BLOCKS.includes(blockInfront) && !cullFront) {
+        if (!shouldCull(block, blockInfront, "SIDE")) {
           const index = target.positions.length / 3;
           target.indices.push(
             index,
@@ -282,10 +321,10 @@ export function generateMesh(
 
           target.positions.push(
             x,
-            y,
+            yl,
             1 + z,
             1 + x,
-            y,
+            yl,
             1 + z,
             x,
             yh,
@@ -322,22 +361,7 @@ export function generateMesh(
           }
         }
 
-        let cullBack = false;
-        if (block === BlockType.WATER && blockBehind === BlockType.WATER) {
-          let neighborAbove = BlockType.AIR;
-          if (!isBackEdge) {
-            if (!isTopEdge)
-              neighborAbove = chunk[calculateOffset(x, y + 1, z - 1)];
-            else if (topBorder)
-              neighborAbove = topBorder[x * CHUNK_LENGTH + (z - 1)];
-          } else if (backBorder && !isTopEdge) {
-            neighborAbove = backBorder[x * CHUNK_HEIGHT + (y + 1)];
-          }
-          const neighborHeight = neighborAbove !== BlockType.WATER ? 0.8 : 1;
-          if (blockHeight <= neighborHeight) cullBack = true;
-        }
-
-        if (TRANSPARENT_BLOCKS.includes(blockBehind) && !cullBack) {
+        if (!shouldCull(block, blockBehind, "SIDE")) {
           const index = target.positions.length / 3;
           target.indices.push(
             index,
@@ -348,7 +372,7 @@ export function generateMesh(
             index + 3
           );
 
-          target.positions.push(1 + x, y, z, x, y, z, 1 + x, yh, z, x, yh, z);
+          target.positions.push(1 + x, yl, z, x, yl, z, 1 + x, yh, z, x, yh, z);
           target.normals.push(0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1);
           target.uvs.push(1, 1, 0, 1, 1, 0, 0, 0);
           if (textureIndexBack) {
@@ -377,22 +401,7 @@ export function generateMesh(
           }
         }
 
-        let cullLeft = false;
-        if (block === BlockType.WATER && blockToTheLeft === BlockType.WATER) {
-          let neighborAbove = BlockType.AIR;
-          if (!isLeftEdge) {
-            if (!isTopEdge)
-              neighborAbove = chunk[calculateOffset(x - 1, y + 1, z)];
-            else if (topBorder)
-              neighborAbove = topBorder[(x - 1) * CHUNK_LENGTH + z];
-          } else if (leftBorder && !isTopEdge) {
-            neighborAbove = leftBorder[(y + 1) * CHUNK_LENGTH + z];
-          }
-          const neighborHeight = neighborAbove !== BlockType.WATER ? 0.8 : 1;
-          if (blockHeight <= neighborHeight) cullLeft = true;
-        }
-
-        if (TRANSPARENT_BLOCKS.includes(blockToTheLeft) && !cullLeft) {
+        if (!shouldCull(block, blockToTheLeft, "SIDE")) {
           const index = target.positions.length / 3;
           target.indices.push(
             index,
@@ -403,7 +412,7 @@ export function generateMesh(
             index + 3
           );
 
-          target.positions.push(x, yh, z, x, y, z, x, yh, 1 + z, x, y, 1 + z);
+          target.positions.push(x, yh, z, x, yl, z, x, yh, 1 + z, x, yl, 1 + z);
           target.normals.push(-1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0);
           target.uvs.push(0, 0, 0, 1, 1, 0, 1, 1);
           if (textureIndexLeft) {
@@ -432,22 +441,7 @@ export function generateMesh(
           }
         }
 
-        let cullRight = false;
-        if (block === BlockType.WATER && blockToTheRight === BlockType.WATER) {
-          let neighborAbove = BlockType.AIR;
-          if (!isRightEdge) {
-            if (!isTopEdge)
-              neighborAbove = chunk[calculateOffset(x + 1, y + 1, z)];
-            else if (topBorder)
-              neighborAbove = topBorder[(x + 1) * CHUNK_LENGTH + z];
-          } else if (rightBorder && !isTopEdge) {
-            neighborAbove = rightBorder[(y + 1) * CHUNK_LENGTH + z];
-          }
-          const neighborHeight = neighborAbove !== BlockType.WATER ? 0.8 : 1;
-          if (blockHeight <= neighborHeight) cullRight = true;
-        }
-
-        if (TRANSPARENT_BLOCKS.includes(blockToTheRight) && !cullRight) {
+        if (!shouldCull(block, blockToTheRight, "SIDE")) {
           const index = target.positions.length / 3;
           target.indices.push(
             index,
@@ -463,13 +457,13 @@ export function generateMesh(
             yh,
             1 + z,
             1 + x,
-            y,
+            yl,
             1 + z,
             1 + x,
             yh,
             z,
             1 + x,
-            y,
+            yl,
             z
           );
           target.normals.push(1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0);
