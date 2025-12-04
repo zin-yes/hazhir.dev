@@ -20,7 +20,7 @@ export class NetworkManager {
     return new Promise((resolve, reject) => {
       // Create Peer instance
       // If id is provided, we try to use it (optional)
-      const peer = new Peer(id || undefined);
+      const peer = id ? new Peer(id) : new Peer();
 
       peer.on("open", (id) => {
         console.log("My peer ID is: " + id);
