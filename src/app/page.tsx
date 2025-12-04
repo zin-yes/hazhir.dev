@@ -198,7 +198,7 @@ function CalendarDropdown({ time }: { time: string }) {
       </DropdownMenuTrigger>
       <DropdownMenuContent className="ml-2 mt-2 w-fit p-1 rounded-xl shadow-md flex flex-col gap-1 transition-all duration-500 bg-background/40 backdrop-blur-xl z-[9999]">
         <Calendar
-          mode="default"
+          mode="single"
           className="rounded-[8px] text-base transition-all duration-500"
         />
       </DropdownMenuContent>

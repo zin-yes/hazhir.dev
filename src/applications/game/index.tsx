@@ -1754,7 +1754,7 @@ export default function Game() {
 
   function saveWorld() {
     if (!playerControlsRef.current) return;
-    const playerObj = playerControlsRef.current.controls.getObject();
+    const playerObj = playerControlsRef.current.controls.object;
     const saveData = {
       seed: seedRef.current,
       modifiedChunks: Array.from(modifiedChunks.current.entries()).map(
@@ -1796,7 +1796,7 @@ export default function Game() {
       setHotbarSlots(saveData.hotbarSlots);
 
       if (playerControlsRef.current) {
-        const playerObj = playerControlsRef.current.controls.getObject();
+        const playerObj = playerControlsRef.current.controls.object;
         playerObj.position.set(
           saveData.position.x,
           saveData.position.y,
@@ -1834,7 +1834,7 @@ export default function Game() {
       playerControlsRef.current.update(delta);
 
       if (networkManager.current.myPeerId) {
-        const obj = playerControlsRef.current.controls.getObject();
+        const obj = playerControlsRef.current.controls.object;
         networkManager.current.send({
           type: "PLAYER_UPDATE",
           id: networkManager.current.myPeerId,
