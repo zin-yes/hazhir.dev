@@ -77,7 +77,7 @@ export class PlayerControls {
           this.moveUp = true;
         } else if (
           this.physics.isInWater(
-            this.controls.getObject().position,
+            this.controls.object.position,
             this.currentEyeHeight
           )
         ) {
@@ -93,7 +93,7 @@ export class PlayerControls {
         if (
           this.isFlying ||
           this.physics.isInWater(
-            this.controls.getObject().position,
+            this.controls.object.position,
             this.currentEyeHeight
           )
         ) {
@@ -161,18 +161,18 @@ export class PlayerControls {
 
     // Compensate camera position to keep feet planted
     const diff = this.currentEyeHeight - lastEyeHeight;
-    this.controls.getObject().position.y += diff;
+    this.controls.object.position.y += diff;
 
     if (this.isFlying) {
       if (this.controls.isLocked) {
         const forward = new THREE.Vector3();
         const right = new THREE.Vector3();
 
-        this.controls.getObject().getWorldDirection(forward);
+        this.controls.object.getWorldDirection(forward);
         forward.y = 0;
         forward.normalize();
 
-        right.crossVectors(forward, this.controls.getObject().up).normalize();
+        right.crossVectors(forward, this.controls.object.up).normalize();
 
         const desiredVelocity = new THREE.Vector3();
         if (this.moveForward) desiredVelocity.add(forward);
@@ -191,7 +191,7 @@ export class PlayerControls {
         this.velocity.set(0, 0, 0);
       }
 
-      const position = this.controls.getObject().position;
+      const position = this.controls.object.position;
       position.addScaledVector(this.velocity, delta);
       this.physics.updatePlayerBox(
         this.playerBox,
@@ -201,7 +201,7 @@ export class PlayerControls {
       return;
     }
 
-    const position = this.controls.getObject().position;
+    const position = this.controls.object.position;
 
     if (this.physics.isInWater(position, this.currentEyeHeight)) {
       this.velocity.y -= this.gravity * delta * 0.1;
@@ -211,10 +211,10 @@ export class PlayerControls {
         const forward = new THREE.Vector3();
         const right = new THREE.Vector3();
 
-        this.controls.getObject().getWorldDirection(forward);
+        this.controls.object.getWorldDirection(forward);
         forward.normalize();
 
-        right.crossVectors(forward, this.controls.getObject().up).normalize();
+        right.crossVectors(forward, this.controls.object.up).normalize();
 
         const desiredVelocity = new THREE.Vector3();
         if (this.moveForward) desiredVelocity.add(forward);
@@ -248,11 +248,11 @@ export class PlayerControls {
       const forward = new THREE.Vector3();
       const right = new THREE.Vector3();
 
-      this.controls.getObject().getWorldDirection(forward);
+      this.controls.object.getWorldDirection(forward);
       forward.y = 0;
       forward.normalize();
 
-      right.crossVectors(forward, this.controls.getObject().up).normalize();
+      right.crossVectors(forward, this.controls.object.up).normalize();
 
       const desiredVelocity = new THREE.Vector3();
       if (this.moveForward) desiredVelocity.add(forward);
