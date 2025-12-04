@@ -62,6 +62,14 @@ function getTextureForBlock(block: BlockType): string {
       return Texture.COBBLESTONE;
     case BlockType.MARBLE:
       return Texture.MARBLE;
+    case BlockType.ANEMONE_FLOWER:
+      return Texture.ANEMONE_FLOWER;
+    case BlockType.SAPLING:
+      return Texture.SAPLING;
+    case BlockType.BELLIS_FLOWER:
+      return Texture.BELLIS_FLOWER;
+    case BlockType.FORGETMENOTS_FLOWER:
+      return Texture.FORGETMENOTS_FLOWER;
     default:
       return Texture.DIRT; // Fallback
   }

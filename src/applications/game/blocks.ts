@@ -27,6 +27,11 @@ export enum BlockType {
   PLANKS_SLAB_TOP,
   COBBLESTONE_SLAB_TOP,
   STONE_SLAB_TOP,
+  TALL_GRASS,
+  ANEMONE_FLOWER,
+  SAPLING,
+  BELLIS_FLOWER,
+  FORGETMENOTS_FLOWER,
 }
 
 export const Texture = {
@@ -54,6 +59,11 @@ export const Texture = {
   PLANKS: "planks.png",
   LOG_TOP_BOTTOM: "log_top_bottom.png",
   LOG_SIDE: "log_side.png",
+  ANEMONE_FLOWER: "flower_anemone.png",
+  SAPLING: "sapling.png",
+  BELLIS_FLOWER: "flower_bellis.png",
+  FORGETMENOTS_FLOWER: "flower_forgetmenots.png",
+  TALL_GRASS: "tall_grass.png",
 };
 
 export const LOADING_SCREEN_TEXTURES = [
@@ -76,6 +86,11 @@ export const LOADING_SCREEN_TEXTURES = [
   "planks.png",
   "log_top_bottom.png",
   "log_side.png",
+  "flower_anemone.png",
+  "sapling.png",
+  "flower_bellis.png",
+  "flower_forgetmenots.png",
+  "tall_grass.png",
 ];
 
 function getTextureIndexByName(name: string): number {
@@ -186,6 +201,22 @@ BLOCK_TEXTURES[BlockType.COBBLESTONE_SLAB_TOP] = {
 BLOCK_TEXTURES[BlockType.STONE_SLAB_TOP] = {
   DEFAULT: getTextureIndexByName("STONE"),
 };
+BLOCK_TEXTURES[BlockType.ANEMONE_FLOWER] = {
+  DEFAULT: getTextureIndexByName("ANEMONE_FLOWER"),
+};
+BLOCK_TEXTURES[BlockType.SAPLING] = {
+  DEFAULT: getTextureIndexByName("SAPLING"),
+};
+BLOCK_TEXTURES[BlockType.BELLIS_FLOWER] = {
+  DEFAULT: getTextureIndexByName("BELLIS_FLOWER"),
+};
+BLOCK_TEXTURES[BlockType.FORGETMENOTS_FLOWER] = {
+  DEFAULT: getTextureIndexByName("FORGETMENOTS_FLOWER"),
+};
+
+BLOCK_TEXTURES[BlockType.TALL_GRASS] = {
+  DEFAULT: getTextureIndexByName("TALL_GRASS"),
+};
 
 export const TRANSPARENT_BLOCKS = [
   BlockType.AIR,
@@ -199,10 +230,12 @@ export const TRANSPARENT_BLOCKS = [
   BlockType.PLANKS_SLAB_TOP,
   BlockType.COBBLESTONE_SLAB_TOP,
   BlockType.STONE_SLAB_TOP,
-  // BlockType.ANEMONE_FLOWER,
+  BlockType.ANEMONE_FLOWER,
+  BlockType.SAPLING,
+  BlockType.BELLIS_FLOWER,
+  BlockType.FORGETMENOTS_FLOWER,
+  BlockType.TALL_GRASS,
   // BlockType.PUMPOM_FLOWER,
-  // BlockType.FORGETMENOTS_FLOWER,
-  // BlockType.BELLIS_FLOWER,
 ];
 
 export const TRANSLUCENT_BLOCKS = [
@@ -214,8 +247,10 @@ export const TRANSLUCENT_BLOCKS = [
 export const NON_COLLIDABLE_BLOCKS = [
   BlockType.AIR,
   BlockType.WATER,
-  // BlockType.ANEMONE_FLOWER,
+  BlockType.ANEMONE_FLOWER,
+  BlockType.SAPLING,
+  BlockType.BELLIS_FLOWER,
+  BlockType.FORGETMENOTS_FLOWER,
+  BlockType.TALL_GRASS,
   // BlockType.PUMPOM_FLOWER,
-  // BlockType.FORGETMENOTS_FLOWER,
-  // BlockType.BELLIS_FLOWER,
 ];

@@ -891,10 +891,69 @@ export default function Game() {
           )
         );
         if (getBlock(x, y, z) !== BlockType.AIR) {
-          scene.getObjectByName("indicator")!.position.x = x;
-          scene.getObjectByName("indicator")!.position.y = y;
-          scene.getObjectByName("indicator")!.position.z = z;
-          scene.getObjectByName("indicator")!.visible = true;
+          const indicator = scene.getObjectByName(
+            "indicator"
+          ) as THREE.LineSegments;
+          const blockType = getBlock(x, y, z);
+
+          // default: full block
+          let scaleX = 1.002;
+          let scaleY = 1.002;
+          let scaleZ = 1.002;
+          let posY = y;
+
+          // Bottom slabs
+          if (
+            blockType === BlockType.PLANKS_SLAB ||
+            blockType === BlockType.COBBLESTONE_SLAB ||
+            blockType === BlockType.STONE_SLAB
+          ) {
+            scaleY = 0.502; // half-height
+            posY = y - 0.25; // center of lower half
+          }
+
+          // Top slabs
+          if (
+            blockType === BlockType.PLANKS_SLAB_TOP ||
+            blockType === BlockType.COBBLESTONE_SLAB_TOP ||
+            blockType === BlockType.STONE_SLAB_TOP
+          ) {
+            scaleY = 0.502;
+            posY = y + 0.25; // center of upper half
+          }
+
+          // Cross-shaped blocks: make indicator slimmer horizontally
+          if (
+            blockType === BlockType.ANEMONE_FLOWER ||
+            blockType === BlockType.SAPLING
+          ) {
+            scaleX = 0.6;
+            scaleZ = 0.6;
+            scaleY = 1.002;
+            posY = y;
+          }
+
+          // Forget-me-nots: smaller indicator (but full height)
+          if (blockType === BlockType.FORGETMENOTS_FLOWER) {
+            scaleX = 0.6;
+            scaleZ = 0.6;
+            scaleY = 1.002;
+            posY = y;
+          }
+
+          // Bellis: very short indicator near the ground (our bellis quad sits at y + 0.1)
+          if (blockType === BlockType.BELLIS_FLOWER) {
+            scaleX = 1.002;
+            scaleZ = 1.002;
+            scaleY = 0.08; // very short
+            posY = y - 0.46; // align with the bellis quad placement
+          }
+
+          indicator.position.x = x;
+          indicator.position.y = posY;
+          indicator.position.z = z;
+          indicator.scale.set(scaleX, scaleY, scaleZ);
+          indicator.visible = true;
           return;
         }
       }
@@ -1581,6 +1640,45 @@ export default function Game() {
     }
   }
 
+  function growTree(x: number, y: number, z: number) {
+    const height = 4 + Math.floor(Math.random() * 3); // 4 to 6
+
+    // Trunk
+    for (let i = 0; i < height; i++) {
+      setBlock(x, y + i, z, BlockType.LOG);
+    }
+
+    // Leaves
+    // Top (y+height)
+    setBlock(x, y + height, z, BlockType.LEAVES);
+    setBlock(x + 1, y + height, z, BlockType.LEAVES);
+    setBlock(x - 1, y + height, z, BlockType.LEAVES);
+    setBlock(x, y + height, z + 1, BlockType.LEAVES);
+    setBlock(x, y + height, z - 1, BlockType.LEAVES);
+
+    // Layer 2 (y+height-1)
+    for (let dx = -2; dx <= 2; dx++) {
+      for (let dz = -2; dz <= 2; dz++) {
+        if (Math.abs(dx) === 2 && Math.abs(dz) === 2) {
+          if (Math.random() > 0.5) continue;
+        }
+        if (dx === 0 && dz === 0) continue; // Trunk
+        setBlock(x + dx, y + height - 1, z + dz, BlockType.LEAVES);
+      }
+    }
+
+    // Layer 3 (y+height-2)
+    for (let dx = -2; dx <= 2; dx++) {
+      for (let dz = -2; dz <= 2; dz++) {
+        if (Math.abs(dx) === 2 && Math.abs(dz) === 2) {
+          if (Math.random() > 0.5) continue;
+        }
+        if (dx === 0 && dz === 0) continue; // Trunk
+        setBlock(x + dx, y + height - 2, z + dz, BlockType.LEAVES);
+      }
+    }
+  }
+
   function tickChunks() {
     if (connectedToHostRef.current) return;
     Object.keys(chunks.current).forEach((chunkName) => {
@@ -1599,7 +1697,12 @@ export default function Game() {
         const globalY = chunkY * CHUNK_HEIGHT + y;
         const globalZ = chunkZ * CHUNK_LENGTH + z;
 
-        if (block === BlockType.GRASS) {
+        if (block === BlockType.SAPLING) {
+          // Tree growth
+          if (Math.random() < 0.1) {
+            growTree(globalX, globalY, globalZ);
+          }
+        } else if (block === BlockType.GRASS) {
           // Grass death
           const blockAbove = getBlock(globalX, globalY + 1, globalZ);
           if (
