@@ -347,6 +347,44 @@ function pseudoRandom(x: number, z: number, seed: number): number {
   return val - Math.floor(val);
 }
 
+// Check if a tree would spawn at a given global position (deterministic)
+function wouldTreeSpawnAt(
+  noiseGenerator: typeof FastNoiseLite,
+  globalX: number,
+  globalZ: number,
+  seed: number
+): boolean {
+  const treeRnd = pseudoRandom(globalX, globalZ, seed);
+  if (treeRnd <= 0.98) return false;
+
+  const surfaceY = getSurfaceHeight(noiseGenerator, globalX, globalZ);
+  const grassY = Math.floor(surfaceY);
+
+  // Check if there's grass at surface (trees only spawn on grass)
+  if (grassY < WATER_LEVEL) return false;
+
+  return true;
+}
+
+// Check if any tree exists within a given radius of a position
+function hasTreeNearby(
+  noiseGenerator: typeof FastNoiseLite,
+  globalX: number,
+  globalZ: number,
+  seed: number,
+  radius: number
+): boolean {
+  for (let dx = -radius; dx <= radius; dx++) {
+    for (let dz = -radius; dz <= radius; dz++) {
+      if (dx === 0 && dz === 0) continue;
+      if (wouldTreeSpawnAt(noiseGenerator, globalX + dx, globalZ + dz, seed)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 function placeTreeInChunk(
   chunk: Uint8Array,
   chunkX: number,
@@ -453,6 +491,58 @@ export function generateChunk(
     }
   }
 
+  for (let x = 0; x < CHUNK_WIDTH; x++) {
+    for (let z = 0; z < CHUNK_LENGTH; z++) {
+      const globalX = x + CHUNK_WIDTH * chunkX;
+      const globalZ = z + CHUNK_LENGTH * chunkZ;
+
+      // Skip flora placement if a tree would spawn here
+      if (wouldTreeSpawnAt(noiseGenerator, globalX, globalZ, seed)) {
+        continue;
+      }
+
+      // Tall grass: make it more common than flowers and trees
+      const tallRnd = pseudoRandom(globalX, globalZ, seed + 456);
+      if (tallRnd > 0.9) {
+        const surfaceY = getSurfaceHeight(noiseGenerator, globalX, globalZ);
+        const grassY = Math.floor(surfaceY);
+
+        if (grassY >= WATER_LEVEL) {
+          const localY = grassY + 1 - chunkY * CHUNK_HEIGHT;
+          if (localY >= 0 && localY < CHUNK_HEIGHT) {
+            const index = calculateOffset(x, localY, z);
+            if (chunk[index] === BlockType.AIR) {
+              chunk[index] = BlockType.TALL_GRASS;
+            }
+          }
+        }
+      } else {
+        const flowerRnd = pseudoRandom(globalX, globalZ, seed + 123);
+
+        if (flowerRnd > 0.97) {
+          const surfaceY = getSurfaceHeight(noiseGenerator, globalX, globalZ);
+          const grassY = Math.floor(surfaceY);
+
+          if (grassY >= WATER_LEVEL) {
+            const localY = grassY + 1 - chunkY * CHUNK_HEIGHT;
+            if (localY >= 0 && localY < CHUNK_HEIGHT) {
+              const index = calculateOffset(x, localY, z);
+              if (chunk[index] === BlockType.AIR) {
+                if (flowerRnd > 0.99) {
+                  chunk[index] = BlockType.ANEMONE_FLOWER;
+                } else if (flowerRnd > 0.98) {
+                  chunk[index] = BlockType.BELLIS_FLOWER;
+                } else {
+                  chunk[index] = BlockType.FORGETMENOTS_FLOWER;
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
   const treeRadius = 2;
   for (let x = -treeRadius; x < CHUNK_WIDTH + treeRadius; x++) {
     for (let z = -treeRadius; z < CHUNK_LENGTH + treeRadius; z++) {
@@ -462,6 +552,11 @@ export function generateChunk(
       const treeRnd = pseudoRandom(globalX, globalZ, seed);
 
       if (treeRnd > 0.98) {
+        // Check if another tree would spawn within 3 blocks
+        if (hasTreeNearby(noiseGenerator, globalX, globalZ, seed, 3)) {
+          continue;
+        }
+
         const surfaceY = getSurfaceHeight(noiseGenerator, globalX, globalZ);
         const grassY = Math.floor(surfaceY);
 

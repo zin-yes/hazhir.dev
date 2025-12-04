@@ -82,6 +82,14 @@ export function generateMesh(
     );
   };
 
+  const isCrossBlock = (block: BlockType) => {
+    return (
+      block === BlockType.ANEMONE_FLOWER ||
+      block === BlockType.SAPLING ||
+      block === BlockType.TALL_GRASS
+    );
+  };
+
   const shouldCull = (
     block: BlockType,
     neighbor: BlockType,
@@ -210,6 +218,305 @@ export function generateMesh(
         const textureIndexBottom = BLOCK_TEXTURES[block].BOTTOM_FACE;
         const textureIndexLeft = BLOCK_TEXTURES[block].LEFT_FACE;
         const textureIndexRight = BLOCK_TEXTURES[block].RIGHT_FACE;
+
+        if (isCrossBlock(block)) {
+          const index = transparent.positions.length / 3;
+
+          const height = block === BlockType.TALL_GRASS ? 0.9 : 1;
+
+          // Diagonal 1
+          transparent.positions.push(
+            x,
+            y,
+            z,
+            x + 1,
+            y,
+            z + 1,
+            x,
+            y + height,
+            z,
+            x + 1,
+            y + height,
+            z + 1
+          );
+          transparent.normals.push(0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0);
+          transparent.uvs.push(1, 1, 0, 1, 1, 0, 0, 0);
+          transparent.textureIndices.push(
+            textureIndexDefault,
+            textureIndexDefault,
+            textureIndexDefault,
+            textureIndexDefault
+          );
+
+          transparent.indices.push(
+            index,
+            index + 1,
+            index + 2,
+            index + 2,
+            index + 1,
+            index + 3,
+            index,
+            index + 2,
+            index + 1,
+            index + 2,
+            index + 3,
+            index + 1
+          );
+
+          const index2 = transparent.positions.length / 3;
+
+          // Diagonal 2
+          transparent.positions.push(
+            x,
+            y,
+            z + 1,
+            x + 1,
+            y,
+            z,
+            x,
+            y + height,
+            z + 1,
+            x + 1,
+            y + height,
+            z
+          );
+          transparent.normals.push(0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0);
+          transparent.uvs.push(1, 1, 0, 1, 1, 0, 0, 0);
+          transparent.textureIndices.push(
+            textureIndexDefault,
+            textureIndexDefault,
+            textureIndexDefault,
+            textureIndexDefault
+          );
+
+          transparent.indices.push(
+            index2,
+            index2 + 1,
+            index2 + 2,
+            index2 + 2,
+            index2 + 1,
+            index2 + 3,
+            index2,
+            index2 + 2,
+            index2 + 1,
+            index2 + 2,
+            index2 + 3,
+            index2 + 1
+          );
+
+          continue;
+        }
+
+        if (block === BlockType.BELLIS_FLOWER) {
+          const index = transparent.positions.length / 3;
+          const yOffset = 0.1;
+
+          transparent.positions.push(
+            x,
+            y + yOffset,
+            z + 1,
+            x + 1,
+            y + yOffset,
+            z + 1,
+            x,
+            y + yOffset,
+            z,
+            x + 1,
+            y + yOffset,
+            z
+          );
+          transparent.normals.push(0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0);
+          transparent.uvs.push(1, 1, 0, 1, 1, 0, 0, 0);
+          transparent.textureIndices.push(
+            textureIndexDefault,
+            textureIndexDefault,
+            textureIndexDefault,
+            textureIndexDefault
+          );
+
+          transparent.indices.push(
+            index,
+            index + 1,
+            index + 2,
+            index + 2,
+            index + 1,
+            index + 3,
+            index,
+            index + 2,
+            index + 1,
+            index + 2,
+            index + 3,
+            index + 1
+          );
+
+          continue;
+        }
+
+        if (block === BlockType.FORGETMENOTS_FLOWER) {
+          const margin = 0.3;
+          const min = margin;
+          const max = 1 - margin;
+          const height = 1; // Full height? Or maybe slightly less? Let's stick to 1 for now.
+
+          // 4 Quads forming a square box
+          // Front (z = max)
+          let index = transparent.positions.length / 3;
+          transparent.positions.push(
+            x,
+            y,
+            z + max,
+            x + 1,
+            y,
+            z + max,
+            x,
+            y + height,
+            z + max,
+            x + 1,
+            y + height,
+            z + max
+          );
+          transparent.normals.push(0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1);
+          transparent.uvs.push(1, 1, 0, 1, 1, 0, 0, 0);
+          transparent.textureIndices.push(
+            textureIndexDefault,
+            textureIndexDefault,
+            textureIndexDefault,
+            textureIndexDefault
+          );
+          transparent.indices.push(
+            index,
+            index + 1,
+            index + 2,
+            index + 2,
+            index + 1,
+            index + 3,
+            index,
+            index + 2,
+            index + 1,
+            index + 2,
+            index + 3,
+            index + 1
+          );
+
+          // Back (z = min)
+          index = transparent.positions.length / 3;
+          transparent.positions.push(
+            x + 1,
+            y,
+            z + min,
+            x,
+            y,
+            z + min,
+            x + 1,
+            y + height,
+            z + min,
+            x,
+            y + height,
+            z + min
+          );
+          transparent.normals.push(0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1);
+          transparent.uvs.push(1, 1, 0, 1, 1, 0, 0, 0);
+          transparent.textureIndices.push(
+            textureIndexDefault,
+            textureIndexDefault,
+            textureIndexDefault,
+            textureIndexDefault
+          );
+          transparent.indices.push(
+            index,
+            index + 1,
+            index + 2,
+            index + 2,
+            index + 1,
+            index + 3,
+            index,
+            index + 2,
+            index + 1,
+            index + 2,
+            index + 3,
+            index + 1
+          );
+
+          // Left (x = min)
+          index = transparent.positions.length / 3;
+          transparent.positions.push(
+            x + min,
+            y,
+            z,
+            x + min,
+            y,
+            z + 1,
+            x + min,
+            y + height,
+            z,
+            x + min,
+            y + height,
+            z + 1
+          );
+          transparent.normals.push(-1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0);
+          transparent.uvs.push(1, 1, 0, 1, 1, 0, 0, 0);
+          transparent.textureIndices.push(
+            textureIndexDefault,
+            textureIndexDefault,
+            textureIndexDefault,
+            textureIndexDefault
+          );
+          transparent.indices.push(
+            index,
+            index + 1,
+            index + 2,
+            index + 2,
+            index + 1,
+            index + 3,
+            index,
+            index + 2,
+            index + 1,
+            index + 2,
+            index + 3,
+            index + 1
+          );
+
+          // Right (x = max)
+          index = transparent.positions.length / 3;
+          transparent.positions.push(
+            x + max,
+            y,
+            z + 1,
+            x + max,
+            y,
+            z,
+            x + max,
+            y + height,
+            z + 1,
+            x + max,
+            y + height,
+            z
+          );
+          transparent.normals.push(1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0);
+          transparent.uvs.push(1, 1, 0, 1, 1, 0, 0, 0);
+          transparent.textureIndices.push(
+            textureIndexDefault,
+            textureIndexDefault,
+            textureIndexDefault,
+            textureIndexDefault
+          );
+          transparent.indices.push(
+            index,
+            index + 1,
+            index + 2,
+            index + 2,
+            index + 1,
+            index + 3,
+            index,
+            index + 2,
+            index + 1,
+            index + 2,
+            index + 3,
+            index + 1
+          );
+
+          continue;
+        }
 
         const blockHeight = isSlab(block)
           ? 0.5
