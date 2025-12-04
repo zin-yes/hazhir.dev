@@ -57,7 +57,7 @@ export default function Game() {
   const [peerId, setPeerId] = useState<string>("");
   const [connectedToHost, setConnectedToHost] = useState(false);
   const connectedToHostRef = useRef(false);
-  const intervalRef = useRef<Timer | null>(null);
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const chunkPositions = useRef<
     { chunkX: number; chunkY: number; chunkZ: number }[]
@@ -831,24 +831,27 @@ export default function Game() {
           .exec("generateMesh", [result, borders])
           .then(
             ({
-              positions,
-              normals,
-              indices,
-              uvs,
-              textureIndices,
+              opaque,
+              transparent,
             }: {
-              positions: ArrayBuffer;
-              normals: ArrayBuffer;
-              indices: ArrayBuffer;
-              uvs: ArrayBuffer;
-              textureIndices: ArrayBuffer;
+              opaque: {
+                positions: ArrayBuffer;
+                normals: ArrayBuffer;
+                indices: ArrayBuffer;
+                uvs: ArrayBuffer;
+                textureIndices: ArrayBuffer;
+              };
+              transparent: {
+                positions: ArrayBuffer;
+                normals: ArrayBuffer;
+                indices: ArrayBuffer;
+                uvs: ArrayBuffer;
+                textureIndices: ArrayBuffer;
+              };
             }) => {
               addChunkMesh(
-                positions,
-                normals,
-                indices,
-                uvs,
-                textureIndices,
+                opaque,
+                transparent,
                 chunkName,
                 chunkX,
                 chunkY,
