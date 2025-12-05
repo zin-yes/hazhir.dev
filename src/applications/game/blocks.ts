@@ -29,6 +29,7 @@ export enum BlockType {
   STONE_SLAB_TOP,
   TALL_GRASS,
   ANEMONE_FLOWER,
+  PONPON_FLOWER,
   SAPLING,
   BELLIS_FLOWER,
   FORGETMENOTS_FLOWER,
@@ -60,6 +61,7 @@ export const Texture = {
   LOG_TOP_BOTTOM: "log_top_bottom.png",
   LOG_SIDE: "log_side.png",
   ANEMONE_FLOWER: "flower_anemone.png",
+  PONPON_FLOWER: "flower_ponpon.png",
   SAPLING: "sapling.png",
   BELLIS_FLOWER: "flower_bellis.png",
   FORGETMENOTS_FLOWER: "flower_forgetmenots.png",
@@ -78,6 +80,7 @@ export const LOADING_SCREEN_TEXTURES = [
   "phyllite.png",
   "shale.png",
   "stone.png",
+  "flower_ponpon.png",
   "cobblestone.png",
   "sand.png",
   "marble.png",
@@ -204,6 +207,9 @@ BLOCK_TEXTURES[BlockType.STONE_SLAB_TOP] = {
 BLOCK_TEXTURES[BlockType.ANEMONE_FLOWER] = {
   DEFAULT: getTextureIndexByName("ANEMONE_FLOWER"),
 };
+BLOCK_TEXTURES[BlockType.PONPON_FLOWER] = {
+  DEFAULT: getTextureIndexByName("PONPON_FLOWER"),
+};
 BLOCK_TEXTURES[BlockType.SAPLING] = {
   DEFAULT: getTextureIndexByName("SAPLING"),
 };
@@ -231,6 +237,7 @@ export const TRANSPARENT_BLOCKS = [
   BlockType.COBBLESTONE_SLAB_TOP,
   BlockType.STONE_SLAB_TOP,
   BlockType.ANEMONE_FLOWER,
+  BlockType.PONPON_FLOWER,
   BlockType.SAPLING,
   BlockType.BELLIS_FLOWER,
   BlockType.FORGETMENOTS_FLOWER,
@@ -248,6 +255,7 @@ export const NON_COLLIDABLE_BLOCKS = [
   BlockType.AIR,
   BlockType.WATER,
   BlockType.ANEMONE_FLOWER,
+  BlockType.PONPON_FLOWER,
   BlockType.SAPLING,
   BlockType.BELLIS_FLOWER,
   BlockType.FORGETMENOTS_FLOWER,
@@ -288,6 +296,7 @@ export const BLOCK_ITEM_TEXTURES: Record<
   [BlockType.COBBLESTONE_SLAB_TOP]: Texture.COBBLESTONE,
   [BlockType.STONE_SLAB_TOP]: Texture.STONE,
   [BlockType.ANEMONE_FLOWER]: Texture.ANEMONE_FLOWER,
+  [BlockType.PONPON_FLOWER]: Texture.PONPON_FLOWER,
   [BlockType.SAPLING]: Texture.SAPLING,
   [BlockType.BELLIS_FLOWER]: Texture.BELLIS_FLOWER,
   [BlockType.FORGETMENOTS_FLOWER]: Texture.FORGETMENOTS_FLOWER,

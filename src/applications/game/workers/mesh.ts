@@ -85,6 +85,7 @@ export function generateMesh(
   const isCrossBlock = (block: BlockType) => {
     return (
       block === BlockType.ANEMONE_FLOWER ||
+      block === BlockType.PONPON_FLOWER ||
       block === BlockType.SAPLING ||
       block === BlockType.TALL_GRASS
     );

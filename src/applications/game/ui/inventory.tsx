@@ -23,26 +23,33 @@ export function Inventory({ isOpen, onSelectBlock }: InventoryProps) {
         <CardContent>
           <ScrollArea className="h-[400px] pr-4">
             <div className="grid grid-cols-6 gap-4">
-              {blocks.map((block) => (
-                <button
-                  key={block}
-                  onClick={() => onSelectBlock(block)}
-                  className="flex flex-col items-center gap-2 p-2 rounded-md hover:bg-white/10 transition-colors group"
-                >
-                  <div
-                    className="w-12 h-12 bg-cover bg-center border border-white/10 group-hover:border-white/50 transition-all"
-                    style={{
-                      backgroundImage: `url(/game/${getTextureForBlock(
-                        block
-                      )})`,
-                      imageRendering: "pixelated",
-                    }}
-                  />
-                  <span className="text-xs text-zinc-400 group-hover:text-white capitalize">
-                    {BlockType[block].toLowerCase().replace(/_/g, " ")}
-                  </span>
-                </button>
-              ))}
+              {blocks
+                .filter(
+                  (block) =>
+                    block !== BlockType.STONE_SLAB_TOP &&
+                    block !== BlockType.COBBLESTONE_SLAB_TOP &&
+                    block !== BlockType.PLANKS_SLAB_TOP
+                )
+                .map((block) => (
+                  <button
+                    key={block}
+                    onClick={() => onSelectBlock(block)}
+                    className="flex flex-col items-center gap-2 p-2 rounded-md hover:bg-white/10 transition-colors group"
+                  >
+                    <div
+                      className="w-12 h-12 bg-cover bg-center border border-white/10 group-hover:border-white/50 transition-all"
+                      style={{
+                        backgroundImage: `url(/game/${getTextureForBlock(
+                          block
+                        )})`,
+                        imageRendering: "pixelated",
+                      }}
+                    />
+                    <span className="text-xs text-zinc-400 group-hover:text-white capitalize">
+                      {BlockType[block].toLowerCase().replace(/_/g, " ")}
+                    </span>
+                  </button>
+                ))}
             </div>
           </ScrollArea>
         </CardContent>
