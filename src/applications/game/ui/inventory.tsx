@@ -1,6 +1,6 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { BlockType, Texture } from "../blocks";
+import { BLOCK_ITEM_TEXTURES, BlockType } from "../blocks";
 
 interface InventoryProps {
   isOpen: boolean;
@@ -51,60 +51,7 @@ export function Inventory({ isOpen, onSelectBlock }: InventoryProps) {
   );
 }
 
-function getTextureForBlock(block: BlockType): string {
-  // Duplicate mapping for now, ideally shared
-  switch (block) {
-    case BlockType.DIRT:
-      return Texture.DIRT;
-    case BlockType.GRASS:
-      return Texture.GRASS_SIDE;
-    case BlockType.STONE:
-      return Texture.STONE;
-    case BlockType.LOG:
-      return Texture.LOG_SIDE;
-    case BlockType.PLANKS:
-      return Texture.PLANKS;
-    case BlockType.LEAVES:
-      return Texture.LEAVES;
-    case BlockType.GLASS:
-      return Texture.GLASS;
-    case BlockType.SAND:
-      return Texture.SAND;
-    case BlockType.GRAVEL:
-      return Texture.GRAVEL;
-    case BlockType.COBBLESTONE:
-      return Texture.COBBLESTONE;
-    case BlockType.HUMUS:
-      return Texture.HUMUS;
-    case BlockType.SILT:
-      return Texture.SILT;
-    case BlockType.CLAY:
-      return Texture.CLAY;
-    case BlockType.GRANITE:
-      return Texture.GRANITE;
-    case BlockType.CALCITE:
-      return Texture.CALCITE;
-    case BlockType.COMPACT_GRAVEL:
-      return Texture.COMPACT_GRAVEL;
-    case BlockType.PHYLLITE:
-      return Texture.PHYLLITE;
-    case BlockType.SHALE:
-      return Texture.SHALE;
-    case BlockType.MARBLE:
-      return Texture.MARBLE;
-    case BlockType.WATER:
-      return Texture.WATER;
-    case BlockType.DECORATIVE_GLASS:
-      return Texture.DECORATIVE_GLASS;
-    case BlockType.ANEMONE_FLOWER:
-      return Texture.ANEMONE_FLOWER;
-    case BlockType.SAPLING:
-      return Texture.SAPLING;
-    case BlockType.BELLIS_FLOWER:
-      return Texture.BELLIS_FLOWER;
-    case BlockType.FORGETMENOTS_FLOWER:
-      return Texture.FORGETMENOTS_FLOWER;
-    default:
-      return Texture.DIRT;
-  }
+function getTextureForBlock(block: BlockType) {
+  const textureInfo = BLOCK_ITEM_TEXTURES[block];
+  return textureInfo;
 }

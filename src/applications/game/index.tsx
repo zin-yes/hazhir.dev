@@ -29,6 +29,7 @@ import {
   Texture,
 } from "@/applications/game/blocks";
 import { BlockHighlighter } from "./block-highlighter";
+import { HOTBAR_SIZE, normalizeHotbar } from "./constants";
 import { NetworkManager } from "./network/NetworkManager";
 import { RemotePlayer } from "./network/RemotePlayer";
 import { PhysicsEngine } from "./physics-engine";
@@ -36,7 +37,6 @@ import { PlayerControls } from "./player-controls";
 import { FRAGMENT_SHADER, VERTEX_SHADER } from "./shaders/chunk";
 import UILayer from "./ui/index";
 import { calculateOffset, getSurfaceHeightFromSeed } from "./utils";
-import { HOTBAR_SIZE, normalizeHotbar } from "./constants";
 
 const FLYING_SPEED = 10;
 
@@ -1869,7 +1869,10 @@ export default function Game() {
         hotbarSlots={hotbarSlots}
         isInventoryOpen={isInventoryOpen}
         onSelectBlock={(block) => {
-          const clampedIndex = Math.max(0, Math.min(selectedSlot, HOTBAR_SIZE - 1));
+          const clampedIndex = Math.max(
+            0,
+            Math.min(selectedSlot, HOTBAR_SIZE - 1)
+          );
           const base = normalizeHotbar(hotbarSlots);
           const newSlots = [...base];
           newSlots[clampedIndex] = block;
