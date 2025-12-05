@@ -37,6 +37,7 @@ import { PlayerControls } from "./player-controls";
 import { FRAGMENT_SHADER, VERTEX_SHADER } from "./shaders/chunk";
 import UILayer from "./ui/index";
 import { calculateOffset, getSurfaceHeightFromSeed } from "./utils";
+import { updateWater } from "./water-physics";
 
 const FLYING_SPEED = 10;
 
@@ -66,6 +67,7 @@ export default function Game() {
   const chunks = useRef<{ [chunkName: string]: Uint8Array }>({});
   const chunkVersions = useRef<{ [chunkName: string]: number }>({});
   const modifiedChunks = useRef<Map<string, Map<number, number>>>(new Map());
+  const pendingWaterUpdates = useRef<Set<string>>(new Set());
   const generationWorkerPool = useMemo(
     () =>
       new WorkerPool(
@@ -1347,6 +1349,26 @@ export default function Game() {
     return chunk[calculateOffset(blockChunkX, blockChunkY, blockChunkZ)];
   }
 
+  function scheduleWaterUpdate(x: number, y: number, z: number) {
+    pendingWaterUpdates.current.add(`${x},${y},${z}`);
+  }
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (pendingWaterUpdates.current.size === 0) return;
+
+      const updates = Array.from(pendingWaterUpdates.current);
+      pendingWaterUpdates.current.clear();
+
+      updates.forEach((key) => {
+        const [x, y, z] = key.split(",").map(Number);
+        updateWater(x, y, z, getBlock, setBlock, scheduleWaterUpdate);
+      });
+    }, 50);
+
+    return () => clearInterval(interval);
+  }, []);
+
   function setBlock(
     x: number,
     y: number,
@@ -1376,6 +1398,14 @@ export default function Game() {
     if (!chunk) return BlockType.AIR;
 
     chunk[blockIndex] = type;
+
+    scheduleWaterUpdate(x, y, z);
+    scheduleWaterUpdate(x + 1, y, z);
+    scheduleWaterUpdate(x - 1, y, z);
+    scheduleWaterUpdate(x, y + 1, z);
+    scheduleWaterUpdate(x, y - 1, z);
+    scheduleWaterUpdate(x, y, z + 1);
+    scheduleWaterUpdate(x, y, z - 1);
 
     if (!chunkVersions.current[chunkName]) chunkVersions.current[chunkName] = 0;
     chunkVersions.current[chunkName]++;
