@@ -1,5 +1,5 @@
 import { cn } from "@/components/ui/utils";
-import { BlockType, Texture } from "../blocks";
+import { BLOCK_ITEM_TEXTURES, BlockType } from "../blocks";
 
 interface HotbarProps {
   selectedSlot: number;
@@ -38,39 +38,6 @@ export function Hotbar({ selectedSlot, slots }: HotbarProps) {
 }
 
 function getTextureForBlock(block: BlockType): string {
-  // Simple mapping for now, can be improved
-  switch (block) {
-    case BlockType.DIRT:
-      return Texture.DIRT;
-    case BlockType.GRASS:
-      return Texture.GRASS_SIDE;
-    case BlockType.STONE:
-      return Texture.STONE;
-    case BlockType.LOG:
-      return Texture.LOG_SIDE; // Assuming WOOD maps to LOG
-    case BlockType.PLANKS:
-      return Texture.PLANKS;
-    case BlockType.LEAVES:
-      return Texture.LEAVES;
-    case BlockType.GLASS:
-      return Texture.GLASS;
-    case BlockType.SAND:
-      return Texture.SAND;
-    case BlockType.GRAVEL:
-      return Texture.GRAVEL;
-    case BlockType.COBBLESTONE:
-      return Texture.COBBLESTONE;
-    case BlockType.MARBLE:
-      return Texture.MARBLE;
-    case BlockType.ANEMONE_FLOWER:
-      return Texture.ANEMONE_FLOWER;
-    case BlockType.SAPLING:
-      return Texture.SAPLING;
-    case BlockType.BELLIS_FLOWER:
-      return Texture.BELLIS_FLOWER;
-    case BlockType.FORGETMENOTS_FLOWER:
-      return Texture.FORGETMENOTS_FLOWER;
-    default:
-      return Texture.DIRT; // Fallback
-  }
+  const textureInfo = BLOCK_ITEM_TEXTURES[block];
+  return textureInfo;
 }
