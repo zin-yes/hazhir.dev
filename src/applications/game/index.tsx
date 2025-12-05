@@ -36,6 +36,7 @@ import { PlayerControls } from "./player-controls";
 import { FRAGMENT_SHADER, VERTEX_SHADER } from "./shaders/chunk";
 import UILayer from "./ui/index";
 import { calculateOffset, getSurfaceHeightFromSeed } from "./utils";
+import { HOTBAR_SIZE, normalizeHotbar } from "./constants";
 
 const FLYING_SPEED = 10;
 
@@ -186,20 +187,19 @@ export default function Game() {
 
   const [selectedSlot, setSelectedSlot] = useState(0);
   const selectedSlotRef = useRef(0);
-  const [hotbarSlots, setHotbarSlots] = useState<BlockType[]>([
-    BlockType.DIRT,
-    BlockType.GRASS,
-    BlockType.STONE,
-    BlockType.LOG,
-    BlockType.PLANKS,
-    BlockType.LEAVES,
-    BlockType.GLASS,
-    BlockType.SAND,
-    BlockType.COBBLESTONE,
-    BlockType.PLANKS_SLAB,
-    BlockType.COBBLESTONE_SLAB,
-    BlockType.STONE_SLAB,
-  ]);
+  const [hotbarSlots, setHotbarSlots] = useState<BlockType[]>(
+    normalizeHotbar([
+      BlockType.DIRT,
+      BlockType.GRASS,
+      BlockType.STONE,
+      BlockType.LOG,
+      BlockType.PLANKS,
+      BlockType.LEAVES,
+      BlockType.GLASS,
+      BlockType.SAND,
+      BlockType.COBBLESTONE,
+    ])
+  );
   const hotbarSlotsRef = useRef(hotbarSlots);
   const [isInventoryOpen, setIsInventoryOpen] = useState(false);
   const isInventoryOpenRef = useRef(false);
@@ -231,8 +231,9 @@ export default function Game() {
       }
 
       if (!isInventoryOpen && playerControlsRef.current?.controls.isLocked) {
-        if (event.key >= "1" && event.key <= "9") {
-          setSelectedSlot(parseInt(event.key) - 1);
+        const keyNum = parseInt(event.key);
+        if (!Number.isNaN(keyNum) && keyNum >= 1 && keyNum <= HOTBAR_SIZE) {
+          setSelectedSlot(keyNum - 1);
         }
       }
     };
@@ -242,8 +243,8 @@ export default function Game() {
         const direction = Math.sign(event.deltaY);
         setSelectedSlot((prev) => {
           let next = prev + direction;
-          if (next < 0) next = 8;
-          if (next > 8) next = 0;
+          if (next < 0) next = HOTBAR_SIZE - 1;
+          if (next > HOTBAR_SIZE - 1) next = 0;
           return next;
         });
       }
@@ -1770,7 +1771,7 @@ export default function Game() {
         y: playerObj.rotation.y,
         z: playerObj.rotation.z,
       },
-      hotbarSlots: hotbarSlotsRef.current,
+      hotbarSlots: normalizeHotbar(hotbarSlotsRef.current),
     };
     localStorage.setItem("hazhir-dev-save", JSON.stringify(saveData));
     alert("World saved!");
@@ -1793,7 +1794,7 @@ export default function Game() {
           ]
         )
       );
-      setHotbarSlots(saveData.hotbarSlots);
+      setHotbarSlots(normalizeHotbar(saveData.hotbarSlots));
 
       if (playerControlsRef.current) {
         const playerObj = playerControlsRef.current.controls.object;
@@ -1868,8 +1869,10 @@ export default function Game() {
         hotbarSlots={hotbarSlots}
         isInventoryOpen={isInventoryOpen}
         onSelectBlock={(block) => {
-          const newSlots = [...hotbarSlots];
-          newSlots[selectedSlot] = block;
+          const clampedIndex = Math.max(0, Math.min(selectedSlot, HOTBAR_SIZE - 1));
+          const base = normalizeHotbar(hotbarSlots);
+          const newSlots = [...base];
+          newSlots[clampedIndex] = block;
           setHotbarSlots(newSlots);
         }}
       />
