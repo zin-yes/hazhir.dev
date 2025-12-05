@@ -33,6 +33,30 @@ export enum BlockType {
   SAPLING,
   BELLIS_FLOWER,
   FORGETMENOTS_FLOWER,
+  WATER_LEVEL_1,
+  WATER_LEVEL_2,
+  WATER_LEVEL_3,
+  WATER_LEVEL_4,
+  WATER_LEVEL_5,
+  WATER_LEVEL_6,
+  WATER_LEVEL_7,
+  WATER_FALLING,
+}
+
+export function isWater(block: BlockType): boolean {
+  return (
+    block === BlockType.WATER ||
+    block === BlockType.WATER_FALLING ||
+    (block >= BlockType.WATER_LEVEL_1 && block <= BlockType.WATER_LEVEL_7)
+  );
+}
+
+export function getWaterLevel(block: BlockType): number {
+  if (block === BlockType.WATER || block === BlockType.WATER_FALLING) return 8;
+  if (block >= BlockType.WATER_LEVEL_1 && block <= BlockType.WATER_LEVEL_7) {
+    return block - BlockType.WATER_LEVEL_1 + 1;
+  }
+  return 0;
 }
 
 export const Texture = {
@@ -168,6 +192,30 @@ BLOCK_TEXTURES[BlockType.LEAVES] = {
 BLOCK_TEXTURES[BlockType.WATER] = {
   DEFAULT: getTextureIndexByName("WATER"),
 };
+BLOCK_TEXTURES[BlockType.WATER_LEVEL_1] = {
+  DEFAULT: getTextureIndexByName("WATER"),
+};
+BLOCK_TEXTURES[BlockType.WATER_LEVEL_2] = {
+  DEFAULT: getTextureIndexByName("WATER"),
+};
+BLOCK_TEXTURES[BlockType.WATER_LEVEL_3] = {
+  DEFAULT: getTextureIndexByName("WATER"),
+};
+BLOCK_TEXTURES[BlockType.WATER_LEVEL_4] = {
+  DEFAULT: getTextureIndexByName("WATER"),
+};
+BLOCK_TEXTURES[BlockType.WATER_LEVEL_5] = {
+  DEFAULT: getTextureIndexByName("WATER"),
+};
+BLOCK_TEXTURES[BlockType.WATER_LEVEL_6] = {
+  DEFAULT: getTextureIndexByName("WATER"),
+};
+BLOCK_TEXTURES[BlockType.WATER_LEVEL_7] = {
+  DEFAULT: getTextureIndexByName("WATER"),
+};
+BLOCK_TEXTURES[BlockType.WATER_FALLING] = {
+  DEFAULT: getTextureIndexByName("WATER"),
+};
 BLOCK_TEXTURES[BlockType.DECORATIVE_GLASS] = {
   DEFAULT: getTextureIndexByName("DECORATIVE_GLASS"),
 };
@@ -230,6 +278,14 @@ export const TRANSPARENT_BLOCKS = [
   BlockType.LEAVES,
   BlockType.DECORATIVE_GLASS,
   BlockType.WATER,
+  BlockType.WATER_LEVEL_1,
+  BlockType.WATER_LEVEL_2,
+  BlockType.WATER_LEVEL_3,
+  BlockType.WATER_LEVEL_4,
+  BlockType.WATER_LEVEL_5,
+  BlockType.WATER_LEVEL_6,
+  BlockType.WATER_LEVEL_7,
+  BlockType.WATER_FALLING,
   BlockType.PLANKS_SLAB,
   BlockType.COBBLESTONE_SLAB,
   BlockType.STONE_SLAB,
@@ -247,6 +303,14 @@ export const TRANSPARENT_BLOCKS = [
 
 export const TRANSLUCENT_BLOCKS = [
   BlockType.WATER,
+  BlockType.WATER_LEVEL_1,
+  BlockType.WATER_LEVEL_2,
+  BlockType.WATER_LEVEL_3,
+  BlockType.WATER_LEVEL_4,
+  BlockType.WATER_LEVEL_5,
+  BlockType.WATER_LEVEL_6,
+  BlockType.WATER_LEVEL_7,
+  BlockType.WATER_FALLING,
   BlockType.GLASS,
   BlockType.DECORATIVE_GLASS,
 ];
@@ -254,6 +318,14 @@ export const TRANSLUCENT_BLOCKS = [
 export const NON_COLLIDABLE_BLOCKS = [
   BlockType.AIR,
   BlockType.WATER,
+  BlockType.WATER_LEVEL_1,
+  BlockType.WATER_LEVEL_2,
+  BlockType.WATER_LEVEL_3,
+  BlockType.WATER_LEVEL_4,
+  BlockType.WATER_LEVEL_5,
+  BlockType.WATER_LEVEL_6,
+  BlockType.WATER_LEVEL_7,
+  BlockType.WATER_FALLING,
   BlockType.ANEMONE_FLOWER,
   BlockType.PONPON_FLOWER,
   BlockType.SAPLING,
@@ -284,6 +356,14 @@ export const BLOCK_ITEM_TEXTURES: Record<
   [BlockType.MARBLE]: Texture.MARBLE,
   [BlockType.LEAVES]: Texture.LEAVES,
   [BlockType.WATER]: Texture.WATER,
+  [BlockType.WATER_LEVEL_1]: Texture.WATER,
+  [BlockType.WATER_LEVEL_2]: Texture.WATER,
+  [BlockType.WATER_LEVEL_3]: Texture.WATER,
+  [BlockType.WATER_LEVEL_4]: Texture.WATER,
+  [BlockType.WATER_LEVEL_5]: Texture.WATER,
+  [BlockType.WATER_LEVEL_6]: Texture.WATER,
+  [BlockType.WATER_LEVEL_7]: Texture.WATER,
+  [BlockType.WATER_FALLING]: Texture.WATER,
   [BlockType.DECORATIVE_GLASS]: Texture.DECORATIVE_GLASS,
   [BlockType.GLASS]: Texture.GLASS,
   [BlockType.GRASS]: Texture.GRASS_SIDE,

@@ -3,6 +3,8 @@ import {
   BlockType,
   TRANSLUCENT_BLOCKS,
   TRANSPARENT_BLOCKS,
+  getWaterLevel,
+  isWater,
 } from "@/applications/game/blocks";
 import {
   CHUNK_HEIGHT,
@@ -120,7 +122,7 @@ export function generateMesh(
       }
     }
 
-    if (block === BlockType.WATER && neighbor === BlockType.WATER) return true;
+    if (isWater(block) && isWater(neighbor)) return true;
     if (block === BlockType.GLASS && neighbor === BlockType.GLASS) return true;
 
     return false;
@@ -521,8 +523,8 @@ export function generateMesh(
 
         const blockHeight = isSlab(block)
           ? 0.5
-          : block === BlockType.WATER && blockAbove !== BlockType.WATER
-          ? 0.8
+          : isWater(block) && !isWater(blockAbove)
+          ? getWaterLevel(block) / 9
           : 1;
 
         const yOffset = isTopSlab(block) ? 0.5 : 0;

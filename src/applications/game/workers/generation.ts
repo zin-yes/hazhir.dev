@@ -527,7 +527,7 @@ export function generateChunk(
             const localY = grassY + 1 - chunkY * CHUNK_HEIGHT;
             if (localY >= 0 && localY < CHUNK_HEIGHT) {
               const index = calculateOffset(x, localY, z);
-                if (chunk[index] === BlockType.AIR) {
+              if (chunk[index] === BlockType.AIR) {
                 // Split the top end of the random range into four flower types
                 if (flowerRnd > 0.995) {
                   chunk[index] = BlockType.ANEMONE_FLOWER;
