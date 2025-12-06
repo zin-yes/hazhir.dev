@@ -3,11 +3,13 @@ import {
   BlockType,
   TRANSLUCENT_BLOCKS,
   TRANSPARENT_BLOCKS,
+  getDirection,
   getWaterLevel,
   isCrop,
   isCrossBlock,
   isFlatQuad,
   isSlab,
+  isStairs,
   isTopSlab,
   isWater,
 } from "@/applications/game/blocks";
@@ -494,6 +496,385 @@ export function generateMesh(
             index + 3,
             index + 1
           );
+
+          continue;
+        }
+
+        if (isStairs(block)) {
+          const direction = getDirection(block);
+
+          const pushQuad = (
+            p1: number[],
+            p2: number[],
+            p3: number[],
+            p4: number[],
+            n: number[],
+            uv: number[],
+            tex: number
+          ) => {
+            const index = target.positions.length / 3;
+            target.positions.push(...p1, ...p2, ...p3, ...p4);
+            target.normals.push(...n, ...n, ...n, ...n);
+            target.uvs.push(...uv);
+            target.textureIndices.push(tex, tex, tex, tex);
+            target.indices.push(
+              index,
+              index + 1,
+              index + 2,
+              index + 2,
+              index + 1,
+              index + 3
+            );
+          };
+
+          // Bottom Face (y=0)
+          if (!shouldCull(block, blockBelow, "DOWN")) {
+            // Normal (0, -1, 0). Winding: p1(TR), p2(TL), p3(BR), p4(BL) relative to bottom view?
+            // Standard cube bottom: (x+1, z+1), (x, z+1), (x+1, z), (x, z)
+            // p1(1,1), p2(0,1), p3(1,0), p4(0,0)
+            // Tri 1: p1, p2, p3 -> (1,1), (0,1), (1,0). (v2-v1)=(-1,0), (v3-v1)=(0,-1). Cross = (0,0,1).
+            // Wait, standard cube bottom normal is (0, -1, 0).
+            // Let's copy standard cube bottom winding exactly.
+            // Standard: p1(x+1, z+1), p2(x, z+1), p3(x+1, z), p4(x, z)
+            pushQuad(
+              [x + 1, y, z + 1],
+              [x, y, z + 1],
+              [x + 1, y, z],
+              [x, y, z],
+              [0, -1, 0],
+              [1, 0, 0, 0, 1, 1, 0, 1],
+              textureIndexBottom ?? textureIndexDefault
+            );
+          }
+
+          // Top Face of Bottom Slab (y=0.5)
+          let exposedMinX = 0,
+            exposedMaxX = 1,
+            exposedMinZ = 0,
+            exposedMaxZ = 1;
+          if (direction === "NORTH") exposedMinZ = 0.5;
+          else if (direction === "SOUTH") exposedMaxZ = 0.5;
+          else if (direction === "EAST") exposedMaxX = 0.5;
+          else if (direction === "WEST") exposedMinX = 0.5;
+
+          // Normal (0, 1, 0). Standard cube top: (x, z+1), (x+1, z+1), (x, z), (x+1, z)
+          // p1(0,1), p2(1,1), p3(0,0), p4(1,0)
+          pushQuad(
+            [x + exposedMinX, y + 0.5, z + exposedMaxZ],
+            [x + exposedMaxX, y + 0.5, z + exposedMaxZ],
+            [x + exposedMinX, y + 0.5, z + exposedMinZ],
+            [x + exposedMaxX, y + 0.5, z + exposedMinZ],
+            [0, 1, 0],
+            [
+              1 - exposedMinX,
+              exposedMaxZ,
+              1 - exposedMaxX,
+              exposedMaxZ,
+              1 - exposedMinX,
+              exposedMinZ,
+              1 - exposedMaxX,
+              exposedMinZ,
+            ],
+            textureIndexTop ?? textureIndexDefault
+          );
+
+          // Top Face of Top Slab (y=1)
+          let topMinX = 0,
+            topMaxX = 1,
+            topMinZ = 0,
+            topMaxZ = 1;
+          if (direction === "NORTH") topMaxZ = 0.5;
+          else if (direction === "SOUTH") topMinZ = 0.5;
+          else if (direction === "EAST") topMinX = 0.5;
+          else if (direction === "WEST") topMaxX = 0.5;
+
+          if (!shouldCull(block, blockAbove, "UP")) {
+            pushQuad(
+              [x + topMinX, y + 1, z + topMaxZ],
+              [x + topMaxX, y + 1, z + topMaxZ],
+              [x + topMinX, y + 1, z + topMinZ],
+              [x + topMaxX, y + 1, z + topMinZ],
+              [0, 1, 0],
+              [
+                1 - topMinX,
+                topMaxZ,
+                1 - topMaxX,
+                topMaxZ,
+                1 - topMinX,
+                topMinZ,
+                1 - topMaxX,
+                topMinZ,
+              ],
+              textureIndexTop ?? textureIndexDefault
+            );
+          }
+
+          // Vertical Step Face
+          if (direction === "NORTH") {
+            // Face at Z=0.5, facing South (+Z). Normal (0, 0, 1).
+            // Standard Front: (x, z+1), (x+1, z+1), (x, z+1), (x+1, z+1) ... wait standard front uses y.
+            // Standard Front: p1(0,0), p2(1,0), p3(0,1), p4(1,1) -> (x, yl, z+1), (x+1, yl, z+1), (x, yh, z+1), (x+1, yh, z+1)
+            // Tri 1: p1, p2, p3 -> (0,0), (1,0), (0,1). (1,0)x(0,1) = (0,0,1). Correct.
+            // So p1=BL, p2=BR, p3=TL, p4=TR.
+            pushQuad(
+              [x, y + 0.5, z + 0.5],
+              [x + 1, y + 0.5, z + 0.5],
+              [x, y + 1, z + 0.5],
+              [x + 1, y + 1, z + 0.5],
+              [0, 0, 1],
+              [1, 0.5, 0, 0.5, 1, 1, 0, 1], // UVs need to be checked. 0.5 to 1 in V?
+              textureIndexSides ?? textureIndexDefault
+            );
+          } else if (direction === "SOUTH") {
+            // Face at Z=0.5, facing North (-Z). Normal (0, 0, -1).
+            // Standard Back: p1(x+1, yl, z), p2(x, yl, z), p3(x+1, yh, z), p4(x, yh, z)
+            // p1(1,0), p2(0,0), p3(1,1). (-1,0)x(0,1) = (0,0,-1). Correct.
+            pushQuad(
+              [x + 1, y + 0.5, z + 0.5],
+              [x, y + 0.5, z + 0.5],
+              [x + 1, y + 1, z + 0.5],
+              [x, y + 1, z + 0.5],
+              [0, 0, -1],
+              [1, 0.5, 0, 0.5, 1, 1, 0, 1],
+              textureIndexSides ?? textureIndexDefault
+            );
+          } else if (direction === "EAST") {
+            // Face at X=0.5, facing West (-X). Normal (-1, 0, 0).
+            // Standard Left: p1(x, yl, z), p2(x, yl, z+1), p3(x, yh, z), p4(x, yh, z+1)
+            // p1(0,0,0), p2(0,0,1), p3(0,1,0). (0,0,1)x(0,1,0) = (-1,0,0). Correct.
+            pushQuad(
+              [x + 0.5, y + 0.5, z],
+              [x + 0.5, y + 0.5, z + 1],
+              [x + 0.5, y + 1, z],
+              [x + 0.5, y + 1, z + 1],
+              [-1, 0, 0],
+              [1, 0.5, 0, 0.5, 1, 1, 0, 1],
+              textureIndexSides ?? textureIndexDefault
+            );
+          } else if (direction === "WEST") {
+            // Face at X=0.5, facing East (+X). Normal (1, 0, 0).
+            // Standard Right: p1(x+1, yl, z+1), p2(x+1, yl, z), p3(x+1, yh, z+1), p4(x+1, yh, z)
+            // p1(1,0,1), p2(1,0,0), p3(1,1,1). (0,0,-1)x(0,1,0) = (1,0,0). Correct.
+            pushQuad(
+              [x + 0.5, y + 0.5, z + 1],
+              [x + 0.5, y + 0.5, z],
+              [x + 0.5, y + 1, z + 1],
+              [x + 0.5, y + 1, z],
+              [1, 0, 0],
+              [1, 0.5, 0, 0.5, 1, 1, 0, 1],
+              textureIndexSides ?? textureIndexDefault
+            );
+          }
+
+          // Front (z=1)
+          if (!shouldCull(block, blockInfront, "SIDE")) {
+            // Standard Front: p1(BL), p2(BR), p3(TL), p4(TR)
+            // Bottom half (y=0..0.5)
+            pushQuad(
+              [x, y, z + 1],
+              [x + 1, y, z + 1],
+              [x, y + 0.5, z + 1],
+              [x + 1, y + 0.5, z + 1],
+              [0, 0, 1],
+              [1, 0, 0, 0, 1, 0.5, 0, 0.5],
+              textureIndexFront ?? textureIndexSides ?? textureIndexDefault
+            );
+
+            // Top half (y=0.5..1)
+            if (direction === "SOUTH") {
+              // Full face
+              pushQuad(
+                [x, y + 0.5, z + 1],
+                [x + 1, y + 0.5, z + 1],
+                [x, y + 1, z + 1],
+                [x + 1, y + 1, z + 1],
+                [0, 0, 1],
+                [1, 0.5, 0, 0.5, 1, 1, 0, 1],
+                textureIndexFront ?? textureIndexSides ?? textureIndexDefault
+              );
+            } else if (direction === "EAST") {
+              // Right half (x=0.5..1)
+              pushQuad(
+                [x + 0.5, y + 0.5, z + 1],
+                [x + 1, y + 0.5, z + 1],
+                [x + 0.5, y + 1, z + 1],
+                [x + 1, y + 1, z + 1],
+                [0, 0, 1],
+                [0.5, 0.5, 0, 0.5, 0.5, 1, 0, 1],
+                textureIndexFront ?? textureIndexSides ?? textureIndexDefault
+              );
+            } else if (direction === "WEST") {
+              // Left half (x=0..0.5)
+              pushQuad(
+                [x, y + 0.5, z + 1],
+                [x + 0.5, y + 0.5, z + 1],
+                [x, y + 1, z + 1],
+                [x + 0.5, y + 1, z + 1],
+                [0, 0, 1],
+                [1, 0.5, 0.5, 0.5, 1, 1, 0.5, 1],
+                textureIndexFront ?? textureIndexSides ?? textureIndexDefault
+              );
+            }
+          }
+
+          // Back (z=0)
+          if (!shouldCull(block, blockBehind, "SIDE")) {
+            // Standard Back: p1(BR), p2(BL), p3(TR), p4(TL) (looking from back)
+            // p1(x+1, yl, z), p2(x, yl, z), p3(x+1, yh, z), p4(x, yh, z)
+
+            // Bottom half
+            pushQuad(
+              [x + 1, y, z],
+              [x, y, z],
+              [x + 1, y + 0.5, z],
+              [x, y + 0.5, z],
+              [0, 0, -1],
+              [1, 0, 0, 0, 1, 0.5, 0, 0.5],
+              textureIndexBack ?? textureIndexSides ?? textureIndexDefault
+            );
+
+            // Top half
+            if (direction === "NORTH") {
+              // Full face
+              pushQuad(
+                [x + 1, y + 0.5, z],
+                [x, y + 0.5, z],
+                [x + 1, y + 1, z],
+                [x, y + 1, z],
+                [0, 0, -1],
+                [1, 0.5, 0, 0.5, 1, 1, 0, 1],
+                textureIndexBack ?? textureIndexSides ?? textureIndexDefault
+              );
+            } else if (direction === "EAST") {
+              // Right half (x=0.5..1) (Looking from back, x is inverted? No, x is world x)
+              // Back face is at z=0. x goes 0->1.
+              // EAST top step is at x=0.5..1.
+              pushQuad(
+                [x + 1, y + 0.5, z],
+                [x + 0.5, y + 0.5, z],
+                [x + 1, y + 1, z],
+                [x + 0.5, y + 1, z],
+                [0, 0, -1],
+                [1, 0.5, 0.5, 0.5, 1, 1, 0.5, 1],
+                textureIndexBack ?? textureIndexSides ?? textureIndexDefault
+              );
+            } else if (direction === "WEST") {
+              // Left half (x=0..0.5)
+              pushQuad(
+                [x + 0.5, y + 0.5, z],
+                [x, y + 0.5, z],
+                [x + 0.5, y + 1, z],
+                [x, y + 1, z],
+                [0, 0, -1],
+                [0.5, 0.5, 0, 0.5, 0.5, 1, 0, 1],
+                textureIndexBack ?? textureIndexSides ?? textureIndexDefault
+              );
+            }
+          }
+
+          // Left (x=0)
+          if (!shouldCull(block, blockToTheLeft, "SIDE")) {
+            // Standard Left: p1(x, yl, z), p2(x, yl, z+1), p3(x, yh, z), p4(x, yh, z+1)
+
+            // Bottom half
+            pushQuad(
+              [x, y, z],
+              [x, y, z + 1],
+              [x, y + 0.5, z],
+              [x, y + 0.5, z + 1],
+              [-1, 0, 0],
+              [1, 0, 0, 0, 1, 0.5, 0, 0.5],
+              textureIndexLeft ?? textureIndexSides ?? textureIndexDefault
+            );
+
+            // Top half
+            if (direction === "WEST") {
+              // Full face
+              pushQuad(
+                [x, y + 0.5, z],
+                [x, y + 0.5, z + 1],
+                [x, y + 1, z],
+                [x, y + 1, z + 1],
+                [-1, 0, 0],
+                [1, 0.5, 0, 0.5, 1, 1, 0, 1],
+                textureIndexLeft ?? textureIndexSides ?? textureIndexDefault
+              );
+            } else if (direction === "NORTH") {
+              // Back half (z=0..0.5)
+              pushQuad(
+                [x, y + 0.5, z],
+                [x, y + 0.5, z + 0.5],
+                [x, y + 1, z],
+                [x, y + 1, z + 0.5],
+                [-1, 0, 0],
+                [1, 0.5, 0.5, 0.5, 1, 1, 0.5, 1],
+                textureIndexLeft ?? textureIndexSides ?? textureIndexDefault
+              );
+            } else if (direction === "SOUTH") {
+              // Front half (z=0.5..1)
+              pushQuad(
+                [x, y + 0.5, z + 0.5],
+                [x, y + 0.5, z + 1],
+                [x, y + 1, z + 0.5],
+                [x, y + 1, z + 1],
+                [-1, 0, 0],
+                [0.5, 0.5, 0, 0.5, 0.5, 1, 0, 1],
+                textureIndexLeft ?? textureIndexSides ?? textureIndexDefault
+              );
+            }
+          }
+
+          // Right (x=1)
+          if (!shouldCull(block, blockToTheRight, "SIDE")) {
+            // Standard Right: p1(x+1, yl, z+1), p2(x+1, yl, z), p3(x+1, yh, z+1), p4(x+1, yh, z)
+
+            // Bottom half
+            pushQuad(
+              [x + 1, y, z + 1],
+              [x + 1, y, z],
+              [x + 1, y + 0.5, z + 1],
+              [x + 1, y + 0.5, z],
+              [1, 0, 0],
+              [1, 0, 0, 0, 1, 0.5, 0, 0.5],
+              textureIndexRight ?? textureIndexSides ?? textureIndexDefault
+            );
+
+            // Top half
+            if (direction === "EAST") {
+              // Full face
+              pushQuad(
+                [x + 1, y + 0.5, z + 1],
+                [x + 1, y + 0.5, z],
+                [x + 1, y + 1, z + 1],
+                [x + 1, y + 1, z],
+                [1, 0, 0],
+                [1, 0.5, 0, 0.5, 1, 1, 0, 1],
+                textureIndexRight ?? textureIndexSides ?? textureIndexDefault
+              );
+            } else if (direction === "NORTH") {
+              // Back half (z=0..0.5)
+              pushQuad(
+                [x + 1, y + 0.5, z + 0.5],
+                [x + 1, y + 0.5, z],
+                [x + 1, y + 1, z + 0.5],
+                [x + 1, y + 1, z],
+                [1, 0, 0],
+                [0.5, 0.5, 0, 0.5, 0.5, 1, 0, 1],
+                textureIndexRight ?? textureIndexSides ?? textureIndexDefault
+              );
+            } else if (direction === "SOUTH") {
+              // Front half (z=0.5..1)
+              pushQuad(
+                [x + 1, y + 0.5, z + 1],
+                [x + 1, y + 0.5, z + 0.5],
+                [x + 1, y + 1, z + 1],
+                [x + 1, y + 1, z + 0.5],
+                [1, 0, 0],
+                [1, 0.5, 0.5, 0.5, 1, 1, 0.5, 1],
+                textureIndexRight ?? textureIndexSides ?? textureIndexDefault
+              );
+            }
+          }
 
           continue;
         }

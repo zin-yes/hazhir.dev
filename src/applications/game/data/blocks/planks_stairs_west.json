@@ -1,0 +1,8 @@
+{
+  "id": 53,
+  "name": "PLANKS_STAIRS_WEST",
+  "texture": "planks.png",
+  "model": "STAIRS",
+  "direction": "WEST",
+  "isTransparent": true
+}

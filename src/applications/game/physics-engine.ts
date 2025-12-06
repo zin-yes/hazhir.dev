@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { BlockType, NON_COLLIDABLE_BLOCKS } from "./blocks";
+import { BlockType, NON_COLLIDABLE_BLOCKS, getHitboxes } from "./blocks";
 
 export class PhysicsEngine {
   private getBlock: (x: number, y: number, z: number) => BlockType | null;
@@ -25,8 +25,23 @@ export class PhysicsEngine {
     position.x += velocity.x * delta;
     this.updatePlayerBox(playerBox, position, eyeHeight);
     if (this.checkCollision(playerBox)) {
-      position.x = originalX;
-      velocity.x = 0;
+      let stepped = false;
+      if (wasOnGround && !isShifting) {
+        const stepHeight = 0.6;
+        const originalY = position.y;
+        position.y += stepHeight;
+        this.updatePlayerBox(playerBox, position, eyeHeight);
+        if (!this.checkCollision(playerBox)) {
+          stepped = true;
+        } else {
+          position.y = originalY;
+        }
+      }
+
+      if (!stepped) {
+        position.x = originalX;
+        velocity.x = 0;
+      }
     } else if (
       isShifting &&
       wasOnGround &&
@@ -42,8 +57,23 @@ export class PhysicsEngine {
     position.z += velocity.z * delta;
     this.updatePlayerBox(playerBox, position, eyeHeight);
     if (this.checkCollision(playerBox)) {
-      position.z = originalZ;
-      velocity.z = 0;
+      let stepped = false;
+      if (wasOnGround && !isShifting) {
+        const stepHeight = 0.6;
+        const originalY = position.y;
+        position.y += stepHeight;
+        this.updatePlayerBox(playerBox, position, eyeHeight);
+        if (!this.checkCollision(playerBox)) {
+          stepped = true;
+        } else {
+          position.y = originalY;
+        }
+      }
+
+      if (!stepped) {
+        position.z = originalZ;
+        velocity.z = 0;
+      }
     } else if (
       isShifting &&
       wasOnGround &&
@@ -131,29 +161,32 @@ export class PhysicsEngine {
             continue;
           }
 
-          let maxYOffset = 0.5;
-          let minYOffset = 0.0;
+          const hitboxes = getHitboxes(block);
 
-          if (
-            block === BlockType.PLANKS_SLAB ||
-            block === BlockType.COBBLESTONE_SLAB ||
-            block === BlockType.STONE_SLAB
-          ) {
-            maxYOffset = 0.0;
-          } else if (
-            block === BlockType.PLANKS_SLAB_TOP ||
-            block === BlockType.COBBLESTONE_SLAB_TOP ||
-            block === BlockType.STONE_SLAB_TOP
-          ) {
-            minYOffset = 0.5;
+          for (const { scale, offset } of hitboxes) {
+            const centerX = x + offset[0];
+            const centerY = y + offset[1];
+            const centerZ = z + offset[2];
+
+            const halfScaleX = scale[0] / 2;
+            const halfScaleY = scale[1] / 2;
+            const halfScaleZ = scale[2] / 2;
+
+            const blockBox = new THREE.Box3(
+              new THREE.Vector3(
+                centerX - halfScaleX,
+                centerY - halfScaleY,
+                centerZ - halfScaleZ
+              ),
+              new THREE.Vector3(
+                centerX + halfScaleX,
+                centerY + halfScaleY,
+                centerZ + halfScaleZ
+              )
+            );
+
+            if (box.intersectsBox(blockBox)) return true;
           }
-
-          const blockBox = new THREE.Box3(
-            new THREE.Vector3(x - 0.5, y - 0.5 + minYOffset, z - 0.5),
-            new THREE.Vector3(x + 0.5, y + maxYOffset, z + 0.5)
-          );
-
-          if (box.intersectsBox(blockBox)) return true;
         }
       }
     }

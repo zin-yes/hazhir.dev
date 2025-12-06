@@ -27,7 +27,7 @@ import {
   NON_COLLIDABLE_BLOCKS,
   TRANSPARENT_BLOCKS,
   Texture,
-  getHitbox,
+  getBoundingBox,
   isReplaceable,
 } from "@/applications/game/blocks";
 import { BlockHighlighter } from "./block-highlighter";
@@ -904,7 +904,7 @@ export default function Game() {
           ) as THREE.LineSegments;
           const blockType = getBlock(x, y, z);
 
-          const { scale, offset } = getHitbox(blockType);
+          const { scale, offset } = getBoundingBox(blockType);
 
           indicator.position.x = x + offset[0];
           indicator.position.y = y + offset[1];
