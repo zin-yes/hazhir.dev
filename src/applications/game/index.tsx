@@ -318,7 +318,14 @@ export default function Game() {
               const borders = getChunkBorders(chunkX, chunkY, chunkZ);
 
               meshWorkerPool
-                .exec("generateMesh", [result, borders])
+                .exec("generateMesh", [
+                  result,
+                  borders,
+                  currentSeed,
+                  chunkX,
+                  chunkY,
+                  chunkZ,
+                ])
                 .then(
                   ({
                     opaque,
@@ -833,7 +840,14 @@ export default function Game() {
         const borders = getChunkBorders(chunkX, chunkY, chunkZ);
 
         meshWorkerPool
-          .exec("generateMesh", [result, borders])
+          .exec("generateMesh", [
+            result,
+            borders,
+            seedRef.current,
+            chunkX,
+            chunkY,
+            chunkZ,
+          ])
           .then(
             ({
               opaque,
@@ -1208,6 +1222,7 @@ export default function Game() {
       indices: ArrayBuffer;
       uvs: ArrayBuffer;
       textureIndices: ArrayBuffer;
+      lightLevels: ArrayBuffer;
     },
     transparent: {
       positions: ArrayBuffer;
@@ -1215,6 +1230,7 @@ export default function Game() {
       indices: ArrayBuffer;
       uvs: ArrayBuffer;
       textureIndices: ArrayBuffer;
+      lightLevels: ArrayBuffer;
     },
     chunkName: string,
     chunkX: number,
@@ -1241,6 +1257,10 @@ export default function Game() {
     opaqueGeometry.setAttribute(
       "textureIndex",
       new THREE.Int32BufferAttribute(opaque.textureIndices, 1)
+    );
+    opaqueGeometry.setAttribute(
+      "lightLevel",
+      new THREE.Float32BufferAttribute(opaque.lightLevels, 1)
     );
     opaqueGeometry.setIndex(new THREE.Uint32BufferAttribute(opaque.indices, 1));
     const opaqueMesh = new THREE.Mesh(
@@ -1274,6 +1294,10 @@ export default function Game() {
     transparentGeometry.setAttribute(
       "textureIndex",
       new THREE.Int32BufferAttribute(transparent.textureIndices, 1)
+    );
+    transparentGeometry.setAttribute(
+      "lightLevel",
+      new THREE.Float32BufferAttribute(transparent.lightLevels, 1)
     );
     transparentGeometry.setIndex(
       new THREE.Uint32BufferAttribute(transparent.indices, 1)
@@ -1496,7 +1520,14 @@ export default function Game() {
       const borders = getChunkBorders(chunkX, chunkY, chunkZ);
 
       meshWorkerPool
-        .exec("generateMesh", [chunks.current[chunkName], borders])
+        .exec("generateMesh", [
+          chunks.current[chunkName],
+          borders,
+          seedRef.current,
+          chunkX,
+          chunkY,
+          chunkZ,
+        ])
         .then(
           ({
             opaque,

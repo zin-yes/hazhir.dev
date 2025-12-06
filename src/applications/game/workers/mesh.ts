@@ -19,7 +19,12 @@ import {
   CHUNK_WIDTH,
 } from "@/applications/game/config";
 
+import { getSurfaceHeight } from "./generation";
+// @ts-ignore
+import FastNoiseLite from "fastnoise-lite";
+
 import { calculateOffset } from "../utils";
+import { computeChunkLighting } from "./lighting";
 
 export function generateMesh(
   _chunk: ArrayBuffer,
@@ -30,7 +35,11 @@ export function generateMesh(
     right?: ArrayBuffer;
     front?: ArrayBuffer;
     back?: ArrayBuffer;
-  } = {}
+  } = {},
+  seed: number = 0,
+  chunkX: number = 0,
+  chunkY: number = 0,
+  chunkZ: number = 0
 ): {
   opaque: {
     positions: ArrayBuffer;
@@ -38,6 +47,7 @@ export function generateMesh(
     indices: ArrayBuffer;
     uvs: ArrayBuffer;
     textureIndices: ArrayBuffer;
+    lightLevels: ArrayBuffer;
   };
   transparent: {
     positions: ArrayBuffer;
@@ -45,6 +55,7 @@ export function generateMesh(
     indices: ArrayBuffer;
     uvs: ArrayBuffer;
     textureIndices: ArrayBuffer;
+    lightLevels: ArrayBuffer;
   };
 } {
   const opaque = {
@@ -53,6 +64,7 @@ export function generateMesh(
     indices: [] as number[],
     uvs: [] as number[],
     textureIndices: [] as number[],
+    lightLevels: [] as number[],
   };
 
   const transparent = {
@@ -61,9 +73,20 @@ export function generateMesh(
     indices: [] as number[],
     uvs: [] as number[],
     textureIndices: [] as number[],
+    lightLevels: [] as number[],
   };
 
   const chunk = new Uint8Array(_chunk);
+  const lightMap = computeChunkLighting(
+    chunk,
+    borders,
+    seed,
+    chunkX,
+    chunkY,
+    chunkZ
+  );
+
+  const noise = new FastNoiseLite(seed);
 
   const topBorder = borders.top ? new Uint8Array(borders.top) : null;
   const bottomBorder = borders.bottom ? new Uint8Array(borders.bottom) : null;
@@ -113,6 +136,30 @@ export function generateMesh(
         const block = chunk[calculateOffset(x, y, z)];
 
         if (block === BlockType.AIR) continue;
+
+        const rawLight = lightMap[calculateOffset(x, y, z)];
+        const currentLight = Math.max((rawLight >> 4) & 0xf, rawLight & 0xf);
+
+        const getLight = (lx: number, ly: number, lz: number) => {
+          if (
+            lx < 0 ||
+            lx >= CHUNK_WIDTH ||
+            ly < 0 ||
+            ly >= CHUNK_HEIGHT ||
+            lz < 0 ||
+            lz >= CHUNK_LENGTH
+          ) {
+            const nWorldX = chunkX * CHUNK_WIDTH + lx;
+            const nWorldY = chunkY * CHUNK_HEIGHT + ly;
+            const nWorldZ = chunkZ * CHUNK_LENGTH + lz;
+
+            const sY = getSurfaceHeight(noise, nWorldX, nWorldZ);
+            const heuristic = nWorldY > sY ? 15 : 0;
+            return Math.max(heuristic, currentLight - 1);
+          }
+          const val = lightMap[calculateOffset(lx, ly, lz)];
+          return Math.max((val >> 4) & 0xf, val & 0xf);
+        };
 
         const isTranslucent = TRANSLUCENT_BLOCKS.includes(block);
         const target = isTranslucent ? transparent : opaque;
@@ -229,6 +276,7 @@ export function generateMesh(
             textureIndexDefault,
             textureIndexDefault
           );
+          transparent.lightLevels.push(currentLight, currentLight, currentLight, currentLight);
 
           transparent.indices.push(
             index,
@@ -270,6 +318,7 @@ export function generateMesh(
             textureIndexDefault,
             textureIndexDefault
           );
+          transparent.lightLevels.push(currentLight, currentLight, currentLight, currentLight);
 
           transparent.indices.push(
             index2,
@@ -315,6 +364,7 @@ export function generateMesh(
             textureIndexDefault,
             textureIndexDefault
           );
+          transparent.lightLevels.push(currentLight, currentLight, currentLight, currentLight);
 
           transparent.indices.push(
             index,
@@ -365,6 +415,7 @@ export function generateMesh(
             textureIndexDefault,
             textureIndexDefault
           );
+          transparent.lightLevels.push(currentLight, currentLight, currentLight, currentLight);
           transparent.indices.push(
             index,
             index + 1,
@@ -404,6 +455,7 @@ export function generateMesh(
             textureIndexDefault,
             textureIndexDefault
           );
+          transparent.lightLevels.push(currentLight, currentLight, currentLight, currentLight);
           transparent.indices.push(
             index,
             index + 1,
@@ -443,6 +495,7 @@ export function generateMesh(
             textureIndexDefault,
             textureIndexDefault
           );
+          transparent.lightLevels.push(currentLight, currentLight, currentLight, currentLight);
           transparent.indices.push(
             index,
             index + 1,
@@ -482,6 +535,7 @@ export function generateMesh(
             textureIndexDefault,
             textureIndexDefault
           );
+          transparent.lightLevels.push(currentLight, currentLight, currentLight, currentLight);
           transparent.indices.push(
             index,
             index + 1,
@@ -517,6 +571,7 @@ export function generateMesh(
             target.normals.push(...n, ...n, ...n, ...n);
             target.uvs.push(...uv);
             target.textureIndices.push(tex, tex, tex, tex);
+            target.lightLevels.push(currentLight, currentLight, currentLight, currentLight);
             target.indices.push(
               index,
               index + 1,
@@ -942,6 +997,8 @@ export function generateMesh(
               textureIndexDefault
             );
           }
+          const l = getLight(x, y + 1, z);
+          target.lightLevels.push(l, l, l, l);
         }
         if (!shouldCull(block, blockBelow, "DOWN")) {
           const index = target.positions.length / 3;
@@ -985,6 +1042,8 @@ export function generateMesh(
               textureIndexDefault
             );
           }
+          const l = getLight(x, y - 1, z);
+          target.lightLevels.push(l, l, l, l);
         }
 
         if (!shouldCull(block, blockInfront, "SIDE")) {
@@ -1038,6 +1097,8 @@ export function generateMesh(
               );
             }
           }
+          const l = getLight(x, y, z + 1);
+          target.lightLevels.push(l, l, l, l);
         }
 
         if (!shouldCull(block, blockBehind, "SIDE")) {
@@ -1078,6 +1139,8 @@ export function generateMesh(
               );
             }
           }
+          const l = getLight(x, y, z - 1);
+          target.lightLevels.push(l, l, l, l);
         }
 
         if (!shouldCull(block, blockToTheLeft, "SIDE")) {
@@ -1118,6 +1181,8 @@ export function generateMesh(
               );
             }
           }
+          const l = getLight(x - 1, y, z);
+          target.lightLevels.push(l, l, l, l);
         }
 
         if (!shouldCull(block, blockToTheRight, "SIDE")) {
@@ -1171,6 +1236,8 @@ export function generateMesh(
               );
             }
           }
+          const l = getLight(x + 1, y, z);
+          target.lightLevels.push(l, l, l, l);
         }
       }
     }
@@ -1183,6 +1250,7 @@ export function generateMesh(
       indices: new Uint32Array(opaque.indices).buffer,
       uvs: new Float32Array(opaque.uvs).buffer,
       textureIndices: new Int32Array(opaque.textureIndices).buffer,
+      lightLevels: new Float32Array(opaque.lightLevels).buffer,
     },
     transparent: {
       positions: new Float32Array(transparent.positions).buffer,
@@ -1190,6 +1258,7 @@ export function generateMesh(
       indices: new Uint32Array(transparent.indices).buffer,
       uvs: new Float32Array(transparent.uvs).buffer,
       textureIndices: new Int32Array(transparent.textureIndices).buffer,
+      lightLevels: new Float32Array(transparent.lightLevels).buffer,
     },
   };
 }

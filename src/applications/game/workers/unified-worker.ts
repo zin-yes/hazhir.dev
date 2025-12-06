@@ -9,7 +9,14 @@ addEventListener("message", async (event: MessageEvent) => {
     if (method === "generateChunk") {
       result = generateChunk(params[0], params[1], params[2], params[3]);
     } else if (method === "generateMesh") {
-      result = generateMesh(params[0], params[1]);
+      result = generateMesh(
+        params[0],
+        params[1],
+        params[2],
+        params[3],
+        params[4],
+        params[5]
+      );
     } else if (method === "loadTextureArray") {
       result = await loadTextureArray(params[0]);
     } else {
