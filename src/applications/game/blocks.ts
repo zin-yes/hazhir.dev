@@ -59,6 +59,18 @@ export function getWaterLevel(block: BlockType): number {
   return 0;
 }
 
+export function isReplaceable(block: BlockType): boolean {
+  return (
+    isWater(block) ||
+    block === BlockType.TALL_GRASS ||
+    block === BlockType.ANEMONE_FLOWER ||
+    block === BlockType.PONPON_FLOWER ||
+    block === BlockType.SAPLING ||
+    block === BlockType.BELLIS_FLOWER ||
+    block === BlockType.FORGETMENOTS_FLOWER
+  );
+}
+
 export const Texture = {
   INVALID: "invalid.png",
   DIRT: "dirt.png",

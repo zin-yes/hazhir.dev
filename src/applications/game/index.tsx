@@ -27,6 +27,7 @@ import {
   NON_COLLIDABLE_BLOCKS,
   TRANSPARENT_BLOCKS,
   Texture,
+  isReplaceable,
 } from "@/applications/game/blocks";
 import { BlockHighlighter } from "./block-highlighter";
 import { HOTBAR_SIZE, normalizeHotbar } from "./constants";
@@ -1081,12 +1082,22 @@ export default function Game() {
             cameraDirection.z
           )
         );
-        if (getBlock(x, y, z) !== BlockType.AIR) {
-          const newBlockX = x + faceNormal.x;
-          const newBlockY = y + faceNormal.y;
-          const newBlockZ = z + faceNormal.z;
+        const hitBlock = getBlock(x, y, z);
+        if (hitBlock !== BlockType.AIR) {
+          let newBlockX = x + faceNormal.x;
+          let newBlockY = y + faceNormal.y;
+          let newBlockZ = z + faceNormal.z;
 
-          if (getBlock(newBlockX, newBlockY, newBlockZ) !== BlockType.AIR)
+          if (hitBlock && isReplaceable(hitBlock)) {
+            newBlockX = x;
+            newBlockY = y;
+            newBlockZ = z;
+          }
+
+          if (
+            getBlock(newBlockX, newBlockY, newBlockZ) !== BlockType.AIR &&
+            !isReplaceable(getBlock(newBlockX, newBlockY, newBlockZ)!)
+          )
             return;
 
           const blockBox = new THREE.Box3(
@@ -1364,7 +1375,7 @@ export default function Game() {
         const [x, y, z] = key.split(",").map(Number);
         updateWater(x, y, z, getBlock, setBlock, scheduleWaterUpdate);
       });
-    }, 50);
+    }, 650);
 
     return () => clearInterval(interval);
   }, []);
