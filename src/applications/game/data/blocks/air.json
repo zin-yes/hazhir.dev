@@ -1,0 +1,8 @@
+{
+  "id": 0,
+  "name": "AIR",
+  "texture": "invalid.png",
+  "isTransparent": true,
+  "isCollidable": false,
+  "model": "CUBE"
+}

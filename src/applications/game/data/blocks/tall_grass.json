@@ -1,0 +1,9 @@
+{
+  "id": 28,
+  "name": "TALL_GRASS",
+  "texture": "tall_grass.png",
+  "isTransparent": true,
+  "isCollidable": false,
+  "isReplaceable": true,
+  "model": "X_SHAPE"
+}

@@ -28,7 +28,15 @@ export function Inventory({ isOpen, onSelectBlock }: InventoryProps) {
                   (block) =>
                     block !== BlockType.STONE_SLAB_TOP &&
                     block !== BlockType.COBBLESTONE_SLAB_TOP &&
-                    block !== BlockType.PLANKS_SLAB_TOP
+                    block !== BlockType.PLANKS_SLAB_TOP &&
+                    block !== BlockType.WATER_FALLING &&
+                    block !== BlockType.WATER_LEVEL_1 &&
+                    block !== BlockType.WATER_LEVEL_2 &&
+                    block !== BlockType.WATER_LEVEL_3 &&
+                    block !== BlockType.WATER_LEVEL_4 &&
+                    block !== BlockType.WATER_LEVEL_5 &&
+                    block !== BlockType.WATER_LEVEL_6 &&
+                    block !== BlockType.WATER_LEVEL_7
                 )
                 .map((block) => (
                   <button

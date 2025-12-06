@@ -1,0 +1,8 @@
+{
+  "id": 18,
+  "name": "GLASS",
+  "texture": "glass.png",
+  "isTransparent": true,
+  "isTranslucent": true,
+  "model": "CUBE"
+}

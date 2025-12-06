@@ -1,0 +1,9 @@
+{
+  "id": 30,
+  "name": "PONPON_FLOWER",
+  "texture": "flower_ponpon.png",
+  "isTransparent": true,
+  "isCollidable": false,
+  "isReplaceable": false,
+  "model": "X_SHAPE"
+}

@@ -1,0 +1,13 @@
+{
+  "id": 32,
+  "name": "BELLIS_FLOWER",
+  "texture": "flower_bellis.png",
+  "isTransparent": true,
+  "isCollidable": false,
+  "isReplaceable": false,
+  "model": "FLAT_QUAD",
+  "hitbox": {
+    "scale": [1.002, 0.08, 1.002],
+    "offset": [0, -0.46, 0]
+  }
+}

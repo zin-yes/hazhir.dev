@@ -4,6 +4,11 @@ import {
   TRANSLUCENT_BLOCKS,
   TRANSPARENT_BLOCKS,
   getWaterLevel,
+  isCrop,
+  isCrossBlock,
+  isFlatQuad,
+  isSlab,
+  isTopSlab,
   isWater,
 } from "@/applications/game/blocks";
 import {
@@ -64,34 +69,6 @@ export function generateMesh(
   const rightBorder = borders.right ? new Uint8Array(borders.right) : null;
   const frontBorder = borders.front ? new Uint8Array(borders.front) : null;
   const backBorder = borders.back ? new Uint8Array(borders.back) : null;
-
-  const isSlab = (block: BlockType) => {
-    return (
-      block === BlockType.PLANKS_SLAB ||
-      block === BlockType.COBBLESTONE_SLAB ||
-      block === BlockType.STONE_SLAB ||
-      block === BlockType.PLANKS_SLAB_TOP ||
-      block === BlockType.COBBLESTONE_SLAB_TOP ||
-      block === BlockType.STONE_SLAB_TOP
-    );
-  };
-
-  const isTopSlab = (block: BlockType) => {
-    return (
-      block === BlockType.PLANKS_SLAB_TOP ||
-      block === BlockType.COBBLESTONE_SLAB_TOP ||
-      block === BlockType.STONE_SLAB_TOP
-    );
-  };
-
-  const isCrossBlock = (block: BlockType) => {
-    return (
-      block === BlockType.ANEMONE_FLOWER ||
-      block === BlockType.PONPON_FLOWER ||
-      block === BlockType.SAPLING ||
-      block === BlockType.TALL_GRASS
-    );
-  };
 
   const shouldCull = (
     block: BlockType,
@@ -310,7 +287,7 @@ export function generateMesh(
           continue;
         }
 
-        if (block === BlockType.BELLIS_FLOWER) {
+        if (isFlatQuad(block)) {
           const index = transparent.positions.length / 3;
           const yOffset = 0.1;
 
@@ -355,7 +332,7 @@ export function generateMesh(
           continue;
         }
 
-        if (block === BlockType.FORGETMENOTS_FLOWER) {
+        if (isCrop(block)) {
           const margin = 0.3;
           const min = margin;
           const max = 1 - margin;

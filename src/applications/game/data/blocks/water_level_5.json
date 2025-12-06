@@ -1,0 +1,11 @@
+{
+  "id": 38,
+  "name": "WATER_LEVEL_5",
+  "texture": "water.png",
+  "isTransparent": true,
+  "isTranslucent": true,
+  "isCollidable": false,
+  "isWater": true,
+  "waterLevel": 5,
+  "model": "CUBE"
+}

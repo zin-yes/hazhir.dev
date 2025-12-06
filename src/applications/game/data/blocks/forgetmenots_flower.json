@@ -1,0 +1,13 @@
+{
+  "id": 33,
+  "name": "FORGETMENOTS_FLOWER",
+  "texture": "flower_forgetmenots.png",
+  "isTransparent": true,
+  "isCollidable": false,
+  "isReplaceable": false,
+  "model": "CROP",
+  "hitbox": {
+    "scale": [0.6, 1.002, 0.6],
+    "offset": [0, 0, 0]
+  }
+}

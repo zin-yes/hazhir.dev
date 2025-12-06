@@ -1,0 +1,9 @@
+{
+  "id": 21,
+  "name": "LOG",
+  "texture": {
+    "default": "log_top_bottom.png",
+    "sides": "log_side.png"
+  },
+  "model": "CUBE"
+}

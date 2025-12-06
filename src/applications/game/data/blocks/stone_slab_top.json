@@ -1,0 +1,7 @@
+{
+  "id": 27,
+  "name": "STONE_SLAB_TOP",
+  "texture": "stone.png",
+  "isTransparent": true,
+  "model": "SLAB_TOP"
+}

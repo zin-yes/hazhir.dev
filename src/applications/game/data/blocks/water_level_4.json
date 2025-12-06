@@ -1,0 +1,11 @@
+{
+  "id": 37,
+  "name": "WATER_LEVEL_4",
+  "texture": "water.png",
+  "isTransparent": true,
+  "isTranslucent": true,
+  "isCollidable": false,
+  "isWater": true,
+  "waterLevel": 4,
+  "model": "CUBE"
+}

@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
+    "generate:blocks": "bun scripts/generate-blocks.ts",
     "start": "next start",
     "lint": "next lint"
   },
