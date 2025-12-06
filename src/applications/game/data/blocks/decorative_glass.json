@@ -1,0 +1,8 @@
+{
+  "id": 17,
+  "name": "DECORATIVE_GLASS",
+  "texture": "decorative_glass.png",
+  "isTransparent": true,
+  "isTranslucent": true,
+  "model": "CUBE"
+}

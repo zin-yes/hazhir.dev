@@ -1,0 +1,7 @@
+{
+  "id": 23,
+  "name": "COBBLESTONE_SLAB",
+  "texture": "cobblestone.png",
+  "isTransparent": true,
+  "model": "SLAB_BOTTOM"
+}

@@ -1,0 +1,13 @@
+{
+  "id": 31,
+  "name": "SAPLING",
+  "texture": "sapling.png",
+  "isTransparent": true,
+  "isCollidable": false,
+  "isReplaceable": false,
+  "model": "X_SHAPE",
+  "hitbox": {
+    "scale": [0.6, 1.002, 0.6],
+    "offset": [0, 0, 0]
+  }
+}

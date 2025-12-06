@@ -27,6 +27,7 @@ import {
   NON_COLLIDABLE_BLOCKS,
   TRANSPARENT_BLOCKS,
   Texture,
+  getHitbox,
   isReplaceable,
 } from "@/applications/game/blocks";
 import { BlockHighlighter } from "./block-highlighter";
@@ -903,63 +904,12 @@ export default function Game() {
           ) as THREE.LineSegments;
           const blockType = getBlock(x, y, z);
 
-          // default: full block
-          let scaleX = 1.002;
-          let scaleY = 1.002;
-          let scaleZ = 1.002;
-          let posY = y;
+          const { scale, offset } = getHitbox(blockType);
 
-          // Bottom slabs
-          if (
-            blockType === BlockType.PLANKS_SLAB ||
-            blockType === BlockType.COBBLESTONE_SLAB ||
-            blockType === BlockType.STONE_SLAB
-          ) {
-            scaleY = 0.502; // half-height
-            posY = y - 0.25; // center of lower half
-          }
-
-          // Top slabs
-          if (
-            blockType === BlockType.PLANKS_SLAB_TOP ||
-            blockType === BlockType.COBBLESTONE_SLAB_TOP ||
-            blockType === BlockType.STONE_SLAB_TOP
-          ) {
-            scaleY = 0.502;
-            posY = y + 0.25; // center of upper half
-          }
-
-          // Cross-shaped blocks: make indicator slimmer horizontally
-          if (
-            blockType === BlockType.ANEMONE_FLOWER ||
-            blockType === BlockType.SAPLING
-          ) {
-            scaleX = 0.6;
-            scaleZ = 0.6;
-            scaleY = 1.002;
-            posY = y;
-          }
-
-          // Forget-me-nots: smaller indicator (but full height)
-          if (blockType === BlockType.FORGETMENOTS_FLOWER) {
-            scaleX = 0.6;
-            scaleZ = 0.6;
-            scaleY = 1.002;
-            posY = y;
-          }
-
-          // Bellis: very short indicator near the ground (our bellis quad sits at y + 0.1)
-          if (blockType === BlockType.BELLIS_FLOWER) {
-            scaleX = 1.002;
-            scaleZ = 1.002;
-            scaleY = 0.08; // very short
-            posY = y - 0.46; // align with the bellis quad placement
-          }
-
-          indicator.position.x = x;
-          indicator.position.y = posY;
-          indicator.position.z = z;
-          indicator.scale.set(scaleX, scaleY, scaleZ);
+          indicator.position.x = x + offset[0];
+          indicator.position.y = y + offset[1];
+          indicator.position.z = z + offset[2];
+          indicator.scale.set(scale[0], scale[1], scale[2]);
           indicator.visible = true;
           return;
         }

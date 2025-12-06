@@ -1,0 +1,11 @@
+{
+  "id": 41,
+  "name": "WATER_FALLING",
+  "texture": "water.png",
+  "isTransparent": true,
+  "isTranslucent": true,
+  "isCollidable": false,
+  "isWater": true,
+  "waterLevel": 8,
+  "model": "CUBE"
+}

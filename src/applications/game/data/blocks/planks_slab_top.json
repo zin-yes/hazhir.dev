@@ -1,0 +1,7 @@
+{
+  "id": 25,
+  "name": "PLANKS_SLAB_TOP",
+  "texture": "planks.png",
+  "isTransparent": true,
+  "model": "SLAB_TOP"
+}

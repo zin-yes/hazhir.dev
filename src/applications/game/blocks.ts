@@ -1,74 +1,147 @@
+// This file is auto-generated. Do not edit manually.
+// Edit the JSON files in src/applications/game/data/blocks/ instead.
+
 export enum BlockType {
-  AIR,
-  DIRT,
-  HUMUS,
-  SILT,
-  CLAY,
-  GRAVEL,
-  GRANITE,
-  CALCITE,
-  COMPACT_GRAVEL,
-  PHYLLITE,
-  SHALE,
-  STONE,
-  COBBLESTONE,
-  SAND,
-  MARBLE,
-  LEAVES,
-  WATER,
-  DECORATIVE_GLASS,
-  GLASS,
-  GRASS,
-  PLANKS,
-  LOG,
-  PLANKS_SLAB,
-  COBBLESTONE_SLAB,
-  STONE_SLAB,
-  PLANKS_SLAB_TOP,
-  COBBLESTONE_SLAB_TOP,
-  STONE_SLAB_TOP,
-  TALL_GRASS,
-  ANEMONE_FLOWER,
-  PONPON_FLOWER,
-  SAPLING,
-  BELLIS_FLOWER,
-  FORGETMENOTS_FLOWER,
-  WATER_LEVEL_1,
-  WATER_LEVEL_2,
-  WATER_LEVEL_3,
-  WATER_LEVEL_4,
-  WATER_LEVEL_5,
-  WATER_LEVEL_6,
-  WATER_LEVEL_7,
-  WATER_FALLING,
+  AIR = 0,
+  DIRT = 1,
+  HUMUS = 2,
+  SILT = 3,
+  CLAY = 4,
+  GRAVEL = 5,
+  GRANITE = 6,
+  CALCITE = 7,
+  COMPACT_GRAVEL = 8,
+  PHYLLITE = 9,
+  SHALE = 10,
+  STONE = 11,
+  COBBLESTONE = 12,
+  SAND = 13,
+  MARBLE = 14,
+  LEAVES = 15,
+  WATER = 16,
+  DECORATIVE_GLASS = 17,
+  GLASS = 18,
+  GRASS = 19,
+  PLANKS = 20,
+  LOG = 21,
+  PLANKS_SLAB = 22,
+  COBBLESTONE_SLAB = 23,
+  STONE_SLAB = 24,
+  PLANKS_SLAB_TOP = 25,
+  COBBLESTONE_SLAB_TOP = 26,
+  STONE_SLAB_TOP = 27,
+  TALL_GRASS = 28,
+  ANEMONE_FLOWER = 29,
+  PONPON_FLOWER = 30,
+  SAPLING = 31,
+  BELLIS_FLOWER = 32,
+  FORGETMENOTS_FLOWER = 33,
+  WATER_LEVEL_1 = 34,
+  WATER_LEVEL_2 = 35,
+  WATER_LEVEL_3 = 36,
+  WATER_LEVEL_4 = 37,
+  WATER_LEVEL_5 = 38,
+  WATER_LEVEL_6 = 39,
+  WATER_LEVEL_7 = 40,
+  WATER_FALLING = 41,
 }
 
 export function isWater(block: BlockType): boolean {
   return (
     block === BlockType.WATER ||
-    block === BlockType.WATER_FALLING ||
-    (block >= BlockType.WATER_LEVEL_1 && block <= BlockType.WATER_LEVEL_7)
+    block === BlockType.WATER_LEVEL_1 ||
+    block === BlockType.WATER_LEVEL_2 ||
+    block === BlockType.WATER_LEVEL_3 ||
+    block === BlockType.WATER_LEVEL_4 ||
+    block === BlockType.WATER_LEVEL_5 ||
+    block === BlockType.WATER_LEVEL_6 ||
+    block === BlockType.WATER_LEVEL_7 ||
+    block === BlockType.WATER_FALLING
   );
 }
 
 export function getWaterLevel(block: BlockType): number {
-  if (block === BlockType.WATER || block === BlockType.WATER_FALLING) return 8;
-  if (block >= BlockType.WATER_LEVEL_1 && block <= BlockType.WATER_LEVEL_7) {
-    return block - BlockType.WATER_LEVEL_1 + 1;
-  }
+  if (block === BlockType.WATER) return 8;
+  if (block === BlockType.WATER_LEVEL_1) return 1;
+  if (block === BlockType.WATER_LEVEL_2) return 2;
+  if (block === BlockType.WATER_LEVEL_3) return 3;
+  if (block === BlockType.WATER_LEVEL_4) return 4;
+  if (block === BlockType.WATER_LEVEL_5) return 5;
+  if (block === BlockType.WATER_LEVEL_6) return 6;
+  if (block === BlockType.WATER_LEVEL_7) return 7;
+  if (block === BlockType.WATER_FALLING) return 8;
   return 0;
 }
 
 export function isReplaceable(block: BlockType): boolean {
   return (
-    isWater(block) ||
+    block === BlockType.WATER ||
+    block === BlockType.TALL_GRASS ||
+    block === BlockType.WATER_LEVEL_1 ||
+    block === BlockType.WATER_LEVEL_2 ||
+    block === BlockType.WATER_LEVEL_3 ||
+    block === BlockType.WATER_LEVEL_4 ||
+    block === BlockType.WATER_LEVEL_5 ||
+    block === BlockType.WATER_LEVEL_6 ||
+    block === BlockType.WATER_LEVEL_7 ||
+    block === BlockType.WATER_FALLING
+  );
+}
+
+export function isSlab(block: BlockType): boolean {
+  return (
+    block === BlockType.PLANKS_SLAB ||
+    block === BlockType.COBBLESTONE_SLAB ||
+    block === BlockType.STONE_SLAB ||
+    block === BlockType.PLANKS_SLAB_TOP ||
+    block === BlockType.COBBLESTONE_SLAB_TOP ||
+    block === BlockType.STONE_SLAB_TOP
+  );
+}
+
+export function isTopSlab(block: BlockType): boolean {
+  return (
+    block === BlockType.PLANKS_SLAB_TOP ||
+    block === BlockType.COBBLESTONE_SLAB_TOP ||
+    block === BlockType.STONE_SLAB_TOP
+  );
+}
+
+export function isCrossBlock(block: BlockType): boolean {
+  return (
     block === BlockType.TALL_GRASS ||
     block === BlockType.ANEMONE_FLOWER ||
     block === BlockType.PONPON_FLOWER ||
-    block === BlockType.SAPLING ||
-    block === BlockType.BELLIS_FLOWER ||
+    block === BlockType.SAPLING
+  );
+}
+
+export function isFlatQuad(block: BlockType): boolean {
+  return (
+    block === BlockType.BELLIS_FLOWER
+  );
+}
+
+export function isCrop(block: BlockType): boolean {
+  return (
     block === BlockType.FORGETMENOTS_FLOWER
   );
+}
+
+export function getHitbox(block: BlockType): { scale: [number, number, number]; offset: [number, number, number] } {
+  switch (block) {
+    case BlockType.PLANKS_SLAB: return { scale: [1.002, 0.502, 1.002], offset: [0, -0.25, 0] };
+    case BlockType.COBBLESTONE_SLAB: return { scale: [1.002, 0.502, 1.002], offset: [0, -0.25, 0] };
+    case BlockType.STONE_SLAB: return { scale: [1.002, 0.502, 1.002], offset: [0, -0.25, 0] };
+    case BlockType.PLANKS_SLAB_TOP: return { scale: [1.002, 0.502, 1.002], offset: [0, 0.25, 0] };
+    case BlockType.COBBLESTONE_SLAB_TOP: return { scale: [1.002, 0.502, 1.002], offset: [0, 0.25, 0] };
+    case BlockType.STONE_SLAB_TOP: return { scale: [1.002, 0.502, 1.002], offset: [0, 0.25, 0] };
+    case BlockType.ANEMONE_FLOWER: return { scale: [0.6, 1.002, 0.6], offset: [0, 0, 0] };
+    case BlockType.SAPLING: return { scale: [0.6, 1.002, 0.6], offset: [0, 0, 0] };
+    case BlockType.BELLIS_FLOWER: return { scale: [1.002, 0.08, 1.002], offset: [0, -0.46, 0] };
+    case BlockType.FORGETMENOTS_FLOWER: return { scale: [0.6, 1.002, 0.6], offset: [0, 0, 0] };
+    default: return { scale: [1.002, 1.002, 1.002], offset: [0, 0, 0] };
+  }
 }
 
 export const Texture = {
@@ -91,20 +164,21 @@ export const Texture = {
   WATER: "water.png",
   DECORATIVE_GLASS: "decorative_glass.png",
   GLASS: "glass.png",
-  GRASS_TOP: "grass_top.png",
   GRASS_SIDE: "grass_side.png",
+  GRASS_TOP: "grass_top.png",
   PLANKS: "planks.png",
   LOG_TOP_BOTTOM: "log_top_bottom.png",
   LOG_SIDE: "log_side.png",
-  ANEMONE_FLOWER: "flower_anemone.png",
-  PONPON_FLOWER: "flower_ponpon.png",
-  SAPLING: "sapling.png",
-  BELLIS_FLOWER: "flower_bellis.png",
-  FORGETMENOTS_FLOWER: "flower_forgetmenots.png",
   TALL_GRASS: "tall_grass.png",
+  FLOWER_ANEMONE: "flower_anemone.png",
+  FLOWER_PONPON: "flower_ponpon.png",
+  SAPLING: "sapling.png",
+  FLOWER_BELLIS: "flower_bellis.png",
+  FLOWER_FORGETMENOTS: "flower_forgetmenots.png",
 };
 
 export const LOADING_SCREEN_TEXTURES = [
+
   "dirt.png",
   "humus.png",
   "silt.png",
@@ -116,20 +190,24 @@ export const LOADING_SCREEN_TEXTURES = [
   "phyllite.png",
   "shale.png",
   "stone.png",
-  "flower_ponpon.png",
   "cobblestone.png",
   "sand.png",
   "marble.png",
-  "grass_top.png",
+  "leaves.png",
+  "water.png",
+  "decorative_glass.png",
+  "glass.png",
   "grass_side.png",
+  "grass_top.png",
   "planks.png",
   "log_top_bottom.png",
   "log_side.png",
+  "tall_grass.png",
   "flower_anemone.png",
+  "flower_ponpon.png",
   "sapling.png",
   "flower_bellis.png",
   "flower_forgetmenots.png",
-  "tall_grass.png",
 ];
 
 function getTextureIndexByName(name: string): number {
@@ -155,6 +233,10 @@ export let BLOCK_TEXTURES: {
   };
 } = {};
 
+BLOCK_TEXTURES[BlockType.AIR] = {
+  DEFAULT: getTextureIndexByName("INVALID"),
+};
+
 BLOCK_TEXTURES[BlockType.DIRT] = {
   DEFAULT: getTextureIndexByName("DIRT"),
 };
@@ -162,159 +244,184 @@ BLOCK_TEXTURES[BlockType.DIRT] = {
 BLOCK_TEXTURES[BlockType.HUMUS] = {
   DEFAULT: getTextureIndexByName("HUMUS"),
 };
+
 BLOCK_TEXTURES[BlockType.SILT] = {
   DEFAULT: getTextureIndexByName("SILT"),
 };
+
 BLOCK_TEXTURES[BlockType.CLAY] = {
   DEFAULT: getTextureIndexByName("CLAY"),
 };
+
 BLOCK_TEXTURES[BlockType.GRAVEL] = {
   DEFAULT: getTextureIndexByName("GRAVEL"),
 };
+
 BLOCK_TEXTURES[BlockType.GRANITE] = {
   DEFAULT: getTextureIndexByName("GRANITE"),
 };
+
 BLOCK_TEXTURES[BlockType.CALCITE] = {
   DEFAULT: getTextureIndexByName("CALCITE"),
 };
+
 BLOCK_TEXTURES[BlockType.COMPACT_GRAVEL] = {
   DEFAULT: getTextureIndexByName("COMPACT_GRAVEL"),
 };
+
 BLOCK_TEXTURES[BlockType.PHYLLITE] = {
   DEFAULT: getTextureIndexByName("PHYLLITE"),
 };
+
 BLOCK_TEXTURES[BlockType.SHALE] = {
   DEFAULT: getTextureIndexByName("SHALE"),
 };
+
 BLOCK_TEXTURES[BlockType.STONE] = {
   DEFAULT: getTextureIndexByName("STONE"),
 };
+
 BLOCK_TEXTURES[BlockType.COBBLESTONE] = {
   DEFAULT: getTextureIndexByName("COBBLESTONE"),
 };
+
 BLOCK_TEXTURES[BlockType.SAND] = {
   DEFAULT: getTextureIndexByName("SAND"),
 };
+
 BLOCK_TEXTURES[BlockType.MARBLE] = {
   DEFAULT: getTextureIndexByName("MARBLE"),
 };
+
 BLOCK_TEXTURES[BlockType.LEAVES] = {
   DEFAULT: getTextureIndexByName("LEAVES"),
 };
+
 BLOCK_TEXTURES[BlockType.WATER] = {
   DEFAULT: getTextureIndexByName("WATER"),
 };
-BLOCK_TEXTURES[BlockType.WATER_LEVEL_1] = {
-  DEFAULT: getTextureIndexByName("WATER"),
-};
-BLOCK_TEXTURES[BlockType.WATER_LEVEL_2] = {
-  DEFAULT: getTextureIndexByName("WATER"),
-};
-BLOCK_TEXTURES[BlockType.WATER_LEVEL_3] = {
-  DEFAULT: getTextureIndexByName("WATER"),
-};
-BLOCK_TEXTURES[BlockType.WATER_LEVEL_4] = {
-  DEFAULT: getTextureIndexByName("WATER"),
-};
-BLOCK_TEXTURES[BlockType.WATER_LEVEL_5] = {
-  DEFAULT: getTextureIndexByName("WATER"),
-};
-BLOCK_TEXTURES[BlockType.WATER_LEVEL_6] = {
-  DEFAULT: getTextureIndexByName("WATER"),
-};
-BLOCK_TEXTURES[BlockType.WATER_LEVEL_7] = {
-  DEFAULT: getTextureIndexByName("WATER"),
-};
-BLOCK_TEXTURES[BlockType.WATER_FALLING] = {
-  DEFAULT: getTextureIndexByName("WATER"),
-};
+
 BLOCK_TEXTURES[BlockType.DECORATIVE_GLASS] = {
   DEFAULT: getTextureIndexByName("DECORATIVE_GLASS"),
 };
+
 BLOCK_TEXTURES[BlockType.GLASS] = {
   DEFAULT: getTextureIndexByName("GLASS"),
 };
+
 BLOCK_TEXTURES[BlockType.GRASS] = {
   DEFAULT: getTextureIndexByName("DIRT"),
   SIDES: getTextureIndexByName("GRASS_SIDE"),
   TOP_FACE: getTextureIndexByName("GRASS_TOP"),
 };
+
 BLOCK_TEXTURES[BlockType.PLANKS] = {
   DEFAULT: getTextureIndexByName("PLANKS"),
 };
+
 BLOCK_TEXTURES[BlockType.LOG] = {
   DEFAULT: getTextureIndexByName("LOG_TOP_BOTTOM"),
   SIDES: getTextureIndexByName("LOG_SIDE"),
 };
+
 BLOCK_TEXTURES[BlockType.PLANKS_SLAB] = {
   DEFAULT: getTextureIndexByName("PLANKS"),
 };
+
 BLOCK_TEXTURES[BlockType.COBBLESTONE_SLAB] = {
   DEFAULT: getTextureIndexByName("COBBLESTONE"),
 };
+
 BLOCK_TEXTURES[BlockType.STONE_SLAB] = {
   DEFAULT: getTextureIndexByName("STONE"),
 };
+
 BLOCK_TEXTURES[BlockType.PLANKS_SLAB_TOP] = {
   DEFAULT: getTextureIndexByName("PLANKS"),
 };
+
 BLOCK_TEXTURES[BlockType.COBBLESTONE_SLAB_TOP] = {
   DEFAULT: getTextureIndexByName("COBBLESTONE"),
 };
+
 BLOCK_TEXTURES[BlockType.STONE_SLAB_TOP] = {
   DEFAULT: getTextureIndexByName("STONE"),
-};
-BLOCK_TEXTURES[BlockType.ANEMONE_FLOWER] = {
-  DEFAULT: getTextureIndexByName("ANEMONE_FLOWER"),
-};
-BLOCK_TEXTURES[BlockType.PONPON_FLOWER] = {
-  DEFAULT: getTextureIndexByName("PONPON_FLOWER"),
-};
-BLOCK_TEXTURES[BlockType.SAPLING] = {
-  DEFAULT: getTextureIndexByName("SAPLING"),
-};
-BLOCK_TEXTURES[BlockType.BELLIS_FLOWER] = {
-  DEFAULT: getTextureIndexByName("BELLIS_FLOWER"),
-};
-BLOCK_TEXTURES[BlockType.FORGETMENOTS_FLOWER] = {
-  DEFAULT: getTextureIndexByName("FORGETMENOTS_FLOWER"),
 };
 
 BLOCK_TEXTURES[BlockType.TALL_GRASS] = {
   DEFAULT: getTextureIndexByName("TALL_GRASS"),
 };
 
+BLOCK_TEXTURES[BlockType.ANEMONE_FLOWER] = {
+  DEFAULT: getTextureIndexByName("FLOWER_ANEMONE"),
+};
+
+BLOCK_TEXTURES[BlockType.PONPON_FLOWER] = {
+  DEFAULT: getTextureIndexByName("FLOWER_PONPON"),
+};
+
+BLOCK_TEXTURES[BlockType.SAPLING] = {
+  DEFAULT: getTextureIndexByName("SAPLING"),
+};
+
+BLOCK_TEXTURES[BlockType.BELLIS_FLOWER] = {
+  DEFAULT: getTextureIndexByName("FLOWER_BELLIS"),
+};
+
+BLOCK_TEXTURES[BlockType.FORGETMENOTS_FLOWER] = {
+  DEFAULT: getTextureIndexByName("FLOWER_FORGETMENOTS"),
+};
+
+BLOCK_TEXTURES[BlockType.WATER_LEVEL_1] = {
+  DEFAULT: getTextureIndexByName("WATER"),
+};
+
+BLOCK_TEXTURES[BlockType.WATER_LEVEL_2] = {
+  DEFAULT: getTextureIndexByName("WATER"),
+};
+
+BLOCK_TEXTURES[BlockType.WATER_LEVEL_3] = {
+  DEFAULT: getTextureIndexByName("WATER"),
+};
+
+BLOCK_TEXTURES[BlockType.WATER_LEVEL_4] = {
+  DEFAULT: getTextureIndexByName("WATER"),
+};
+
+BLOCK_TEXTURES[BlockType.WATER_LEVEL_5] = {
+  DEFAULT: getTextureIndexByName("WATER"),
+};
+
+BLOCK_TEXTURES[BlockType.WATER_LEVEL_6] = {
+  DEFAULT: getTextureIndexByName("WATER"),
+};
+
+BLOCK_TEXTURES[BlockType.WATER_LEVEL_7] = {
+  DEFAULT: getTextureIndexByName("WATER"),
+};
+
+BLOCK_TEXTURES[BlockType.WATER_FALLING] = {
+  DEFAULT: getTextureIndexByName("WATER"),
+};
+
 export const TRANSPARENT_BLOCKS = [
   BlockType.AIR,
-  BlockType.GLASS,
   BlockType.LEAVES,
-  BlockType.DECORATIVE_GLASS,
   BlockType.WATER,
-  BlockType.WATER_LEVEL_1,
-  BlockType.WATER_LEVEL_2,
-  BlockType.WATER_LEVEL_3,
-  BlockType.WATER_LEVEL_4,
-  BlockType.WATER_LEVEL_5,
-  BlockType.WATER_LEVEL_6,
-  BlockType.WATER_LEVEL_7,
-  BlockType.WATER_FALLING,
+  BlockType.DECORATIVE_GLASS,
+  BlockType.GLASS,
   BlockType.PLANKS_SLAB,
   BlockType.COBBLESTONE_SLAB,
   BlockType.STONE_SLAB,
   BlockType.PLANKS_SLAB_TOP,
   BlockType.COBBLESTONE_SLAB_TOP,
   BlockType.STONE_SLAB_TOP,
+  BlockType.TALL_GRASS,
   BlockType.ANEMONE_FLOWER,
   BlockType.PONPON_FLOWER,
   BlockType.SAPLING,
   BlockType.BELLIS_FLOWER,
   BlockType.FORGETMENOTS_FLOWER,
-  BlockType.TALL_GRASS,
-  // BlockType.PUMPOM_FLOWER,
-];
-
-export const TRANSLUCENT_BLOCKS = [
-  BlockType.WATER,
   BlockType.WATER_LEVEL_1,
   BlockType.WATER_LEVEL_2,
   BlockType.WATER_LEVEL_3,
@@ -323,13 +430,31 @@ export const TRANSLUCENT_BLOCKS = [
   BlockType.WATER_LEVEL_6,
   BlockType.WATER_LEVEL_7,
   BlockType.WATER_FALLING,
-  BlockType.GLASS,
+];
+
+export const TRANSLUCENT_BLOCKS = [
+  BlockType.WATER,
   BlockType.DECORATIVE_GLASS,
+  BlockType.GLASS,
+  BlockType.WATER_LEVEL_1,
+  BlockType.WATER_LEVEL_2,
+  BlockType.WATER_LEVEL_3,
+  BlockType.WATER_LEVEL_4,
+  BlockType.WATER_LEVEL_5,
+  BlockType.WATER_LEVEL_6,
+  BlockType.WATER_LEVEL_7,
+  BlockType.WATER_FALLING,
 ];
 
 export const NON_COLLIDABLE_BLOCKS = [
   BlockType.AIR,
   BlockType.WATER,
+  BlockType.TALL_GRASS,
+  BlockType.ANEMONE_FLOWER,
+  BlockType.PONPON_FLOWER,
+  BlockType.SAPLING,
+  BlockType.BELLIS_FLOWER,
+  BlockType.FORGETMENOTS_FLOWER,
   BlockType.WATER_LEVEL_1,
   BlockType.WATER_LEVEL_2,
   BlockType.WATER_LEVEL_3,
@@ -338,13 +463,6 @@ export const NON_COLLIDABLE_BLOCKS = [
   BlockType.WATER_LEVEL_6,
   BlockType.WATER_LEVEL_7,
   BlockType.WATER_FALLING,
-  BlockType.ANEMONE_FLOWER,
-  BlockType.PONPON_FLOWER,
-  BlockType.SAPLING,
-  BlockType.BELLIS_FLOWER,
-  BlockType.FORGETMENOTS_FLOWER,
-  BlockType.TALL_GRASS,
-  // BlockType.PUMPOM_FLOWER,
 ];
 
 export const BLOCK_ITEM_TEXTURES: Record<
@@ -368,14 +486,6 @@ export const BLOCK_ITEM_TEXTURES: Record<
   [BlockType.MARBLE]: Texture.MARBLE,
   [BlockType.LEAVES]: Texture.LEAVES,
   [BlockType.WATER]: Texture.WATER,
-  [BlockType.WATER_LEVEL_1]: Texture.WATER,
-  [BlockType.WATER_LEVEL_2]: Texture.WATER,
-  [BlockType.WATER_LEVEL_3]: Texture.WATER,
-  [BlockType.WATER_LEVEL_4]: Texture.WATER,
-  [BlockType.WATER_LEVEL_5]: Texture.WATER,
-  [BlockType.WATER_LEVEL_6]: Texture.WATER,
-  [BlockType.WATER_LEVEL_7]: Texture.WATER,
-  [BlockType.WATER_FALLING]: Texture.WATER,
   [BlockType.DECORATIVE_GLASS]: Texture.DECORATIVE_GLASS,
   [BlockType.GLASS]: Texture.GLASS,
   [BlockType.GRASS]: Texture.GRASS_SIDE,
@@ -387,10 +497,18 @@ export const BLOCK_ITEM_TEXTURES: Record<
   [BlockType.PLANKS_SLAB_TOP]: Texture.PLANKS,
   [BlockType.COBBLESTONE_SLAB_TOP]: Texture.COBBLESTONE,
   [BlockType.STONE_SLAB_TOP]: Texture.STONE,
-  [BlockType.ANEMONE_FLOWER]: Texture.ANEMONE_FLOWER,
-  [BlockType.PONPON_FLOWER]: Texture.PONPON_FLOWER,
-  [BlockType.SAPLING]: Texture.SAPLING,
-  [BlockType.BELLIS_FLOWER]: Texture.BELLIS_FLOWER,
-  [BlockType.FORGETMENOTS_FLOWER]: Texture.FORGETMENOTS_FLOWER,
   [BlockType.TALL_GRASS]: Texture.TALL_GRASS,
+  [BlockType.ANEMONE_FLOWER]: Texture.FLOWER_ANEMONE,
+  [BlockType.PONPON_FLOWER]: Texture.FLOWER_PONPON,
+  [BlockType.SAPLING]: Texture.SAPLING,
+  [BlockType.BELLIS_FLOWER]: Texture.FLOWER_BELLIS,
+  [BlockType.FORGETMENOTS_FLOWER]: Texture.FLOWER_FORGETMENOTS,
+  [BlockType.WATER_LEVEL_1]: Texture.WATER,
+  [BlockType.WATER_LEVEL_2]: Texture.WATER,
+  [BlockType.WATER_LEVEL_3]: Texture.WATER,
+  [BlockType.WATER_LEVEL_4]: Texture.WATER,
+  [BlockType.WATER_LEVEL_5]: Texture.WATER,
+  [BlockType.WATER_LEVEL_6]: Texture.WATER,
+  [BlockType.WATER_LEVEL_7]: Texture.WATER,
+  [BlockType.WATER_FALLING]: Texture.WATER,
 };
