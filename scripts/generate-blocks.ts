@@ -34,7 +34,9 @@ interface BlockDef {
     | "SLAB_TOP"
     | "X_SHAPE"
     | "FLAT_QUAD"
-    | "CROP";
+    | "CROP"
+    | "STAIRS";
+  direction?: "NORTH" | "SOUTH" | "EAST" | "WEST";
   hitbox?: {
     scale?: [number, number, number];
     offset?: [number, number, number];
@@ -167,43 +169,95 @@ ${blocks
   );
 }
 
-export function getHitbox(block: BlockType): { scale: [number, number, number]; offset: [number, number, number] } {
+export function isStairs(block: BlockType): boolean {
+  return (
+${blocks
+  .filter((b) => b.model === "STAIRS")
+  .map((b) => `    block === BlockType.${b.name}`)
+  .join(" ||\n")}
+  );
+}
+
+export function getDirection(block: BlockType): "NORTH" | "SOUTH" | "EAST" | "WEST" | null {
+  switch (block) {
+${blocks
+  .filter((b) => b.direction)
+  .map((b) => `    case BlockType.${b.name}: return "${b.direction}";`)
+  .join("\n")}
+    default: return null;
+  }
+}
+
+export function getHitboxes(block: BlockType): { scale: [number, number, number]; offset: [number, number, number] }[] {
   switch (block) {
 ${blocks
   .map((b) => {
-    let scale = [1.002, 1.002, 1.002];
-    let offset = [0, 0, 0];
+    let boxes: {
+      scale: [number, number, number];
+      offset: [number, number, number];
+    }[] = [];
 
     if (b.hitbox) {
+      let scale: [number, number, number] = [1.002, 1.002, 1.002];
+      let offset: [number, number, number] = [0, 0, 0];
       if (b.hitbox.scale) scale = b.hitbox.scale;
       if (b.hitbox.offset) offset = b.hitbox.offset;
+      boxes.push({ scale, offset });
     } else if (b.model === "SLAB_BOTTOM") {
-      scale = [1.002, 0.502, 1.002];
-      offset = [0, -0.25, 0];
+      boxes.push({ scale: [1.002, 0.502, 1.002], offset: [0, -0.25, 0] });
     } else if (b.model === "SLAB_TOP") {
-      scale = [1.002, 0.502, 1.002];
-      offset = [0, 0.25, 0];
+      boxes.push({ scale: [1.002, 0.502, 1.002], offset: [0, 0.25, 0] });
+    } else if (b.model === "STAIRS") {
+      // Bottom slab
+      boxes.push({ scale: [1.002, 0.502, 1.002], offset: [0, -0.25, 0] });
+      // Top half
+      if (b.direction === "NORTH") {
+        // -Z
+        boxes.push({ scale: [1.002, 0.502, 0.502], offset: [0, 0.25, -0.25] });
+      } else if (b.direction === "SOUTH") {
+        // +Z
+        boxes.push({ scale: [1.002, 0.502, 0.502], offset: [0, 0.25, 0.25] });
+      } else if (b.direction === "EAST") {
+        // +X
+        boxes.push({ scale: [0.502, 0.502, 1.002], offset: [0.25, 0.25, 0] });
+      } else if (b.direction === "WEST") {
+        // -X
+        boxes.push({ scale: [0.502, 0.502, 1.002], offset: [-0.25, 0.25, 0] });
+      } else {
+        // Default to NORTH if no direction
+        boxes.push({ scale: [1.002, 0.502, 0.502], offset: [0, 0.25, -0.25] });
+      }
+    } else {
+      // Default cube
+      boxes.push({ scale: [1.002, 1.002, 1.002], offset: [0, 0, 0] });
     }
 
     // Only generate case if it differs from default cube
-    if (
-      scale[0] !== 1.002 ||
-      scale[1] !== 1.002 ||
-      scale[2] !== 1.002 ||
-      offset[0] !== 0 ||
-      offset[1] !== 0 ||
-      offset[2] !== 0
-    ) {
-      return `    case BlockType.${b.name}: return { scale: [${scale.join(
-        ", "
-      )}], offset: [${offset.join(", ")}] };`;
+    const isDefault =
+      boxes.length === 1 &&
+      boxes[0].scale[0] === 1.002 &&
+      boxes[0].scale[1] === 1.002 &&
+      boxes[0].scale[2] === 1.002 &&
+      boxes[0].offset[0] === 0 &&
+      boxes[0].offset[1] === 0 &&
+      boxes[0].offset[2] === 0;
+
+    if (!isDefault) {
+      return `    case BlockType.${b.name}: return ${JSON.stringify(boxes)};`;
     }
     return "";
   })
   .filter((s) => s)
   .join("\n")}
-    default: return { scale: [1.002, 1.002, 1.002], offset: [0, 0, 0] };
+    default: return [{ scale: [1.002, 1.002, 1.002], offset: [0, 0, 0] }];
   }
+}
+
+export function getBoundingBox(block: BlockType): { scale: [number, number, number]; offset: [number, number, number] } {
+  const boxes = getHitboxes(block);
+  if (boxes.length === 0) return { scale: [1.002, 1.002, 1.002], offset: [0, 0, 0] };
+  // Return full block for simplicity in highlighter for now
+  return { scale: [1.002, 1.002, 1.002], offset: [0, 0, 0] };
 }
 
 export const Texture = {

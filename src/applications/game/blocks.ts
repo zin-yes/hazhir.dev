@@ -44,6 +44,10 @@ export enum BlockType {
   WATER_LEVEL_6 = 39,
   WATER_LEVEL_7 = 40,
   WATER_FALLING = 41,
+  PLANKS_STAIRS_NORTH = 50,
+  PLANKS_STAIRS_SOUTH = 51,
+  PLANKS_STAIRS_EAST = 52,
+  PLANKS_STAIRS_WEST = 53,
 }
 
 export function isWater(block: BlockType): boolean {
@@ -128,20 +132,50 @@ export function isCrop(block: BlockType): boolean {
   );
 }
 
-export function getHitbox(block: BlockType): { scale: [number, number, number]; offset: [number, number, number] } {
+export function isStairs(block: BlockType): boolean {
+  return (
+    block === BlockType.PLANKS_STAIRS_NORTH ||
+    block === BlockType.PLANKS_STAIRS_SOUTH ||
+    block === BlockType.PLANKS_STAIRS_EAST ||
+    block === BlockType.PLANKS_STAIRS_WEST
+  );
+}
+
+export function getDirection(block: BlockType): "NORTH" | "SOUTH" | "EAST" | "WEST" | null {
   switch (block) {
-    case BlockType.PLANKS_SLAB: return { scale: [1.002, 0.502, 1.002], offset: [0, -0.25, 0] };
-    case BlockType.COBBLESTONE_SLAB: return { scale: [1.002, 0.502, 1.002], offset: [0, -0.25, 0] };
-    case BlockType.STONE_SLAB: return { scale: [1.002, 0.502, 1.002], offset: [0, -0.25, 0] };
-    case BlockType.PLANKS_SLAB_TOP: return { scale: [1.002, 0.502, 1.002], offset: [0, 0.25, 0] };
-    case BlockType.COBBLESTONE_SLAB_TOP: return { scale: [1.002, 0.502, 1.002], offset: [0, 0.25, 0] };
-    case BlockType.STONE_SLAB_TOP: return { scale: [1.002, 0.502, 1.002], offset: [0, 0.25, 0] };
-    case BlockType.ANEMONE_FLOWER: return { scale: [0.6, 1.002, 0.6], offset: [0, 0, 0] };
-    case BlockType.SAPLING: return { scale: [0.6, 1.002, 0.6], offset: [0, 0, 0] };
-    case BlockType.BELLIS_FLOWER: return { scale: [1.002, 0.08, 1.002], offset: [0, -0.46, 0] };
-    case BlockType.FORGETMENOTS_FLOWER: return { scale: [0.6, 1.002, 0.6], offset: [0, 0, 0] };
-    default: return { scale: [1.002, 1.002, 1.002], offset: [0, 0, 0] };
+    case BlockType.PLANKS_STAIRS_NORTH: return "NORTH";
+    case BlockType.PLANKS_STAIRS_SOUTH: return "SOUTH";
+    case BlockType.PLANKS_STAIRS_EAST: return "EAST";
+    case BlockType.PLANKS_STAIRS_WEST: return "WEST";
+    default: return null;
   }
+}
+
+export function getHitboxes(block: BlockType): { scale: [number, number, number]; offset: [number, number, number] }[] {
+  switch (block) {
+    case BlockType.PLANKS_SLAB: return [{"scale":[1.002,0.502,1.002],"offset":[0,-0.25,0]}];
+    case BlockType.COBBLESTONE_SLAB: return [{"scale":[1.002,0.502,1.002],"offset":[0,-0.25,0]}];
+    case BlockType.STONE_SLAB: return [{"scale":[1.002,0.502,1.002],"offset":[0,-0.25,0]}];
+    case BlockType.PLANKS_SLAB_TOP: return [{"scale":[1.002,0.502,1.002],"offset":[0,0.25,0]}];
+    case BlockType.COBBLESTONE_SLAB_TOP: return [{"scale":[1.002,0.502,1.002],"offset":[0,0.25,0]}];
+    case BlockType.STONE_SLAB_TOP: return [{"scale":[1.002,0.502,1.002],"offset":[0,0.25,0]}];
+    case BlockType.ANEMONE_FLOWER: return [{"scale":[0.6,1.002,0.6],"offset":[0,0,0]}];
+    case BlockType.SAPLING: return [{"scale":[0.6,1.002,0.6],"offset":[0,0,0]}];
+    case BlockType.BELLIS_FLOWER: return [{"scale":[1.002,0.08,1.002],"offset":[0,-0.46,0]}];
+    case BlockType.FORGETMENOTS_FLOWER: return [{"scale":[0.6,1.002,0.6],"offset":[0,0,0]}];
+    case BlockType.PLANKS_STAIRS_NORTH: return [{"scale":[1.002,0.502,1.002],"offset":[0,-0.25,0]},{"scale":[1.002,0.502,0.502],"offset":[0,0.25,-0.25]}];
+    case BlockType.PLANKS_STAIRS_SOUTH: return [{"scale":[1.002,0.502,1.002],"offset":[0,-0.25,0]},{"scale":[1.002,0.502,0.502],"offset":[0,0.25,0.25]}];
+    case BlockType.PLANKS_STAIRS_EAST: return [{"scale":[1.002,0.502,1.002],"offset":[0,-0.25,0]},{"scale":[0.502,0.502,1.002],"offset":[0.25,0.25,0]}];
+    case BlockType.PLANKS_STAIRS_WEST: return [{"scale":[1.002,0.502,1.002],"offset":[0,-0.25,0]},{"scale":[0.502,0.502,1.002],"offset":[-0.25,0.25,0]}];
+    default: return [{ scale: [1.002, 1.002, 1.002], offset: [0, 0, 0] }];
+  }
+}
+
+export function getBoundingBox(block: BlockType): { scale: [number, number, number]; offset: [number, number, number] } {
+  const boxes = getHitboxes(block);
+  if (boxes.length === 0) return { scale: [1.002, 1.002, 1.002], offset: [0, 0, 0] };
+  // Return full block for simplicity in highlighter for now
+  return { scale: [1.002, 1.002, 1.002], offset: [0, 0, 0] };
 }
 
 export const Texture = {
@@ -404,6 +438,22 @@ BLOCK_TEXTURES[BlockType.WATER_FALLING] = {
   DEFAULT: getTextureIndexByName("WATER"),
 };
 
+BLOCK_TEXTURES[BlockType.PLANKS_STAIRS_NORTH] = {
+  DEFAULT: getTextureIndexByName("PLANKS"),
+};
+
+BLOCK_TEXTURES[BlockType.PLANKS_STAIRS_SOUTH] = {
+  DEFAULT: getTextureIndexByName("PLANKS"),
+};
+
+BLOCK_TEXTURES[BlockType.PLANKS_STAIRS_EAST] = {
+  DEFAULT: getTextureIndexByName("PLANKS"),
+};
+
+BLOCK_TEXTURES[BlockType.PLANKS_STAIRS_WEST] = {
+  DEFAULT: getTextureIndexByName("PLANKS"),
+};
+
 export const TRANSPARENT_BLOCKS = [
   BlockType.AIR,
   BlockType.LEAVES,
@@ -430,6 +480,10 @@ export const TRANSPARENT_BLOCKS = [
   BlockType.WATER_LEVEL_6,
   BlockType.WATER_LEVEL_7,
   BlockType.WATER_FALLING,
+  BlockType.PLANKS_STAIRS_NORTH,
+  BlockType.PLANKS_STAIRS_SOUTH,
+  BlockType.PLANKS_STAIRS_EAST,
+  BlockType.PLANKS_STAIRS_WEST,
 ];
 
 export const TRANSLUCENT_BLOCKS = [
@@ -511,4 +565,8 @@ export const BLOCK_ITEM_TEXTURES: Record<
   [BlockType.WATER_LEVEL_6]: Texture.WATER,
   [BlockType.WATER_LEVEL_7]: Texture.WATER,
   [BlockType.WATER_FALLING]: Texture.WATER,
+  [BlockType.PLANKS_STAIRS_NORTH]: Texture.PLANKS,
+  [BlockType.PLANKS_STAIRS_SOUTH]: Texture.PLANKS,
+  [BlockType.PLANKS_STAIRS_EAST]: Texture.PLANKS,
+  [BlockType.PLANKS_STAIRS_WEST]: Texture.PLANKS,
 };
