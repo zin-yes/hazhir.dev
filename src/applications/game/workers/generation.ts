@@ -463,6 +463,49 @@ function placeTreeInChunk(
   }
 }
 
+export function _generateChunk(
+  seed: number,
+  chunkX: number,
+  chunkY: number,
+  chunkZ: number
+): ArrayBuffer {
+  if (chunkY > 0) {
+    const view = new Uint8Array(CHUNK_WIDTH * CHUNK_HEIGHT * CHUNK_LENGTH);
+    for (let i = 0; i < view.length; i++) {
+      view[i] = BlockType.AIR;
+    }
+    return view.buffer;
+  } else {
+    const view = new Uint8Array(CHUNK_WIDTH * CHUNK_HEIGHT * CHUNK_LENGTH);
+    for (let x = 0; x < CHUNK_WIDTH; x++) {
+      for (let y = 0; y < CHUNK_HEIGHT; y++) {
+        for (let z = 0; z < CHUNK_LENGTH; z++) {
+          // Fill every block except top layer
+
+          if (y < CHUNK_HEIGHT - 1) {
+            view[
+              calculateOffset(
+                x % CHUNK_WIDTH,
+                y % CHUNK_HEIGHT,
+                z % CHUNK_LENGTH
+              )
+            ] = BlockType.STONE;
+          } else {
+            view[
+              calculateOffset(
+                x % CHUNK_WIDTH,
+                y % CHUNK_HEIGHT,
+                z % CHUNK_LENGTH
+              )
+            ] = BlockType.AIR;
+          }
+        }
+      }
+    }
+    return view.buffer;
+  }
+}
+
 export function generateChunk(
   seed: number,
   chunkX: number,

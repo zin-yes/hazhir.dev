@@ -48,6 +48,7 @@ export enum BlockType {
   PLANKS_STAIRS_SOUTH = 51,
   PLANKS_STAIRS_EAST = 52,
   PLANKS_STAIRS_WEST = 53,
+  GLOWSTONE = 54,
 }
 
 export function isWater(block: BlockType): boolean {
@@ -74,6 +75,11 @@ export function getWaterLevel(block: BlockType): number {
   if (block === BlockType.WATER_LEVEL_6) return 6;
   if (block === BlockType.WATER_LEVEL_7) return 7;
   if (block === BlockType.WATER_FALLING) return 8;
+  return 0;
+}
+
+export function getBlockLightLevel(block: BlockType): number {
+  if (block === BlockType.GLOWSTONE) return 15;
   return 0;
 }
 
@@ -454,6 +460,10 @@ BLOCK_TEXTURES[BlockType.PLANKS_STAIRS_WEST] = {
   DEFAULT: getTextureIndexByName("PLANKS"),
 };
 
+BLOCK_TEXTURES[BlockType.GLOWSTONE] = {
+  DEFAULT: getTextureIndexByName("INVALID"),
+};
+
 export const TRANSPARENT_BLOCKS = [
   BlockType.AIR,
   BlockType.LEAVES,
@@ -569,4 +579,5 @@ export const BLOCK_ITEM_TEXTURES: Record<
   [BlockType.PLANKS_STAIRS_SOUTH]: Texture.PLANKS,
   [BlockType.PLANKS_STAIRS_EAST]: Texture.PLANKS,
   [BlockType.PLANKS_STAIRS_WEST]: Texture.PLANKS,
+  [BlockType.GLOWSTONE]: Texture.INVALID,
 };
