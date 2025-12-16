@@ -33,7 +33,7 @@ void main() {
   vec3 diffuse = vec3(diff) + vec3(0.25);
   
   float lightIntensity = pow(0.8, 15.0 - vLightLevel);
-  vec3 lighting = diffuse * lightIntensity;
+  vec3 lighting = vec3(1.0) * lightIntensity;
   lighting = max(lighting, vec3(0.05));
 
   vec4 textureColor = texture(Texture, vec3(TextureCoordinates, TextureIndex));
@@ -45,7 +45,8 @@ void main() {
   if (textureColor.a < 0.5) discard;
   
   // Debug: Visualize light level
-  // gl_FragColor = vec4(vec3(vLightLevel / 15.0), 1.0);
+  //gl_FragColor = vec4(vec3(vLightLevel / 15.0), 1.0);
+  
   
   gl_FragColor = vec4((vec4(lighting, 1.0) * textureColor).rgb, textureColor.a);
 }

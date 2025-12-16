@@ -1,17 +1,32 @@
 import { BlockType, getWaterLevel, isWater } from "./blocks";
 
+// Safe version of isWater that handles null
+const safeIsWater = (block: BlockType | null): block is BlockType => {
+  return block !== null && isWater(block);
+};
+
+// Safe version of getWaterLevel that handles null
+const safeGetWaterLevel = (block: BlockType | null): number => {
+  if (block === null) return 0;
+  return getWaterLevel(block);
+};
+
 export function updateWater(
   x: number,
   y: number,
   z: number,
-  getBlock: (x: number, y: number, z: number) => BlockType,
+  getBlock: (x: number, y: number, z: number) => BlockType | null,
   setBlock: (x: number, y: number, z: number, block: BlockType) => void,
   scheduleUpdate: (x: number, y: number, z: number) => void
 ) {
   const currentBlock = getBlock(x, y, z);
 
   // If not water and not air, we don't do anything (unless we want to wash away things, but let's skip for now)
-  if (!isWater(currentBlock) && currentBlock !== BlockType.AIR) return;
+  if (
+    currentBlock === null ||
+    (!isWater(currentBlock) && currentBlock !== BlockType.AIR)
+  )
+    return;
 
   let newLevel = 0;
   let isSource = currentBlock === BlockType.WATER;
@@ -21,7 +36,7 @@ export function updateWater(
     newLevel = 8;
   } else {
     const blockAbove = getBlock(x, y + 1, z);
-    if (isWater(blockAbove)) {
+    if (safeIsWater(blockAbove)) {
       newLevel = 8;
       isFalling = true;
     } else {
@@ -37,8 +52,8 @@ export function updateWater(
       ];
 
       for (const neighbor of neighbors) {
-        if (isWater(neighbor)) {
-          const level = getWaterLevel(neighbor);
+        if (safeIsWater(neighbor)) {
+          const level = safeGetWaterLevel(neighbor);
           if (level > maxNeighborLevel) {
             maxNeighborLevel = level;
           }
@@ -53,6 +68,7 @@ export function updateWater(
       // Minecraft: "horizontally adjacent to two or more other source blocks, and sitting on top of a solid block or another water source block"
       const blockBelow = getBlock(x, y - 1, z);
       const solidBelow =
+        blockBelow !== null &&
         blockBelow !== BlockType.AIR &&
         (blockBelow === BlockType.WATER || !isWater(blockBelow)); // Simplified solid check
 
@@ -108,14 +124,14 @@ export function updateWater(
       setBlock(x, y - 1, z, BlockType.WATER_FALLING);
       scheduleUpdate(x, y - 1, z);
     } else if (
-      isWater(blockBelow) &&
-      getWaterLevel(blockBelow) < 8 &&
+      safeIsWater(blockBelow) &&
+      safeGetWaterLevel(blockBelow) < 8 &&
       blockBelow !== BlockType.WATER
     ) {
       setBlock(x, y - 1, z, BlockType.WATER_FALLING);
       scheduleUpdate(x, y - 1, z);
-    } else if (blockBelow !== BlockType.AIR && !isWater(blockBelow)) {
-      // Spread Sides
+    } else if (blockBelow !== null && !safeIsWater(blockBelow)) {
+      // Spread Sides (blockBelow is solid - not AIR and not water)
       const spreadLevel = newLevel - 1;
       if (spreadLevel > 0) {
         const spreadTo = (nx: number, ny: number, nz: number) => {

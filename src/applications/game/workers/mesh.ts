@@ -24,11 +24,19 @@ import { getSurfaceHeight } from "./generation";
 import FastNoiseLite from "fastnoise-lite";
 
 import { calculateOffset } from "../utils";
-import { computeChunkLighting } from "./lighting";
 
 export function generateMesh(
   _chunk: ArrayBuffer,
+  _lightBuffer: ArrayBuffer,
   borders: {
+    top?: ArrayBuffer;
+    bottom?: ArrayBuffer;
+    left?: ArrayBuffer;
+    right?: ArrayBuffer;
+    front?: ArrayBuffer;
+    back?: ArrayBuffer;
+  } = {},
+  borderLights: {
     top?: ArrayBuffer;
     bottom?: ArrayBuffer;
     left?: ArrayBuffer;
@@ -77,23 +85,39 @@ export function generateMesh(
   };
 
   const chunk = new Uint8Array(_chunk);
-  const lightMap = computeChunkLighting(
-    chunk,
-    borders,
-    seed,
-    chunkX,
-    chunkY,
-    chunkZ
-  );
+  const lightMap = new Uint8Array(_lightBuffer);
+
+  // Convert ArrayBuffer borders to Uint8Array before passing to lighting
+  const topBorder = borders.top ? new Uint8Array(borders.top) : undefined;
+  const bottomBorder = borders.bottom
+    ? new Uint8Array(borders.bottom)
+    : undefined;
+  const leftBorder = borders.left ? new Uint8Array(borders.left) : undefined;
+  const rightBorder = borders.right ? new Uint8Array(borders.right) : undefined;
+  const frontBorder = borders.front ? new Uint8Array(borders.front) : undefined;
+  const backBorder = borders.back ? new Uint8Array(borders.back) : undefined;
+
+  // Convert ArrayBuffer borderLights to Uint8Array
+  const topBorderLight = borderLights.top
+    ? new Uint8Array(borderLights.top)
+    : undefined;
+  const bottomBorderLight = borderLights.bottom
+    ? new Uint8Array(borderLights.bottom)
+    : undefined;
+  const leftBorderLight = borderLights.left
+    ? new Uint8Array(borderLights.left)
+    : undefined;
+  const rightBorderLight = borderLights.right
+    ? new Uint8Array(borderLights.right)
+    : undefined;
+  const frontBorderLight = borderLights.front
+    ? new Uint8Array(borderLights.front)
+    : undefined;
+  const backBorderLight = borderLights.back
+    ? new Uint8Array(borderLights.back)
+    : undefined;
 
   const noise = new FastNoiseLite(seed);
-
-  const topBorder = borders.top ? new Uint8Array(borders.top) : null;
-  const bottomBorder = borders.bottom ? new Uint8Array(borders.bottom) : null;
-  const leftBorder = borders.left ? new Uint8Array(borders.left) : null;
-  const rightBorder = borders.right ? new Uint8Array(borders.right) : null;
-  const frontBorder = borders.front ? new Uint8Array(borders.front) : null;
-  const backBorder = borders.back ? new Uint8Array(borders.back) : null;
 
   const shouldCull = (
     block: BlockType,
@@ -141,24 +165,91 @@ export function generateMesh(
         const currentLight = Math.max((rawLight >> 4) & 0xf, rawLight & 0xf);
 
         const getLight = (lx: number, ly: number, lz: number) => {
-          if (
-            lx < 0 ||
-            lx >= CHUNK_WIDTH ||
-            ly < 0 ||
-            ly >= CHUNK_HEIGHT ||
-            lz < 0 ||
-            lz >= CHUNK_LENGTH
+          if (lx < 0) {
+            if (
+              leftBorderLight &&
+              ly >= 0 &&
+              ly < CHUNK_HEIGHT &&
+              lz >= 0 &&
+              lz < CHUNK_LENGTH
+            ) {
+              const val = leftBorderLight[ly * CHUNK_LENGTH + lz];
+              return Math.max((val >> 4) & 0xf, val & 0xf);
+            }
+          } else if (lx >= CHUNK_WIDTH) {
+            if (
+              rightBorderLight &&
+              ly >= 0 &&
+              ly < CHUNK_HEIGHT &&
+              lz >= 0 &&
+              lz < CHUNK_LENGTH
+            ) {
+              const val = rightBorderLight[ly * CHUNK_LENGTH + lz];
+              return Math.max((val >> 4) & 0xf, val & 0xf);
+            }
+          } else if (ly < 0) {
+            if (
+              bottomBorderLight &&
+              lx >= 0 &&
+              lx < CHUNK_WIDTH &&
+              lz >= 0 &&
+              lz < CHUNK_LENGTH
+            ) {
+              const val = bottomBorderLight[lx * CHUNK_LENGTH + lz];
+              return Math.max((val >> 4) & 0xf, val & 0xf);
+            }
+          } else if (ly >= CHUNK_HEIGHT) {
+            if (
+              topBorderLight &&
+              lx >= 0 &&
+              lx < CHUNK_WIDTH &&
+              lz >= 0 &&
+              lz < CHUNK_LENGTH
+            ) {
+              const val = topBorderLight[lx * CHUNK_LENGTH + lz];
+              return Math.max((val >> 4) & 0xf, val & 0xf);
+            }
+          } else if (lz < 0) {
+            if (
+              backBorderLight &&
+              lx >= 0 &&
+              lx < CHUNK_WIDTH &&
+              ly >= 0 &&
+              ly < CHUNK_HEIGHT
+            ) {
+              const val = backBorderLight[lx * CHUNK_HEIGHT + ly];
+              return Math.max((val >> 4) & 0xf, val & 0xf);
+            }
+          } else if (lz >= CHUNK_LENGTH) {
+            if (
+              frontBorderLight &&
+              lx >= 0 &&
+              lx < CHUNK_WIDTH &&
+              ly >= 0 &&
+              ly < CHUNK_HEIGHT
+            ) {
+              const val = frontBorderLight[lx * CHUNK_HEIGHT + ly];
+              return Math.max((val >> 4) & 0xf, val & 0xf);
+            }
+          } else if (
+            lx >= 0 &&
+            lx < CHUNK_WIDTH &&
+            ly >= 0 &&
+            ly < CHUNK_HEIGHT &&
+            lz >= 0 &&
+            lz < CHUNK_LENGTH
           ) {
-            const nWorldX = chunkX * CHUNK_WIDTH + lx;
-            const nWorldY = chunkY * CHUNK_HEIGHT + ly;
-            const nWorldZ = chunkZ * CHUNK_LENGTH + lz;
-
-            const sY = getSurfaceHeight(noise, nWorldX, nWorldZ);
-            const heuristic = nWorldY > sY ? 15 : 0;
-            return Math.max(heuristic, currentLight - 1);
+            const val = lightMap[calculateOffset(lx, ly, lz)];
+            return Math.max((val >> 4) & 0xf, val & 0xf);
           }
-          const val = lightMap[calculateOffset(lx, ly, lz)];
-          return Math.max((val >> 4) & 0xf, val & 0xf);
+
+          const nWorldX = chunkX * CHUNK_WIDTH + lx;
+          const nWorldY = chunkY * CHUNK_HEIGHT + ly;
+          const nWorldZ = chunkZ * CHUNK_LENGTH + lz;
+
+          const sY = getSurfaceHeight(noise, nWorldX, nWorldZ);
+          const heuristic = nWorldY > sY ? 15 : 0;
+          return Math.max(heuristic, currentLight - 1);
         };
 
         const isTranslucent = TRANSLUCENT_BLOCKS.includes(block);
@@ -276,7 +367,12 @@ export function generateMesh(
             textureIndexDefault,
             textureIndexDefault
           );
-          transparent.lightLevels.push(currentLight, currentLight, currentLight, currentLight);
+          transparent.lightLevels.push(
+            currentLight,
+            currentLight,
+            currentLight,
+            currentLight
+          );
 
           transparent.indices.push(
             index,
@@ -318,7 +414,12 @@ export function generateMesh(
             textureIndexDefault,
             textureIndexDefault
           );
-          transparent.lightLevels.push(currentLight, currentLight, currentLight, currentLight);
+          transparent.lightLevels.push(
+            currentLight,
+            currentLight,
+            currentLight,
+            currentLight
+          );
 
           transparent.indices.push(
             index2,
@@ -364,7 +465,12 @@ export function generateMesh(
             textureIndexDefault,
             textureIndexDefault
           );
-          transparent.lightLevels.push(currentLight, currentLight, currentLight, currentLight);
+          transparent.lightLevels.push(
+            currentLight,
+            currentLight,
+            currentLight,
+            currentLight
+          );
 
           transparent.indices.push(
             index,
@@ -415,7 +521,12 @@ export function generateMesh(
             textureIndexDefault,
             textureIndexDefault
           );
-          transparent.lightLevels.push(currentLight, currentLight, currentLight, currentLight);
+          transparent.lightLevels.push(
+            currentLight,
+            currentLight,
+            currentLight,
+            currentLight
+          );
           transparent.indices.push(
             index,
             index + 1,
@@ -455,7 +566,12 @@ export function generateMesh(
             textureIndexDefault,
             textureIndexDefault
           );
-          transparent.lightLevels.push(currentLight, currentLight, currentLight, currentLight);
+          transparent.lightLevels.push(
+            currentLight,
+            currentLight,
+            currentLight,
+            currentLight
+          );
           transparent.indices.push(
             index,
             index + 1,
@@ -495,7 +611,12 @@ export function generateMesh(
             textureIndexDefault,
             textureIndexDefault
           );
-          transparent.lightLevels.push(currentLight, currentLight, currentLight, currentLight);
+          transparent.lightLevels.push(
+            currentLight,
+            currentLight,
+            currentLight,
+            currentLight
+          );
           transparent.indices.push(
             index,
             index + 1,
@@ -535,7 +656,12 @@ export function generateMesh(
             textureIndexDefault,
             textureIndexDefault
           );
-          transparent.lightLevels.push(currentLight, currentLight, currentLight, currentLight);
+          transparent.lightLevels.push(
+            currentLight,
+            currentLight,
+            currentLight,
+            currentLight
+          );
           transparent.indices.push(
             index,
             index + 1,
@@ -571,7 +697,12 @@ export function generateMesh(
             target.normals.push(...n, ...n, ...n, ...n);
             target.uvs.push(...uv);
             target.textureIndices.push(tex, tex, tex, tex);
-            target.lightLevels.push(currentLight, currentLight, currentLight, currentLight);
+            target.lightLevels.push(
+              currentLight,
+              currentLight,
+              currentLight,
+              currentLight
+            );
             target.indices.push(
               index,
               index + 1,

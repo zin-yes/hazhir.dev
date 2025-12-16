@@ -1,6 +1,7 @@
 import { Silkscreen } from "next/font/google";
 import { useRef, useState } from "react";
 import { BlockType } from "../blocks";
+import { DebugInfo, DebugOverlay } from "./debug-overlay";
 import { Hotbar } from "./hotbar";
 import { Inventory } from "./inventory";
 
@@ -19,6 +20,8 @@ interface UILayerProps {
   hotbarSlots: BlockType[];
   isInventoryOpen: boolean;
   onSelectBlock: (block: BlockType) => void;
+  debugInfo?: DebugInfo;
+  isDebugVisible?: boolean;
 }
 
 export default function UILayer({
@@ -31,6 +34,8 @@ export default function UILayer({
   hotbarSlots,
   isInventoryOpen,
   onSelectBlock,
+  debugInfo,
+  isDebugVisible,
 }: UILayerProps) {
   const uiLayerRef = useRef<HTMLDivElement>(null);
   const [joinId, setJoinId] = useState("");
@@ -72,6 +77,13 @@ export default function UILayer({
 
       <Hotbar selectedSlot={selectedSlot} slots={hotbarSlots} />
       <Inventory isOpen={isInventoryOpen} onSelectBlock={onSelectBlock} />
+
+      {debugInfo && (
+        <DebugOverlay
+          isVisible={isDebugVisible ?? false}
+          debugInfo={debugInfo}
+        />
+      )}
 
       <div
         className={

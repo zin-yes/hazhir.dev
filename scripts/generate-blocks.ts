@@ -28,6 +28,7 @@ interface BlockDef {
   isWater?: boolean;
   waterLevel?: number;
   isReplaceable?: boolean;
+  lightLevel?: number;
   model?:
     | "CUBE"
     | "SLAB_BOTTOM"
@@ -111,6 +112,14 @@ export function getWaterLevel(block: BlockType): number {
 ${blocks
   .filter((b) => b.waterLevel !== undefined)
   .map((b) => `  if (block === BlockType.${b.name}) return ${b.waterLevel};`)
+  .join("\n")}
+  return 0;
+}
+
+export function getBlockLightLevel(block: BlockType): number {
+${blocks
+  .filter((b) => b.lightLevel !== undefined && b.lightLevel > 0)
+  .map((b) => `  if (block === BlockType.${b.name}) return ${b.lightLevel};`)
   .join("\n")}
   return 0;
 }

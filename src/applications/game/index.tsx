@@ -27,6 +27,7 @@ import {
   NON_COLLIDABLE_BLOCKS,
   TRANSPARENT_BLOCKS,
   Texture,
+  getBlockLightLevel,
   getBoundingBox,
   isReplaceable,
 } from "@/applications/game/blocks";
@@ -67,6 +68,7 @@ export default function Game() {
     { chunkX: number; chunkY: number; chunkZ: number }[]
   >([]);
   const chunks = useRef<{ [chunkName: string]: Uint8Array }>({});
+  const lightChunks = useRef<{ [chunkName: string]: Uint8Array }>({});
   const chunkVersions = useRef<{ [chunkName: string]: number }>({});
   const modifiedChunks = useRef<Map<string, Map<number, number>>>(new Map());
   const pendingWaterUpdates = useRef<Set<string>>(new Set());
@@ -78,6 +80,17 @@ export default function Game() {
             name: "generation",
           }),
         3
+      ),
+    []
+  );
+  const lightingWorkerPool = useMemo(
+    () =>
+      new WorkerPool(
+        () =>
+          new Worker(new URL("./workers/unified-worker.ts", import.meta.url), {
+            name: "lighting",
+          }),
+        2
       ),
     []
   );
@@ -200,13 +213,24 @@ export default function Game() {
       BlockType.PLANKS,
       BlockType.LEAVES,
       BlockType.GLASS,
-      BlockType.SAND,
+      BlockType.GLOWSTONE,
       BlockType.COBBLESTONE,
     ])
   );
   const hotbarSlotsRef = useRef(hotbarSlots);
   const [isInventoryOpen, setIsInventoryOpen] = useState(false);
   const isInventoryOpenRef = useRef(false);
+  const [isDebugVisible, setIsDebugVisible] = useState(false);
+  const [debugInfo, setDebugInfo] = useState({
+    fps: 0,
+    playerPosition: { x: 0, y: 0, z: 0 },
+    currentChunk: { x: 0, y: 0, z: 0 },
+    loadedChunks: 0,
+    blockAtCursor: null as { type: number; light: number } | null,
+    lookingAt: null as { x: number; y: number; z: number } | null,
+    seed: 0,
+  });
+  const fpsFrames = useRef<number[]>([]);
 
   const playerControlsRef = useRef<PlayerControls | null>(null);
 
@@ -224,6 +248,12 @@ export default function Game() {
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
+      if (event.code === "F3") {
+        event.preventDefault();
+        setIsDebugVisible((prev) => !prev);
+        return;
+      }
+
       if (event.code === "KeyE") {
         if (isInventoryOpen) {
           setIsInventoryOpen(false);
@@ -275,6 +305,7 @@ export default function Game() {
     // Clear chunks
     Object.keys(chunks.current).forEach((key) => pruneChunkMesh(key));
     chunks.current = {};
+    lightChunks.current = {};
     chunkPositions.current = [];
 
     let initialLoadTasks =
@@ -283,6 +314,8 @@ export default function Game() {
       (POSITIVE_Z_RENDER_DISTANCE + NEGATIVE_Z_RENDER_DISTANCE);
 
     let tasksDone = 0;
+
+    const chunksToGenerate: { x: number; y: number; z: number }[] = [];
 
     for (
       let chunkX = -NEGATIVE_X_RENDER_DISTANCE;
@@ -299,77 +332,191 @@ export default function Game() {
           chunkZ < POSITIVE_Z_RENDER_DISTANCE;
           chunkZ++
         ) {
+          chunksToGenerate.push({ x: chunkX, y: chunkY, z: chunkZ });
           chunkPositions.current.push({ chunkX, chunkY, chunkZ });
-          generationWorkerPool
-            .exec("generateChunk", [currentSeed, chunkX, chunkY, chunkZ])
-            .then((result: ArrayBuffer) => {
-              const chunk = new Uint8Array(result);
-              const chunkName = generateChunkName(chunkX, chunkY, chunkZ);
-              chunks.current[chunkName] = chunk;
-
-              if (modifiedChunks.current.has(chunkName)) {
-                modifiedChunks.current
-                  .get(chunkName)!
-                  .forEach((type, index) => {
-                    chunk[index] = type;
-                  });
-              }
-
-              const borders = getChunkBorders(chunkX, chunkY, chunkZ);
-
-              meshWorkerPool
-                .exec("generateMesh", [
-                  result,
-                  borders,
-                  currentSeed,
-                  chunkX,
-                  chunkY,
-                  chunkZ,
-                ])
-                .then(
-                  ({
-                    opaque,
-                    transparent,
-                  }: {
-                    opaque: {
-                      positions: ArrayBuffer;
-                      normals: ArrayBuffer;
-                      indices: ArrayBuffer;
-                      uvs: ArrayBuffer;
-                      textureIndices: ArrayBuffer;
-                    };
-                    transparent: {
-                      positions: ArrayBuffer;
-                      normals: ArrayBuffer;
-                      indices: ArrayBuffer;
-                      uvs: ArrayBuffer;
-                      textureIndices: ArrayBuffer;
-                    };
-                  }) => {
-                    addChunkMesh(
-                      opaque,
-                      transparent,
-                      chunkName,
-                      chunkX,
-                      chunkY,
-                      chunkZ
-                    );
-
-                    tasksDone++;
-
-                    setInitialLoadCompletion(tasksDone / initialLoadTasks);
-                  }
-                )
-                .catch((err) => {
-                  console.error(err);
-                });
-            })
-            .catch((err) => {
-              console.error(err);
-            });
         }
       }
     }
+
+    // 1. Generate Blocks
+    Promise.all(
+      chunksToGenerate.map(async ({ x, y, z }) => {
+        const result = await generationWorkerPool.exec("generateChunk", [
+          currentSeed,
+          x,
+          y,
+          z,
+        ]);
+        const chunk = new Uint8Array(result);
+        const chunkName = generateChunkName(x, y, z);
+        chunks.current[chunkName] = chunk;
+
+        if (modifiedChunks.current.has(chunkName)) {
+          modifiedChunks.current.get(chunkName)!.forEach((type, index) => {
+            chunk[index] = type;
+          });
+        }
+      })
+    ).then(async () => {
+      // 2. Initialize Light
+      const queues: { [key: string]: number[] } = {};
+
+      // Group by Y to ensure top-down lighting initialization
+      const chunksByY: { [y: number]: { x: number; z: number }[] } = {};
+      chunksToGenerate.forEach(({ x, y, z }) => {
+        if (!chunksByY[y]) chunksByY[y] = [];
+        chunksByY[y].push({ x, z });
+      });
+
+      const sortedYs = Object.keys(chunksByY)
+        .map(Number)
+        .sort((a, b) => b - a);
+
+      for (const y of sortedYs) {
+        await Promise.all(
+          chunksByY[y].map(async ({ x, z }) => {
+            const chunkName = generateChunkName(x, y, z);
+            const chunk = chunks.current[chunkName];
+
+            const topChunkName = generateChunkName(x, y + 1, z);
+            const topChunk = chunks.current[topChunkName]?.buffer;
+            const topChunkLight = lightChunks.current[topChunkName]?.buffer;
+
+            const { light, queue } = await lightingWorkerPool.exec(
+              "initializeChunkLight",
+              [chunk.buffer, currentSeed, x, y, z, topChunk, topChunkLight]
+            );
+            lightChunks.current[chunkName] = light;
+            queues[chunkName] = queue;
+          })
+        );
+      }
+
+      // 3. Propagate Light
+      const lightUpdates: { [key: string]: Uint8Array[] } = {};
+
+      await Promise.all(
+        chunksToGenerate.map(async ({ x, y, z }) => {
+          const chunkName = generateChunkName(x, y, z);
+          const light = lightChunks.current[chunkName];
+          const chunk = chunks.current[chunkName];
+          const queue = queues[chunkName];
+
+          const neighbors = {
+            "-1,0,0": chunks.current[generateChunkName(x - 1, y, z)]?.buffer,
+            "1,0,0": chunks.current[generateChunkName(x + 1, y, z)]?.buffer,
+            "0,1,0": chunks.current[generateChunkName(x, y + 1, z)]?.buffer,
+            "0,-1,0": chunks.current[generateChunkName(x, y - 1, z)]?.buffer,
+            "0,0,1": chunks.current[generateChunkName(x, y, z + 1)]?.buffer,
+            "0,0,-1": chunks.current[generateChunkName(x, y, z - 1)]?.buffer,
+          };
+
+          const neighborLights = {
+            "-1,0,0":
+              lightChunks.current[generateChunkName(x - 1, y, z)]?.buffer,
+            "1,0,0":
+              lightChunks.current[generateChunkName(x + 1, y, z)]?.buffer,
+            "0,1,0":
+              lightChunks.current[generateChunkName(x, y + 1, z)]?.buffer,
+            "0,-1,0":
+              lightChunks.current[generateChunkName(x, y - 1, z)]?.buffer,
+            "0,0,1":
+              lightChunks.current[generateChunkName(x, y, z + 1)]?.buffer,
+            "0,0,-1":
+              lightChunks.current[generateChunkName(x, y, z - 1)]?.buffer,
+          };
+
+          const { centerLight, neighborLightUpdates } =
+            await lightingWorkerPool.exec("propagateChunkLight", [
+              chunk.buffer,
+              light.buffer,
+              neighbors,
+              neighborLights,
+              queue,
+            ]);
+
+          if (!lightUpdates[chunkName]) lightUpdates[chunkName] = [];
+          lightUpdates[chunkName].push(centerLight);
+
+          Object.entries(neighborLightUpdates).forEach(([key, update]) => {
+            const [dx, dy, dz] = key.split(",").map(Number);
+            const neighborName = generateChunkName(x + dx, y + dy, z + dz);
+            if (!lightUpdates[neighborName]) lightUpdates[neighborName] = [];
+            lightUpdates[neighborName].push(update as Uint8Array);
+          });
+        })
+      );
+
+      // Merge updates
+      Object.keys(lightUpdates).forEach((chunkName) => {
+        const updates = lightUpdates[chunkName];
+        if (updates.length === 0) return;
+
+        const merged = new Uint8Array(updates[0]);
+        for (let i = 1; i < updates.length; i++) {
+          const update = updates[i];
+          for (let j = 0; j < merged.length; j++) {
+            merged[j] = Math.max(merged[j], update[j]);
+          }
+        }
+        lightChunks.current[chunkName] = merged;
+      });
+
+      // 4. Generate Mesh
+      chunksToGenerate.forEach(({ x, y, z }) => {
+        const chunkName = generateChunkName(x, y, z);
+        const chunk = chunks.current[chunkName];
+        const light = lightChunks.current[chunkName];
+
+        if (!light) return;
+
+        const { borders, borderLights } = getChunkBorders(x, y, z);
+
+        meshWorkerPool
+          .exec("generateMesh", [
+            chunk.buffer,
+            light.buffer,
+            borders,
+            borderLights,
+            currentSeed,
+            x,
+            y,
+            z,
+          ])
+          .then(
+            ({
+              opaque,
+              transparent,
+            }: {
+              opaque: {
+                positions: ArrayBuffer;
+                normals: ArrayBuffer;
+                indices: ArrayBuffer;
+                uvs: ArrayBuffer;
+                textureIndices: ArrayBuffer;
+                lightLevels: ArrayBuffer;
+              };
+              transparent: {
+                positions: ArrayBuffer;
+                normals: ArrayBuffer;
+                indices: ArrayBuffer;
+                uvs: ArrayBuffer;
+                textureIndices: ArrayBuffer;
+                lightLevels: ArrayBuffer;
+              };
+            }) => {
+              addChunkMesh(opaque, transparent, chunkName, x, y, z);
+
+              tasksDone++;
+
+              setInitialLoadCompletion(tasksDone / initialLoadTasks);
+            }
+          )
+          .catch((err) => {
+            console.error(err);
+          });
+      });
+    });
 
     intervalRef.current = setInterval(() => {
       const playerChunkX = Math.round(camera.position.x / CHUNK_WIDTH);
@@ -810,7 +957,7 @@ export default function Game() {
 
     generationWorkerPool
       .exec("generateChunk", [seedRef.current, chunkX, chunkY, chunkZ])
-      .then((result: ArrayBuffer) => {
+      .then(async (result: ArrayBuffer) => {
         const chunk = new Uint8Array(result);
         const chunkName = generateChunkName(chunkX, chunkY, chunkZ);
         chunks.current[chunkName] = chunk;
@@ -820,6 +967,95 @@ export default function Game() {
             chunk[index] = type;
           });
         }
+
+        // Initialize Light
+        const topChunkName = generateChunkName(chunkX, chunkY + 1, chunkZ);
+        const topChunk = chunks.current[topChunkName]?.buffer;
+        const topChunkLight = lightChunks.current[topChunkName]?.buffer;
+
+        const { light, queue } = await lightingWorkerPool.exec(
+          "initializeChunkLight",
+          [
+            chunk.buffer,
+            seedRef.current,
+            chunkX,
+            chunkY,
+            chunkZ,
+            topChunk,
+            topChunkLight,
+          ]
+        );
+        lightChunks.current[chunkName] = light;
+
+        // Propagate Light
+        const neighbors = {
+          "-1,0,0":
+            chunks.current[generateChunkName(chunkX - 1, chunkY, chunkZ)]
+              ?.buffer,
+          "1,0,0":
+            chunks.current[generateChunkName(chunkX + 1, chunkY, chunkZ)]
+              ?.buffer,
+          "0,1,0":
+            chunks.current[generateChunkName(chunkX, chunkY + 1, chunkZ)]
+              ?.buffer,
+          "0,-1,0":
+            chunks.current[generateChunkName(chunkX, chunkY - 1, chunkZ)]
+              ?.buffer,
+          "0,0,1":
+            chunks.current[generateChunkName(chunkX, chunkY, chunkZ + 1)]
+              ?.buffer,
+          "0,0,-1":
+            chunks.current[generateChunkName(chunkX, chunkY, chunkZ - 1)]
+              ?.buffer,
+        };
+
+        const neighborLights = {
+          "-1,0,0":
+            lightChunks.current[generateChunkName(chunkX - 1, chunkY, chunkZ)]
+              ?.buffer,
+          "1,0,0":
+            lightChunks.current[generateChunkName(chunkX + 1, chunkY, chunkZ)]
+              ?.buffer,
+          "0,1,0":
+            lightChunks.current[generateChunkName(chunkX, chunkY + 1, chunkZ)]
+              ?.buffer,
+          "0,-1,0":
+            lightChunks.current[generateChunkName(chunkX, chunkY - 1, chunkZ)]
+              ?.buffer,
+          "0,0,1":
+            lightChunks.current[generateChunkName(chunkX, chunkY, chunkZ + 1)]
+              ?.buffer,
+          "0,0,-1":
+            lightChunks.current[generateChunkName(chunkX, chunkY, chunkZ - 1)]
+              ?.buffer,
+        };
+
+        const { centerLight, neighborLightUpdates } =
+          await lightingWorkerPool.exec("propagateChunkLight", [
+            chunk.buffer,
+            lightChunks.current[chunkName].buffer,
+            neighbors,
+            neighborLights,
+            queue,
+          ]);
+        lightChunks.current[chunkName] = centerLight;
+
+        // Apply neighbor updates
+        Object.entries(neighborLightUpdates).forEach(([key, update]) => {
+          const [dx, dy, dz] = key.split(",").map(Number);
+          const neighborName = generateChunkName(
+            chunkX + dx,
+            chunkY + dy,
+            chunkZ + dz
+          );
+          if (lightChunks.current[neighborName]) {
+            const current = lightChunks.current[neighborName];
+            const u = update as Uint8Array;
+            for (let i = 0; i < current.length; i++) {
+              current[i] = Math.max(current[i], u[i]);
+            }
+          }
+        });
 
         const adjChunks = {
           left: chunks.current[generateChunkName(chunkX - 1, chunkY, chunkZ)],
@@ -837,12 +1073,18 @@ export default function Game() {
         if (adjChunks.back) regenerateChunkMesh(chunkX, chunkY, chunkZ - 1);
         if (adjChunks.front) regenerateChunkMesh(chunkX, chunkY, chunkZ + 1);
 
-        const borders = getChunkBorders(chunkX, chunkY, chunkZ);
+        const { borders, borderLights } = getChunkBorders(
+          chunkX,
+          chunkY,
+          chunkZ
+        );
 
         meshWorkerPool
           .exec("generateMesh", [
             result,
+            lightChunks.current[chunkName].buffer,
             borders,
+            borderLights,
             seedRef.current,
             chunkX,
             chunkY,
@@ -859,6 +1101,7 @@ export default function Game() {
                 indices: ArrayBuffer;
                 uvs: ArrayBuffer;
                 textureIndices: ArrayBuffer;
+                lightLevels: ArrayBuffer;
               };
               transparent: {
                 positions: ArrayBuffer;
@@ -866,6 +1109,7 @@ export default function Game() {
                 indices: ArrayBuffer;
                 uvs: ArrayBuffer;
                 textureIndices: ArrayBuffer;
+                lightLevels: ArrayBuffer;
               };
             }) => {
               addChunkMesh(
@@ -912,11 +1156,11 @@ export default function Game() {
             cameraDirection.z
           )
         );
-        if (getBlock(x, y, z) !== BlockType.AIR) {
+        if (getBlock(x, y, z) !== BlockType.AIR && getBlock(x, y, z) !== null) {
           const indicator = scene.getObjectByName(
             "indicator"
           ) as THREE.LineSegments;
-          const blockType = getBlock(x, y, z);
+          const blockType = getBlock(x, y, z) as BlockType;
 
           const { scale, offset } = getBoundingBox(blockType);
 
@@ -1354,6 +1598,260 @@ export default function Game() {
     return () => clearInterval(interval);
   }, []);
 
+  async function updateChunkLightAndMesh(
+    chunkX: number,
+    chunkY: number,
+    chunkZ: number
+  ) {
+    const chunkName = generateChunkName(chunkX, chunkY, chunkZ);
+    const chunk = chunks.current[chunkName];
+    if (!chunk) return;
+
+    const topChunkName = generateChunkName(chunkX, chunkY + 1, chunkZ);
+    const topChunk = chunks.current[topChunkName]?.buffer;
+    const topChunkLight = lightChunks.current[topChunkName]?.buffer;
+
+    const { light, queue } = await lightingWorkerPool.exec(
+      "initializeChunkLight",
+      [
+        chunk.buffer,
+        seedRef.current,
+        chunkX,
+        chunkY,
+        chunkZ,
+        topChunk,
+        topChunkLight,
+      ]
+    );
+    lightChunks.current[chunkName] = light;
+
+    const neighbors = {
+      "-1,0,0":
+        chunks.current[generateChunkName(chunkX - 1, chunkY, chunkZ)]?.buffer,
+      "1,0,0":
+        chunks.current[generateChunkName(chunkX + 1, chunkY, chunkZ)]?.buffer,
+      "0,1,0":
+        chunks.current[generateChunkName(chunkX, chunkY + 1, chunkZ)]?.buffer,
+      "0,-1,0":
+        chunks.current[generateChunkName(chunkX, chunkY - 1, chunkZ)]?.buffer,
+      "0,0,1":
+        chunks.current[generateChunkName(chunkX, chunkY, chunkZ + 1)]?.buffer,
+      "0,0,-1":
+        chunks.current[generateChunkName(chunkX, chunkY, chunkZ - 1)]?.buffer,
+    };
+
+    const neighborLights = {
+      "-1,0,0":
+        lightChunks.current[generateChunkName(chunkX - 1, chunkY, chunkZ)]
+          ?.buffer,
+      "1,0,0":
+        lightChunks.current[generateChunkName(chunkX + 1, chunkY, chunkZ)]
+          ?.buffer,
+      "0,1,0":
+        lightChunks.current[generateChunkName(chunkX, chunkY + 1, chunkZ)]
+          ?.buffer,
+      "0,-1,0":
+        lightChunks.current[generateChunkName(chunkX, chunkY - 1, chunkZ)]
+          ?.buffer,
+      "0,0,1":
+        lightChunks.current[generateChunkName(chunkX, chunkY, chunkZ + 1)]
+          ?.buffer,
+      "0,0,-1":
+        lightChunks.current[generateChunkName(chunkX, chunkY, chunkZ - 1)]
+          ?.buffer,
+    };
+
+    const { centerLight, neighborLightUpdates } = await lightingWorkerPool.exec(
+      "propagateChunkLight",
+      [
+        chunk.buffer,
+        lightChunks.current[chunkName].buffer,
+        neighbors,
+        neighborLights,
+        queue,
+      ]
+    );
+    lightChunks.current[chunkName] = centerLight;
+
+    // Apply neighbor updates
+    if (neighborLightUpdates) {
+      Object.entries(neighborLightUpdates).forEach(([key, update]) => {
+        const [dx, dy, dz] = key.split(",").map(Number);
+        const neighborName = generateChunkName(
+          chunkX + dx,
+          chunkY + dy,
+          chunkZ + dz
+        );
+        if (lightChunks.current[neighborName]) {
+          const current = lightChunks.current[neighborName];
+          const u = update as Uint8Array;
+          for (let i = 0; i < current.length; i++) {
+            current[i] = Math.max(current[i], u[i]);
+          }
+          // Regenerate neighbor mesh if light changed
+          regenerateChunkMesh(chunkX + dx, chunkY + dy, chunkZ + dz);
+        }
+      });
+    }
+
+    regenerateChunkMesh(chunkX, chunkY, chunkZ);
+  }
+
+  async function updateLightForRegion(cx: number, cy: number, cz: number) {
+    const chunksToUpdate: { x: number; y: number; z: number }[] = [];
+    for (let x = -1; x <= 1; x++) {
+      for (let y = -1; y <= 1; y++) {
+        for (let z = -1; z <= 1; z++) {
+          if (chunks.current[generateChunkName(cx + x, cy + y, cz + z)]) {
+            chunksToUpdate.push({ x: cx + x, y: cy + y, z: cz + z });
+          }
+        }
+      }
+    }
+
+    // 1. Initialize (Top-Down)
+    const queues: { [key: string]: number[] } = {};
+    const chunksByY: { [y: number]: { x: number; z: number }[] } = {};
+    chunksToUpdate.forEach(({ x, y, z }) => {
+      if (!chunksByY[y]) chunksByY[y] = [];
+      chunksByY[y].push({ x, z });
+    });
+
+    const sortedYs = Object.keys(chunksByY)
+      .map(Number)
+      .sort((a, b) => b - a);
+
+    for (const y of sortedYs) {
+      await Promise.all(
+        chunksByY[y].map(async ({ x, z }) => {
+          const chunkName = generateChunkName(x, y, z);
+          const chunk = chunks.current[chunkName];
+
+          const topChunkName = generateChunkName(x, y + 1, z);
+          const topChunk = chunks.current[topChunkName]?.buffer;
+          const topChunkLight = lightChunks.current[topChunkName]?.buffer;
+
+          const { light, queue } = await lightingWorkerPool.exec(
+            "initializeChunkLight",
+            [chunk.buffer, seedRef.current, x, y, z, topChunk, topChunkLight]
+          );
+          lightChunks.current[chunkName] = light;
+          queues[chunkName] = queue;
+        })
+      );
+    }
+
+    // 2. Propagate Center
+    const centerName = generateChunkName(cx, cy, cz);
+    if (lightChunks.current[centerName]) {
+      const neighbors = {
+        "-1,0,0": chunks.current[generateChunkName(cx - 1, cy, cz)]?.buffer,
+        "1,0,0": chunks.current[generateChunkName(cx + 1, cy, cz)]?.buffer,
+        "0,1,0": chunks.current[generateChunkName(cx, cy + 1, cz)]?.buffer,
+        "0,-1,0": chunks.current[generateChunkName(cx, cy - 1, cz)]?.buffer,
+        "0,0,1": chunks.current[generateChunkName(cx, cy, cz + 1)]?.buffer,
+        "0,0,-1": chunks.current[generateChunkName(cx, cy, cz - 1)]?.buffer,
+      };
+
+      const neighborLights = {
+        "-1,0,0":
+          lightChunks.current[generateChunkName(cx - 1, cy, cz)]?.buffer,
+        "1,0,0": lightChunks.current[generateChunkName(cx + 1, cy, cz)]?.buffer,
+        "0,1,0": lightChunks.current[generateChunkName(cx, cy + 1, cz)]?.buffer,
+        "0,-1,0":
+          lightChunks.current[generateChunkName(cx, cy - 1, cz)]?.buffer,
+        "0,0,1": lightChunks.current[generateChunkName(cx, cy, cz + 1)]?.buffer,
+        "0,0,-1":
+          lightChunks.current[generateChunkName(cx, cy, cz - 1)]?.buffer,
+      };
+
+      const { centerLight, neighborLightUpdates } =
+        await lightingWorkerPool.exec("propagateChunkLight", [
+          chunks.current[centerName].buffer,
+          lightChunks.current[centerName].buffer,
+          neighbors,
+          neighborLights,
+          queues[centerName],
+        ]);
+      lightChunks.current[centerName] = centerLight;
+
+      // Apply updates to neighbors
+      if (neighborLightUpdates) {
+        Object.entries(neighborLightUpdates).forEach(([key, update]) => {
+          const [dx, dy, dz] = key.split(",").map(Number);
+          const neighborName = generateChunkName(cx + dx, cy + dy, cz + dz);
+          if (lightChunks.current[neighborName]) {
+            const current = lightChunks.current[neighborName];
+            const u = update as Uint8Array;
+            for (let i = 0; i < current.length; i++) {
+              current[i] = Math.max(current[i], u[i]);
+            }
+          }
+        });
+      }
+    }
+
+    // 3. Propagate Neighbors
+    const neighborsToPropagate = chunksToUpdate.filter(
+      (c) => c.x !== cx || c.y !== cy || c.z !== cz
+    );
+
+    await Promise.all(
+      neighborsToPropagate.map(async ({ x, y, z }) => {
+        const chunkName = generateChunkName(x, y, z);
+        const chunk = chunks.current[chunkName];
+        const light = lightChunks.current[chunkName];
+        const queue = queues[chunkName];
+
+        const neighbors = {
+          "-1,0,0": chunks.current[generateChunkName(x - 1, y, z)]?.buffer,
+          "1,0,0": chunks.current[generateChunkName(x + 1, y, z)]?.buffer,
+          "0,1,0": chunks.current[generateChunkName(x, y + 1, z)]?.buffer,
+          "0,-1,0": chunks.current[generateChunkName(x, y - 1, z)]?.buffer,
+          "0,0,1": chunks.current[generateChunkName(x, y, z + 1)]?.buffer,
+          "0,0,-1": chunks.current[generateChunkName(x, y, z - 1)]?.buffer,
+        };
+
+        const neighborLights = {
+          "-1,0,0": lightChunks.current[generateChunkName(x - 1, y, z)]?.buffer,
+          "1,0,0": lightChunks.current[generateChunkName(x + 1, y, z)]?.buffer,
+          "0,1,0": lightChunks.current[generateChunkName(x, y + 1, z)]?.buffer,
+          "0,-1,0": lightChunks.current[generateChunkName(x, y - 1, z)]?.buffer,
+          "0,0,1": lightChunks.current[generateChunkName(x, y, z + 1)]?.buffer,
+          "0,0,-1": lightChunks.current[generateChunkName(x, y, z - 1)]?.buffer,
+        };
+
+        const { centerLight, neighborLightUpdates } =
+          await lightingWorkerPool.exec("propagateChunkLight", [
+            chunk.buffer,
+            light.buffer,
+            neighbors,
+            neighborLights,
+            queue,
+          ]);
+        lightChunks.current[chunkName] = centerLight;
+
+        // Apply updates (though mostly redundant if we don't iterate further)
+        if (neighborLightUpdates) {
+          Object.entries(neighborLightUpdates).forEach(([key, update]) => {
+            const [dx, dy, dz] = key.split(",").map(Number);
+            const neighborName = generateChunkName(x + dx, y + dy, z + dz);
+            if (lightChunks.current[neighborName]) {
+              const current = lightChunks.current[neighborName];
+              const u = update as Uint8Array;
+              for (let i = 0; i < current.length; i++) {
+                current[i] = Math.max(current[i], u[i]);
+              }
+            }
+          });
+        }
+      })
+    );
+
+    // 4. Mesh
+    chunksToUpdate.forEach((c) => regenerateChunkMesh(c.x, c.y, c.z));
+  }
+
   function setBlock(
     x: number,
     y: number,
@@ -1382,6 +1880,9 @@ export default function Game() {
 
     if (!chunk) return BlockType.AIR;
 
+    // Get old block before modifying for light change detection
+    const oldBlock = chunk[blockIndex];
+
     chunk[blockIndex] = type;
 
     scheduleWaterUpdate(x, y, z);
@@ -1395,17 +1896,35 @@ export default function Game() {
     if (!chunkVersions.current[chunkName]) chunkVersions.current[chunkName] = 0;
     chunkVersions.current[chunkName]++;
 
-    regenerateChunkMesh(chunkX, chunkY, chunkZ);
+    // Update Lighting asynchronously
+    (async () => {
+      // Check if the block being placed/removed is a light source
+      const isLightChange =
+        getBlockLightLevel(type) > 0 || getBlockLightLevel(oldBlock) > 0;
 
-    if (blockChunkX === 0) regenerateChunkMesh(chunkX - 1, chunkY, chunkZ);
-    if (blockChunkX === CHUNK_WIDTH - 1)
-      regenerateChunkMesh(chunkX + 1, chunkY, chunkZ);
-    if (blockChunkY === 0) regenerateChunkMesh(chunkX, chunkY - 1, chunkZ);
-    if (blockChunkY === CHUNK_HEIGHT - 1)
-      regenerateChunkMesh(chunkX, chunkY + 1, chunkZ);
-    if (blockChunkZ === 0) regenerateChunkMesh(chunkX, chunkY, chunkZ - 1);
-    if (blockChunkZ === CHUNK_LENGTH - 1)
-      regenerateChunkMesh(chunkX, chunkY, chunkZ + 1);
+      if (isLightChange) {
+        await updateLightForRegion(chunkX, chunkY, chunkZ);
+      } else {
+        await updateChunkLightAndMesh(chunkX, chunkY, chunkZ);
+
+        // Also update the chunk below if it exists, as sky light might have changed
+        const bottomChunkName = generateChunkName(chunkX, chunkY - 1, chunkZ);
+        if (chunks.current[bottomChunkName]) {
+          await updateChunkLightAndMesh(chunkX, chunkY - 1, chunkZ);
+        }
+
+        // Only regenerate neighbors if block is on chunk edge
+        if (blockChunkX === 0) regenerateChunkMesh(chunkX - 1, chunkY, chunkZ);
+        if (blockChunkX === CHUNK_WIDTH - 1)
+          regenerateChunkMesh(chunkX + 1, chunkY, chunkZ);
+        if (blockChunkY === 0) regenerateChunkMesh(chunkX, chunkY - 1, chunkZ);
+        if (blockChunkY === CHUNK_HEIGHT - 1)
+          regenerateChunkMesh(chunkX, chunkY + 1, chunkZ);
+        if (blockChunkZ === 0) regenerateChunkMesh(chunkX, chunkY, chunkZ - 1);
+        if (blockChunkZ === CHUNK_LENGTH - 1)
+          regenerateChunkMesh(chunkX, chunkY, chunkZ + 1);
+      }
+    })();
 
     if (broadcast && networkManager.current.myPeerId) {
       networkManager.current.send({
@@ -1428,88 +1947,122 @@ export default function Game() {
       back?: ArrayBuffer;
     } = {};
 
-    // Top (y+1), need y=0
-    const topChunk =
-      chunks.current[generateChunkName(chunkX, chunkY + 1, chunkZ)];
-    if (topChunk) {
-      const border = new Uint8Array(CHUNK_WIDTH * CHUNK_LENGTH);
-      for (let x = 0; x < CHUNK_WIDTH; x++) {
-        for (let z = 0; z < CHUNK_LENGTH; z++) {
-          border[x * CHUNK_LENGTH + z] = topChunk[calculateOffset(x, 0, z)];
+    const borderLights: {
+      top?: ArrayBuffer;
+      bottom?: ArrayBuffer;
+      left?: ArrayBuffer;
+      right?: ArrayBuffer;
+      front?: ArrayBuffer;
+      back?: ArrayBuffer;
+    } = {};
+
+    const extractBorder = (
+      nx: number,
+      ny: number,
+      nz: number,
+      face: "top" | "bottom" | "left" | "right" | "front" | "back"
+    ) => {
+      const name = generateChunkName(nx, ny, nz);
+      const chunk = chunks.current[name];
+      const light = lightChunks.current[name];
+
+      if (chunk) {
+        let border: Uint8Array;
+        if (face === "top") {
+          border = new Uint8Array(CHUNK_WIDTH * CHUNK_LENGTH);
+          for (let x = 0; x < CHUNK_WIDTH; x++)
+            for (let z = 0; z < CHUNK_LENGTH; z++)
+              border[x * CHUNK_LENGTH + z] = chunk[calculateOffset(x, 0, z)];
+          borders.top = border.buffer;
+        } else if (face === "bottom") {
+          border = new Uint8Array(CHUNK_WIDTH * CHUNK_LENGTH);
+          for (let x = 0; x < CHUNK_WIDTH; x++)
+            for (let z = 0; z < CHUNK_LENGTH; z++)
+              border[x * CHUNK_LENGTH + z] =
+                chunk[calculateOffset(x, CHUNK_HEIGHT - 1, z)];
+          borders.bottom = border.buffer;
+        } else if (face === "front") {
+          border = new Uint8Array(CHUNK_WIDTH * CHUNK_HEIGHT);
+          for (let x = 0; x < CHUNK_WIDTH; x++)
+            for (let y = 0; y < CHUNK_HEIGHT; y++)
+              border[x * CHUNK_HEIGHT + y] = chunk[calculateOffset(x, y, 0)];
+          borders.front = border.buffer;
+        } else if (face === "back") {
+          border = new Uint8Array(CHUNK_WIDTH * CHUNK_HEIGHT);
+          for (let x = 0; x < CHUNK_WIDTH; x++)
+            for (let y = 0; y < CHUNK_HEIGHT; y++)
+              border[x * CHUNK_HEIGHT + y] =
+                chunk[calculateOffset(x, y, CHUNK_LENGTH - 1)];
+          borders.back = border.buffer;
+        } else if (face === "right") {
+          border = new Uint8Array(CHUNK_HEIGHT * CHUNK_LENGTH);
+          for (let y = 0; y < CHUNK_HEIGHT; y++)
+            for (let z = 0; z < CHUNK_LENGTH; z++)
+              border[y * CHUNK_LENGTH + z] = chunk[calculateOffset(0, y, z)];
+          borders.right = border.buffer;
+        } else if (face === "left") {
+          border = new Uint8Array(CHUNK_HEIGHT * CHUNK_LENGTH);
+          for (let y = 0; y < CHUNK_HEIGHT; y++)
+            for (let z = 0; z < CHUNK_LENGTH; z++)
+              border[y * CHUNK_LENGTH + z] =
+                chunk[calculateOffset(CHUNK_WIDTH - 1, y, z)];
+          borders.left = border.buffer;
         }
       }
-      borders.top = border.buffer;
-    }
 
-    // Bottom (y-1), need y=HEIGHT-1
-    const bottomChunk =
-      chunks.current[generateChunkName(chunkX, chunkY - 1, chunkZ)];
-    if (bottomChunk) {
-      const border = new Uint8Array(CHUNK_WIDTH * CHUNK_LENGTH);
-      for (let x = 0; x < CHUNK_WIDTH; x++) {
-        for (let z = 0; z < CHUNK_LENGTH; z++) {
-          border[x * CHUNK_LENGTH + z] =
-            bottomChunk[calculateOffset(x, CHUNK_HEIGHT - 1, z)];
+      if (light) {
+        let border: Uint8Array;
+        if (face === "top") {
+          border = new Uint8Array(CHUNK_WIDTH * CHUNK_LENGTH);
+          for (let x = 0; x < CHUNK_WIDTH; x++)
+            for (let z = 0; z < CHUNK_LENGTH; z++)
+              border[x * CHUNK_LENGTH + z] = light[calculateOffset(x, 0, z)];
+          borderLights.top = border.buffer;
+        } else if (face === "bottom") {
+          border = new Uint8Array(CHUNK_WIDTH * CHUNK_LENGTH);
+          for (let x = 0; x < CHUNK_WIDTH; x++)
+            for (let z = 0; z < CHUNK_LENGTH; z++)
+              border[x * CHUNK_LENGTH + z] =
+                light[calculateOffset(x, CHUNK_HEIGHT - 1, z)];
+          borderLights.bottom = border.buffer;
+        } else if (face === "front") {
+          border = new Uint8Array(CHUNK_WIDTH * CHUNK_HEIGHT);
+          for (let x = 0; x < CHUNK_WIDTH; x++)
+            for (let y = 0; y < CHUNK_HEIGHT; y++)
+              border[x * CHUNK_HEIGHT + y] = light[calculateOffset(x, y, 0)];
+          borderLights.front = border.buffer;
+        } else if (face === "back") {
+          border = new Uint8Array(CHUNK_WIDTH * CHUNK_HEIGHT);
+          for (let x = 0; x < CHUNK_WIDTH; x++)
+            for (let y = 0; y < CHUNK_HEIGHT; y++)
+              border[x * CHUNK_HEIGHT + y] =
+                light[calculateOffset(x, y, CHUNK_LENGTH - 1)];
+          borderLights.back = border.buffer;
+        } else if (face === "right") {
+          border = new Uint8Array(CHUNK_HEIGHT * CHUNK_LENGTH);
+          for (let y = 0; y < CHUNK_HEIGHT; y++)
+            for (let z = 0; z < CHUNK_LENGTH; z++)
+              border[y * CHUNK_LENGTH + z] = light[calculateOffset(0, y, z)];
+          borderLights.right = border.buffer;
+        } else if (face === "left") {
+          border = new Uint8Array(CHUNK_HEIGHT * CHUNK_LENGTH);
+          for (let y = 0; y < CHUNK_HEIGHT; y++)
+            for (let z = 0; z < CHUNK_LENGTH; z++)
+              border[y * CHUNK_LENGTH + z] =
+                light[calculateOffset(CHUNK_WIDTH - 1, y, z)];
+          borderLights.left = border.buffer;
         }
       }
-      borders.bottom = border.buffer;
-    }
+    };
 
-    // Front (z+1), need z=0
-    const frontChunk =
-      chunks.current[generateChunkName(chunkX, chunkY, chunkZ + 1)];
-    if (frontChunk) {
-      const border = new Uint8Array(CHUNK_WIDTH * CHUNK_HEIGHT);
-      for (let x = 0; x < CHUNK_WIDTH; x++) {
-        for (let y = 0; y < CHUNK_HEIGHT; y++) {
-          border[x * CHUNK_HEIGHT + y] = frontChunk[calculateOffset(x, y, 0)];
-        }
-      }
-      borders.front = border.buffer;
-    }
+    extractBorder(chunkX, chunkY + 1, chunkZ, "top");
+    extractBorder(chunkX, chunkY - 1, chunkZ, "bottom");
+    extractBorder(chunkX, chunkY, chunkZ + 1, "front");
+    extractBorder(chunkX, chunkY, chunkZ - 1, "back");
+    extractBorder(chunkX + 1, chunkY, chunkZ, "right");
+    extractBorder(chunkX - 1, chunkY, chunkZ, "left");
 
-    // Back (z-1), need z=LENGTH-1
-    const backChunk =
-      chunks.current[generateChunkName(chunkX, chunkY, chunkZ - 1)];
-    if (backChunk) {
-      const border = new Uint8Array(CHUNK_WIDTH * CHUNK_HEIGHT);
-      for (let x = 0; x < CHUNK_WIDTH; x++) {
-        for (let y = 0; y < CHUNK_HEIGHT; y++) {
-          border[x * CHUNK_HEIGHT + y] =
-            backChunk[calculateOffset(x, y, CHUNK_LENGTH - 1)];
-        }
-      }
-      borders.back = border.buffer;
-    }
-
-    // Right (x+1), need x=0
-    const rightChunk =
-      chunks.current[generateChunkName(chunkX + 1, chunkY, chunkZ)];
-    if (rightChunk) {
-      const border = new Uint8Array(CHUNK_HEIGHT * CHUNK_LENGTH);
-      for (let y = 0; y < CHUNK_HEIGHT; y++) {
-        for (let z = 0; z < CHUNK_LENGTH; z++) {
-          border[y * CHUNK_LENGTH + z] = rightChunk[calculateOffset(0, y, z)];
-        }
-      }
-      borders.right = border.buffer;
-    }
-
-    // Left (x-1), need x=WIDTH-1
-    const leftChunk =
-      chunks.current[generateChunkName(chunkX - 1, chunkY, chunkZ)];
-    if (leftChunk) {
-      const border = new Uint8Array(CHUNK_HEIGHT * CHUNK_LENGTH);
-      for (let y = 0; y < CHUNK_HEIGHT; y++) {
-        for (let z = 0; z < CHUNK_LENGTH; z++) {
-          border[y * CHUNK_LENGTH + z] =
-            leftChunk[calculateOffset(CHUNK_WIDTH - 1, y, z)];
-        }
-      }
-      borders.left = border.buffer;
-    }
-
-    return borders;
+    return { borders, borderLights };
   }
 
   function regenerateChunkMesh(chunkX: number, chunkY: number, chunkZ: number) {
@@ -1517,12 +2070,16 @@ export default function Game() {
       const chunkName = generateChunkName(chunkX, chunkY, chunkZ);
       const currentVersion = chunkVersions.current[chunkName];
 
-      const borders = getChunkBorders(chunkX, chunkY, chunkZ);
+      if (!lightChunks.current[chunkName]) return;
+
+      const { borders, borderLights } = getChunkBorders(chunkX, chunkY, chunkZ);
 
       meshWorkerPool
         .exec("generateMesh", [
           chunks.current[chunkName],
+          lightChunks.current[chunkName].buffer,
           borders,
+          borderLights,
           seedRef.current,
           chunkX,
           chunkY,
@@ -1539,6 +2096,7 @@ export default function Game() {
               indices: ArrayBuffer;
               uvs: ArrayBuffer;
               textureIndices: ArrayBuffer;
+              lightLevels: ArrayBuffer;
             };
             transparent: {
               positions: ArrayBuffer;
@@ -1546,6 +2104,7 @@ export default function Game() {
               indices: ArrayBuffer;
               uvs: ArrayBuffer;
               textureIndices: ArrayBuffer;
+              lightLevels: ArrayBuffer;
             };
           }) => {
             if (chunkVersions.current[chunkName] === currentVersion) {
@@ -1845,7 +2404,104 @@ export default function Game() {
     const time = performance.now();
     const delta = (time - prevTime) / 1000;
 
+    // Update FPS counter
+    fpsFrames.current.push(time);
+    // Keep only frames from the last second
+    while (fpsFrames.current.length > 0 && fpsFrames.current[0] < time - 1000) {
+      fpsFrames.current.shift();
+    }
+
     updateIndicator();
+
+    // Update debug info every few frames to avoid excessive re-renders
+    if (Math.floor(time / 100) !== Math.floor(prevTime / 100)) {
+      const playerChunkX = Math.floor(camera.position.x / CHUNK_WIDTH);
+      const playerChunkY = Math.floor(camera.position.y / CHUNK_HEIGHT);
+      const playerChunkZ = Math.floor(camera.position.z / CHUNK_LENGTH);
+
+      // Find what block we're looking at
+      let lookingAtBlock: { x: number; y: number; z: number } | null = null;
+      let blockAtCursor: { type: number; light: number } | null = null;
+
+      if (playerControlsRef.current?.controls.isLocked) {
+        let cameraDirection: THREE.Vector3 = new THREE.Vector3();
+        camera.getWorldDirection(cameraDirection);
+        cameraDirection.normalize();
+        cameraDirection.multiplyScalar(0.02);
+
+        let currentPoint = new THREE.Vector3(
+          camera.position.x,
+          camera.position.y,
+          camera.position.z
+        );
+
+        let lastX = Math.round(currentPoint.x);
+        let lastY = Math.round(currentPoint.y);
+        let lastZ = Math.round(currentPoint.z);
+
+        for (let step = 0; step < 5 * 50; step++) {
+          const x = Math.round(currentPoint.x);
+          const y = Math.round(currentPoint.y);
+          const z = Math.round(currentPoint.z);
+
+          currentPoint = currentPoint.add(
+            new THREE.Vector3(
+              cameraDirection.x,
+              cameraDirection.y,
+              cameraDirection.z
+            )
+          );
+          const blockType = getBlock(x, y, z);
+          if (blockType !== null && blockType !== BlockType.AIR) {
+            lookingAtBlock = { x, y, z };
+
+            const chunkX = Math.floor(lastX / CHUNK_WIDTH);
+            const chunkY = Math.floor(lastY / CHUNK_HEIGHT);
+            const chunkZ = Math.floor(lastZ / CHUNK_LENGTH);
+
+            const chunkName = generateChunkName(chunkX, chunkY, chunkZ);
+            const lightChunk = lightChunks.current[chunkName];
+
+            let lightLevel = 0;
+            if (lightChunk) {
+              const blockChunkX = lastX - chunkX * CHUNK_WIDTH;
+              const blockChunkY = lastY - chunkY * CHUNK_HEIGHT;
+              const blockChunkZ = lastZ - chunkZ * CHUNK_LENGTH;
+              const rawLight =
+                lightChunk[
+                  calculateOffset(blockChunkX, blockChunkY, blockChunkZ)
+                ];
+              lightLevel = (rawLight >> 4) & 0xf;
+            }
+
+            blockAtCursor = { type: blockType, light: lightLevel };
+            break;
+          }
+
+          lastX = x;
+          lastY = y;
+          lastZ = z;
+        }
+      }
+
+      setDebugInfo({
+        fps: fpsFrames.current.length,
+        playerPosition: {
+          x: camera.position.x,
+          y: camera.position.y,
+          z: camera.position.z,
+        },
+        currentChunk: {
+          x: playerChunkX,
+          y: playerChunkY,
+          z: playerChunkZ,
+        },
+        loadedChunks: Object.keys(chunks.current).length,
+        blockAtCursor,
+        lookingAt: lookingAtBlock,
+        seed: seedRef.current,
+      });
+    }
 
     // document.getElementById("crosshairLayer")!.innerHTML = `Chunks: ${
     //   scene.children.length
@@ -1900,6 +2556,8 @@ export default function Game() {
           newSlots[clampedIndex] = block;
           setHotbarSlots(newSlots);
         }}
+        debugInfo={debugInfo}
+        isDebugVisible={isDebugVisible}
       />
     </div>
   );

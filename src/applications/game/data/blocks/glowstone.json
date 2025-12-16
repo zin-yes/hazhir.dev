@@ -1,0 +1,7 @@
+{
+  "id": 54,
+  "name": "GLOWSTONE",
+  "texture": "invalid.png",
+  "model": "CUBE",
+  "lightLevel": 15
+}
