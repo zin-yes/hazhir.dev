@@ -1973,40 +1973,40 @@ export default function Game() {
           for (let x = 0; x < CHUNK_WIDTH; x++)
             for (let z = 0; z < CHUNK_LENGTH; z++)
               border[x * CHUNK_LENGTH + z] = chunk[calculateOffset(x, 0, z)];
-          borders.top = border.buffer;
+          borders.top = border.buffer as ArrayBuffer;
         } else if (face === "bottom") {
           border = new Uint8Array(CHUNK_WIDTH * CHUNK_LENGTH);
           for (let x = 0; x < CHUNK_WIDTH; x++)
             for (let z = 0; z < CHUNK_LENGTH; z++)
               border[x * CHUNK_LENGTH + z] =
                 chunk[calculateOffset(x, CHUNK_HEIGHT - 1, z)];
-          borders.bottom = border.buffer;
+          borders.bottom = border.buffer as ArrayBuffer;
         } else if (face === "front") {
           border = new Uint8Array(CHUNK_WIDTH * CHUNK_HEIGHT);
           for (let x = 0; x < CHUNK_WIDTH; x++)
             for (let y = 0; y < CHUNK_HEIGHT; y++)
               border[x * CHUNK_HEIGHT + y] = chunk[calculateOffset(x, y, 0)];
-          borders.front = border.buffer;
+          borders.front = border.buffer as ArrayBuffer;
         } else if (face === "back") {
           border = new Uint8Array(CHUNK_WIDTH * CHUNK_HEIGHT);
           for (let x = 0; x < CHUNK_WIDTH; x++)
             for (let y = 0; y < CHUNK_HEIGHT; y++)
               border[x * CHUNK_HEIGHT + y] =
                 chunk[calculateOffset(x, y, CHUNK_LENGTH - 1)];
-          borders.back = border.buffer;
+          borders.back = border.buffer as ArrayBuffer;
         } else if (face === "right") {
           border = new Uint8Array(CHUNK_HEIGHT * CHUNK_LENGTH);
           for (let y = 0; y < CHUNK_HEIGHT; y++)
             for (let z = 0; z < CHUNK_LENGTH; z++)
               border[y * CHUNK_LENGTH + z] = chunk[calculateOffset(0, y, z)];
-          borders.right = border.buffer;
+          borders.right = border.buffer as ArrayBuffer;
         } else if (face === "left") {
           border = new Uint8Array(CHUNK_HEIGHT * CHUNK_LENGTH);
           for (let y = 0; y < CHUNK_HEIGHT; y++)
             for (let z = 0; z < CHUNK_LENGTH; z++)
               border[y * CHUNK_LENGTH + z] =
                 chunk[calculateOffset(CHUNK_WIDTH - 1, y, z)];
-          borders.left = border.buffer;
+          borders.left = border.buffer as ArrayBuffer;
         }
       }
 
@@ -2017,40 +2017,40 @@ export default function Game() {
           for (let x = 0; x < CHUNK_WIDTH; x++)
             for (let z = 0; z < CHUNK_LENGTH; z++)
               border[x * CHUNK_LENGTH + z] = light[calculateOffset(x, 0, z)];
-          borderLights.top = border.buffer;
+          borderLights.top = border.buffer as ArrayBuffer;
         } else if (face === "bottom") {
           border = new Uint8Array(CHUNK_WIDTH * CHUNK_LENGTH);
           for (let x = 0; x < CHUNK_WIDTH; x++)
             for (let z = 0; z < CHUNK_LENGTH; z++)
               border[x * CHUNK_LENGTH + z] =
                 light[calculateOffset(x, CHUNK_HEIGHT - 1, z)];
-          borderLights.bottom = border.buffer;
+          borderLights.bottom = border.buffer as ArrayBuffer;
         } else if (face === "front") {
           border = new Uint8Array(CHUNK_WIDTH * CHUNK_HEIGHT);
           for (let x = 0; x < CHUNK_WIDTH; x++)
             for (let y = 0; y < CHUNK_HEIGHT; y++)
               border[x * CHUNK_HEIGHT + y] = light[calculateOffset(x, y, 0)];
-          borderLights.front = border.buffer;
+          borderLights.front = border.buffer as ArrayBuffer;
         } else if (face === "back") {
           border = new Uint8Array(CHUNK_WIDTH * CHUNK_HEIGHT);
           for (let x = 0; x < CHUNK_WIDTH; x++)
             for (let y = 0; y < CHUNK_HEIGHT; y++)
               border[x * CHUNK_HEIGHT + y] =
                 light[calculateOffset(x, y, CHUNK_LENGTH - 1)];
-          borderLights.back = border.buffer;
+          borderLights.back = border.buffer as ArrayBuffer;
         } else if (face === "right") {
           border = new Uint8Array(CHUNK_HEIGHT * CHUNK_LENGTH);
           for (let y = 0; y < CHUNK_HEIGHT; y++)
             for (let z = 0; z < CHUNK_LENGTH; z++)
               border[y * CHUNK_LENGTH + z] = light[calculateOffset(0, y, z)];
-          borderLights.right = border.buffer;
+          borderLights.right = border.buffer as ArrayBuffer;
         } else if (face === "left") {
           border = new Uint8Array(CHUNK_HEIGHT * CHUNK_LENGTH);
           for (let y = 0; y < CHUNK_HEIGHT; y++)
             for (let z = 0; z < CHUNK_LENGTH; z++)
               border[y * CHUNK_LENGTH + z] =
                 light[calculateOffset(CHUNK_WIDTH - 1, y, z)];
-          borderLights.left = border.buffer;
+          borderLights.left = border.buffer as ArrayBuffer;
         }
       }
     };
