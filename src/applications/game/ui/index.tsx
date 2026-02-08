@@ -153,7 +153,7 @@ export default function UILayer({
                 <input
                   type="text"
                   placeholder="Enter Host ID"
-                  className="text-black px-2 py-1 flex-grow"
+                  className="text-black px-2 py-1 grow"
                   value={joinId}
                   onChange={(e) => setJoinId(e.target.value)}
                 />

@@ -40,6 +40,30 @@
     "callbackFunctionName": "exit"
   },
   {
+    "name": "alias",
+    "usage": ["alias", "alias name=value", "alias -u name"],
+    "examples": ["alias", "alias ll=ls", "alias -u ll"],
+    "aliases": [],
+    "description": "Creates, lists, or removes command aliases.",
+    "callbackFunctionName": "alias"
+  },
+  {
+    "name": "export",
+    "usage": ["export VAR=value", "export VAR"],
+    "examples": ["export THIS=demo", "export PATH=/usr/bin"],
+    "aliases": [],
+    "description": "Sets environment variables for the terminal session.",
+    "callbackFunctionName": "export"
+  },
+  {
+    "name": "source",
+    "usage": ["source [path]"],
+    "examples": ["source ~/terminal_rc", "source /home/user/terminal_rc"],
+    "aliases": ["."],
+    "description": "Loads and executes commands from a script file.",
+    "callbackFunctionName": "source"
+  },
+  {
     "name": "application",
     "usage": ["application <info/close/list> [uuid?]"],
     "examples": [
@@ -69,10 +93,58 @@
   },
   {
     "name": "ls",
-    "usage": ["ls"],
-    "examples": ["ls"],
+    "usage": ["ls [-la] [path]"],
+    "examples": ["ls", "ls -la", "ls /home/user/Documents"],
     "aliases": [],
-    "description": "Displays a list of all the files on the operating system.",
+    "description": "Lists directory contents. Use -a to show hidden files, -l for long format.",
     "callbackFunctionName": "ls"
+  },
+  {
+    "name": "cd",
+    "usage": ["cd [path]"],
+    "examples": ["cd", "cd /home/user", "cd ..", "cd ~/Documents"],
+    "aliases": [],
+    "description": "Changes the current working directory.",
+    "callbackFunctionName": "cd"
+  },
+  {
+    "name": "pwd",
+    "usage": ["pwd"],
+    "examples": ["pwd"],
+    "aliases": [],
+    "description": "Prints the current working directory.",
+    "callbackFunctionName": "pwd"
+  },
+  {
+    "name": "mkdir",
+    "usage": ["mkdir [-p] <directory>"],
+    "examples": ["mkdir test", "mkdir -p path/to/dir"],
+    "aliases": [],
+    "description": "Creates a new directory. Use -p to create parent directories as needed.",
+    "callbackFunctionName": "mkdir"
+  },
+  {
+    "name": "touch",
+    "usage": ["touch <file>"],
+    "examples": ["touch newfile.txt", "touch /home/user/test.md"],
+    "aliases": [],
+    "description": "Creates an empty file or updates file timestamps.",
+    "callbackFunctionName": "touch"
+  },
+  {
+    "name": "rm",
+    "usage": ["rm [-rf] <file/directory>"],
+    "examples": ["rm file.txt", "rm -r folder", "rm -rf folder"],
+    "aliases": [],
+    "description": "Removes files or directories. Use -r for directories, -f to force.",
+    "callbackFunctionName": "rm"
+  },
+  {
+    "name": "cat",
+    "usage": ["cat <file>"],
+    "examples": ["cat readme.txt", "cat /home/user/.bashrc"],
+    "aliases": [],
+    "description": "Displays the contents of a file.",
+    "callbackFunctionName": "cat"
   }
 ]

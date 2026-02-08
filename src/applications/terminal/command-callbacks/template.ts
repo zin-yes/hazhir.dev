@@ -1,6 +1,6 @@
 import type { Terminal } from "@xterm/xterm";
 
-import type { CommandCallback } from "./index";
+import type { CommandAutocomplete, CommandCallback } from "./index";
 import { useSession } from "next-auth/react";
 
 async function template(
@@ -11,3 +11,7 @@ async function template(
 ): Promise<void> {}
 
 export default template satisfies CommandCallback;
+
+const autocomplete: CommandAutocomplete = () => [];
+
+export { autocomplete };

@@ -1,0 +1,44 @@
+{
+  "narrator": {
+    "id": "narrator",
+    "name": "Narrator"
+  },
+  "alex": {
+    "id": "alex",
+    "name": "Alex",
+    "color": "#4a9eff",
+    "sprites": [
+      {
+        "id": "alex_happy",
+        "emotion": "happy",
+        "url": "placeholder",
+        "position": "center"
+      },
+      {
+        "id": "alex_surprised",
+        "emotion": "surprised",
+        "url": "placeholder",
+        "position": "center"
+      },
+      {
+        "id": "alex_sad",
+        "emotion": "sad",
+        "url": "placeholder",
+        "position": "center"
+      }
+    ]
+  },
+  "mysterious_figure": {
+    "id": "mysterious_figure",
+    "name": "???",
+    "color": "#9333ea",
+    "sprites": [
+      {
+        "id": "mystery_neutral",
+        "emotion": "neutral",
+        "url": "placeholder",
+        "position": "center"
+      }
+    ]
+  }
+}

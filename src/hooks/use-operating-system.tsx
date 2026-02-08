@@ -1,4 +1,3 @@
-import styles from "@/operating-system/application/window/application-window.module.css";
 
 export type ApplicationWindowType =
   | "TERMINAL"
@@ -79,13 +78,13 @@ export default function UseOperatingSystem() {
   }
 
   function setApplicationWindowTitle(identifier: string, title: string) {
-    const element = document.getElementById(identifier) as HTMLDivElement;
+    // const element = document.getElementById(identifier) as HTMLDivElement;
 
-    if (element) {
-      (
-        element.getElementsByClassName(styles.titleText)[0] as HTMLDivElement
-      ).innerHTML = title;
-    }
+    // if (element) {
+    //   (
+    //     element.getElementsByClassName(styles.titleText)[0] as HTMLDivElement
+    //   ).innerHTML = title;
+    // }
   }
 
   function fileExists(directory: string[], fileName: string) {

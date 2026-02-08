@@ -1,110 +1,229 @@
 "use client";
 
 import { Button } from "@/components/ui/button";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import { Textarea } from "@/components/ui/textarea";
-import UseOperatingSystem, {
-  OperatingSystemFile,
-} from "@/hooks/use-operating-system";
-import { useEffect, useRef, useState } from "react";
+import { useFileSystem } from "@/hooks/use-file-system";
+import UseOperatingSystem from "@/hooks/use-operating-system";
+import MonacoEditor, { type Monaco } from "@monaco-editor/react";
+import { Save } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+
+interface TextEditorProps {
+  filePath: string;
+  identifier: string;
+}
 
 export default function TextEditorApplication({
-  file,
+  filePath,
   identifier,
-}: {
-  file: OperatingSystemFile;
-  identifier: string;
-}) {
+}: TextEditorProps) {
+  const fs = useFileSystem();
   const operatingSystem = UseOperatingSystem();
+  
+  const [contents, setContents] = useState<string>("");
+  const [originalContents, setOriginalContents] = useState<string>("");
+  const [fileName, setFileName] = useState<string>("");
+  const [editorTheme] = useState<"vs-dark">("vs-dark");
 
-  const [contents, setContents] = useState<string>(
-    file ? file.contents + "" : ""
-  );
-  const textAreaRef = useRef<HTMLTextAreaElement>(null);
-  const initialized = useRef<boolean>(false);
-  const [fileName, setFileName] = useState<string>(file.fileName);
+  const editorRef = useRef<import("monaco-editor").editor.IStandaloneCodeEditor | null>(null);
+  const monacoRef = useRef<Monaco | null>(null);
+  const lastLoadedPathRef = useRef<string | null>(null);
 
+  const isModified = contents !== originalContents;
+
+  // Initialize file contents
   useEffect(() => {
-    if (!initialized.current && textAreaRef.current && operatingSystem) {
-      initialized.current = true;
-      window.addEventListener("storage", (event) => {
-        if (file) {
-          const _file = operatingSystem.getFile(file.directory, file.fileName);
-          if (_file) setContents(_file.contents);
-        } else {
-          operatingSystem.setApplicationWindowTitle(
-            identifier,
-            "Text Editor - " + fileName + " ●"
-          );
+    if (lastLoadedPathRef.current === filePath) {
+      return;
+    }
+    lastLoadedPathRef.current = filePath;
+
+    const node = fs.getNode(filePath);
+    const fileContents = fs.getFileContents(filePath) || "";
+
+    if (node && node.type === "file") {
+      setContents(fileContents);
+      setOriginalContents(fileContents);
+      setFileName(node.name);
+
+      operatingSystem.setApplicationWindowTitle(
+        identifier,
+        `Text Editor - ${node.name}`
+      );
+    } else {
+      // File might be new or path might just be a name
+      const name = filePath.split("/").pop() || "Untitled";
+      setFileName(name);
+      setContents(fileContents);
+      setOriginalContents(fileContents);
+    }
+  }, [filePath, fs, identifier, operatingSystem]);
+
+  // Update title when modified state changes
+  useEffect(() => {
+    if (fileName) {
+      operatingSystem.setApplicationWindowTitle(
+        identifier,
+        `Text Editor - ${fileName}${isModified ? " ●" : ""}`
+      );
+    }
+  }, [isModified, fileName, identifier, operatingSystem]);
+
+  // Listen for external file changes
+  useEffect(() => {
+    const handleStorageChange = () => {
+      const fileContents = fs.getFileContents(filePath);
+      if (fileContents !== undefined) {
+        // Only update if we haven't modified locally
+        if (!isModified) {
+          setContents(fileContents);
+          setOriginalContents(fileContents);
         }
-      });
-
-      if (file) {
-        operatingSystem.setApplicationWindowTitle(
-          identifier,
-          "Text Editor - " + file.fileName
-        );
       }
+    };
+
+    window.addEventListener("storage", handleStorageChange);
+    return () => window.removeEventListener("storage", handleStorageChange);
+  }, [filePath, fs, isModified]);
+
+  const handleContentChange = useCallback((newContent?: string) => {
+    if (newContent === undefined) {
+      return;
     }
-  }, [textAreaRef, initialized]);
+    setContents(newContent);
+  }, []);
+
+  const saveFile = useCallback(() => {
+    if (fs.updateFile(filePath, contents)) {
+      setOriginalContents(contents);
+    }
+  }, [filePath, contents, fs]);
+
+  // Handle keyboard shortcuts
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.ctrlKey || e.metaKey) {
+        if (e.key === "s") {
+          e.preventDefault();
+          saveFile();
+        }
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [saveFile]);
+
+
+
+  const resolveEditorBackground = useCallback(() => "#09090b", []);
+
+  const applyMonacoTheme = useCallback(() => {
+    if (!monacoRef.current) return;
+
+    const background = resolveEditorBackground();
+
+    monacoRef.current.editor.defineTheme("app-editor", {
+      base: "vs-dark",
+      inherit: true,
+      rules: [],
+      colors: {
+        "editor.background": background,
+      },
+    });
+    monacoRef.current.editor.setTheme("app-editor");
+  }, [editorTheme, resolveEditorBackground]);
 
   useEffect(() => {
-    if (file) {
-      const _file = operatingSystem.getFile(file.directory, file.fileName);
-      if (_file ? _file.contents !== contents : true) {
-        operatingSystem.setApplicationWindowTitle(
-          identifier,
-          "Text Editor - " + file.fileName + " ●"
-        );
-      } else {
-        operatingSystem.setApplicationWindowTitle(
-          identifier,
-          "Text Editor - " + file.fileName
-        );
-      }
-    }
-  }, [contents]);
+    applyMonacoTheme();
+  }, [applyMonacoTheme]);
 
-  function saveFile() {
-    if (file) {
-      operatingSystem.saveFile(file.directory, file.fileName, contents);
-
-      const _file = operatingSystem.getFile(file.directory, file.fileName);
-      if (_file ? _file.contents !== contents : true) {
-        operatingSystem.setApplicationWindowTitle(
-          identifier,
-          "Text Editor - " + file.fileName + "*"
-        );
-      } else {
-        operatingSystem.setApplicationWindowTitle(
-          identifier,
-          "Text Editor - " + file.fileName
-        );
-      }
+  const lineCount = contents.split("\n").length;
+  const language = useMemo(() => {
+    const name = fileName || filePath.split("/").pop() || "";
+    const ext = name.split(".").pop()?.toLowerCase();
+    switch (ext) {
+      case "ts":
+      case "tsx":
+        return "typescript";
+      case "js":
+      case "jsx":
+        return "javascript";
+      case "json":
+        return "json";
+      case "css":
+        return "css";
+      case "html":
+      case "htm":
+        return "html";
+      case "md":
+      case "markdown":
+        return "markdown";
+      case "yml":
+      case "yaml":
+        return "yaml";
+      case "py":
+        return "python";
+      case "sh":
+      case "bash":
+        return "shell";
+      case "sql":
+        return "sql";
+      case "xml":
+        return "xml";
+      case "toml":
+        return "toml";
+      default:
+        return "plaintext";
     }
-  }
+  }, [fileName, filePath]);
 
   return (
     <div className="w-full h-full bg-background flex flex-col">
-      <textarea
-        ref={textAreaRef}
-        className="w-full h-full outline-none border-none active:border-none active:outline-none resize-none bg-background text-foreground text-lg p-4"
-        rows={contents.split("\n").length}
-        placeholder="Text file contents..."
-        value={contents}
-        wrap="hard"
-        onChange={(event) => {
-          setContents(event.target.value);
-        }}
-      />
-      <div className="flex row gap-2 p-4">
-        <Button
-          onClick={() => {
-            saveFile();
-          }}
-        >
+      {/* Toolbar */}
+      <div className="flex items-center justify-between px-3 py-2 border-b bg-muted/30">
+        <div className="text-sm text-foreground font-medium">
+          {fileName}
+          {isModified && (
+            <span className="text-orange-500 text-xs ml-2">(unsaved)</span>
+          )}
+        </div>
+        <Button onClick={saveFile} disabled={!isModified} size="sm">
+          <Save className="w-4 h-4 mr-2" />
           Save
         </Button>
+      </div>
+
+      {/* Editor Area */}
+      <div className="flex-1 flex overflow-hidden">
+        <MonacoEditor
+          value={contents}
+          onChange={handleContentChange}
+          theme="app-editor"
+          language={language}
+          options={{
+            minimap: { enabled: false },
+            lineNumbers: "on",
+            wordWrap: "on",
+            fontSize: 13,
+            fontFamily: "var(--font-mono)",
+            tabSize: 4,
+            renderLineHighlight: "all",
+            scrollBeyondLastLine: false,
+            automaticLayout: true,
+            padding: { top: 12, bottom: 12 },
+          }}
+          onMount={(editor, monaco) => {
+            editorRef.current = editor;
+            monacoRef.current = monaco;
+            applyMonacoTheme();
+          }}
+        />
+      </div>
+
+      {/* Status Bar */}
+      <div className="flex items-center justify-between px-3 py-1 border-t bg-muted/30 text-xs text-muted-foreground">
+        <span>Lines: {lineCount}</span>
+        <span>Characters: {contents.length}</span>
       </div>
     </div>
   );

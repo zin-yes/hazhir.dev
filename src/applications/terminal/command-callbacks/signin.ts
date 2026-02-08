@@ -1,6 +1,6 @@
 import type { Terminal } from "@xterm/xterm";
 
-import type { CommandCallback } from "./index";
+import type { CommandAutocomplete, CommandCallback } from "./index";
 import { signIn, useSession } from "next-auth/react";
 
 import ansi from "ansi-escape-sequences";
@@ -36,3 +36,7 @@ async function signin(
 }
 
 export default signin satisfies CommandCallback;
+
+const autocomplete: CommandAutocomplete = () => [];
+
+export { autocomplete };

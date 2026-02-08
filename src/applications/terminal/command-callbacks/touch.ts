@@ -1,0 +1,62 @@
+import type { Terminal } from "@xterm/xterm";
+
+import { useFileSystem } from "@/hooks/use-file-system";
+import { useSession } from "next-auth/react";
+import { getCwd } from "./cd";
+import type { CommandAutocomplete, CommandCallback } from "./index";
+import { getPathCompletions } from "./autocomplete";
+
+async function touch(
+  fullCommand: string,
+  terminal: Terminal,
+  session: ReturnType<typeof useSession>,
+  windowIdentifier: string
+): Promise<void> {
+  const fs = useFileSystem();
+  const args = fullCommand.trim().split(/\s+/);
+  
+  if (args.length < 2) {
+    terminal.writeln("\x1b[31mtouch: missing file operand\x1b[0m");
+    return;
+  }
+  
+  const names = args.slice(1);
+  
+  for (const name of names) {
+    let targetPath: string;
+    
+    if (name.startsWith("/")) {
+      targetPath = fs.normalizePath(name);
+    } else {
+      targetPath = fs.normalizePath(`${getCwd()}/${name}`);
+    }
+    
+    if (fs.exists(targetPath)) {
+      // File exists, just update timestamp (simulated)
+      continue;
+    }
+    
+    const parentPath = fs.getParentPath(targetPath);
+    const fileName = fs.getNodeName(targetPath);
+    
+    if (!fs.exists(parentPath)) {
+      terminal.writeln(`\x1b[31mtouch: cannot touch '${name}': No such file or directory\x1b[0m`);
+      continue;
+    }
+    
+    fs.createFile(parentPath, fileName, "");
+  }
+}
+
+export default touch satisfies CommandCallback;
+
+const autocomplete: CommandAutocomplete = ({ currentToken }) => {
+  return getPathCompletions(currentToken, {
+    includeFiles: true,
+    includeDirs: true,
+    includeHidden: true,
+    appendDirSlash: true,
+  });
+};
+
+export { autocomplete };

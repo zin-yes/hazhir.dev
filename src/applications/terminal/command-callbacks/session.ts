@@ -1,6 +1,6 @@
 import type { Terminal } from "@xterm/xterm";
 
-import type { CommandCallback } from "./index";
+import type { CommandAutocomplete, CommandCallback } from "./index";
 import { useSession } from "next-auth/react";
 
 import commands from "../commands.json";
@@ -42,3 +42,12 @@ async function session(
 }
 
 export default session satisfies CommandCallback;
+
+const autocomplete: CommandAutocomplete = ({ currentIndex, currentToken }) => {
+  if (currentIndex === 0) {
+    return ["status", "data"].filter((item) => item.startsWith(currentToken));
+  }
+  return [];
+};
+
+export { autocomplete };

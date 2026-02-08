@@ -1,6 +1,6 @@
 import type { Terminal } from "@xterm/xterm";
 
-import type { CommandCallback } from "./index";
+import type { CommandAutocomplete, CommandCallback } from "./index";
 import { useSession } from "next-auth/react";
 
 import styles from "@/operating-system/application/window/application-window.module.css";
@@ -69,3 +69,7 @@ async function exit(
 }
 
 export default exit satisfies CommandCallback;
+
+const autocomplete: CommandAutocomplete = () => [];
+
+export { autocomplete };

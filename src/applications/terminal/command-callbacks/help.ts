@@ -1,5 +1,5 @@
 import type { Terminal } from "@xterm/xterm";
-import type { CommandCallback } from "./index";
+import type { CommandAutocomplete, CommandCallback } from "./index";
 
 import ansi, { Style } from "ansi-escape-sequences";
 
@@ -326,3 +326,14 @@ async function help(fullCommand: string, terminal: Terminal): Promise<void> {
 }
 
 export default help satisfies CommandCallback;
+
+const autocomplete: CommandAutocomplete = ({ currentToken }) => {
+  const list: string[] = [];
+  commands.forEach((command) => {
+    list.push(command.name);
+    command.aliases.forEach((alias) => list.push(alias));
+  });
+  return list.filter((item) => item.startsWith(currentToken));
+};
+
+export { autocomplete };

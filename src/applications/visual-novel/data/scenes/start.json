@@ -1,0 +1,68 @@
+{
+  "id": "start",
+  "name": "A Chance Encounter",
+  "sceneType": "dialog",
+  "background": {
+    "id": "bg_cafe",
+    "name": "Cafe",
+    "url": "placeholder"
+  },
+  "entrySegmentId": "start_1",
+  "dialogSegments": {
+    "start_1": {
+      "id": "start_1",
+      "type": "replace",
+      "characterId": "narrator",
+      "text": "It's a peaceful afternoon at the local cafe. The aroma of fresh coffee fills the air.",
+      "nextSegmentId": "start_2"
+    },
+    "start_2": {
+      "id": "start_2",
+      "type": "append",
+      "characterId": "narrator",
+      "text": "You sit by the window, watching people pass by on the busy street.",
+      "nextSegmentId": "start_3"
+    },
+    "start_3": {
+      "id": "start_3",
+      "type": "append",
+      "characterId": "narrator",
+      "text": "Suddenly, someone approaches your table.",
+      "nextSegmentId": "start_4"
+    },
+    "start_4": {
+      "id": "start_4",
+      "type": "replace",
+      "characterId": "alex",
+      "text": "Excuse me! Is this seat taken?",
+      "spriteEmotion": "happy",
+      "nextSegmentId": "start_5"
+    },
+    "start_5": {
+      "id": "start_5",
+      "type": "replace",
+      "characterId": "narrator",
+      "text": "A friendly-looking person with bright eyes stands before you, holding a coffee cup.",
+      "nextSegmentId": "start_6"
+    },
+    "start_6": {
+      "id": "start_6",
+      "type": "choice",
+      "characterId": "alex",
+      "text": "All the other tables are full. Mind if I join you?",
+      "spriteEmotion": "happy",
+      "choices": [
+        {
+          "id": "choice_accept",
+          "text": "Sure, have a seat!",
+          "nextSceneId": "conversation_friendly"
+        },
+        {
+          "id": "choice_decline",
+          "text": "Actually, I prefer to sit alone...",
+          "nextSceneId": "conversation_awkward"
+        }
+      ]
+    }
+  }
+}

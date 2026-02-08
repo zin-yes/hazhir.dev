@@ -4,13 +4,19 @@ import "./global.css";
 
 import "@xterm/xterm/css/xterm.css";
 
-import { Montserrat } from "next/font/google";
+import { Fira_Code, Montserrat } from "next/font/google";
 const default_font = Montserrat({
   subsets: ["latin"],
 });
 
-import type { Metadata } from "next";
+const fira_code = Fira_Code({
+  subsets: ["latin"],
+  weight: ["400", "500", "600", "700"],
+  variable: "--font-fira-code",
+})
+
 import { NextAuthSessionProvider } from "@/providers/session-provider";
+import type { Metadata } from "next";
 export const metadata: Metadata = {
   title: "hazhir.dev",
   description:
