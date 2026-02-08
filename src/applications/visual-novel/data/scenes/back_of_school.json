@@ -1,0 +1,167 @@
+{
+  "id": "back_of_school",
+  "name": "Back of School - Late Afternoon",
+  "sceneType": "dialog",
+  "background": {
+    "id": "bg_back_of_school",
+    "name": "Back of School",
+    "url": "/visual-novel/scene-backgrounds/back-of-school.jpg"
+  },
+  "sprites": [
+    {
+      "characterId": "dot",
+      "position": "left",
+      "x": 80,
+      "y": 120
+    },
+    {
+      "characterId": "com",
+      "position": "right",
+      "x": 380,
+      "y": 120
+    }
+  ],
+  "entrySegmentId": "back_1",
+  "dialogSegments": {
+    "back_1": {
+      "id": "back_1",
+      "type": "replace",
+      "characterId": "dot",
+      "text": "Mr. Henderson called the police, Com. My dad had to re-sod his entire lawn. I was grounded for a month.",
+      "nextSegmentId": "back_2"
+    },
+    "back_2": {
+      "id": "back_2",
+      "type": "replace",
+      "characterId": "com",
+      "text": "(Laughing gleefully) But we almost found it! I could feel it in my bones! It was exhilarating!",
+      "nextSegmentId": "back_3"
+    },
+    "back_3": {
+      "id": "back_3",
+      "type": "replace",
+      "characterId": "dot",
+      "text": "We found a rusty sprinkler head and a dead mole.",
+      "nextSegmentId": "back_4"
+    },
+    "back_4": {
+      "id": "back_4",
+      "type": "replace",
+      "characterId": "com",
+      "text": "Exhilarating!",
+      "nextSegmentId": "back_5"
+    },
+    "back_5": {
+      "id": "back_5",
+      "type": "replace",
+      "characterId": "dot",
+      "text": "You have rose-colored glasses for chaos. What about the \"Comet Enterprises\" Lemonade Stand?",
+      "nextSegmentId": "back_6"
+    },
+    "back_6": {
+      "id": "back_6",
+      "type": "replace",
+      "characterId": "com",
+      "text": "Hey, don't bring dat up. Dat was a legitimate business failure due to market fluctuations!",
+      "nextSegmentId": "back_7"
+    },
+    "back_7": {
+      "id": "back_7",
+      "type": "replace",
+      "characterId": "dot",
+      "text": "You tried to charge twenty dollars a cup because you said it was \"imported Sicilian lemon nectar.\" It was powdered mix and tap water. And you made me wear a suit in ninety-degree weather to look \"professional.\"",
+      "nextSegmentId": "back_8"
+    },
+    "back_8": {
+      "id": "back_8",
+      "type": "replace",
+      "characterId": "com",
+      "text": "Okay, okay. Maybe da execution was flawed. But da vision was dere!",
+      "nextSegmentId": "back_9"
+    },
+    "back_9": {
+      "id": "back_9",
+      "type": "replace",
+      "characterId": "dot",
+      "text": "You were named after a celestial body known for crashing into things and causing mass extinction events. I think you're just living up to the branding.",
+      "nextSegmentId": "back_10"
+    },
+    "back_10": {
+      "id": "back_10",
+      "type": "replace",
+      "characterId": "com",
+      "text": "Hey, my folks knew what dey were doin'. A little chaos keeps things interestin', Dot. Otherwise, we're just eatin' paste wit' da rest of da herd.",
+      "nextSegmentId": "back_11"
+    },
+    "back_11": {
+      "id": "back_11",
+      "type": "replace",
+      "characterId": "dot",
+      "text": "I guess someone has to keep life interesting. Even if it means almost getting arrested every other Tuesday.",
+      "nextSegmentId": "back_12"
+    },
+    "back_12": {
+      "id": "back_12",
+      "type": "replace",
+      "characterId": "com",
+      "text": "Exactly! Someone's gotta drive da getaway car of life.",
+      "nextSegmentId": "back_13"
+    },
+    "back_13": {
+      "id": "back_13",
+      "type": "replace",
+      "characterId": "com",
+      "text": "Anyway, all dis talk of our glorious past has got me thinkin'.",
+      "nextSegmentId": "back_14"
+    },
+    "back_14": {
+      "id": "back_14",
+      "type": "replace",
+      "characterId": "dot",
+      "text": "Oh no.",
+      "nextSegmentId": "back_15"
+    },
+    "back_15": {
+      "id": "back_15",
+      "type": "replace",
+      "characterId": "com",
+      "text": "Oh yes. You wanna bail on last period and go to my place? My Ma made fresh cannolis, and I got dat new zombie survival game you wanted to play. We can barricade ourselves in da basement and ignore da world.",
+      "nextSegmentId": "back_16"
+    },
+    "back_16": {
+      "id": "back_16",
+      "type": "replace",
+      "characterId": "dot",
+      "text": "Cannolis and zombies?",
+      "nextSegmentId": "back_17"
+    },
+    "back_17": {
+      "id": "back_17",
+      "type": "replace",
+      "characterId": "com",
+      "text": "Cannolis and zombies. Bestedabest.",
+      "nextSegmentId": "back_18"
+    },
+    "back_18": {
+      "id": "back_18",
+      "type": "replace",
+      "characterId": "dot",
+      "text": "Okay. But I'm driving the getaway car this time.",
+      "nextSegmentId": "back_19"
+    },
+    "back_19": {
+      "id": "back_19",
+      "type": "replace",
+      "characterId": "com",
+      "text": "(Laughing as they start walking off-screen) In your dreams, Dot. In your dreams.",
+      "nextSegmentId": "back_20"
+    },
+    "back_20": {
+      "id": "back_20",
+      "type": "replace",
+      "characterId": "narrator",
+      "text": "Fade to black.",
+      "nextSceneId": "credits"
+    }
+  }
+}

@@ -12,7 +12,6 @@ export interface Character {
 
 export interface CharacterSprite {
   id: string;
-  emotion: string; // e.g., "happy", "sad", "angry", "neutral"
   url: string;
   position?: "left" | "center" | "right";
 }
@@ -35,11 +34,18 @@ export interface DialogSegmentChoice {
   affectionChange?: Record<string, number>; // Character affection changes
 }
 
+export interface DialogSegmentTiming {
+  mode: "instant" | "typewriter";
+  charDelayMs?: number;
+  lineDelayMs?: number;
+}
+
 export interface DialogSegment {
   id: string;
   type: DialogSegmentType;
   character: Character;
   text: string;
+  timing?: DialogSegmentTiming;
   characterSprite?: CharacterSprite;
   voiceOver?: string; // Audio file path
   choices?: DialogSegmentChoice[];
@@ -58,8 +64,9 @@ export type SceneType = "dialog" | "cutscene" | "chapter_start" | "chapter_end";
 
 export interface SceneSprite {
   characterId: string;
-  emotion?: string;
   position?: "left" | "center" | "right";
+  x?: number;
+  y?: number;
 }
 
 export interface Scene {

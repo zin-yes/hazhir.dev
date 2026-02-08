@@ -1,0 +1,97 @@
+{
+  "id": "cafeteria_table",
+  "name": "Cafeteria Table - Day",
+  "sceneType": "dialog",
+  "background": {
+    "id": "bg_cafeteria_table",
+    "name": "Cafeteria Table",
+    "url": "/visual-novel/scene-backgrounds/cafeteria-showing-both.jpg"
+  },
+  "sprites": [
+    {
+      "characterId": "dot",
+      "position": "left",
+      "x": 80,
+      "y": 120
+    },
+    {
+      "characterId": "com",
+      "position": "right",
+      "x": 380,
+      "y": 120
+    }
+  ],
+  "entrySegmentId": "table_1",
+  "dialogSegments": {
+    "table_1": {
+      "id": "table_1",
+      "type": "replace",
+      "characterId": "com",
+      "text": "Ey, Dot. You ever just sit here and wonder... what's the point of it all?",
+      "nextSegmentId": "table_2"
+    },
+    "table_2": {
+      "id": "table_2",
+      "type": "replace",
+      "characterId": "dot",
+      "text": "(Muffled) Mmph? What? Why? What do you mean?",
+      "nextSegmentId": "table_3"
+    },
+    "table_3": {
+      "id": "table_3",
+      "type": "replace",
+      "characterId": "com",
+      "text": "I mean, look at us. We sit in class, we listen to dese old farts drone on about isosceles triangles, den we come here and get fed paste like livestock. Repeat until we die.",
+      "nextSegmentId": "table_4"
+    },
+    "table_4": {
+      "id": "table_4",
+      "type": "replace",
+      "characterId": "dot",
+      "text": "(Swallows food) That's grim, Com. Even for me.",
+      "nextSegmentId": "table_5"
+    },
+    "table_5": {
+      "id": "table_5",
+      "type": "replace",
+      "characterId": "com",
+      "text": "Nah, it ain't grim, it's... eye-openin'. I'm just sayin', maybe we should be doin' more. We should be out in da world, grabbin' life by the horns.",
+      "nextSegmentId": "table_6"
+    },
+    "table_6": {
+      "id": "table_6",
+      "type": "replace",
+      "characterId": "dot",
+      "text": "Like what? Joining the chess club?",
+      "nextSegmentId": "table_7"
+    },
+    "table_7": {
+      "id": "table_7",
+      "type": "replace",
+      "characterId": "com",
+      "text": "(Laughs incredulously) Chess club? Nah, forget chess club. I mean like, really gettin' the most out of the world. You know? Like... I dunno, we find an armored truck that left its back doors open, or we start a high-stakes underground gabagool import business. Something wit' a little pizzazz.",
+      "nextSegmentId": "table_8"
+    },
+    "table_8": {
+      "id": "table_8",
+      "type": "replace",
+      "characterId": "dot",
+      "text": "I don't know, Com. That doesn't seem too realistic. Also, highly illegal.",
+      "nextSegmentId": "table_9"
+    },
+    "table_9": {
+      "id": "table_9",
+      "type": "replace",
+      "characterId": "com",
+      "text": "(Waving his hand dismissively) Details, details! It's about da thrill, Dot! Da enterprise! We used to have dat spark. You remember? Like dat time back when we were ankle-biters in kindergarten...",
+      "nextSegmentId": "table_10"
+    },
+    "table_10": {
+      "id": "table_10",
+      "type": "replace",
+      "characterId": "narrator",
+      "text": "A harp strum carries us into the flashback.",
+      "nextSceneId": "flashback_kindergarten"
+    }
+  }
+}

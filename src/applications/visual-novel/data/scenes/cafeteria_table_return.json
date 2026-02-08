@@ -1,0 +1,55 @@
+{
+  "id": "cafeteria_table_return",
+  "name": "Cafeteria Table - Return",
+  "sceneType": "dialog",
+  "background": {
+    "id": "bg_cafeteria_return",
+    "name": "Cafeteria Close",
+    "url": "/visual-novel/scene-backgrounds/cafeteria-focus-on-com.jpg"
+  },
+  "sprites": [
+    {
+      "characterId": "dot",
+      "position": "left",
+      "x": 80,
+      "y": 120
+    },
+    {
+      "characterId": "com",
+      "position": "right",
+      "x": 380,
+      "y": 120
+    }
+  ],
+  "entrySegmentId": "ctr_1",
+  "dialogSegments": {
+    "ctr_1": {
+      "id": "ctr_1",
+      "type": "replace",
+      "characterId": "com",
+      "text": "Wasn't dat fun? We ate like kings dat week! We had goldfish comin' out of our ears!",
+      "nextSegmentId": "ctr_2"
+    },
+    "ctr_2": {
+      "id": "ctr_2",
+      "type": "replace",
+      "characterId": "dot",
+      "text": "We got put in timeout for three days, Com.",
+      "nextSegmentId": "ctr_3"
+    },
+    "ctr_3": {
+      "id": "ctr_3",
+      "type": "replace",
+      "characterId": "com",
+      "text": "Yeah, but it was worth it! It's about da memories! Or hey, remember dat time in fourth grade?",
+      "nextSegmentId": "ctr_4"
+    },
+    "ctr_4": {
+      "id": "ctr_4",
+      "type": "replace",
+      "characterId": "narrator",
+      "text": "A harp strum shifts us into another flashback.",
+      "nextSceneId": "flashback_suburban"
+    }
+  }
+}

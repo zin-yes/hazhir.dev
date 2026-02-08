@@ -1,0 +1,55 @@
+{
+  "id": "flashback_kindergarten",
+  "name": "Kindergarten Flashback - Day",
+  "sceneType": "dialog",
+  "background": {
+    "id": "bg_kindergarten",
+    "name": "Kindergarten Classroom",
+    "url": "/visual-novel/scene-backgrounds/kindergarten.jpg"
+  },
+  "sprites": [
+    {
+      "characterId": "young_dot",
+      "position": "left",
+      "x": 80,
+      "y": 140
+    },
+    {
+      "characterId": "young_com",
+      "position": "right",
+      "x": 380,
+      "y": 140
+    }
+  ],
+  "entrySegmentId": "fk_1",
+  "dialogSegments": {
+    "fk_1": {
+      "id": "fk_1",
+      "type": "replace",
+      "characterId": "young_com",
+      "text": "Alright, listen up. Timmy thinks his Charizard is worth three juice boxes. He's a mook. We corner da market on energy cards, see? We create a supply chain issue. By nap time, we'll own every goldfish cracker in dis zip code.",
+      "nextSegmentId": "fk_2"
+    },
+    "fk_2": {
+      "id": "fk_2",
+      "type": "replace",
+      "characterId": "young_dot",
+      "text": "But Com, Mrs. Davis said gambling is wrong.",
+      "nextSegmentId": "fk_3"
+    },
+    "fk_3": {
+      "id": "fk_3",
+      "type": "replace",
+      "characterId": "young_com",
+      "text": "It ain't gamblin', Dot. It's finance. Now go tell Susie her Jigglypuff is deprecated currency.",
+      "nextSegmentId": "fk_4"
+    },
+    "fk_4": {
+      "id": "fk_4",
+      "type": "replace",
+      "characterId": "narrator",
+      "text": "The harp fades out and we return to the cafeteria.",
+      "nextSceneId": "cafeteria_table_return"
+    }
+  }
+}

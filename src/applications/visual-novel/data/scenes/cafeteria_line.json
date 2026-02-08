@@ -1,0 +1,55 @@
+{
+  "id": "cafeteria_line",
+  "name": "Cafeteria Line - Day",
+  "sceneType": "dialog",
+  "background": {
+    "id": "bg_cafeteria_line",
+    "name": "Cafeteria Line",
+    "url": "/visual-novel/scene-backgrounds/lunch-line.jpg"
+  },
+  "sprites": [
+    {
+      "characterId": "dot",
+      "position": "left",
+      "x": 80,
+      "y": 120
+    },
+    {
+      "characterId": "com",
+      "position": "right",
+      "x": 380,
+      "y": 120
+    }
+  ],
+  "entrySegmentId": "line_1",
+  "dialogSegments": {
+    "line_1": {
+      "id": "line_1",
+      "type": "replace",
+      "characterId": "narrator",
+      "text": "A close-up of a metal trough filled with an unrecognizable, grayish-brown gelatinous substance. A hairnet-wearing lunch lady hands a ladle full of it towards the screen with a squelch.",
+      "nextSegmentId": "line_2"
+    },
+    "line_2": {
+      "id": "line_2",
+      "type": "replace",
+      "characterId": "com",
+      "text": "Eugh! Maddone. Look at dis muck. You gotta be kiddin' me with dis. It looks like somethin' my Uncle Sal scraped off his boot after a late night down at the docks, y'know what I mean?",
+      "nextSegmentId": "line_3"
+    },
+    "line_3": {
+      "id": "line_3",
+      "type": "replace",
+      "characterId": "dot",
+      "text": "It's Tuesday. Tuesday is mystery meat mash. You know this.",
+      "nextSegmentId": "line_4"
+    },
+    "line_4": {
+      "id": "line_4",
+      "type": "replace",
+      "characterId": "com",
+      "text": "Yeah, but da mystery should be \"what animal is dis,\" not \"is dis ed-i-ble matter.\" It ain't right, Dot. We deserve better than trough slop.",
+      "nextSceneId": "cafeteria_table"
+    }
+  }
+}

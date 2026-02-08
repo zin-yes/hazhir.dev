@@ -1,56 +1,57 @@
 {
   "id": "conversation_awkward",
-  "name": "Awkward Moment",
-  "sceneType": "dialog",
+  "name": "Cutscene Demo",
+  "sceneType": "cutscene",
   "background": {
-    "id": "bg_cafe",
-    "name": "Cafe",
+    "id": "bg_demo_cutscene",
+    "name": "Cutscene Stage",
     "url": "placeholder"
   },
-  "entrySegmentId": "awkward_1",
+  "sprites": [
+    {
+      "characterId": "mysterious_figure",
+      "position": "center",
+      "x": 240,
+      "y": 60
+    }
+  ],
+  "entrySegmentId": "cutscene_1",
   "dialogSegments": {
-    "awkward_1": {
-      "id": "awkward_1",
-      "type": "replace",
-      "characterId": "alex",
-      "text": "Oh... I understand. Sorry to bother you.",
-      "spriteEmotion": "sad",
-      "nextSegmentId": "awkward_2"
-    },
-    "awkward_2": {
-      "id": "awkward_2",
+    "cutscene_1": {
+      "id": "cutscene_1",
       "type": "replace",
       "characterId": "narrator",
-      "text": "Alex walks away, looking a bit disappointed. You return to your coffee, alone with your thoughts.",
-      "nextSegmentId": "awkward_3"
+      "text": "Cutscene scene type: no choices, auto-advance used by the game.",
+      "timing": {
+        "mode": "typewriter",
+        "charDelayMs": 18,
+        "lineDelayMs": 200
+      },
+      "nextSegmentId": "cutscene_2"
     },
-    "awkward_3": {
-      "id": "awkward_3",
+    "cutscene_2": {
+      "id": "cutscene_2",
       "type": "append",
       "characterId": "narrator",
-      "text": "A few minutes pass...",
-      "nextSegmentId": "awkward_4"
+      "text": "Use this for animated sequences and scripted transitions.",
+      "timing": {
+        "mode": "instant",
+        "charDelayMs": 0,
+        "lineDelayMs": 0
+      },
+      "nextSegmentId": "cutscene_3"
     },
-    "awkward_4": {
-      "id": "awkward_4",
+    "cutscene_3": {
+      "id": "cutscene_3",
       "type": "replace",
-      "characterId": "mysterious_figure",
-      "text": "Interesting choice...",
-      "spriteEmotion": "neutral",
-      "nextSegmentId": "awkward_5"
-    },
-    "awkward_5": {
-      "id": "awkward_5",
-      "type": "choice",
       "characterId": "narrator",
-      "text": "Wait, who said that? You look around but see no one. Must have been your imagination.",
-      "choices": [
-        {
-          "id": "to_ending",
-          "text": "Continue",
-          "nextSceneId": "ending"
-        }
-      ]
+      "text": "Jumping to chapter end demo.",
+      "timing": {
+        "mode": "instant",
+        "charDelayMs": 0,
+        "lineDelayMs": 0
+      },
+      "nextSceneId": "ending"
     }
   }
 }

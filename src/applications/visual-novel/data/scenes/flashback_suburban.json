@@ -1,0 +1,55 @@
+{
+  "id": "flashback_suburban",
+  "name": "Suburban Street Flashback - Day",
+  "sceneType": "dialog",
+  "background": {
+    "id": "bg_suburban_street",
+    "name": "Suburban Street",
+    "url": "/visual-novel/scene-backgrounds/front-lawn.jpg"
+  },
+  "sprites": [
+    {
+      "characterId": "young_dot",
+      "position": "left",
+      "x": 80,
+      "y": 140
+    },
+    {
+      "characterId": "young_com",
+      "position": "right",
+      "x": 380,
+      "y": 140
+    }
+  ],
+  "entrySegmentId": "fs_1",
+  "dialogSegments": {
+    "fs_1": {
+      "id": "fs_1",
+      "type": "replace",
+      "characterId": "young_dot",
+      "text": "I don't think old Mr. Henderson buried pirate gold in his petunias, Com.",
+      "nextSegmentId": "fs_2"
+    },
+    "fs_2": {
+      "id": "fs_2",
+      "type": "replace",
+      "characterId": "young_com",
+      "text": "Shows what you know. X marks da spot, Dot! My Nona told me stories about buried loot all da time. We just gotta dig deeper! Keep an eye out for da feds.",
+      "nextSegmentId": "fs_3"
+    },
+    "fs_3": {
+      "id": "fs_3",
+      "type": "replace",
+      "characterId": "young_com",
+      "text": "(Whispering loudly) Shhh! He's an op!",
+      "nextSegmentId": "fs_4"
+    },
+    "fs_4": {
+      "id": "fs_4",
+      "type": "replace",
+      "characterId": "narrator",
+      "text": "The harp fades out as we return to the present.",
+      "nextSceneId": "back_of_school"
+    }
+  }
+}

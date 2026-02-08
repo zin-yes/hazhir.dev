@@ -1,7 +1,56 @@
 {
   "narrator": {
     "id": "narrator",
-    "name": "Narrator"
+    "name": "Narrator",
+    "color": "#94a3b8"
+  },
+  "dot": {
+    "id": "dot",
+    "name": "Dot",
+    "color": "#64748b",
+    "sprites": [
+      {
+        "id": "dot_default",
+        "url": "/visual-novel/dot.png",
+        "position": "left"
+      }
+    ]
+  },
+  "com": {
+    "id": "com",
+    "name": "Com",
+    "color": "#f59e0b",
+    "sprites": [
+      {
+        "id": "com_default",
+        "url": "/visual-novel/com.png",
+        "position": "right"
+      }
+    ]
+  },
+  "young_dot": {
+    "id": "young_dot",
+    "name": "Young Dot",
+    "color": "#94a3b8",
+    "sprites": [
+      {
+        "id": "young_dot_default",
+        "url": "/visual-novel/young_dot.png",
+        "position": "left"
+      }
+    ]
+  },
+  "young_com": {
+    "id": "young_com",
+    "name": "Young Com",
+    "color": "#f59e0b",
+    "sprites": [
+      {
+        "id": "young_com_default",
+        "url": "/visual-novel/young_com.png",
+        "position": "right"
+      }
+    ]
   },
   "alex": {
     "id": "alex",
@@ -9,20 +58,7 @@
     "color": "#4a9eff",
     "sprites": [
       {
-        "id": "alex_happy",
-        "emotion": "happy",
-        "url": "placeholder",
-        "position": "center"
-      },
-      {
-        "id": "alex_surprised",
-        "emotion": "surprised",
-        "url": "placeholder",
-        "position": "center"
-      },
-      {
-        "id": "alex_sad",
-        "emotion": "sad",
+        "id": "alex_default",
         "url": "placeholder",
         "position": "center"
       }
@@ -34,8 +70,7 @@
     "color": "#9333ea",
     "sprites": [
       {
-        "id": "mystery_neutral",
-        "emotion": "neutral",
+        "id": "mystery_default",
         "url": "placeholder",
         "position": "center"
       }

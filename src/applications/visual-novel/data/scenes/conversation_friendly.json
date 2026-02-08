@@ -1,54 +1,78 @@
 {
   "id": "conversation_friendly",
-  "name": "Friendly Chat",
+  "name": "Dialog Demo",
   "sceneType": "dialog",
   "background": {
-    "id": "bg_cafe",
-    "name": "Cafe",
+    "id": "bg_demo_dialog",
+    "name": "Dialog Stage",
     "url": "placeholder"
   },
-  "entrySegmentId": "friendly_1",
+  "sprites": [
+    {
+      "characterId": "alex",
+      "position": "left",
+      "x": 80,
+      "y": 60
+    },
+    {
+      "characterId": "mysterious_figure",
+      "position": "right",
+      "x": 360,
+      "y": 60
+    }
+  ],
+  "entrySegmentId": "dialog_1",
   "dialogSegments": {
-    "friendly_1": {
-      "id": "friendly_1",
+    "dialog_1": {
+      "id": "dialog_1",
       "type": "replace",
       "characterId": "alex",
-      "text": "Thanks! I'm Alex, by the way.",
-      "spriteEmotion": "happy",
-      "nextSegmentId": "friendly_2"
+      "text": "Replace mode clears the box and starts new text.",
+      "timing": {
+        "mode": "typewriter",
+        "charDelayMs": 24,
+        "lineDelayMs": 200
+      },
+      "nextSegmentId": "dialog_2"
     },
-    "friendly_2": {
-      "id": "friendly_2",
+    "dialog_2": {
+      "id": "dialog_2",
       "type": "append",
       "characterId": "alex",
-      "text": "I come here all the time, but I've never seen you before. Are you new around here?",
-      "spriteEmotion": "happy",
-      "nextSegmentId": "friendly_3"
+      "text": "Append mode adds text to the current line.",
+      "timing": {
+        "mode": "instant",
+        "charDelayMs": 0,
+        "lineDelayMs": 0
+      },
+      "nextSegmentId": "dialog_3"
     },
-    "friendly_3": {
-      "id": "friendly_3",
+    "dialog_3": {
+      "id": "dialog_3",
       "type": "replace",
       "characterId": "narrator",
-      "text": "You chat for a while about the neighborhood, favorite coffee drinks, and local spots.",
-      "nextSegmentId": "friendly_4"
+      "text": "Next: choose where to go.",
+      "timing": {
+        "mode": "instant",
+        "charDelayMs": 0,
+        "lineDelayMs": 0
+      },
+      "nextSegmentId": "dialog_choice"
     },
-    "friendly_4": {
-      "id": "friendly_4",
-      "type": "replace",
-      "characterId": "alex",
-      "text": "This was really nice! Maybe I'll see you around again?",
-      "spriteEmotion": "happy",
-      "nextSegmentId": "friendly_5"
-    },
-    "friendly_5": {
-      "id": "friendly_5",
+    "dialog_choice": {
+      "id": "dialog_choice",
       "type": "choice",
       "characterId": "narrator",
-      "text": "Alex waves goodbye with a warm smile. You feel like you made a new friend today.",
+      "text": "Choice mode presents multiple routes.",
       "choices": [
         {
-          "id": "to_ending",
-          "text": "Continue",
+          "id": "to_cutscene",
+          "text": "Go to cutscene demo",
+          "nextSceneId": "conversation_awkward"
+        },
+        {
+          "id": "to_chapter_end",
+          "text": "Go to chapter end demo",
           "nextSceneId": "ending"
         }
       ]
