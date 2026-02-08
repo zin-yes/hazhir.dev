@@ -1,7 +1,7 @@
 /**
  * Character Sprite Component
  * 
- * Displays character sprites with position and emotion
+ * Displays character sprites with position
  */
 
 export default function CharacterSprite() {

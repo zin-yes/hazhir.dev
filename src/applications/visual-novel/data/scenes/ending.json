@@ -1,31 +1,42 @@
 {
   "id": "ending",
-  "name": "The End",
+  "name": "Chapter End Demo",
   "sceneType": "chapter_end",
   "background": {
-    "id": "bg_cafe",
-    "name": "Cafe",
+    "id": "bg_demo_end",
+    "name": "End Plate",
     "url": "placeholder"
   },
-  "entrySegmentId": "ending_1",
+  "sprites": [],
+  "entrySegmentId": "end_1",
   "dialogSegments": {
-    "ending_1": {
-      "id": "ending_1",
+    "end_1": {
+      "id": "end_1",
       "type": "replace",
       "characterId": "narrator",
-      "text": "And so your brief adventure at the cafe comes to an end.",
-      "nextSegmentId": "ending_2"
+      "text": "Chapter End: This scene highlights end cards and restart choices.",
+      "timing": {
+        "mode": "instant",
+        "charDelayMs": 0,
+        "lineDelayMs": 0
+      },
+      "nextSegmentId": "end_choice"
     },
-    "ending_2": {
-      "id": "ending_2",
+    "end_choice": {
+      "id": "end_choice",
       "type": "choice",
       "characterId": "narrator",
-      "text": "Thank you for experiencing this short visual novel demo!",
+      "text": "Choose where to go next.",
       "choices": [
         {
-          "id": "choice_restart",
-          "text": "Play again",
+          "id": "restart_demo",
+          "text": "Restart demo",
           "nextSceneId": "start"
+        },
+        {
+          "id": "jump_to_dialog",
+          "text": "Jump to dialog demo",
+          "nextSceneId": "conversation_friendly"
         }
       ]
     }

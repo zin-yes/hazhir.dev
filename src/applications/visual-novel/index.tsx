@@ -2,21 +2,46 @@
 
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { useEffect, useState } from "react";
-import { scenes } from "@/applications/visual-novel/data/loader";
+import { useEffect, useRef, useState } from "react";
+import { scenes, characters } from "@/applications/visual-novel/data/loader";
 import type { DialogSegment, DialogSegmentChoice } from "./types";
+
+function getSpriteFallbackPosition(position?: string, index?: number) {
+  const baseY = 40 + (index ?? 0) * 12;
+  if (position === "left") return { x: 40, y: baseY };
+  if (position === "right") return { x: 380, y: baseY };
+  return { x: 210, y: baseY };
+}
+
+function getCharacterSpriteUrl(character?: { sprites?: Array<{ url: string }> }) {
+  const url = character?.sprites?.[0]?.url;
+  if (!url || url === "placeholder") return "";
+  return url;
+}
 
 export default function VisualNovelApplication() {
   const [currentSceneId, setCurrentSceneId] = useState<string>("start");
   const [currentSegmentId, setCurrentSegmentId] = useState<string>("start_1");
-  const [dialogueText, setDialogueText] = useState<string>("");
+  const [displayedText, setDisplayedText] = useState<string>("");
+  const [isTyping, setIsTyping] = useState<boolean>(false);
   const [textHistory, setTextHistory] = useState<string[]>([]);
   const [autoPlay, setAutoPlay] = useState<boolean>(false);
   const [showHistory, setShowHistory] = useState<boolean>(false);
   const [showTitleScreen, setShowTitleScreen] = useState<boolean>(true);
+  const typingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const displayedTextRef = useRef<string>("");
+  const segmentBaseRef = useRef<string>("");
+  const segmentFullRef = useRef<string>("");
 
   const currentScene = scenes[currentSceneId];
   const currentSegment = currentScene?.dialogSegments[currentSegmentId];
+  const backgroundUrl =
+    currentScene?.background?.url && currentScene.background.url !== "placeholder"
+      ? currentScene.background.url
+      : "";
+  const isCutscene = currentScene?.sceneType === "cutscene";
+  const isChapterStart = currentScene?.sceneType === "chapter_start";
+  const isChapterEnd = currentScene?.sceneType === "chapter_end";
 
   // Debug: log when scene or dialogue changes
   useEffect(() => {
@@ -33,19 +58,52 @@ export default function VisualNovelApplication() {
     if (!currentScene) return;
     const entryId = currentScene.entrySegmentId;
     setCurrentSegmentId(entryId);
-    setDialogueText("");
+    setDisplayedText("");
+    setIsTyping(false);
   }, [currentSceneId, currentScene]);
 
   useEffect(() => {
-    if (!currentSegment) return;
-    setDialogueText((prev) => {
-      if (currentSegment.type === "append") {
-        if (!prev) return currentSegment.text;
-        return `${prev} ${currentSegment.text}`;
-      }
+    displayedTextRef.current = displayedText;
+  }, [displayedText]);
 
-      return currentSegment.text;
-    });
+  useEffect(() => {
+    if (!currentSegment) return;
+
+    if (typingTimerRef.current) {
+      clearTimeout(typingTimerRef.current);
+      typingTimerRef.current = null;
+    }
+
+    const timing = currentSegment.timing || { mode: "instant", charDelayMs: 24 };
+    const baseText =
+      currentSegment.type === "append" ? displayedTextRef.current.trim() : "";
+    const segmentText = currentSegment.text || "";
+
+    segmentBaseRef.current = baseText;
+    segmentFullRef.current = segmentText;
+
+    if (timing.mode === "instant") {
+      setIsTyping(false);
+      setDisplayedText(baseText ? `${baseText} ${segmentText}` : segmentText);
+      return;
+    }
+
+    setIsTyping(true);
+    setDisplayedText(baseText);
+    let index = 0;
+    const step = () => {
+      index += 1;
+      const nextSlice = segmentText.slice(0, index);
+      setDisplayedText(baseText ? `${baseText} ${nextSlice}` : nextSlice);
+
+      if (index < segmentText.length) {
+        typingTimerRef.current = setTimeout(step, timing.charDelayMs ?? 24);
+      } else {
+        setIsTyping(false);
+      }
+    };
+
+    typingTimerRef.current = setTimeout(step, timing.charDelayMs ?? 24);
   }, [currentSegment]);
 
   const startGame = () => {
@@ -57,11 +115,21 @@ export default function VisualNovelApplication() {
   const handleNext = () => {
     if (!currentSegment) return;
 
-    // Add current text to history
-    setTextHistory((prev) => [
-      ...prev,
-      `${currentSegment.character.name}: ${dialogueText}`,
-    ]);
+    if (isTyping) {
+      if (typingTimerRef.current) {
+        clearTimeout(typingTimerRef.current);
+        typingTimerRef.current = null;
+      }
+      setIsTyping(false);
+      const base = segmentBaseRef.current;
+      const full = segmentFullRef.current;
+      setDisplayedText(base ? `${base} ${full}` : full);
+      return;
+    }
+
+    if (!isCutscene && currentSegment.text) {
+      setTextHistory((prev) => [...prev, `${currentSegment.character.name}: ${displayedText}`]);
+    }
 
     if (currentSegment.nextSegmentId) {
       setCurrentSegmentId(currentSegment.nextSegmentId);
@@ -109,7 +177,8 @@ export default function VisualNovelApplication() {
   const handleRestart = () => {
     setCurrentSceneId('start');
     setCurrentSegmentId('start_1');
-    setDialogueText("");
+    setDisplayedText("");
+    setIsTyping(false);
     setTextHistory([]);
     setAutoPlay(false);
     setShowTitleScreen(true);
@@ -180,72 +249,130 @@ export default function VisualNovelApplication() {
     );
   }
 
+  if (isChapterStart) {
+    return (
+      <div className="h-full w-full flex items-center justify-center bg-[radial-gradient(circle_at_top,rgba(251,191,36,0.2),transparent_55%),radial-gradient(circle_at_bottom,rgba(56,189,248,0.1),transparent_60%)] bg-slate-950">
+        <div className="text-center space-y-6 px-6">
+          <p className="text-xs uppercase tracking-[0.35em] text-amber-200/70">
+            Chapter Start
+          </p>
+          <h1 className="text-5xl font-semibold text-amber-100">
+            {currentScene?.name || "New Chapter"}
+          </h1>
+          <p className="text-lg text-slate-300 max-w-xl mx-auto">
+            {currentSegment?.text || ""}
+          </p>
+          <Button onClick={handleNext} size="lg" className="bg-amber-600 hover:bg-amber-500">
+            Begin
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  if (isChapterEnd) {
+    return (
+      <div className="h-full w-full flex items-center justify-center bg-[radial-gradient(circle_at_center,rgba(59,130,246,0.12),transparent_60%),linear-gradient(135deg,rgba(15,23,42,0.98),rgba(2,6,23,0.95))]">
+        <div className="text-center space-y-6 px-6">
+          <p className="text-xs uppercase tracking-[0.35em] text-slate-400">
+            Chapter End
+          </p>
+          <h1 className="text-4xl font-semibold text-slate-100">
+            {currentScene?.name || "Chapter Complete"}
+          </h1>
+          <p className="text-base text-slate-400 max-w-xl mx-auto">
+            {currentSegment?.text || ""}
+          </p>
+          <div className="flex items-center justify-center gap-3">
+            <Button onClick={handleNext} variant="secondary">
+              Continue
+            </Button>
+            <Button onClick={handleRestart} variant="ghost">
+              Restart
+            </Button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="h-full w-full flex flex-col bg-black relative overflow-hidden">
+    <div
+      className="h-full w-full flex flex-col bg-black relative overflow-hidden"
+      onClick={() => {
+        if (isCutscene && !currentSegment?.choices?.length) {
+          handleNext();
+        }
+      }}
+    >
       {/* Background */}
       <div className="absolute inset-0 z-0">
         {/* Cafe background gradient */}
         <div className="w-full h-full bg-gradient-to-br from-amber-900/40 via-slate-900 to-slate-950" />
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_20%,rgba(251,191,36,0.1),transparent_50%)]" />
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_70%_80%,rgba(139,92,246,0.05),transparent_50%)]" />
+        {backgroundUrl && (
+          <div
+            className="absolute inset-0 bg-cover bg-center opacity-40"
+            style={{ backgroundImage: `url(${backgroundUrl})` }}
+          />
+        )}
       </div>
 
       {/* Character Sprite Area */}
       <div className="flex-1 relative z-10 flex items-end justify-center pb-32">
-        <div className="flex gap-8 items-end">
-          {/* Character sprite placeholder with color based on character */}
-          {currentSegment?.characterSprite && currentSegment.character.id !== 'narrator' && (
-            <div 
-              className="w-64 h-96 rounded-lg border-2 flex flex-col items-center justify-end p-6 transition-all duration-300"
-              style={{
-                backgroundColor: currentSegment.character.color 
-                  ? `${currentSegment.character.color}15`
-                  : 'rgba(51, 65, 85, 0.3)',
-                borderColor: currentSegment.character.color || 'rgba(51, 65, 85, 0.5)',
-              }}
-            >
-              <div className="text-6xl mb-4">
-                {currentSegment.characterSprite.emotion === 'happy' && '😊'}
-                {currentSegment.characterSprite.emotion === 'sad' && '😢'}
-                {currentSegment.characterSprite.emotion === 'surprised' && '😮'}
-                {currentSegment.characterSprite.emotion === 'neutral' && '😐'}
-              </div>
-              <span className="text-slate-400 text-sm font-medium">
-                {currentSegment.character.name}
-              </span>
-            </div>
-          )}
-        </div>
+        {currentScene.sprites && currentScene.sprites.length > 0 && (
+          <div className="relative h-full w-full">
+            {currentScene.sprites.map((sprite, index) => {
+              const character = characters[sprite.characterId];
+              const fallback = getSpriteFallbackPosition(sprite.position, index);
+              const x = sprite.x ?? fallback.x;
+              const y = sprite.y ?? fallback.y;
+              const isNarrator = sprite.characterId === "narrator";
+              if (isNarrator) return null;
+              const spriteUrl = getCharacterSpriteUrl(character);
+              if (!spriteUrl) return null;
+
+              return (
+                <div
+                  key={`${sprite.characterId}-${index}`}
+                  className="absolute w-40 h-60 bg-contain bg-top bg-no-repeat"
+                  style={{
+                    left: x,
+                    top: y,
+                    backgroundImage: `url(${spriteUrl})`,
+                  }}
+                />
+              );
+            })}
+          </div>
+        )}
       </div>
 
-      {/* Dialogue Box */}
       <div className="relative z-20 p-6">
         <div className="bg-slate-900/95 backdrop-blur-sm border border-slate-700/50 rounded-lg p-6 shadow-2xl">
-          {/* Character Name */}
           {currentSegment && (
             <div className="mb-3">
-              {currentSegment.character.id === 'narrator' ? (
-                // Narrator gets a simple style
+              {currentSegment.character.id === "narrator" ? (
                 <div className="inline-block bg-slate-800/60 px-4 py-1.5 rounded-md border-l-2 border-slate-600">
                   <span className="text-slate-400 font-medium italic text-sm">
                     {currentSegment.character.name}
                   </span>
                 </div>
               ) : (
-                // Other characters get colored name boxes
-                <div 
+                <div
                   className="inline-block px-4 py-1.5 rounded-md"
                   style={{
                     backgroundColor: currentSegment.character.color
                       ? `${currentSegment.character.color}30`
-                      : 'rgba(51, 65, 85, 0.8)',
-                    borderLeft: `3px solid ${currentSegment.character.color || '#64748b'}`,
+                      : "rgba(51, 65, 85, 0.8)",
+                    borderLeft: `3px solid ${currentSegment.character.color || "#64748b"}`,
                   }}
                 >
-                  <span 
+                  <span
                     className="font-medium"
                     style={{
-                      color: currentSegment.character.color || '#e2e8f0',
+                      color: currentSegment.character.color || "#e2e8f0",
                     }}
                   >
                     {currentSegment.character.name}
@@ -255,14 +382,12 @@ export default function VisualNovelApplication() {
             </div>
           )}
 
-          {/* Dialogue Text */}
           <div className="min-h-[120px] mb-4">
             <p className="text-slate-100 text-xl leading-relaxed">
-              {dialogueText || "No dialogue available"}
+              {displayedText || "(no text)"}
             </p>
           </div>
 
-          {/* Choices */}
           {currentSegment?.choices && currentSegment.choices.length > 0 && (
             <div className="flex flex-col gap-2 mt-4">
               {currentSegment.choices.map((choice: DialogSegmentChoice, index: number) => (
@@ -278,7 +403,6 @@ export default function VisualNovelApplication() {
             </div>
           )}
 
-          {/* Controls */}
           <div className="flex items-center justify-between mt-4 pt-4 border-t border-slate-700/50">
             <div className="flex gap-2">
               <Button
@@ -287,7 +411,7 @@ export default function VisualNovelApplication() {
                 size="sm"
                 className="text-slate-400 hover:text-slate-200"
               >
-                {showHistory ? 'Hide' : 'History'}
+                {showHistory ? "Hide" : "History"}
               </Button>
               <Button
                 onClick={handleSkip}

@@ -6,6 +6,13 @@
 import type { Character, Scene, DialogSegment, SceneSprite } from '../types';
 import charactersData from './characters.json';
 import startSceneData from './scenes/start.json';
+import cafeteriaLineSceneData from './scenes/cafeteria_line.json';
+import cafeteriaTableSceneData from './scenes/cafeteria_table.json';
+import flashbackKindergartenSceneData from './scenes/flashback_kindergarten.json';
+import cafeteriaTableReturnSceneData from './scenes/cafeteria_table_return.json';
+import flashbackSuburbanSceneData from './scenes/flashback_suburban.json';
+import backOfSchoolSceneData from './scenes/back_of_school.json';
+import creditsSceneData from './scenes/credits.json';
 import friendlySceneData from './scenes/conversation_friendly.json';
 import awkwardSceneData from './scenes/conversation_awkward.json';
 import endingSceneData from './scenes/ending.json';
@@ -20,19 +27,15 @@ function parseScene(sceneData: any): Scene {
   ).reduce((acc, [segmentId, segmentData]) => {
     const character = characters[(segmentData as any).characterId];
 
-    // Find the sprite if emotion is specified
+    // Sprite selection is handled at the scene level.
     let characterSprite = undefined;
-    if ((segmentData as any).spriteEmotion && character?.sprites) {
-      characterSprite = character.sprites.find(
-        (sprite) => sprite.emotion === (segmentData as any).spriteEmotion
-      );
-    }
 
     acc[segmentId] = {
       id: (segmentData as any).id,
       type: (segmentData as any).type,
       character: character,
       text: (segmentData as any).text || "",
+      timing: (segmentData as any).timing,
       characterSprite: characterSprite,
       nextSegmentId: (segmentData as any).nextSegmentId,
       nextSceneId: (segmentData as any).nextSceneId,
@@ -59,6 +62,13 @@ function parseScene(sceneData: any): Scene {
 
 const sceneDataList = [
   startSceneData,
+  cafeteriaLineSceneData,
+  cafeteriaTableSceneData,
+  flashbackKindergartenSceneData,
+  cafeteriaTableReturnSceneData,
+  flashbackSuburbanSceneData,
+  backOfSchoolSceneData,
+  creditsSceneData,
   friendlySceneData,
   awkwardSceneData,
   endingSceneData,

@@ -26,7 +26,7 @@ visual-novel/
     ├── characters.json    # Character definitions
     ├── scenes.json        # Scene and dialogue content
     └── loader.ts          # JSON data loader
-- [ ] Character sprite display with emotions
+- [ ] Character sprite display with positions
 - [ ] Background images and transitions
 - [ ] Branching dialogue choices
 - [ ] Save/Load system
@@ -63,14 +63,22 @@ All story content is stored in JSON format for easy editing.
         "id": "line_1",
         "characterId": "character_id",
         "text": "Dialogue text goes here.",
-        "spriteEmotion": "happy",
+        "timing": {
+          "mode": "typewriter",
+          "charDelayMs": 24,
+          "lineDelayMs": 300
+        },
         "nextLine": "line_2"
       },
       {
         "id": "line_2",
         "characterId": "character_id",
         "text": "Text with choices.",
-        "spriteEmotion": "neutral",
+        "timing": {
+          "mode": "instant",
+          "charDelayMs": 0,
+          "lineDelayMs": 0
+        },
         "choices": [
           {
             "id": "choice_1",
@@ -94,7 +102,6 @@ All story content is stored in JSON format for easy editing.
     "sprites": [
       {
         "id": "sprite_id",
-        "emotion": "happy",
         "url": "/sprites/character_happy.png",
         "position": "center"
       }
@@ -118,7 +125,7 @@ All story content is stored in JSON files under `data/`:
 ### JSON Structure Notes
 
 - Each dialogue line references a character by `characterId` (not the full character object)
-- Sprite emotions are specified as strings (`"happy"`, `"sad"`, etc.)
+- Sprite positions can be stored per scene or per character sprite
 - The loader automatically resolves character references and sprite lookups
 - Choices can navigate to different scenes using `nextScene`
 - Lines can chain together using `nextLine`

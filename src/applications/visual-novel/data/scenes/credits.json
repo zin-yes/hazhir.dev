@@ -1,0 +1,25 @@
+{
+  "id": "credits",
+  "name": "Credits",
+  "sceneType": "chapter_end",
+  "background": {
+    "id": "bg_credits",
+    "name": "Credits Plate",
+    "url": "/visual-novel/scene-backgrounds/back-of-school.jpg"
+  },
+  "sprites": [],
+  "entrySegmentId": "credits_1",
+  "dialogSegments": {
+    "credits_1": {
+      "id": "credits_1",
+      "type": "replace",
+      "characterId": "narrator",
+      "text": "Credits roll.",
+      "timing": {
+        "mode": "instant",
+        "charDelayMs": 0,
+        "lineDelayMs": 0
+      }
+    }
+  }
+}
