@@ -1,6 +1,6 @@
 import type { Terminal } from "@xterm/xterm";
 
-import type { CommandCallback } from "./index";
+import type { CommandAutocomplete, CommandCallback } from "./index";
 import { useSession } from "next-auth/react";
 
 async function reload(
@@ -13,3 +13,7 @@ async function reload(
 }
 
 export default reload satisfies CommandCallback;
+
+const autocomplete: CommandAutocomplete = () => [];
+
+export { autocomplete };

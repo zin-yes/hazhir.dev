@@ -1,13 +1,9 @@
 "use client";
 
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import { Calendar } from "@/components/ui/calendar";
 
 import {
+  BookOpen,
+  BookText,
   Calculator,
   EditIcon,
   FolderClosed,
@@ -20,8 +16,7 @@ import ApplicationWindow from "@/operating-system/application/window";
 
 import LoadingWindow from "@/operating-system/application/window/loading";
 import dynamic from "next/dynamic";
-import { OperatingSystemFile } from "@/hooks/use-operating-system";
-import { ReactNode } from "react";
+import { ReactNode, useMemo } from "react";
 import { v4 } from "uuid";
 
 const CalculatorApplication = dynamic(
@@ -49,23 +44,32 @@ const FileExplorerApplication = dynamic(
   { loading: () => <LoadingWindow />, ssr: false }
 );
 
+const DocumentViewerApplication = dynamic(
+  () => import("@/applications/document-viewer"),
+  { loading: () => <LoadingWindow />, ssr: false }
+);
+
 const TextEditorApplication = dynamic(
   () => import("@/applications/text-editor"),
-  {
-    ssr: false,
-  }
+  { loading: () => <LoadingWindow />, ssr: false }
+);
+
+const VisualNovelApplication = dynamic(
+  () => import("@/applications/visual-novel"),
+  { loading: () => <LoadingWindow />, ssr: false }
 );
 
 export function TextEditorApplicationWindow({
-  file,
+  filePath,
 }: {
-  file: OperatingSystemFile;
+  filePath: string;
 }) {
-  const identifier = v4();
+  const identifier = useMemo(() => v4(), []);
+  const fileName = filePath.split("/").pop() || "Untitled";
   return (
     <ApplicationWindow
       action_bar={{
-        title: "Text Editor",
+        title: `Text Editor - ${fileName}`,
         icon: {
           svg: <EditIcon />,
         },
@@ -80,11 +84,10 @@ export function TextEditorApplicationWindow({
         allow_overflow: false,
       }}
     >
-      <TextEditorApplication file={file} identifier={identifier} />
+      <TextEditorApplication filePath={filePath} identifier={identifier} />
     </ApplicationWindow>
   );
 }
-
 export function CalculatorApplicationWindow() {
   return (
     <ApplicationWindow
@@ -137,20 +140,76 @@ export function FileExplorerApplicationWindow({
   return (
     <ApplicationWindow
       action_bar={{
-        title: "File Explorer",
+        title: "Files",
         icon: {
           svg: <FolderClosed />,
         },
       }}
       settings={{
-        min_width: 700,
-        min_height: 460,
-        starting_width: 700,
-        starting_height: 450,
+        min_width: 800,
+        min_height: 500,
+        starting_width: Math.min(950, window.innerWidth - 40),
+        starting_height: Math.min(600, window.innerHeight - 40),
         allow_overflow: false,
       }}
     >
       <FileExplorerApplication />
+    </ApplicationWindow>
+  );
+}
+
+export function DocumentViewerApplicationWindow({
+  articleId,
+}: {
+  articleId?: string;
+}) {
+  return (
+    <ApplicationWindow
+      action_bar={{
+        title: "Document Viewer",
+        icon: {
+          svg: <BookOpen />,
+        },
+      }}
+      type="DOCUMENT_VIEWER"
+      settings={{
+        min_width: 640,
+        min_height: 420,
+        starting_width: Math.min(980, window.innerWidth - 40),
+        starting_height: Math.min(620, window.innerHeight - 40),
+        allow_overflow: false,
+      }}
+    >
+      <DocumentViewerApplication id={articleId} />
+    </ApplicationWindow>
+  );
+}
+
+export function SingleDocumentApplicationWindow({
+  articleId,
+  title,
+}: {
+  articleId: string;
+  title: string;
+}) {
+  return (
+    <ApplicationWindow
+      action_bar={{
+        title,
+        icon: {
+          svg: <BookOpen />,
+        },
+    }}
+      type="DOCUMENT_VIEWER"
+      settings={{
+        min_width: 600,
+        min_height: 420,
+        starting_width: Math.min(820, window.innerWidth - 40),
+        starting_height: Math.min(620, window.innerHeight - 40),
+        allow_overflow: false,
+      }}
+    >
+      <DocumentViewerApplication id={articleId} mode="single" />
     </ApplicationWindow>
   );
 }
@@ -202,6 +261,29 @@ export function GameApplicationWindow() {
       }}
     >
       <GameApplication />
+    </ApplicationWindow>
+  );
+}
+
+export function VisualNovelApplicationWindow() {
+  return (
+    <ApplicationWindow
+      action_bar={{
+        title: "Visual Novel",
+        icon: {
+          svg: <BookText />,
+        },
+      }}
+      type={"VISUAL_NOVEL"}
+      settings={{
+        min_width: Math.min(800, window.innerWidth - 40),
+        min_height: Math.min(600, window.innerHeight - 40),
+        starting_width: Math.min(1000, window.innerWidth - 40),
+        starting_height: Math.min(700, window.innerHeight - 40),
+        allow_overflow: false,
+      }}
+    >
+      <VisualNovelApplication />
     </ApplicationWindow>
   );
 }

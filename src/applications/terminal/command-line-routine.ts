@@ -1,17 +1,20 @@
 import type { Terminal } from "@xterm/xterm";
 import ansi from "ansi-escape-sequences";
 
-import wrap from "word-wrap";
 
-import commandCallbacks from "./command-callbacks";
-import commands from "./commands.json";
 import { useSession } from "next-auth/react";
+import commandCallbacks, { commandAutoCompletes } from "./command-callbacks";
+import commands from "./commands.json";
 
 import Fuse from "fuse.js";
 
+import { getCwd } from "./command-callbacks/cd";
+import { useFileSystem } from "@/hooks/use-file-system";
+import { getAliases, getEnvVar } from "./shell-state";
+
 // FIXME: When resizing the lines dont unwrap and wrap properly.
 
-// TODO: Add command history.
+const TERMINAL_HISTORY_PATH = "/home/user/.terminal_history";
 
 interface CommandBuffer {
   content: string;
@@ -24,6 +27,163 @@ let _commandBuffer: CommandBuffer = {
   cursorPosition: 0,
 };
 
+let _historyLoaded = false;
+let _commandHistory: string[] = [];
+let _historyIndex = -1;
+let _historyDraft = "";
+let _historyPendingCreate = false;
+let _autocompleteLines = 0;
+
+function ensureHistoryLoaded(createIfMissing: boolean) {
+  if (typeof window === "undefined") return;
+  const fs = useFileSystem();
+
+  if (!fs.exists(TERMINAL_HISTORY_PATH)) {
+    _commandHistory = [];
+    _historyIndex = -1;
+    _historyDraft = "";
+    _historyLoaded = false;
+    _historyPendingCreate = true;
+    if (createIfMissing) {
+      fs.createFile("/home/user", ".terminal_history", "");
+      _historyLoaded = true;
+      _historyPendingCreate = false;
+    }
+    return;
+  }
+
+  if (_historyLoaded) return;
+
+  const contents = fs.getFileContents(TERMINAL_HISTORY_PATH) ?? "";
+  _commandHistory = contents
+    .split("\n")
+    .map((line) => line.trimEnd())
+    .filter((line) => line.length > 0);
+  _historyLoaded = true;
+}
+
+function syncHistoryWithFileSystem() {
+  if (typeof window === "undefined") return;
+  const fs = useFileSystem();
+  if (!fs.exists(TERMINAL_HISTORY_PATH)) {
+    _commandHistory = [];
+    _historyIndex = -1;
+    _historyDraft = "";
+    _historyLoaded = false;
+    _historyPendingCreate = true;
+  }
+}
+
+function persistHistory(createIfMissing: boolean) {
+  if (typeof window === "undefined") return;
+  const fs = useFileSystem();
+  if (!fs.exists(TERMINAL_HISTORY_PATH)) {
+    if (!createIfMissing) return;
+    fs.createFile("/home/user", ".terminal_history", "");
+    _historyPendingCreate = false;
+  }
+  fs.updateFile(TERMINAL_HISTORY_PATH, _commandHistory.join("\n"));
+}
+
+function appendHistory(command: string) {
+  const trimmed = command.trim();
+  if (trimmed.length === 0) return;
+  ensureHistoryLoaded(false);
+  _commandHistory.push(command);
+  if (_commandHistory.length > 100) {
+    _commandHistory = _commandHistory.slice(-100);
+  }
+  if (!_historyPendingCreate) {
+    persistHistory(false);
+  }
+  _historyIndex = -1;
+  _historyDraft = "";
+}
+
+function replaceCommandBuffer(newContent: string, terminal: Terminal) {
+  const end = _commandBuffer.content.substring(
+    _commandBuffer.cursorPosition,
+    _commandBuffer.content.length
+  );
+  moveCursorForward(end.length, terminal);
+  _commandBuffer.cursorPosition = _commandBuffer.content.length;
+
+  if (_commandBuffer.content.length > 0) {
+    _commandBuffer = removeFromTerminalAndCommandBuffer(
+      _commandBuffer.content.length,
+      _commandBuffer,
+      terminal
+    );
+  }
+
+  _commandBuffer = writeToTerminalAndCommandBuffer(
+    newContent,
+    _commandBuffer,
+    terminal
+  );
+}
+
+function expandAliasesAndEnv(input: string): string {
+  const trimmed = input.trim();
+  if (trimmed.length === 0) return input;
+
+  const parts = trimmed.split(/\s+/);
+  const command = parts[0];
+  const aliases = getAliases();
+  const aliasValue = aliases[command];
+
+  let expanded = input;
+  if (aliasValue) {
+    const rest = trimmed.slice(command.length).trimStart();
+    expanded = `${aliasValue}${rest ? ` ${rest}` : ""}`;
+  }
+
+  return expanded.replace(/\$([A-Za-z_][A-Za-z0-9_]*)/g, (_, name: string) => {
+    const value = getEnvVar(name);
+    return value !== undefined ? value : "";
+  });
+}
+
+function clearAutocompleteDisplay(terminal: Terminal) {
+  if (_autocompleteLines <= 0) return;
+
+  terminal.write(cursor.savePosition);
+  terminal.write(ansi.cursor.nextLine());
+
+  for (let i = 0; i < _autocompleteLines; i += 1) {
+    terminal.write("\r");
+    terminal.write("\x1b[2K");
+    if (i < _autocompleteLines - 1) {
+      terminal.write(ansi.cursor.nextLine());
+    }
+  }
+
+  terminal.write(cursor.returnToSavedPosition);
+  _autocompleteLines = 0;
+}
+
+export function getCommandLinePrefix(username: string): string {
+  const cwd = getCwd();
+  // Shorten home directory to ~
+  const displayPath = cwd.replace("/home/user", "~");
+  
+  return (
+    "\x1b[38;2;249;117;22m" +
+    username +
+    ansi.style.reset +
+    "\x1b[38;2;100;100;100m" +
+    ":" +
+    ansi.style.reset +
+    "\x1b[38;2;80;160;255m" +
+    displayPath +
+    ansi.style.reset +
+    "\x1b[38;2;180;180;180m" +
+    "$ " +
+    ansi.style.reset
+  );
+}
+
+// Keep for backwards compatibility but use getCommandLinePrefix() instead
 export const COMMAND_LINE_PREFIX =
   "\x1b[38;2;249;117;22m" +
   "%username" +
@@ -195,24 +355,31 @@ async function onCommand(
   commandBuffer: CommandBuffer,
   terminal: Terminal,
   session: ReturnType<typeof useSession>,
-  windowIdentifier: string
+  windowIdentifier: string,
+  options?: { writePrompt?: boolean }
 ): Promise<CommandBuffer> {
   const username =
     session.status === "authenticated"
       ? session.data.user.name ?? session.data.user.id + " "
       : "";
+  const shouldWritePrompt = options?.writePrompt !== false;
 
   if (commandBuffer.content.length === 0) {
-    terminal.write(
-      "\n" + COMMAND_LINE_PREFIX.replaceAll("%username", username)
-    );
+    clearAutocompleteDisplay(terminal);
+    terminal.write("\n");
+    if (shouldWritePrompt) {
+      terminal.write(getCommandLinePrefix(username));
+    }
     return {
       content: "",
       cursorPosition: 0,
     };
   }
 
-  const tokens = commandBuffer.content.split(" ");
+  appendHistory(commandBuffer.content);
+
+  const expandedCommand = expandAliasesAndEnv(commandBuffer.content);
+  const tokens = expandedCommand.split(" ");
   const command = tokens[0];
 
   const queryForCommand = commands.filter(
@@ -222,9 +389,11 @@ async function onCommand(
   const commandExists = queryForCommand !== undefined;
 
   if (commandExists) {
+    clearAutocompleteDisplay(terminal);
     terminal.write(ansi.cursor.hide);
-    commandCallbacks[queryForCommand.callbackFunctionName](
-      commandBuffer.content,
+    terminal.writeln("");
+    await commandCallbacks[queryForCommand.callbackFunctionName](
+      expandedCommand,
       terminal,
       session,
       windowIdentifier
@@ -240,14 +409,16 @@ async function onCommand(
       })
       .finally(() => {
         if (
+          shouldWritePrompt &&
           queryForCommand.name !== "exit" &&
           queryForCommand.name !== "reload"
         ) {
-          terminal.write(COMMAND_LINE_PREFIX.replaceAll("%username", username));
+          terminal.write(getCommandLinePrefix(username));
         }
         terminal.write(ansi.cursor.show);
       });
   } else {
+    clearAutocompleteDisplay(terminal);
     const commandList: string[] = [];
 
     commands.forEach((command) => {
@@ -285,7 +456,9 @@ async function onCommand(
           ansi.style.reset
       );
       terminal.writeln(" ".repeat(terminal.cols));
-      terminal.write(COMMAND_LINE_PREFIX.replaceAll("%username", username));
+      if (shouldWritePrompt) {
+        terminal.write(getCommandLinePrefix(username));
+      }
     } else {
       terminal.writeln(" ".repeat(terminal.cols));
       terminal.writeln(
@@ -302,14 +475,35 @@ async function onCommand(
           ansi.style.reset
       );
       terminal.writeln(" ".repeat(terminal.cols));
-      terminal.write(COMMAND_LINE_PREFIX.replaceAll("%username", username));
+      if (shouldWritePrompt) {
+        terminal.write(getCommandLinePrefix(username));
+      }
     }
   }
+
+  if (_historyPendingCreate) {
+    persistHistory(true);
+  }
+  syncHistoryWithFileSystem();
 
   return {
     content: "",
     cursorPosition: 0,
   };
+}
+
+export async function executeCommandLine(
+  command: string,
+  terminal: Terminal,
+  session: ReturnType<typeof useSession>,
+  windowIdentifier: string,
+  options?: { writePrompt?: boolean }
+) {
+  const buffer: CommandBuffer = {
+    content: command,
+    cursorPosition: command.length,
+  };
+  await onCommand(buffer, terminal, session, windowIdentifier, options);
 }
 
 export async function parseCommand(
@@ -318,6 +512,9 @@ export async function parseCommand(
   session: ReturnType<typeof useSession>,
   windowIdentifier: string
 ) {
+  if (event.domEvent.key !== "Tab") {
+    clearAutocompleteDisplay(terminal);
+  }
   const content = `${event.domEvent.ctrlKey ? "^" : ""}${event.domEvent.key}`;
 
   if (content === "^r") {
@@ -333,9 +530,7 @@ export async function parseCommand(
         ? session.data.user.name ?? session.data.user.id + " "
         : "";
 
-    terminal.write(
-      "\n" + COMMAND_LINE_PREFIX.replaceAll("%username", username)
-    );
+    terminal.write("\n" + getCommandLinePrefix(username));
 
     _commandBuffer = {
       content: "",
@@ -412,7 +607,8 @@ export async function parseCommand(
         _commandBuffer,
         terminal,
         session,
-        windowIdentifier
+        windowIdentifier,
+        { writePrompt: true }
       );
       break;
     case "End":
@@ -434,12 +630,18 @@ export async function parseCommand(
       _commandBuffer.cursorPosition -= start.length;
       break;
     case "Tab":
+      const beforeCursor = _commandBuffer.content.substring(
+        0,
+        _commandBuffer.cursorPosition
+      );
       const args = _commandBuffer.content.split(" ");
 
       const cursorAtEndOfCommandBuffer =
         _commandBuffer.content.length === _commandBuffer.cursorPosition;
       const cursorNotOnASpace =
         _commandBuffer.content.charAt(_commandBuffer.cursorPosition) !== " ";
+      const hasTrailingSpace = /\s$/.test(beforeCursor);
+      const parts = beforeCursor.split(/\s+/).filter(Boolean);
 
       if (
         args.length === 1 &&
@@ -469,6 +671,14 @@ export async function parseCommand(
             terminal
           );
         } else if (searchResult.length > 1) {
+          const suggestionText = searchResult
+            .map((item) => item.item)
+            .join("  ");
+          const neededLines = Math.max(
+            1,
+            Math.ceil(suggestionText.length / terminal.cols)
+          );
+
           terminal.write(cursor.savePosition);
 
           terminal.writeln(" ".repeat(terminal.cols));
@@ -480,6 +690,56 @@ export async function parseCommand(
               )
             );
           terminal.write(cursor.returnToSavedPosition);
+          _autocompleteLines = neededLines + 1;
+        }
+      } else if (cursorAtEndOfCommandBuffer && parts.length > 0) {
+        const commandName = parts[0];
+        const autocomplete = commandAutoCompletes[commandName];
+
+        if (autocomplete) {
+          const argsWithoutCommand = parts.slice(1);
+          const currentToken = hasTrailingSpace
+            ? ""
+            : parts[parts.length - 1] ?? "";
+          const currentIndex = hasTrailingSpace
+            ? argsWithoutCommand.length
+            : Math.max(argsWithoutCommand.length - 1, 0);
+
+          const completions = autocomplete({
+            args: argsWithoutCommand,
+            currentIndex,
+            currentToken,
+            cwd: getCwd(),
+          });
+
+          const matches = currentToken.length === 0
+            ? completions
+            : completions.filter((item) => item.startsWith(currentToken));
+
+          if (matches.length === 1) {
+            _commandBuffer = writeToTerminalAndCommandBuffer(
+              matches[0].substring(currentToken.length),
+              _commandBuffer,
+              terminal
+            );
+          } else if (matches.length > 1) {
+            const suggestionText = matches.join("  ");
+            const neededLines = Math.max(1, Math.ceil(suggestionText.length / terminal.cols));
+
+            terminal.write(cursor.savePosition);
+            terminal.writeln(" ".repeat(terminal.cols));
+            matches.forEach((item, index) => {
+              terminal.write(item + (index !== matches.length ? "  " : ""));
+            });
+            terminal.write(cursor.returnToSavedPosition);
+            _autocompleteLines = neededLines + 1;
+          }
+        } else {
+          _commandBuffer = writeToTerminalAndCommandBuffer(
+            "    ",
+            _commandBuffer,
+            terminal
+          );
         }
       } else {
         _commandBuffer = writeToTerminalAndCommandBuffer(
@@ -493,9 +753,37 @@ export async function parseCommand(
       break;
     case "PageDown":
     case "ArrowDown":
+    case "Down":
+      event.domEvent.preventDefault();
+      event.domEvent.stopPropagation();
+      ensureHistoryLoaded(false);
+      if (_commandHistory.length === 0) break;
+      if (_historyIndex === -1) break;
+
+      if (_historyIndex < _commandHistory.length - 1) {
+        _historyIndex += 1;
+        replaceCommandBuffer(_commandHistory[_historyIndex], terminal);
+      } else {
+        _historyIndex = -1;
+        replaceCommandBuffer(_historyDraft, terminal);
+      }
       break;
     case "PageUp":
     case "ArrowUp":
+    case "Up":
+      event.domEvent.preventDefault();
+      event.domEvent.stopPropagation();
+      ensureHistoryLoaded(false);
+      if (_commandHistory.length === 0) break;
+
+      if (_historyIndex === -1) {
+        _historyDraft = _commandBuffer.content;
+        _historyIndex = _commandHistory.length - 1;
+      } else if (_historyIndex > 0) {
+        _historyIndex -= 1;
+      }
+
+      replaceCommandBuffer(_commandHistory[_historyIndex], terminal);
       break;
     case "ArrowLeft":
       if (

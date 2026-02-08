@@ -10,8 +10,8 @@ import { FitAddon } from "@xterm/addon-fit";
 
 import themes from "./themes.json";
 
-import { COMMAND_LINE_PREFIX, parseCommand } from "./command-line-routine";
 import { useSession } from "next-auth/react";
+import { getCommandLinePrefix, parseCommand } from "./command-line-routine";
 
 import ansi from "ansi-escape-sequences";
 import figlet from "figlet";
@@ -126,9 +126,7 @@ export default function TerminalApplication({
               terminal.writeln(" ".repeat(terminal.cols));
             }
 
-            terminal.write(
-              COMMAND_LINE_PREFIX.replaceAll("%username", username)
-            );
+            terminal.write(getCommandLinePrefix(username));
 
             terminal.onKey(async (event) => {
               await parseCommand(terminal, event, session, windowIdentifier);

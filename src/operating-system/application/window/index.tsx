@@ -1,18 +1,18 @@
 "use client";
 
-import {
+import React, {
   cloneElement,
   useEffect,
   useId,
   useMemo,
   useRef,
-  useState,
 } from "react";
 
 import Image from "next/image";
 
 import styles from "./application-window.module.css";
 
+import { ApplicationWindowType } from "@/hooks/use-operating-system";
 import {
   addBottomResizeHandleEvent,
   addDraggingHandleEvent,
@@ -22,7 +22,6 @@ import {
 } from "@/operating-system/application/window/resizability";
 import { AppWindowIcon, Maximize2, Minimize2, X } from "lucide-react";
 import { v4 } from "uuid";
-import { ApplicationWindowType } from "@/hooks/use-operating-system";
 
 // TODO: Add a way to have "system" configs (e.g. desktop 'wallpaper', accent color, text size/scaling options).
 // TODO: Refactor this into a class and split the repeatable chunks of logic up into other files.
@@ -34,6 +33,41 @@ import { ApplicationWindowType } from "@/hooks/use-operating-system";
 // TODO: Change padding of action bar to match the window and add a system to keep that consistent across the system.
 
 // TODO: Rewrite window system to be more centralized.
+
+class ApplicationErrorBoundary extends React.Component<
+  { children: React.ReactNode },
+  { hasError: boolean; error?: Error }
+> {
+  state: { hasError: boolean; error?: Error } = { hasError: false };
+
+  static getDerivedStateFromError(error: Error) {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error: Error) {
+    console.error("Application window error:", error);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="w-full h-full flex flex-col items-center justify-center bg-background text-foreground p-6">
+          <div className="text-lg font-semibold">Something went wrong</div>
+          <div className="text-sm text-muted-foreground mt-2 text-center">
+            This application failed to load. Try closing and reopening the window.
+          </div>
+          {this.state.error?.message ? (
+            <div className="mt-3 text-xs text-muted-foreground break-all text-center">
+              {this.state.error.message}
+            </div>
+          ) : null}
+        </div>
+      );
+    }
+
+    return this.props.children;
+  }
+}
 
 export default function ApplicationWindow({
   identifier,
@@ -232,8 +266,9 @@ export default function ApplicationWindow({
       const titleElement = ref.current.getElementsByClassName(
         styles.title
       )[0] as HTMLDivElement;
-
-      titleElement.replaceWith(titleElement.cloneNode(true));
+      if (titleElement) {
+        titleElement.style.pointerEvents = "none";
+      }
     } else {
       if (ref.current) {
         ref.current.style.transition = "0.7s";
@@ -258,8 +293,10 @@ export default function ApplicationWindow({
         const titleElement = ref.current.getElementsByClassName(
           styles.title
         )[0] as HTMLDivElement;
-
-        addDraggingHandleEvent(titleElement, ref.current);
+        if (titleElement) {
+          titleElement.style.pointerEvents = "";
+          addDraggingHandleEvent(titleElement, ref.current);
+        }
         maximized = false;
       }
     }
@@ -286,23 +323,39 @@ export default function ApplicationWindow({
       const applicationWindowElements =
         document.getElementsByClassName("applicationWindow");
 
-      let highestZIndex = 0;
+      // Collect all windows with their current z-indexes
+      const windows: { element: HTMLDivElement; zIndex: number }[] = [];
       for (let i = 0; i < applicationWindowElements.length; i++) {
-        if (
-          Number(
-            (applicationWindowElements[i] as HTMLDivElement).style.zIndex
-          ) > highestZIndex
-        ) {
-          highestZIndex = Number(
-            (applicationWindowElements[i] as HTMLDivElement).style.zIndex
-          );
-        }
-        const bodyElement = applicationWindowElements[i].getElementsByClassName(
+        const element = applicationWindowElements[i] as HTMLDivElement;
+        const currentZ = Number(element.style.zIndex) || 0;
+        windows.push({ element, zIndex: currentZ });
+      }
+
+      // Sort by current z-index
+      windows.sort((a, b) => a.zIndex - b.zIndex);
+
+      // Reassign z-indexes starting from 1, keeping the order
+      // This keeps all windows in the range 1-N where N is the number of windows
+      windows.forEach((window, index) => {
+        const bodyElement = window.element.getElementsByClassName(
           styles.body
         )[0] as HTMLDivElement;
         bodyElement.classList.remove(styles.pane_in_focus);
         bodyElement.style.filter = "blur(1px) brightness(80%)";
-      }
+        
+        // Assign z-index based on position in sorted array
+        // But if it's the current window, it gets the highest
+        if (window.element === ref.current) {
+          window.element.style.zIndex = String(windows.length);
+        } else if (index >= windows.indexOf(windows.find(w => w.element === ref.current)!)) {
+          // Shift down windows that were above the current one
+          window.element.style.zIndex = String(index);
+        } else {
+          window.element.style.zIndex = String(index + 1);
+        }
+      });
+
+      // Focus the current window
       const thisPanesBodyElement = ref.current.getElementsByClassName(
         styles.body
       )[0] as HTMLDivElement;
@@ -312,7 +365,8 @@ export default function ApplicationWindow({
         thisPanesBodyElement.style.filter = "";
       }
 
-      ref.current.style.zIndex = String(highestZIndex + 1);
+      // Set current window to highest z-index (number of windows)
+      ref.current.style.zIndex = String(windows.length);
     }
   };
 
@@ -322,7 +376,10 @@ export default function ApplicationWindow({
       ref.current.style.transform = "scale(0)";
       setTimeout(() => {
         if (ref.current) {
-          ref.current.remove();
+          const parent = ref.current.parentElement;
+          if (parent?.contains(ref.current)) {
+            parent.removeChild(ref.current);
+          }
         }
       }, 600);
       const applicationWindowElements =

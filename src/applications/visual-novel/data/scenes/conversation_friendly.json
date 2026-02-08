@@ -1,0 +1,57 @@
+{
+  "id": "conversation_friendly",
+  "name": "Friendly Chat",
+  "sceneType": "dialog",
+  "background": {
+    "id": "bg_cafe",
+    "name": "Cafe",
+    "url": "placeholder"
+  },
+  "entrySegmentId": "friendly_1",
+  "dialogSegments": {
+    "friendly_1": {
+      "id": "friendly_1",
+      "type": "replace",
+      "characterId": "alex",
+      "text": "Thanks! I'm Alex, by the way.",
+      "spriteEmotion": "happy",
+      "nextSegmentId": "friendly_2"
+    },
+    "friendly_2": {
+      "id": "friendly_2",
+      "type": "append",
+      "characterId": "alex",
+      "text": "I come here all the time, but I've never seen you before. Are you new around here?",
+      "spriteEmotion": "happy",
+      "nextSegmentId": "friendly_3"
+    },
+    "friendly_3": {
+      "id": "friendly_3",
+      "type": "replace",
+      "characterId": "narrator",
+      "text": "You chat for a while about the neighborhood, favorite coffee drinks, and local spots.",
+      "nextSegmentId": "friendly_4"
+    },
+    "friendly_4": {
+      "id": "friendly_4",
+      "type": "replace",
+      "characterId": "alex",
+      "text": "This was really nice! Maybe I'll see you around again?",
+      "spriteEmotion": "happy",
+      "nextSegmentId": "friendly_5"
+    },
+    "friendly_5": {
+      "id": "friendly_5",
+      "type": "choice",
+      "characterId": "narrator",
+      "text": "Alex waves goodbye with a warm smile. You feel like you made a new friend today.",
+      "choices": [
+        {
+          "id": "to_ending",
+          "text": "Continue",
+          "nextSceneId": "ending"
+        }
+      ]
+    }
+  }
+}

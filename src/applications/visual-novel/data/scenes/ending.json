@@ -1,0 +1,33 @@
+{
+  "id": "ending",
+  "name": "The End",
+  "sceneType": "chapter_end",
+  "background": {
+    "id": "bg_cafe",
+    "name": "Cafe",
+    "url": "placeholder"
+  },
+  "entrySegmentId": "ending_1",
+  "dialogSegments": {
+    "ending_1": {
+      "id": "ending_1",
+      "type": "replace",
+      "characterId": "narrator",
+      "text": "And so your brief adventure at the cafe comes to an end.",
+      "nextSegmentId": "ending_2"
+    },
+    "ending_2": {
+      "id": "ending_2",
+      "type": "choice",
+      "characterId": "narrator",
+      "text": "Thank you for experiencing this short visual novel demo!",
+      "choices": [
+        {
+          "id": "choice_restart",
+          "text": "Play again",
+          "nextSceneId": "start"
+        }
+      ]
+    }
+  }
+}

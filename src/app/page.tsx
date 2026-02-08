@@ -4,23 +4,23 @@ import { Button } from "@/components/ui/button";
 import { Gamepad2, TerminalSquare } from "lucide-react";
 import React, { useEffect, useState } from "react";
 
+import { Calendar } from "@/components/ui/calendar";
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuShortcut,
-  DropdownMenuTrigger,
+    DropdownMenu,
+    DropdownMenuContent,
+    DropdownMenuItem,
+    DropdownMenuShortcut,
+    DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { v4 } from "uuid";
-import Desktop from "./desktop";
+import UseOperatingSystem from "@/hooks/use-operating-system";
 import { useSession } from "next-auth/react";
 import Image from "next/image";
+import { v4 } from "uuid";
 import {
-  GameApplicationWindow,
-  TerminalApplicationWindow,
+    GameApplicationWindow,
+    TerminalApplicationWindow,
 } from "./application-windows";
-import { Calendar } from "@/components/ui/calendar";
-import UseOperatingSystem from "@/hooks/use-operating-system";
+import Desktop from "./desktop";
 
 export default function OperatingSystemPage() {
   const [windows, setWindows] = useState<React.ReactNode[]>([]);
@@ -45,11 +45,11 @@ export default function OperatingSystemPage() {
     <>
       {/* <ContextMenu>
          <ContextMenuTrigger> */}
-      <main className="w-[100vw] h-[100vh] absolute top-0 bottom-0 left-0 right-0 overflow-hidden">
+      <main className="w-screen h-screen absolute top-0 bottom-0 left-0 right-0 overflow-hidden">
         <Desktop addWindow={addWindow} />
         <div
           className={
-            "absolute top-0 left-0 right-0 z-[1] flex flex-row justify-between m-2 p-1 text-white rounded-xl shadow-md bg-primary"
+            "absolute top-0 left-0 right-0 z-1 flex flex-row justify-between m-2 p-1 text-white rounded-xl shadow-md bg-primary"
           }
         >
           <DropdownMenu>
@@ -62,7 +62,7 @@ export default function OperatingSystemPage() {
                 Activites
               </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent className="ml-2 mt-2 w-80 p-1 rounded-xl bg-background/40 backdrop-blur-xl flex flex-col gap-1 z-[9999]">
+            <DropdownMenuContent className="ml-2 mt-2 w-80 p-1 rounded-xl bg-background/40 backdrop-blur-xl flex flex-col gap-1 z-9999">
               <DropdownMenuItem
                 className="rounded-[10px] p-3.5 py-2 text-base"
                 onClick={() => {
@@ -149,14 +149,14 @@ export default function OperatingSystemPage() {
           </div>
         </div>
 
-        <div className="w-[100vw] h-[100vh]" id="operating-system-container">
+        <div className="w-screen h-screen" id="operating-system-container">
           {windows.map((item, index) => {
             return <React.Fragment key={index}>{item}</React.Fragment>;
           })}
         </div>
       </main>
       {/* </ContextMenuTrigger>
-      <ContextMenuContent className="z-[10000] rounded-xl bg-background/40 backdrop-blur-xl">
+      <ContextMenuContent className="z-10000 rounded-xl bg-background/40 backdrop-blur-xl">
         <ContextMenuItem
           className="rounded-[10px] p-3.5 py-2 text-base"
           onClick={() => {
@@ -196,7 +196,7 @@ function CalendarDropdown({ time }: { time: string }) {
           {time}
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent className="ml-2 mt-2 w-fit p-1 rounded-xl shadow-md flex flex-col gap-1 transition-all duration-500 bg-background/40 backdrop-blur-xl z-[9999]">
+      <DropdownMenuContent className="ml-2 mt-2 w-fit p-1 rounded-xl shadow-md flex flex-col gap-1 transition-all duration-500 bg-background/40 backdrop-blur-xl z-9999">
         <Calendar
           mode="single"
           className="rounded-[8px] text-base transition-all duration-500"

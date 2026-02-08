@@ -1,6 +1,6 @@
 import type { Terminal } from "@xterm/xterm";
 
-import type { CommandCallback } from "./index";
+import type { CommandAutocomplete, CommandCallback } from "./index";
 import { useSession } from "next-auth/react";
 
 import commands from "../commands.json";
@@ -153,3 +153,20 @@ function close(windowIdentifier: string) {
 }
 
 export default application satisfies CommandCallback;
+
+const autocomplete: CommandAutocomplete = ({ currentIndex, currentToken, args }) => {
+  if (currentIndex === 0) {
+    const options = ["info", "close", "list"];
+    return options.filter((item) => item.startsWith(currentToken));
+  }
+
+  if (currentIndex === 1 && (args[0] === "info" || args[0] === "close")) {
+    const { getApplicationWindows } = UseOperatingSystem();
+    const ids = (getApplicationWindows() || []).map((win) => win.identifier);
+    return ids.filter((id) => id.startsWith(currentToken));
+  }
+
+  return [];
+};
+
+export { autocomplete };
