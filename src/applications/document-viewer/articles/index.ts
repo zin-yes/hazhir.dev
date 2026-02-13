@@ -16,10 +16,10 @@ export type DocumentArticle = {
 
 export const documents: DocumentArticle[] = [
   {
-    id: "CV.pdf",
+    id: "CV.document",
     title: "CV",
-    fileName: "CV.pdf",
-    path: "CV.pdf",
+    fileName: "CV.document",
+    path: "CV.document",
     Component: CVDocument,
   },
   {

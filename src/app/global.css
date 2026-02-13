@@ -118,7 +118,6 @@
   --sidebar-ring: oklch(0.408 0.123 38.172);
 }
 
-
 @layer base {
   * {
     @apply border-border outline-ring/50;
@@ -141,30 +140,36 @@
   [role="tooltip"] {
     z-index: 9999 !important;
   }
-  
+
   /* Radix UI Popover */
   [data-radix-popper-content-wrapper][data-state] {
     z-index: 9999 !important;
   }
-  
+
   /* Radix UI Dropdown Menu */
   [role="menu"],
   [data-radix-menu-content] {
     z-index: 9999 !important;
   }
-  
+
   /* Radix UI Context Menu */
   [role="menu"][data-radix-context-menu-content] {
     z-index: 9999 !important;
   }
-  
+
+  /* Document viewer content - allow text selection */
+  .document-viewer-rendered,
+  .document-viewer-rendered * {
+    user-select: text !important;
+  }
+
   /* Radix UI Dialog/Modal */
   [role="dialog"],
   [data-radix-dialog-overlay],
   [data-radix-dialog-content] {
     z-index: 10000 !important;
   }
-  
+
   /* Generic portal containers */
   [data-radix-portal] {
     z-index: 9999 !important;

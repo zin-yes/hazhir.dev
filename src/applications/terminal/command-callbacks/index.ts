@@ -2,7 +2,9 @@ import type { Terminal } from "@xterm/xterm";
 
 import { useSession } from "@/auth/client";
 import alias, { autocomplete as aliasAutocomplete } from "./alias";
-import application, { autocomplete as applicationAutocomplete } from "./application";
+import application, {
+  autocomplete as applicationAutocomplete,
+} from "./application";
 import cat, { autocomplete as catAutocomplete } from "./cat";
 import cd, { autocomplete as cdAutocomplete } from "./cd";
 import clear, { autocomplete as clearAutocomplete } from "./clear";
@@ -10,6 +12,7 @@ import cp, { autocomplete as cpAutocomplete } from "./cp";
 import exit, { autocomplete as exitAutocomplete } from "./exit";
 import exportCommand, { autocomplete as exportAutocomplete } from "./export";
 import help, { autocomplete as helpAutocomplete } from "./help";
+import link, { autocomplete as linkAutocomplete } from "./link";
 import ls, { autocomplete as lsAutocomplete } from "./ls";
 import mkdir, { autocomplete as mkdirAutocomplete } from "./mkdir";
 import mv, { autocomplete as mvAutocomplete } from "./mv";
@@ -22,14 +25,16 @@ import signin, { autocomplete as signinAutocomplete } from "./signin";
 import signout, { autocomplete as signoutAutocomplete } from "./signout";
 import source, { autocomplete as sourceAutocomplete } from "./source";
 import template, { autocomplete as templateAutocomplete } from "./template";
-import textEditor, { autocomplete as textEditorAutocomplete } from "./text-editor";
+import textEditor, {
+  autocomplete as textEditorAutocomplete,
+} from "./text-editor";
 import touch, { autocomplete as touchAutocomplete } from "./touch";
 
 export type CommandCallback = (
   fullCommand: string,
   terminal: Terminal,
   session: ReturnType<typeof useSession>,
-  windowIdentifier: string
+  windowIdentifier: string,
 ) => Promise<void>;
 
 export type CommandAutocomplete = (params: {
@@ -42,6 +47,7 @@ export type CommandAutocomplete = (params: {
 const commandCallbacks: Record<string, CommandCallback> = {
   clear: clear,
   help: help,
+  link: link,
   signin: signin,
   signout: signout,
   exit: exit,
@@ -74,6 +80,7 @@ export const commandAutoCompletes: Record<string, CommandAutocomplete> = {
   clear: clearAutocomplete,
   exit: exitAutocomplete,
   help: helpAutocomplete,
+  link: linkAutocomplete,
   ls: lsAutocomplete,
   mkdir: mkdirAutocomplete,
   mv: mvAutocomplete,

@@ -185,6 +185,7 @@ function getFileIcon(node: FileSystemNode, size: number = 18) {
     switch (ext) {
       case "txt":
       case "md":
+      case "document":
       case "doc":
       case "docx":
       case "pdf":
@@ -436,6 +437,7 @@ function FileGridItem({
     [
       "txt",
       "md",
+      "document",
       "js",
       "ts",
       "jsx",
@@ -578,6 +580,7 @@ function FileListItem({
     [
       "txt",
       "md",
+      "document",
       "js",
       "ts",
       "jsx",
@@ -1077,9 +1080,9 @@ export default function FileExplorerApplication({
 
         const ext = node.name.split(".").pop()?.toLowerCase();
 
-        if (ext === "pdf") {
+        if (ext === "pdf" || ext === "document") {
           const portal = createPortal(
-            <DocumentViewerApplicationWindow articleId={node.path} />,
+            <DocumentViewerApplicationWindow filePath={node.path} />,
             document.getElementById(
               "operating-system-container",
             ) as HTMLDivElement,
