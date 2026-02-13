@@ -265,6 +265,64 @@ function constructFooter(width: number): string {
   return result;
 }
 
+function wrapBoxText(text: string, width: number): string[] {
+  const innerWidth = Math.max(10, width - LEFT_EDGE.length - RIGHT_EDGE.length);
+  return wrap(text, {
+    width: innerWidth,
+    indent: "",
+    trim: true,
+  })
+    .split("\n")
+    .filter((line) => line.length > 0);
+}
+
+function writeWrappedBoxLines(
+  terminal: Terminal,
+  lines: string[],
+  width: number,
+  firstPrefix = " - ",
+  continuationPrefix = "   ",
+) {
+  const innerWidth = Math.max(10, width - LEFT_EDGE.length - RIGHT_EDGE.length);
+  const prefixBudget = Math.max(firstPrefix.length, continuationPrefix.length);
+  const contentWidth = Math.max(4, innerWidth - prefixBudget);
+
+  lines.forEach((line) => {
+    const wrapped = wrap(line, {
+      width: contentWidth,
+      indent: "",
+      trim: true,
+    })
+      .split("\n")
+      .filter((part) => part.length > 0);
+
+    if (wrapped.length === 0) {
+      terminal.writeln(
+        sorroundTextWithCharacters(
+          firstPrefix.trimEnd(),
+          width,
+          TEXT_ROW_SPACER,
+          LEFT_EDGE,
+          RIGHT_EDGE,
+        ),
+      );
+      return;
+    }
+
+    wrapped.forEach((part, index) => {
+      terminal.writeln(
+        sorroundTextWithCharacters(
+          `${index === 0 ? firstPrefix : continuationPrefix}${part}`,
+          width,
+          TEXT_ROW_SPACER,
+          LEFT_EDGE,
+          RIGHT_EDGE,
+        ),
+      );
+    });
+  });
+}
+
 const COMMANDS_PER_PAGE = 5;
 
 type CommandOptionDefinition = {
@@ -301,15 +359,21 @@ function printCommandHelp(terminal: Terminal, command: TerminalCommandMeta) {
 
   if (command.aliases.length > 0) {
     terminal.writeln(constructHorizontalSpacer(width));
-    terminal.writeln(
-      sorroundTextWithCharacters(
-        `${ansi.style.bold}Aliases:${ansi.style.reset} ${command.aliases.join(", ")}`,
-        width,
-        TEXT_ROW_SPACER,
-        LEFT_EDGE,
-        RIGHT_EDGE,
-      ),
+    const aliasLines = wrapBoxText(
+      `${ansi.style.bold}Aliases:${ansi.style.reset} ${command.aliases.join(", ")}`,
+      width,
     );
+    aliasLines.forEach((line) => {
+      terminal.writeln(
+        sorroundTextWithCharacters(
+          line,
+          width,
+          TEXT_ROW_SPACER,
+          LEFT_EDGE,
+          RIGHT_EDGE,
+        ),
+      );
+    });
   }
 
   if (command.usage.length > 0) {
@@ -323,17 +387,7 @@ function printCommandHelp(terminal: Terminal, command: TerminalCommandMeta) {
         RIGHT_EDGE,
       ),
     );
-    command.usage.forEach((usageLine) => {
-      terminal.writeln(
-        sorroundTextWithCharacters(
-          ` - ${usageLine}`,
-          width,
-          TEXT_ROW_SPACER,
-          LEFT_EDGE,
-          RIGHT_EDGE,
-        ),
-      );
-    });
+    writeWrappedBoxLines(terminal, command.usage, width);
   }
 
   if (command.examples.length > 0) {
@@ -347,17 +401,7 @@ function printCommandHelp(terminal: Terminal, command: TerminalCommandMeta) {
         RIGHT_EDGE,
       ),
     );
-    command.examples.forEach((exampleLine) => {
-      terminal.writeln(
-        sorroundTextWithCharacters(
-          ` - ${exampleLine}`,
-          width,
-          TEXT_ROW_SPACER,
-          LEFT_EDGE,
-          RIGHT_EDGE,
-        ),
-      );
-    });
+    writeWrappedBoxLines(terminal, command.examples, width);
   }
 
   const argumentDefinitions = command.argumentDefinitions ?? [];
@@ -372,18 +416,14 @@ function printCommandHelp(terminal: Terminal, command: TerminalCommandMeta) {
         RIGHT_EDGE,
       ),
     );
-    argumentDefinitions.forEach((argument) => {
-      const requiredText = argument.required ? "required" : "optional";
-      terminal.writeln(
-        sorroundTextWithCharacters(
-          ` - ${argument.name} (${requiredText}): ${argument.description}`,
-          width,
-          TEXT_ROW_SPACER,
-          LEFT_EDGE,
-          RIGHT_EDGE,
-        ),
-      );
-    });
+    writeWrappedBoxLines(
+      terminal,
+      argumentDefinitions.map((argument) => {
+        const requiredText = argument.required ? "required" : "optional";
+        return `${argument.name} (${requiredText}): ${argument.description}`;
+      }),
+      width,
+    );
   }
 
   const optionDefinitions = [
@@ -405,20 +445,16 @@ function printCommandHelp(terminal: Terminal, command: TerminalCommandMeta) {
         RIGHT_EDGE,
       ),
     );
-    optionDefinitions.forEach((option) => {
-      const names = option.short
-        ? `-${option.short}, --${option.long}`
-        : `--${option.long}`;
-      terminal.writeln(
-        sorroundTextWithCharacters(
-          ` - ${names}: ${option.description}`,
-          width,
-          TEXT_ROW_SPACER,
-          LEFT_EDGE,
-          RIGHT_EDGE,
-        ),
-      );
-    });
+    writeWrappedBoxLines(
+      terminal,
+      optionDefinitions.map((option) => {
+        const names = option.short
+          ? `-${option.short}, --${option.long}`
+          : `--${option.long}`;
+        return `${names}: ${option.description}`;
+      }),
+      width,
+    );
   }
 
   terminal.writeln(constructFooter(width));
@@ -435,7 +471,7 @@ async function help(fullCommand: string, terminal: Terminal): Promise<void> {
     if (/^\d+$/.test(query)) {
       currentPage = Number(query) - 1;
     } else {
-      const commandInfo = commands.find(
+      const commandInfo = commandList.find(
         (command) => command.name === query || command.aliases.includes(query),
       );
 
@@ -488,7 +524,7 @@ async function help(fullCommand: string, terminal: Terminal): Promise<void> {
     }
     terminal.writeln(" ".repeat(terminal.cols));
   } else {
-    const commandInfo = commands.find((command) => command.name === "help");
+    const commandInfo = commandList.find((command) => command.name === "help");
     throw new Error(
       "Incorrect command usage; usage & examples: \n\nUsage(s):\n - " +
         commandInfo?.usage.join("\n - ") +
