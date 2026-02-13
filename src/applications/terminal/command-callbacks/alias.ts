@@ -2,7 +2,7 @@ import type { Terminal } from "@xterm/xterm";
 
 import type { CommandAutocomplete, CommandCallback } from "./index";
 import { getAliases, removeAlias, setAlias } from "../shell-state";
-import { useSession } from "next-auth/react";
+import { useSession } from "@/auth/client";
 
 async function alias(
   fullCommand: string,

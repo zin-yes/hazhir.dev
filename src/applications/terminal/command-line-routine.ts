@@ -2,7 +2,7 @@ import type { Terminal } from "@xterm/xterm";
 import ansi from "ansi-escape-sequences";
 
 
-import { useSession } from "next-auth/react";
+import { useSession } from "@/auth/client";
 import commandCallbacks, { commandAutoCompletes } from "./command-callbacks";
 import commands from "./commands.json";
 
@@ -360,7 +360,9 @@ async function onCommand(
 ): Promise<CommandBuffer> {
   const username =
     session.status === "authenticated"
-      ? session.data.user.name ?? session.data.user.id + " "
+      ? (session.data.user.username ??
+          session.data.user.name ??
+          session.data.user.id)
       : "";
   const shouldWritePrompt = options?.writePrompt !== false;
 
@@ -527,7 +529,9 @@ export async function parseCommand(
 
     const username =
       session.status === "authenticated"
-        ? session.data.user.name ?? session.data.user.id + " "
+        ? (session.data.user.username ??
+            session.data.user.name ??
+            session.data.user.id)
         : "";
 
     terminal.write("\n" + getCommandLinePrefix(username));

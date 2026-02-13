@@ -11,14 +11,18 @@
     {
       "characterId": "dot",
       "position": "left",
-      "x": 80,
-      "y": 120
+      "alignX": "left",
+      "alignY": "bottom",
+      "x": 663.4201998710632,
+      "y": 505.4166717529297
     },
     {
       "characterId": "com",
       "position": "right",
-      "x": 380,
-      "y": 120
+      "alignX": "left",
+      "alignY": "bottom",
+      "x": 840.510470867157,
+      "y": 527.5347442626953
     }
   ],
   "entrySegmentId": "classroom_1",
@@ -67,6 +71,30 @@
       "characterId": "com",
       "text": "Huh? What are you yabberin' about now? Come on, I'm starvin' over here! My stomach's thinkin' my throat's cut.",
       "nextSceneId": "cafeteria_line"
+    }
+  },
+  "editor": {
+    "positions": {
+      "classroom_1": {
+        "x": 120,
+        "y": 120
+      },
+      "classroom_2": {
+        "x": 380,
+        "y": 120
+      },
+      "classroom_3": {
+        "x": 640,
+        "y": 120
+      },
+      "classroom_4": {
+        "x": 120,
+        "y": 280
+      },
+      "classroom_5": {
+        "x": 380,
+        "y": 280
+      }
     }
   }
 }

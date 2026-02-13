@@ -15,7 +15,6 @@ const fira_code = Fira_Code({
   variable: "--font-fira-code",
 })
 
-import { NextAuthSessionProvider } from "@/providers/session-provider";
 import type { Metadata } from "next";
 export const metadata: Metadata = {
   title: "hazhir.dev",
@@ -38,7 +37,7 @@ export default function RootLayout({
           defaultTheme="dark"
           forcedTheme="dark"
         >
-          <NextAuthSessionProvider>{children}</NextAuthSessionProvider>
+          {children}
         </ThemeProvider>
       </body>
     </html>

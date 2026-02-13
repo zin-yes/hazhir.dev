@@ -65,8 +65,12 @@ export type SceneType = "dialog" | "cutscene" | "chapter_start" | "chapter_end";
 export interface SceneSprite {
   characterId: string;
   position?: "left" | "center" | "right";
-  x?: number;
-  y?: number;
+  alignX?: "left" | "right";
+  alignY?: "top" | "bottom";
+  x?: number; // Pixels from left
+  y?: number; // Pixels from bottom
+  width?: number; // Sprite width in pixels
+  height?: number; // Sprite height in pixels
 }
 
 export interface Scene {

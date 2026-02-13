@@ -1,7 +1,7 @@
 import type { Terminal } from "@xterm/xterm";
 
 import type { CommandAutocomplete, CommandCallback } from "./index";
-import { signOut, useSession } from "next-auth/react";
+import { signOut, useSession } from "@/auth/client";
 
 import ansi from "ansi-escape-sequences";
 
@@ -12,7 +12,11 @@ async function template(
 ): Promise<void> {
   if (session.status === "authenticated") {
     terminal.writeln(" ".repeat(terminal.cols));
-    terminal.writeln("Signing you out, and refreshing the page...");
+    terminal.writeln(
+      session.isGuest
+        ? "Ending guest session and returning to login screen..."
+        : "Signing you out, and refreshing the page..."
+    );
     terminal.writeln(" ".repeat(terminal.cols));
 
     signOut({ callbackUrl: "/" });

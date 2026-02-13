@@ -25,7 +25,6 @@ import {
 import { useFileSystem, type FileSystemNode } from "@/hooks/use-file-system";
 import { cn } from "@/lib/utils";
 
-import dynamic from "next/dynamic";
 import { ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { v4 } from "uuid";
 import {
@@ -37,10 +36,6 @@ import {
   TextEditorApplicationWindow,
   VisualNovelApplicationWindow,
 } from "./application-windows";
-
-const Wallpaper = dynamic(() => import("./wallpaper"), {
-  ssr: false,
-});
 
 type DesktopItem = {
   id: string;
@@ -455,16 +450,106 @@ export default function Desktop({
     [desktopItems, fs]
   );
 
+  const moveSelectionByOffset = useCallback(
+    (offset: number, extendRange: boolean) => {
+      if (desktopItems.length === 0) return;
+
+      const currentId =
+        (lastSelectedId && selectedSet.has(lastSelectedId)
+          ? lastSelectedId
+          : selectedIds[0]) ?? null;
+
+      let currentIndex = currentId
+        ? desktopItems.findIndex((item) => item.id === currentId)
+        : -1;
+
+      if (currentIndex === -1) {
+        currentIndex = offset > 0 ? -1 : desktopItems.length;
+      }
+
+      const nextIndex = Math.max(
+        0,
+        Math.min(desktopItems.length - 1, currentIndex + offset)
+      );
+      const nextId = desktopItems[nextIndex]?.id;
+      if (!nextId) return;
+
+      if (extendRange && lastSelectedId) {
+        selectRange(lastSelectedId, nextId);
+      } else {
+        updateSelection(new Set([nextId]));
+      }
+
+      setLastSelectedId(nextId);
+      iconRefs.current
+        .get(nextId)
+        ?.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "nearest" });
+    },
+    [desktopItems, lastSelectedId, selectRange, selectedIds, selectedSet, updateSelection]
+  );
+
+  const handleOpenSelected = useCallback(() => {
+    const activeId =
+      (lastSelectedId && selectedSet.has(lastSelectedId)
+        ? lastSelectedId
+        : selectedIds[0]) ?? null;
+    if (!activeId) return;
+    desktopItems.find((item) => item.id === activeId)?.onOpen?.();
+  }, [desktopItems, lastSelectedId, selectedIds, selectedSet]);
+
+  const handleDesktopKeyDown = useCallback(
+    (event: React.KeyboardEvent<HTMLDivElement>) => {
+      const target = event.target as HTMLElement | null;
+      if (target) {
+        const tagName = target.tagName;
+        const isEditable =
+          tagName === "INPUT" ||
+          tagName === "TEXTAREA" ||
+          target.isContentEditable ||
+          Boolean(target.closest(".monaco-editor"));
+        if (isEditable) return;
+      }
+
+      if (event.key === "ArrowLeft" || event.key === "ArrowUp") {
+        event.preventDefault();
+        moveSelectionByOffset(-1, event.shiftKey);
+        return;
+      }
+
+      if (event.key === "ArrowRight" || event.key === "ArrowDown") {
+        event.preventDefault();
+        moveSelectionByOffset(1, event.shiftKey);
+        return;
+      }
+
+      if (event.key === "Enter") {
+        event.preventDefault();
+        handleOpenSelected();
+        return;
+      }
+
+      if ((event.key === "Delete" || event.key === "Backspace") && selectedIds.length > 0) {
+        event.preventDefault();
+        handleDeleteSelected();
+      }
+    },
+    [handleDeleteSelected, handleOpenSelected, moveSelectionByOffset, selectedIds.length]
+  );
+
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild>
         <div
           ref={containerRef}
+          tabIndex={0}
           className="w-screen h-screen absolute top-0 bottom-0 left-0 right-0 overflow-hidden z-0 select-none"
+          onMouseDownCapture={() => {
+            containerRef.current?.focus();
+          }}
           onMouseDown={startMarquee}
+          onKeyDown={handleDesktopKeyDown}
           onContextMenu={handleDesktopContextMenu}
         >
-          <Wallpaper />
           <div className="h-[calc(100vh-52px)] w-full bottom-0 left-0 right-0 absolute p-4">
             <div className="w-full flex flex-row flex-wrap gap-4 items-start">
               {desktopItems.map((item) => (

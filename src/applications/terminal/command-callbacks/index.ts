@@ -1,6 +1,6 @@
 import type { Terminal } from "@xterm/xterm";
 
-import { useSession } from "next-auth/react";
+import { useSession } from "@/auth/client";
 import application, { autocomplete as applicationAutocomplete } from "./application";
 import alias, { autocomplete as aliasAutocomplete } from "./alias";
 import cat, { autocomplete as catAutocomplete } from "./cat";

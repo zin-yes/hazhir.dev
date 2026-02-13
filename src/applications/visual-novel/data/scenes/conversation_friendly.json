@@ -11,14 +11,18 @@
     {
       "characterId": "alex",
       "position": "left",
+      "alignX": "left",
+      "alignY": "bottom",
       "x": 80,
-      "y": 60
+      "y": 120
     },
     {
       "characterId": "mysterious_figure",
       "position": "right",
+      "alignX": "left",
+      "alignY": "bottom",
       "x": 360,
-      "y": 60
+      "y": 120
     }
   ],
   "entrySegmentId": "dialog_1",
