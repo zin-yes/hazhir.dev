@@ -319,7 +319,10 @@ function FileGridItem({ node, isSelected, onSelect, onOpen, onRename, onDelete, 
           <div className="w-12 h-12 flex items-center justify-center">
             {getFileIcon(node, 40)}
           </div>
-          <span className="text-xs text-center w-full truncate" title={node.name}>
+          <span
+            className="text-xs text-center w-full leading-4 overflow-hidden break-words [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2]"
+            title={node.name}
+          >
             {node.name}
           </span>
         </div>
