@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  ArrowUpDown,
   BookOpen,
   BookText,
   Calculator,
@@ -12,18 +13,17 @@ import {
   FileAudio,
   FileCode,
   FileImage,
+  FilePlus,
   FileSymlink,
   FileText,
   FileVideo,
-  FilePlus,
   FolderClosed,
   FolderPlus,
   Gamepad2,
   RefreshCw,
   Scissors,
-  Trash2,
-  ArrowUpDown,
   TerminalSquare,
+  Trash2,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -34,6 +34,7 @@ import {
   ContextMenuRadioGroup,
   ContextMenuRadioItem,
   ContextMenuSeparator,
+  ContextMenuShortcut,
   ContextMenuSub,
   ContextMenuSubContent,
   ContextMenuSubTrigger,
@@ -51,6 +52,11 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useFileSystem, type FileSystemNode } from "@/hooks/use-file-system";
 import {
+  getFileClipboard,
+  setFileClipboard,
+  subscribeToFileClipboard,
+} from "@/lib/file-clipboard";
+import {
   executeFilePath,
   isExecutableFile,
   isShortcutFile,
@@ -59,11 +65,6 @@ import {
   FILE_PATH_DROP_EVENT,
   readFileDragPayload,
 } from "@/lib/file-transfer-dnd";
-import {
-  getFileClipboard,
-  setFileClipboard,
-  subscribeToFileClipboard,
-} from "@/lib/file-clipboard";
 import { parseShortcut } from "@/lib/shortcut";
 import { getHomePath } from "@/lib/system-user";
 import { cn } from "@/lib/utils";
@@ -135,9 +136,7 @@ export default function Desktop({
   const [renameTargetId, setRenameTargetId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const [renameError, setRenameError] = useState("");
-  const [createMode, setCreateMode] = useState<"file" | "folder" | null>(
-    null,
-  );
+  const [createMode, setCreateMode] = useState<"file" | "folder" | null>(null);
   const [createValue, setCreateValue] = useState("");
   const [createError, setCreateError] = useState("");
   const [clipboard, setClipboard] = useState(getFileClipboard);
@@ -469,11 +468,17 @@ export default function Desktop({
       }
 
       const rawCol = Math.round(
-        (clientX - layerRect.left - DESKTOP_GRID_PADDING - DESKTOP_ICON_WIDTH / 2) /
+        (clientX -
+          layerRect.left -
+          DESKTOP_GRID_PADDING -
+          DESKTOP_ICON_WIDTH / 2) /
           DESKTOP_GRID_COL_WIDTH,
       );
       const rawRow = Math.round(
-        (clientY - layerRect.top - DESKTOP_GRID_PADDING - DESKTOP_ICON_HEIGHT / 2) /
+        (clientY -
+          layerRect.top -
+          DESKTOP_GRID_PADDING -
+          DESKTOP_ICON_HEIGHT / 2) /
           DESKTOP_GRID_ROW_HEIGHT,
       );
 
@@ -540,7 +545,8 @@ export default function Desktop({
         });
 
         normalizedPaths.forEach((path, index) => {
-          const fallbackStartIndex = desired.row * Math.max(1, gridCols) + desired.col + index;
+          const fallbackStartIndex =
+            desired.row * Math.max(1, gridCols) + desired.col + index;
           const placement = findNearestAvailablePosition(
             occupied,
             desired,
@@ -1381,7 +1387,10 @@ export default function Desktop({
         }
       });
 
-      if (destinationDirectoryPath === desktopRootPath && pastedPaths.length > 0) {
+      if (
+        destinationDirectoryPath === desktopRootPath &&
+        pastedPaths.length > 0
+      ) {
         const fallbackRect =
           gridLayerRef.current?.getBoundingClientRect() ??
           containerRef.current?.getBoundingClientRect();
@@ -1389,7 +1398,8 @@ export default function Desktop({
           x: (fallbackRect?.left ?? 0) + (fallbackRect?.width ?? 0) / 2,
           y: (fallbackRect?.top ?? 0) + (fallbackRect?.height ?? 0) / 2,
         };
-        const target = clientPoint ?? desktopContextPointRef.current ?? fallbackPoint;
+        const target =
+          clientPoint ?? desktopContextPointRef.current ?? fallbackPoint;
         placePathsNearClientPoint(pastedPaths, target.x, target.y);
       }
 
@@ -1536,13 +1546,11 @@ export default function Desktop({
       }
 
       setLastSelectedId(nextId);
-      iconRefs.current
-        .get(nextId)
-        ?.scrollIntoView({
-          behavior: "smooth",
-          block: "nearest",
-          inline: "nearest",
-        });
+      iconRefs.current.get(nextId)?.scrollIntoView({
+        behavior: "smooth",
+        block: "nearest",
+        inline: "nearest",
+      });
     },
     [
       lastSelectedId,
@@ -1593,7 +1601,10 @@ export default function Desktop({
 
       if (isModifier && key === "v" && clipboard) {
         event.preventDefault();
-        pasteClipboardToDirectory(desktopRootPath, desktopContextPointRef.current);
+        pasteClipboardToDirectory(
+          desktopRootPath,
+          desktopContextPointRef.current,
+        );
         return;
       }
 
@@ -1726,8 +1737,8 @@ export default function Desktop({
                   {createMode === "folder" ? "New Folder" : "New File"}
                 </DialogTitle>
                 <DialogDescription>
-                  Create a {createMode === "folder" ? "folder" : "file"} on
-                  your Desktop.
+                  Create a {createMode === "folder" ? "folder" : "file"} on your
+                  Desktop.
                 </DialogDescription>
               </DialogHeader>
               <div className="grid gap-2">
@@ -1821,7 +1832,8 @@ export default function Desktop({
                           row: 0,
                         };
                         const isDragging =
-                          draggingIds.includes(item.id) && Boolean(dragCandidateRef.current);
+                          draggingIds.includes(item.id) &&
+                          Boolean(dragCandidateRef.current);
                         const source =
                           dragCandidateRef.current?.sourcePositions[item.id] ??
                           position;
@@ -1852,7 +1864,8 @@ export default function Desktop({
                         };
                       })()}
                     >
-                      {draggingIds.includes(item.id) && dragCandidateRef.current ? null : (
+                      {draggingIds.includes(item.id) &&
+                      dragCandidateRef.current ? null : (
                         <DesktopIcon
                           icon={item.icon}
                           title={item.title}
@@ -1934,13 +1947,19 @@ export default function Desktop({
                     {item.fileNode ? (
                       <>
                         <ContextMenuSeparator />
-                        <ContextMenuItem onClick={() => handleCutByContext(item.id)}>
+                        <ContextMenuItem
+                          onClick={() => handleCutByContext(item.id)}
+                        >
                           <Scissors size={16} className="mr-2" />
                           Cut
+                          <ContextMenuShortcut>Ctrl+X</ContextMenuShortcut>
                         </ContextMenuItem>
-                        <ContextMenuItem onClick={() => handleCopyByContext(item.id)}>
+                        <ContextMenuItem
+                          onClick={() => handleCopyByContext(item.id)}
+                        >
                           <Copy size={16} className="mr-2" />
                           Copy
+                          <ContextMenuShortcut>Ctrl+C</ContextMenuShortcut>
                         </ContextMenuItem>
                         {clipboard && item.fileNode.type === "directory" ? (
                           <ContextMenuItem
@@ -1951,6 +1970,7 @@ export default function Desktop({
                           >
                             <ClipboardPaste size={16} className="mr-2" />
                             Paste
+                            <ContextMenuShortcut>Ctrl+V</ContextMenuShortcut>
                           </ContextMenuItem>
                         ) : null}
                         <ContextMenuSeparator />
@@ -1967,6 +1987,7 @@ export default function Desktop({
                         >
                           <Trash2 size={16} className="mr-2" />
                           Delete
+                          <ContextMenuShortcut>Del</ContextMenuShortcut>
                         </ContextMenuItem>
                       </>
                     ) : null}
@@ -2050,11 +2071,15 @@ export default function Desktop({
         {clipboard ? (
           <ContextMenuItem
             onClick={() =>
-              pasteClipboardToDirectory(desktopRootPath, desktopContextPointRef.current)
+              pasteClipboardToDirectory(
+                desktopRootPath,
+                desktopContextPointRef.current,
+              )
             }
           >
             <ClipboardPaste size={16} className="mr-2" />
             Paste
+            <ContextMenuShortcut>Ctrl+V</ContextMenuShortcut>
           </ContextMenuItem>
         ) : null}
         <ContextMenuSub>

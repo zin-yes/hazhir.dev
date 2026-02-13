@@ -1,6 +1,5 @@
 "use client";
 
-
 import {
   BookOpen,
   BookText,
@@ -21,12 +20,12 @@ import { v4 } from "uuid";
 
 const CalculatorApplication = dynamic(
   () => import("@/applications/calculator"),
-  { loading: () => <LoadingWindow />, ssr: false }
+  { loading: () => <LoadingWindow />, ssr: false },
 );
 
 const MockSettingsApplication = dynamic(
   () => import("@/mock-applications/settings"),
-  { loading: () => <LoadingWindow />, ssr: false }
+  { loading: () => <LoadingWindow />, ssr: false },
 );
 
 const TerminalApplication = dynamic(() => import("@/applications/terminal"), {
@@ -41,22 +40,22 @@ const GameApplication = dynamic(() => import("@/applications/game"), {
 
 const FileExplorerApplication = dynamic(
   () => import("@/applications/file-explorer"),
-  { loading: () => <LoadingWindow />, ssr: false }
+  { loading: () => <LoadingWindow />, ssr: false },
 );
 
 const DocumentViewerApplication = dynamic(
   () => import("@/applications/document-viewer"),
-  { loading: () => <LoadingWindow />, ssr: false }
+  { loading: () => <LoadingWindow />, ssr: false },
 );
 
 const TextEditorApplication = dynamic(
   () => import("@/applications/text-editor"),
-  { loading: () => <LoadingWindow />, ssr: false }
+  { loading: () => <LoadingWindow />, ssr: false },
 );
 
 const VisualNovelApplication = dynamic(
   () => import("@/applications/visual-novel"),
-  { loading: () => <LoadingWindow />, ssr: false }
+  { loading: () => <LoadingWindow />, ssr: false },
 );
 
 export function TextEditorApplicationWindow({
@@ -201,7 +200,7 @@ export function SingleDocumentApplicationWindow({
         icon: {
           svg: <BookOpen />,
         },
-    }}
+      }}
       type="DOCUMENT_VIEWER"
       settings={{
         min_width: 600,

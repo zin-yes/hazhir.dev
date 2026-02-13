@@ -80,9 +80,9 @@ export default function Game() {
           new Worker(new URL("./workers/unified-worker.ts", import.meta.url), {
             name: "generation",
           }),
-        3
+        3,
       ),
-    []
+    [],
   );
   const lightingWorkerPool = useMemo(
     () =>
@@ -91,9 +91,9 @@ export default function Game() {
           new Worker(new URL("./workers/unified-worker.ts", import.meta.url), {
             name: "lighting",
           }),
-        2
+        2,
       ),
-    []
+    [],
   );
   const meshWorkerPool = useMemo(
     () =>
@@ -102,9 +102,9 @@ export default function Game() {
           new Worker(new URL("./workers/unified-worker.ts", import.meta.url), {
             name: "mesh",
           }),
-        3
+        3,
       ),
-    []
+    [],
   );
   const textureArrayWorkerPool = useMemo(
     () =>
@@ -113,9 +113,9 @@ export default function Game() {
           new Worker(new URL("./workers/unified-worker.ts", import.meta.url), {
             name: "texture-array",
           }),
-        1
+        1,
       ),
-    []
+    [],
   );
 
   const renderer = useMemo(
@@ -125,7 +125,7 @@ export default function Game() {
         alpha: true,
         // logarithmicDepthBuffer: true,
       }),
-    []
+    [],
   );
 
   const scene = useMemo(() => new THREE.Scene(), []);
@@ -136,9 +136,9 @@ export default function Game() {
         85,
         window.innerWidth / window.innerHeight,
         0.1,
-        10000
+        10000,
       ),
-    []
+    [],
   );
 
   let initialLoadCompletion = 0;
@@ -157,12 +157,12 @@ export default function Game() {
           renderer.setSize(width, height);
         }
       }),
-    [containerRef, camera, renderer]
+    [containerRef, camera, renderer],
   );
 
   function setInitialLoadCompletion(value: number) {
     const loadingLayerBackground = document.getElementById(
-      "loadingLayerBackground"
+      "loadingLayerBackground",
     ) as HTMLDivElement;
 
     if (loadingLayerBackground) {
@@ -178,10 +178,10 @@ export default function Game() {
     initialLoadCompletion = value;
 
     const initialLoadCompletionElement = document.getElementById(
-      "initialLoadCompletion"
+      "initialLoadCompletion",
     ) as HTMLDivElement;
     const loadingLayerElement = document.getElementById(
-      "loadingLayer"
+      "loadingLayer",
     ) as HTMLDivElement;
     if (initialLoadCompletionElement) {
       initialLoadCompletionElement.innerHTML =
@@ -216,7 +216,7 @@ export default function Game() {
       BlockType.GLASS,
       BlockType.GLOWSTONE,
       BlockType.COBBLESTONE,
-    ])
+    ]),
   );
   const hotbarSlotsRef = useRef(hotbarSlots);
   const [isInventoryOpen, setIsInventoryOpen] = useState(false);
@@ -357,7 +357,7 @@ export default function Game() {
             chunk[index] = type;
           });
         }
-      })
+      }),
     ).then(async () => {
       // 2. Initialize Light
       const queues: { [key: string]: number[] } = {};
@@ -385,11 +385,11 @@ export default function Game() {
 
             const { light, queue } = await lightingWorkerPool.exec(
               "initializeChunkLight",
-              [chunk.buffer, currentSeed, x, y, z, topChunk, topChunkLight]
+              [chunk.buffer, currentSeed, x, y, z, topChunk, topChunkLight],
             );
             lightChunks.current[chunkName] = light;
             queues[chunkName] = queue;
-          })
+          }),
         );
       }
 
@@ -445,7 +445,7 @@ export default function Game() {
             if (!lightUpdates[neighborName]) lightUpdates[neighborName] = [];
             lightUpdates[neighborName].push(update as Uint8Array);
           });
-        })
+        }),
       );
 
       // Merge updates
@@ -511,7 +511,7 @@ export default function Game() {
               tasksDone++;
 
               setInitialLoadCompletion(tasksDone / initialLoadTasks);
-            }
+            },
           )
           .catch((err) => {
             console.error(err);
@@ -554,7 +554,7 @@ export default function Game() {
           0,
           0,
           TEXTURE_SIZE,
-          TEXTURE_SIZE
+          TEXTURE_SIZE,
         );
 
         textureData.push(new Uint8ClampedArray(imageData.data.buffer));
@@ -594,7 +594,7 @@ export default function Game() {
       const sunPosition = new THREE.Vector3().setFromSphericalCoords(
         1,
         phi,
-        theta
+        theta,
       );
 
       sky.material.uniforms.sunPosition.value = sunPosition;
@@ -609,7 +609,7 @@ export default function Game() {
       playerControlsRef.current = new PlayerControls(
         camera,
         containerRef.current,
-        physics
+        physics,
       );
 
       playerControlsRef.current.controls.addEventListener("lock", () => {
@@ -650,7 +650,7 @@ export default function Game() {
               result.data,
               TEXTURE_SIZE,
               TEXTURE_SIZE,
-              result.length
+              result.length,
             );
             textureArray.format = THREE.RGBAFormat;
             textureArray.colorSpace = THREE.SRGBColorSpace;
@@ -660,7 +660,7 @@ export default function Game() {
             textureArray.needsUpdate = true;
 
             const waterTextureIndex = Object.values(Texture).indexOf(
-              Texture.WATER
+              Texture.WATER,
             );
 
             materialsRef.current.opaque = new THREE.ShaderMaterial({
@@ -771,7 +771,7 @@ export default function Game() {
             seed: seedRef.current,
             initialPosition: { x: 0, y: 100, z: 0 },
           },
-          id
+          id,
         );
 
         const blocks: { x: number; y: number; z: number; blockType: number }[] =
@@ -782,7 +782,7 @@ export default function Game() {
             const z = index % CHUNK_HEIGHT;
             const y = Math.floor(index / CHUNK_HEIGHT) % CHUNK_WIDTH;
             const x = Math.floor(
-              Math.floor(index / CHUNK_HEIGHT) / CHUNK_WIDTH
+              Math.floor(index / CHUNK_HEIGHT) / CHUNK_WIDTH,
             );
 
             const globalX = cx * CHUNK_WIDTH + x;
@@ -804,7 +804,7 @@ export default function Game() {
               type: "WORLD_STATE",
               blocks,
             },
-            id
+            id,
           );
         }
 
@@ -839,8 +839,8 @@ export default function Game() {
               new THREE.Vector3(
                 data.position.x,
                 data.position.y,
-                data.position.z
-              )
+                data.position.z,
+              ),
             );
             remotePlayers.current.set(data.id, rp);
           }
@@ -860,7 +860,7 @@ export default function Game() {
             const index = calculateOffset(
               blockChunkX,
               blockChunkY,
-              blockChunkZ
+              blockChunkZ,
             );
 
             if (!modifiedChunks.current.has(chunkName)) {
@@ -874,27 +874,27 @@ export default function Game() {
 
               if (blockChunkX === 0)
                 chunksToUpdate.add(
-                  generateChunkName(chunkX - 1, chunkY, chunkZ)
+                  generateChunkName(chunkX - 1, chunkY, chunkZ),
                 );
               if (blockChunkX === CHUNK_WIDTH - 1)
                 chunksToUpdate.add(
-                  generateChunkName(chunkX + 1, chunkY, chunkZ)
+                  generateChunkName(chunkX + 1, chunkY, chunkZ),
                 );
               if (blockChunkY === 0)
                 chunksToUpdate.add(
-                  generateChunkName(chunkX, chunkY - 1, chunkZ)
+                  generateChunkName(chunkX, chunkY - 1, chunkZ),
                 );
               if (blockChunkY === CHUNK_HEIGHT - 1)
                 chunksToUpdate.add(
-                  generateChunkName(chunkX, chunkY + 1, chunkZ)
+                  generateChunkName(chunkX, chunkY + 1, chunkZ),
                 );
               if (blockChunkZ === 0)
                 chunksToUpdate.add(
-                  generateChunkName(chunkX, chunkY, chunkZ - 1)
+                  generateChunkName(chunkX, chunkY, chunkZ - 1),
                 );
               if (blockChunkZ === CHUNK_LENGTH - 1)
                 chunksToUpdate.add(
-                  generateChunkName(chunkX, chunkY, chunkZ + 1)
+                  generateChunkName(chunkX, chunkY, chunkZ + 1),
                 );
             }
           });
@@ -984,7 +984,7 @@ export default function Game() {
             chunkZ,
             topChunk,
             topChunkLight,
-          ]
+          ],
         );
         lightChunks.current[chunkName] = light;
 
@@ -1047,7 +1047,7 @@ export default function Game() {
           const neighborName = generateChunkName(
             chunkX + dx,
             chunkY + dy,
-            chunkZ + dz
+            chunkZ + dz,
           );
           if (lightChunks.current[neighborName]) {
             const current = lightChunks.current[neighborName];
@@ -1077,7 +1077,7 @@ export default function Game() {
         const { borders, borderLights } = getChunkBorders(
           chunkX,
           chunkY,
-          chunkZ
+          chunkZ,
         );
 
         meshWorkerPool
@@ -1119,9 +1119,9 @@ export default function Game() {
                 chunkName,
                 chunkX,
                 chunkY,
-                chunkZ
+                chunkZ,
               );
-            }
+            },
           )
           .catch((err) => {
             console.error(err);
@@ -1142,7 +1142,7 @@ export default function Game() {
       let currentPoint = new THREE.Vector3(
         camera.position.x,
         camera.position.y,
-        camera.position.z
+        camera.position.z,
       );
 
       for (let step = 0; step < 5 * 50; step++) {
@@ -1154,12 +1154,12 @@ export default function Game() {
           new THREE.Vector3(
             cameraDirection.x,
             cameraDirection.y,
-            cameraDirection.z
-          )
+            cameraDirection.z,
+          ),
         );
         if (getBlock(x, y, z) !== BlockType.AIR && getBlock(x, y, z) !== null) {
           const indicator = scene.getObjectByName(
-            "indicator"
+            "indicator",
           ) as THREE.LineSegments;
           const blockType = getBlock(x, y, z) as BlockType;
 
@@ -1231,7 +1231,7 @@ export default function Game() {
       raycaster.setFromCamera(pointer, camera);
 
       const intersections = raycaster.intersectObjects(
-        scene.children.filter((obj) => obj.name !== "indicator")
+        scene.children.filter((obj) => obj.name !== "indicator"),
       );
 
       if (intersections.length === 0) return;
@@ -1256,7 +1256,7 @@ export default function Game() {
       raycaster.setFromCamera(pointer, camera);
 
       const intersections = raycaster.intersectObjects(
-        scene.children.filter((obj) => obj.name !== "indicator")
+        scene.children.filter((obj) => obj.name !== "indicator"),
       );
 
       let faceNormal = new THREE.Vector3();
@@ -1274,7 +1274,7 @@ export default function Game() {
       let currentPoint = new THREE.Vector3(
         camera.position.x,
         camera.position.y,
-        camera.position.z
+        camera.position.z,
       );
       let x = 0;
       let y = 0;
@@ -1288,8 +1288,8 @@ export default function Game() {
           new THREE.Vector3(
             cameraDirection.x,
             cameraDirection.y,
-            cameraDirection.z
-          )
+            cameraDirection.z,
+          ),
         );
         const hitBlock = getBlock(x, y, z);
         if (hitBlock !== BlockType.AIR) {
@@ -1313,9 +1313,13 @@ export default function Game() {
             new THREE.Vector3(
               newBlockX - 0.5,
               newBlockY - 0.5,
-              newBlockZ - 0.5
+              newBlockZ - 0.5,
             ),
-            new THREE.Vector3(newBlockX + 0.5, newBlockY + 0.5, newBlockZ + 0.5)
+            new THREE.Vector3(
+              newBlockX + 0.5,
+              newBlockY + 0.5,
+              newBlockZ + 0.5,
+            ),
           );
 
           const playerBox = playerControlsRef.current!.getPlayerBox().clone();
@@ -1398,7 +1402,7 @@ export default function Game() {
           const targetBlockForTopSlab = getBlock(
             newBlockX,
             newBlockY,
-            newBlockZ
+            newBlockZ,
           );
           if (
             (targetBlockForTopSlab === BlockType.PLANKS_SLAB_TOP &&
@@ -1437,7 +1441,7 @@ export default function Game() {
       let currentPoint = new THREE.Vector3(
         camera.position.x,
         camera.position.y,
-        camera.position.z
+        camera.position.z,
       );
 
       for (let step = 0; step < 5 * 50; step++) {
@@ -1449,8 +1453,8 @@ export default function Game() {
           new THREE.Vector3(
             cameraDirection.x,
             cameraDirection.y,
-            cameraDirection.z
-          )
+            cameraDirection.z,
+          ),
         );
         if (getBlock(x, y, z) !== BlockType.AIR) {
           setBlock(x, y, z, BlockType.AIR);
@@ -1480,7 +1484,7 @@ export default function Game() {
     chunkName: string,
     chunkX: number,
     chunkY: number,
-    chunkZ: number
+    chunkZ: number,
   ) {
     if (!materialsRef.current.opaque || !materialsRef.current.transparent)
       return;
@@ -1489,28 +1493,28 @@ export default function Game() {
     const opaqueGeometry = new THREE.BufferGeometry();
     opaqueGeometry.setAttribute(
       "position",
-      new THREE.Float32BufferAttribute(opaque.positions, 3)
+      new THREE.Float32BufferAttribute(opaque.positions, 3),
     );
     opaqueGeometry.setAttribute(
       "normal",
-      new THREE.Float32BufferAttribute(opaque.normals, 3)
+      new THREE.Float32BufferAttribute(opaque.normals, 3),
     );
     opaqueGeometry.setAttribute(
       "uv",
-      new THREE.Float32BufferAttribute(opaque.uvs, 2)
+      new THREE.Float32BufferAttribute(opaque.uvs, 2),
     );
     opaqueGeometry.setAttribute(
       "textureIndex",
-      new THREE.Int32BufferAttribute(opaque.textureIndices, 1)
+      new THREE.Int32BufferAttribute(opaque.textureIndices, 1),
     );
     opaqueGeometry.setAttribute(
       "lightLevel",
-      new THREE.Float32BufferAttribute(opaque.lightLevels, 1)
+      new THREE.Float32BufferAttribute(opaque.lightLevels, 1),
     );
     opaqueGeometry.setIndex(new THREE.Uint32BufferAttribute(opaque.indices, 1));
     const opaqueMesh = new THREE.Mesh(
       opaqueGeometry,
-      materialsRef.current.opaque
+      materialsRef.current.opaque,
     );
     opaqueMesh.translateX(chunkX * CHUNK_WIDTH - 0.5);
     opaqueMesh.translateY(chunkY * CHUNK_HEIGHT - 0.5);
@@ -1526,30 +1530,30 @@ export default function Game() {
     const transparentGeometry = new THREE.BufferGeometry();
     transparentGeometry.setAttribute(
       "position",
-      new THREE.Float32BufferAttribute(transparent.positions, 3)
+      new THREE.Float32BufferAttribute(transparent.positions, 3),
     );
     transparentGeometry.setAttribute(
       "normal",
-      new THREE.Float32BufferAttribute(transparent.normals, 3)
+      new THREE.Float32BufferAttribute(transparent.normals, 3),
     );
     transparentGeometry.setAttribute(
       "uv",
-      new THREE.Float32BufferAttribute(transparent.uvs, 2)
+      new THREE.Float32BufferAttribute(transparent.uvs, 2),
     );
     transparentGeometry.setAttribute(
       "textureIndex",
-      new THREE.Int32BufferAttribute(transparent.textureIndices, 1)
+      new THREE.Int32BufferAttribute(transparent.textureIndices, 1),
     );
     transparentGeometry.setAttribute(
       "lightLevel",
-      new THREE.Float32BufferAttribute(transparent.lightLevels, 1)
+      new THREE.Float32BufferAttribute(transparent.lightLevels, 1),
     );
     transparentGeometry.setIndex(
-      new THREE.Uint32BufferAttribute(transparent.indices, 1)
+      new THREE.Uint32BufferAttribute(transparent.indices, 1),
     );
     const transparentMesh = new THREE.Mesh(
       transparentGeometry,
-      materialsRef.current.transparent
+      materialsRef.current.transparent,
     );
     transparentMesh.translateX(chunkX * CHUNK_WIDTH - 0.5);
     transparentMesh.translateY(chunkY * CHUNK_HEIGHT - 0.5);
@@ -1602,7 +1606,7 @@ export default function Game() {
   async function updateChunkLightAndMesh(
     chunkX: number,
     chunkY: number,
-    chunkZ: number
+    chunkZ: number,
   ) {
     const chunkName = generateChunkName(chunkX, chunkY, chunkZ);
     const chunk = chunks.current[chunkName];
@@ -1622,7 +1626,7 @@ export default function Game() {
         chunkZ,
         topChunk,
         topChunkLight,
-      ]
+      ],
     );
     lightChunks.current[chunkName] = light;
 
@@ -1670,7 +1674,7 @@ export default function Game() {
         neighbors,
         neighborLights,
         queue,
-      ]
+      ],
     );
     lightChunks.current[chunkName] = centerLight;
 
@@ -1681,7 +1685,7 @@ export default function Game() {
         const neighborName = generateChunkName(
           chunkX + dx,
           chunkY + dy,
-          chunkZ + dz
+          chunkZ + dz,
         );
         if (lightChunks.current[neighborName]) {
           const current = lightChunks.current[neighborName];
@@ -1734,11 +1738,11 @@ export default function Game() {
 
           const { light, queue } = await lightingWorkerPool.exec(
             "initializeChunkLight",
-            [chunk.buffer, seedRef.current, x, y, z, topChunk, topChunkLight]
+            [chunk.buffer, seedRef.current, x, y, z, topChunk, topChunkLight],
           );
           lightChunks.current[chunkName] = light;
           queues[chunkName] = queue;
-        })
+        }),
       );
     }
 
@@ -1794,7 +1798,7 @@ export default function Game() {
 
     // 3. Propagate Neighbors
     const neighborsToPropagate = chunksToUpdate.filter(
-      (c) => c.x !== cx || c.y !== cy || c.z !== cz
+      (c) => c.x !== cx || c.y !== cy || c.z !== cz,
     );
 
     await Promise.all(
@@ -1846,7 +1850,7 @@ export default function Game() {
             }
           });
         }
-      })
+      }),
     );
 
     // 4. Mesh
@@ -1858,7 +1862,7 @@ export default function Game() {
     y: number,
     z: number,
     type: number,
-    broadcast: boolean = true
+    broadcast: boolean = true,
   ) {
     const chunkX = Math.floor(x / CHUNK_WIDTH);
     const chunkY = Math.floor(y / CHUNK_HEIGHT);
@@ -1961,7 +1965,7 @@ export default function Game() {
       nx: number,
       ny: number,
       nz: number,
-      face: "top" | "bottom" | "left" | "right" | "front" | "back"
+      face: "top" | "bottom" | "left" | "right" | "front" | "back",
     ) => {
       const name = generateChunkName(nx, ny, nz);
       const chunk = chunks.current[name];
@@ -2116,10 +2120,10 @@ export default function Game() {
                 chunkName,
                 chunkX,
                 chunkY,
-                chunkZ
+                chunkZ,
               );
             }
-          }
+          },
         )
         .catch((err) => {
           console.error(err);
@@ -2142,13 +2146,13 @@ export default function Game() {
     }
 
     let transparentMesh = scene.getObjectByName(
-      chunkName + "_transparent"
+      chunkName + "_transparent",
     ) as THREE.Mesh;
     while (transparentMesh) {
       transparentMesh.geometry.dispose();
       transparentMesh.removeFromParent();
       transparentMesh = scene.getObjectByName(
-        chunkName + "_transparent"
+        chunkName + "_transparent",
       ) as THREE.Mesh;
     }
   }
@@ -2156,7 +2160,7 @@ export default function Game() {
   function pruneChunks(
     playerChunkX: number,
     playerChunkY: number,
-    playerChunkZ: number
+    playerChunkZ: number,
   ) {
     let prunedChunkPositions: typeof chunkPositions.current = [];
     let prunedChunks: typeof chunks.current = {};
@@ -2164,15 +2168,15 @@ export default function Game() {
       const chunkName = generateChunkName(
         chunkPosition.chunkX,
         chunkPosition.chunkY,
-        chunkPosition.chunkZ
+        chunkPosition.chunkZ,
       );
       if (
         new THREE.Vector3(
           chunkPosition.chunkX,
           chunkPosition.chunkY,
-          chunkPosition.chunkZ
+          chunkPosition.chunkZ,
         ).distanceTo(
-          new THREE.Vector3(playerChunkX, playerChunkY, playerChunkZ)
+          new THREE.Vector3(playerChunkX, playerChunkY, playerChunkZ),
         ) > CHUNK_PRUNING_DISTANCE
       ) {
         pruneChunkMesh(chunkName);
@@ -2190,7 +2194,7 @@ export default function Game() {
   function generateNearbyChunks(
     _chunkX: number,
     _chunkY: number,
-    _chunkZ: number
+    _chunkZ: number,
   ) {
     for (
       let chunkX = _chunkX - NEGATIVE_X_RENDER_DISTANCE;
@@ -2341,7 +2345,7 @@ export default function Game() {
     const saveData = {
       seed: seedRef.current,
       modifiedChunks: Array.from(modifiedChunks.current.entries()).map(
-        ([key, map]) => [key, Array.from(map.entries())]
+        ([key, map]) => [key, Array.from(map.entries())],
       ),
       position: {
         x: playerObj.position.x,
@@ -2373,8 +2377,8 @@ export default function Game() {
           ([key, entries]: [string, [number, number][]]) => [
             key,
             new Map(entries),
-          ]
-        )
+          ],
+        ),
       );
       setHotbarSlots(normalizeHotbar(saveData.hotbarSlots));
 
@@ -2383,12 +2387,12 @@ export default function Game() {
         playerObj.position.set(
           saveData.position.x,
           saveData.position.y,
-          saveData.position.z
+          saveData.position.z,
         );
         playerObj.rotation.set(
           saveData.rotation.x,
           saveData.rotation.y,
-          saveData.rotation.z
+          saveData.rotation.z,
         );
       }
 
@@ -2433,7 +2437,7 @@ export default function Game() {
         let currentPoint = new THREE.Vector3(
           camera.position.x,
           camera.position.y,
-          camera.position.z
+          camera.position.z,
         );
 
         let lastX = Math.round(currentPoint.x);
@@ -2449,8 +2453,8 @@ export default function Game() {
             new THREE.Vector3(
               cameraDirection.x,
               cameraDirection.y,
-              cameraDirection.z
-            )
+              cameraDirection.z,
+            ),
           );
           const blockType = getBlock(x, y, z);
           if (blockType !== null && blockType !== BlockType.AIR) {
@@ -2550,7 +2554,7 @@ export default function Game() {
         onSelectBlock={(block) => {
           const clampedIndex = Math.max(
             0,
-            Math.min(selectedSlot, HOTBAR_SIZE - 1)
+            Math.min(selectedSlot, HOTBAR_SIZE - 1),
           );
           const base = normalizeHotbar(hotbarSlots);
           const newSlots = [...base];

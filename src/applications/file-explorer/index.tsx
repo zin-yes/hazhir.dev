@@ -40,22 +40,22 @@ import {
 } from "@/components/ui/tooltip";
 import { FileSystemNode, useFileSystem } from "@/hooks/use-file-system";
 import {
-  executeFilePath,
-  isExecutableFile,
-  isShortcutFile,
-} from "@/lib/file-execution";
-import {
   getFileClipboard,
   setFileClipboard,
   subscribeToFileClipboard,
 } from "@/lib/file-clipboard";
 import {
+  executeFilePath,
+  isExecutableFile,
+  isShortcutFile,
+} from "@/lib/file-execution";
+import {
   FILE_DRAG_MIME,
   readDroppedPathsFromDataTransfer,
   serializeFileDragPayload,
-  setInternalFileDragActive,
-  setInternalDraggedPaths,
   setFileDragPreview,
+  setInternalDraggedPaths,
+  setInternalFileDragActive,
 } from "@/lib/file-transfer-dnd";
 import { getHomePath } from "@/lib/system-user";
 import { cn } from "@/lib/utils";
@@ -63,9 +63,9 @@ import {
   ArrowLeft,
   ArrowRight,
   ArrowUp,
-  ClipboardPaste,
   ChevronDown,
   ChevronRight,
+  ClipboardPaste,
   Copy,
   Download,
   Edit3,
@@ -1245,7 +1245,8 @@ export default function FileExplorerApplication({
       const directoryDropZone = target?.closest(
         "[data-file-drop-zone='true'][data-file-drop-kind='directory']",
       ) as HTMLElement | null;
-      const destinationPath = directoryDropZone?.dataset.fileDropPath ?? currentPath;
+      const destinationPath =
+        directoryDropZone?.dataset.fileDropPath ?? currentPath;
 
       movePathsToDirectory(paths, destinationPath);
     },
@@ -1372,13 +1373,11 @@ export default function FileExplorerApplication({
           setSelectedPaths(new Set([nextPath]));
         }
         setLastSelectedPath(nextPath);
-        itemRefs.current
-          .get(nextPath)
-          ?.scrollIntoView({
-            behavior: "smooth",
-            block: "nearest",
-            inline: "nearest",
-          });
+        itemRefs.current.get(nextPath)?.scrollIntoView({
+          behavior: "smooth",
+          block: "nearest",
+          inline: "nearest",
+        });
       };
 
       if (e.key === "ArrowLeft" || e.key === "ArrowUp") {
@@ -1683,7 +1682,9 @@ export default function FileExplorerApplication({
                 event.preventDefault();
                 event.stopPropagation();
                 clearBreadcrumbHoverTimer();
-                const paths = readDroppedPathsFromDataTransfer(event.dataTransfer);
+                const paths = readDroppedPathsFromDataTransfer(
+                  event.dataTransfer,
+                );
                 if (!paths.length) return;
                 movePathsToDirectory(paths, "/");
               }}
@@ -1718,7 +1719,9 @@ export default function FileExplorerApplication({
                     event.preventDefault();
                     event.stopPropagation();
                     clearBreadcrumbHoverTimer();
-                    const paths = readDroppedPathsFromDataTransfer(event.dataTransfer);
+                    const paths = readDroppedPathsFromDataTransfer(
+                      event.dataTransfer,
+                    );
                     if (!paths.length) return;
                     movePathsToDirectory(paths, part.path);
                   }}
