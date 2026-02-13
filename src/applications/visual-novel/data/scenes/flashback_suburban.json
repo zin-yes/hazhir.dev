@@ -11,12 +11,16 @@
     {
       "characterId": "young_dot",
       "position": "left",
+      "alignX": "left",
+      "alignY": "bottom",
       "x": 80,
       "y": 140
     },
     {
       "characterId": "young_com",
       "position": "right",
+      "alignX": "left",
+      "alignY": "bottom",
       "x": 380,
       "y": 140
     }

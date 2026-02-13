@@ -1,6 +1,6 @@
 import type { Terminal } from "@xterm/xterm";
 
-import { useSession } from "next-auth/react";
+import { useSession } from "@/auth/client";
 import { getCwd } from "./cd";
 import type { CommandAutocomplete, CommandCallback } from "./index";
 

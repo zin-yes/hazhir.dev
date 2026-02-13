@@ -1,34 +1,33 @@
-import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import {
   Card,
+  CardContent,
+  CardDescription,
   CardHeader,
   CardTitle,
-  CardDescription,
-  CardContent,
 } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Select,
-  SelectTrigger,
-  SelectValue,
   SelectContent,
   SelectItem,
+  SelectTrigger,
+  SelectValue,
 } from "@/components/ui/select";
 import {
   AccessibilityIcon,
   AppWindowIcon,
   ClockIcon,
-  LayoutGridIcon,
   LockIcon,
   MenuIcon,
   NetworkIcon,
   PowerIcon,
   SearchIcon,
   SettingsIcon,
-  UserIcon,
+  UserIcon
 } from "lucide-react";
-import { ScrollArea } from "@/components/ui/scroll-area";
+import Link from "next/link";
 
 export default function MockSettingsApplication() {
   return (
@@ -229,7 +228,7 @@ export default function MockSettingsApplication() {
                   <div className="grid gap-4">
                     <div className="grid grid-cols-[120px_1fr] items-center gap-4">
                       <Label>Application</Label>
-                      <div>hazhirOS</div>
+                      <div>hazhir.dev</div>
                     </div>
                     <div className="grid grid-cols-[120px_1fr] items-center gap-4">
                       <Label>Version</Label>

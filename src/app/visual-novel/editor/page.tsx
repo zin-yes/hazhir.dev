@@ -51,8 +51,12 @@ type DialogSegmentJson = {
 type SceneSpriteJson = {
   characterId: string;
   position?: "left" | "center" | "right";
+  alignX?: "left" | "right";
+  alignY?: "top" | "bottom";
   x?: number;
   y?: number;
+  width?: number;
+  height?: number;
 };
 
 type SceneJson = {
@@ -130,10 +134,10 @@ function getInitials(value?: string) {
 }
 
 function getSpriteFallbackPosition(position?: string, index?: number) {
-  const baseY = 80 + (index ?? 0) * 12;
+  const baseY = 120 + (index ?? 0) * 20;
   if (position === "left") return { x: 80, y: baseY };
-  if (position === "right") return { x: 440, y: baseY };
-  return { x: 260, y: baseY };
+  if (position === "right") return { x: 380, y: baseY };
+  return { x: 240, y: baseY };
 }
 
 function getCharacterSpriteUrl(character?: { sprites?: Array<{ url: string }> }) {
@@ -182,6 +186,8 @@ export default function VisualNovelEditorPage() {
     index: number;
     offsetX: number;
     offsetY: number;
+    height: number;
+    width: number;
   } | null>(null);
   const graphPanRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
   const clipboardRef = useRef<{
@@ -190,6 +196,7 @@ export default function VisualNovelEditorPage() {
   } | null>(null);
   const previewTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const previewTextRef = useRef<string>("");
+  const baseSpriteSize = { width: 160, height: 240 };
 
   const selectedScene = useMemo(
     () => scenes.find((scene) => scene.id === selectedSceneId),
@@ -445,6 +452,24 @@ export default function VisualNovelEditorPage() {
       if (!spriteDragRef.current || !sceneDraft || !previewRef.current) return;
       const { index, offsetX, offsetY } = spriteDragRef.current;
       const containerRect = previewRef.current.getBoundingClientRect();
+      const elementHeight = spriteDragRef.current?.height ?? baseSpriteSize.height;
+      const elementWidth = spriteDragRef.current?.width ?? baseSpriteSize.width;
+
+      const alignX = sceneDraft.sprites?.[index]?.alignX ?? "left";
+      const alignY = sceneDraft.sprites?.[index]?.alignY ?? "bottom";
+
+      const nextX =
+        alignX === "left"
+          ? Math.max(0, event.clientX - containerRect.left - offsetX)
+          : Math.max(0, containerRect.right - event.clientX - (elementWidth - offsetX));
+
+      const nextY =
+        alignY === "bottom"
+          ? Math.max(
+              0,
+              containerRect.bottom - event.clientY - (elementHeight - offsetY)
+            )
+          : Math.max(0, event.clientY - containerRect.top - offsetY);
 
       setSceneDraft((prev) => {
         if (!prev || !prev.sprites) return prev;
@@ -454,8 +479,8 @@ export default function VisualNovelEditorPage() {
           spriteIndex === index
             ? {
                 ...sprite,
-                x: event.clientX - containerRect.left - offsetX,
-                y: event.clientY - containerRect.top - offsetY,
+                x: nextX,
+                y: nextY,
               }
             : sprite
         );
@@ -775,8 +800,12 @@ export default function VisualNovelEditorPage() {
     const nextSprite: SceneSpriteJson = {
       characterId,
       position: "center",
-      x: 120,
+      alignX: "left",
+      alignY: "bottom",
+      x: 80,
       y: 120,
+      width: baseSpriteSize.width,
+      height: baseSpriteSize.height,
     };
     setSceneDraft((prev) => {
       if (!prev) return prev;
@@ -1176,14 +1205,24 @@ export default function VisualNovelEditorPage() {
                     const fallback = getSpriteFallbackPosition(sprite.position, index);
                     const x = sprite.x ?? fallback.x;
                     const y = sprite.y ?? fallback.y;
+                    const alignX = sprite.alignX ?? "left";
+                    const alignY = sprite.alignY ?? "bottom";
+                    const spriteWidth = sprite.width ?? baseSpriteSize.width;
+                    const spriteHeight = sprite.height ?? baseSpriteSize.height;
                     const spriteUrl = getCharacterSpriteUrl(character);
                     if (!spriteUrl) return null;
 
                     return (
                       <div
                         key={`${sprite.characterId}-${index}`}
-                        className="absolute w-28 h-40 rounded-lg border-2 border-amber-400/60 bg-contain bg-top bg-no-repeat cursor-grab"
-                        style={{ left: x, top: y, backgroundImage: `url(${spriteUrl})` }}
+                        className="absolute rounded-lg border-2 border-amber-400/60 bg-contain bg-top bg-no-repeat cursor-grab"
+                        style={{
+                          ...(alignX === "left" ? { left: x } : { right: x }),
+                          ...(alignY === "bottom" ? { bottom: y } : { top: y }),
+                          width: spriteWidth,
+                          height: spriteHeight,
+                          backgroundImage: `url(${spriteUrl})`,
+                        }}
                         onMouseDown={(event) => {
                           if (!previewRef.current) return;
                           const rect = (event.currentTarget as HTMLDivElement).getBoundingClientRect();
@@ -1191,6 +1230,8 @@ export default function VisualNovelEditorPage() {
                             index,
                             offsetX: event.clientX - rect.left,
                             offsetY: event.clientY - rect.top,
+                            height: rect.height,
+                            width: rect.width,
                           };
                         }}
                       />
@@ -1472,6 +1513,32 @@ export default function VisualNovelEditorPage() {
                               </select>
                             </div>
                             <div className="mt-2 grid grid-cols-2 gap-2">
+                              <select
+                                className="h-9 w-full rounded-md border border-slate-700 bg-slate-950 px-2 text-sm"
+                                value={sprite.alignX || "left"}
+                                onChange={(event) =>
+                                  updateSceneSprite(index, {
+                                    alignX: event.target.value as "left" | "right",
+                                  })
+                                }
+                              >
+                                <option value="left">align left</option>
+                                <option value="right">align right</option>
+                              </select>
+                              <select
+                                className="h-9 w-full rounded-md border border-slate-700 bg-slate-950 px-2 text-sm"
+                                value={sprite.alignY || "bottom"}
+                                onChange={(event) =>
+                                  updateSceneSprite(index, {
+                                    alignY: event.target.value as "top" | "bottom",
+                                  })
+                                }
+                              >
+                                <option value="bottom">align bottom</option>
+                                <option value="top">align top</option>
+                              </select>
+                            </div>
+                            <div className="mt-2 grid grid-cols-2 gap-2">
                               <Input
                                 value={sprite.x?.toString() || ""}
                                 onChange={(event) =>
@@ -1479,7 +1546,7 @@ export default function VisualNovelEditorPage() {
                                     x: Number(event.target.value) || 0,
                                   })
                                 }
-                                placeholder="X"
+                                placeholder="X (px)"
                               />
                               <Input
                                 value={sprite.y?.toString() || ""}
@@ -1488,7 +1555,27 @@ export default function VisualNovelEditorPage() {
                                     y: Number(event.target.value) || 0,
                                   })
                                 }
-                                placeholder="Y"
+                                placeholder="Y (px)"
+                              />
+                            </div>
+                            <div className="mt-2 grid grid-cols-2 gap-2">
+                              <Input
+                                value={sprite.width?.toString() || ""}
+                                onChange={(event) =>
+                                  updateSceneSprite(index, {
+                                    width: Number(event.target.value) || 0,
+                                  })
+                                }
+                                placeholder="Width (px)"
+                              />
+                              <Input
+                                value={sprite.height?.toString() || ""}
+                                onChange={(event) =>
+                                  updateSceneSprite(index, {
+                                    height: Number(event.target.value) || 0,
+                                  })
+                                }
+                                placeholder="Height (px)"
                               />
                             </div>
                             <Button

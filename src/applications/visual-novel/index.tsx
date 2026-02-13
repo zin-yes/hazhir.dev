@@ -7,10 +7,10 @@ import { scenes, characters } from "@/applications/visual-novel/data/loader";
 import type { DialogSegment, DialogSegmentChoice } from "./types";
 
 function getSpriteFallbackPosition(position?: string, index?: number) {
-  const baseY = 40 + (index ?? 0) * 12;
-  if (position === "left") return { x: 40, y: baseY };
+  const baseY = 120 + (index ?? 0) * 20;
+  if (position === "left") return { x: 80, y: baseY };
   if (position === "right") return { x: 380, y: baseY };
-  return { x: 210, y: baseY };
+  return { x: 240, y: baseY };
 }
 
 function getCharacterSpriteUrl(character?: { sprites?: Array<{ url: string }> }) {
@@ -32,6 +32,7 @@ export default function VisualNovelApplication() {
   const displayedTextRef = useRef<string>("");
   const segmentBaseRef = useRef<string>("");
   const segmentFullRef = useRef<string>("");
+  const stageRef = useRef<HTMLDivElement | null>(null);
 
   const currentScene = scenes[currentSceneId];
   const currentSegment = currentScene?.dialogSegments[currentSegmentId];
@@ -42,6 +43,7 @@ export default function VisualNovelApplication() {
   const isCutscene = currentScene?.sceneType === "cutscene";
   const isChapterStart = currentScene?.sceneType === "chapter_start";
   const isChapterEnd = currentScene?.sceneType === "chapter_end";
+  const baseSpriteSize = { width: 160, height: 240 };
 
   // Debug: log when scene or dialogue changes
   useEffect(() => {
@@ -61,6 +63,8 @@ export default function VisualNovelApplication() {
     setDisplayedText("");
     setIsTyping(false);
   }, [currentSceneId, currentScene]);
+
+
 
   useEffect(() => {
     displayedTextRef.current = displayedText;
@@ -298,7 +302,8 @@ export default function VisualNovelApplication() {
 
   return (
     <div
-      className="h-full w-full flex flex-col bg-black relative overflow-hidden"
+      ref={stageRef}
+      className="h-full w-full bg-black relative overflow-hidden"
       onClick={() => {
         if (isCutscene && !currentSegment?.choices?.length) {
           handleNext();
@@ -307,20 +312,20 @@ export default function VisualNovelApplication() {
     >
       {/* Background */}
       <div className="absolute inset-0 z-0">
-        {/* Cafe background gradient */}
         <div className="w-full h-full bg-gradient-to-br from-amber-900/40 via-slate-900 to-slate-950" />
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_20%,rgba(251,191,36,0.1),transparent_50%)]" />
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_70%_80%,rgba(139,92,246,0.05),transparent_50%)]" />
         {backgroundUrl && (
-          <div
-            className="absolute inset-0 bg-cover bg-center opacity-40"
-            style={{ backgroundImage: `url(${backgroundUrl})` }}
+          <img
+            src={backgroundUrl}
+            alt=""
+            className="absolute left-1/2 top-0 w-full h-auto -translate-x-1/2 opacity-40"
           />
         )}
       </div>
 
       {/* Character Sprite Area */}
-      <div className="flex-1 relative z-10 flex items-end justify-center pb-32">
+      <div className="absolute inset-0 z-10">
         {currentScene.sprites && currentScene.sprites.length > 0 && (
           <div className="relative h-full w-full">
             {currentScene.sprites.map((sprite, index) => {
@@ -328,6 +333,10 @@ export default function VisualNovelApplication() {
               const fallback = getSpriteFallbackPosition(sprite.position, index);
               const x = sprite.x ?? fallback.x;
               const y = sprite.y ?? fallback.y;
+              const alignX = sprite.alignX ?? "left";
+              const alignY = sprite.alignY ?? "bottom";
+              const spriteWidth = sprite.width ?? baseSpriteSize.width;
+              const spriteHeight = sprite.height ?? baseSpriteSize.height;
               const isNarrator = sprite.characterId === "narrator";
               if (isNarrator) return null;
               const spriteUrl = getCharacterSpriteUrl(character);
@@ -336,10 +345,12 @@ export default function VisualNovelApplication() {
               return (
                 <div
                   key={`${sprite.characterId}-${index}`}
-                  className="absolute w-40 h-60 bg-contain bg-top bg-no-repeat"
+                  className="absolute bg-contain bg-top bg-no-repeat"
                   style={{
-                    left: x,
-                    top: y,
+                    ...(alignX === "left" ? { left: x } : { right: x }),
+                    ...(alignY === "bottom" ? { bottom: y } : { top: y }),
+                    width: spriteWidth,
+                    height: spriteHeight,
                     backgroundImage: `url(${spriteUrl})`,
                   }}
                 />
@@ -349,7 +360,7 @@ export default function VisualNovelApplication() {
         )}
       </div>
 
-      <div className="relative z-20 p-6">
+      <div className="absolute bottom-0 left-0 right-0 z-20 p-6">
         <div className="bg-slate-900/95 backdrop-blur-sm border border-slate-700/50 rounded-lg p-6 shadow-2xl">
           {currentSegment && (
             <div className="mb-3">

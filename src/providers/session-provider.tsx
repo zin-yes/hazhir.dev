@@ -1,10 +1,11 @@
 "use client";
 
-import { SessionProvider, SessionProviderProps } from "next-auth/react";
+import type { ReactNode } from "react";
 
-export function NextAuthSessionProvider({
+export function AppSessionProvider({
   children,
-  ...props
-}: SessionProviderProps) {
-  return <SessionProvider {...props}>{children}</SessionProvider>;
+}: {
+  children: ReactNode;
+}) {
+  return <>{children}</>;
 }

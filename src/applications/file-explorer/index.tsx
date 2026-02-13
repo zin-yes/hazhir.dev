@@ -458,6 +458,7 @@ export default function FileExplorerApplication() {
   const [createMode, setCreateMode] = useState<"file" | "folder" | null>(null);
   const [createValue, setCreateValue] = useState("");
   const [createError, setCreateError] = useState("");
+  const rootRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const viewportRef = useRef<HTMLDivElement>(null);
   const itemRefs = useRef<Map<string, HTMLDivElement>>(new Map());
@@ -574,6 +575,7 @@ export default function FileExplorerApplication() {
   const handleSelect = useCallback(
     (path: string, event: React.MouseEvent<HTMLDivElement>) => {
       if (event.button !== 0) return;
+      rootRef.current?.focus();
       if (event.shiftKey && lastSelectedPath) {
         selectRange(lastSelectedPath, path);
         setLastSelectedPath(path);
@@ -828,8 +830,8 @@ export default function FileExplorerApplication() {
     setCreateMode(null);
   }, [createMode, createValue, currentPath, fs]);
 
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
+  const handleExplorerKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLDivElement>) => {
       const target = e.target as HTMLElement | null;
       if (target) {
         const tagName = target.tagName;
@@ -843,36 +845,100 @@ export default function FileExplorerApplication() {
         }
       }
 
-      if (e.key === "Delete" && selectedPaths.size > 0) {
+      const orderedPaths = contents.map((item) => item.path);
+      const activePath =
+        (lastSelectedPath && selectedPaths.has(lastSelectedPath)
+          ? lastSelectedPath
+          : Array.from(selectedPaths)[0]) ?? null;
+
+      const moveSelectionByOffset = (offset: number, extendRange: boolean) => {
+        if (orderedPaths.length === 0) return;
+
+        let currentIndex = activePath ? orderedPaths.indexOf(activePath) : -1;
+        if (currentIndex === -1) {
+          currentIndex = offset > 0 ? -1 : orderedPaths.length;
+        }
+
+        const nextIndex = Math.max(
+          0,
+          Math.min(orderedPaths.length - 1, currentIndex + offset)
+        );
+        const nextPath = orderedPaths[nextIndex];
+        if (!nextPath) return;
+
+        if (extendRange && lastSelectedPath) {
+          selectRange(lastSelectedPath, nextPath);
+        } else {
+          setSelectedPaths(new Set([nextPath]));
+        }
+        setLastSelectedPath(nextPath);
+        itemRefs.current
+          .get(nextPath)
+          ?.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "nearest" });
+      };
+
+      if (e.key === "ArrowLeft" || e.key === "ArrowUp") {
+        e.preventDefault();
+        moveSelectionByOffset(-1, e.shiftKey);
+        return;
+      }
+
+      if (e.key === "ArrowRight" || e.key === "ArrowDown") {
+        e.preventDefault();
+        moveSelectionByOffset(1, e.shiftKey);
+        return;
+      }
+
+      if (e.key === "Enter") {
+        e.preventDefault();
+        const pathToOpen = activePath ?? orderedPaths[0];
+        if (!pathToOpen) return;
+        const node = fs.getNode(pathToOpen);
+        if (!node) return;
+        handleOpen(node);
+        return;
+      }
+
+      if ((e.key === "Delete" || e.key === "Backspace") && selectedPaths.size > 0) {
+        e.preventDefault();
         selectedPaths.forEach((path) => {
           fs.deleteNode(path);
         });
         setSelectedPaths(new Set());
+        return;
       }
+
       if ((e.ctrlKey || e.metaKey) && e.key === "c" && selectedPaths.size > 0) {
+        e.preventDefault();
         const nodes = Array.from(selectedPaths)
           .map((p) => fs.getNode(p))
           .filter(Boolean) as FileSystemNode[];
         setClipboard({ nodes, mode: "copy" });
+        return;
       }
+
       if ((e.ctrlKey || e.metaKey) && e.key === "x" && selectedPaths.size > 0) {
+        e.preventDefault();
         const nodes = Array.from(selectedPaths)
           .map((p) => fs.getNode(p))
           .filter(Boolean) as FileSystemNode[];
         setClipboard({ nodes, mode: "cut" });
+        return;
       }
+
       if ((e.ctrlKey || e.metaKey) && e.key === "v" && clipboard) {
+        e.preventDefault();
         handlePaste();
+        return;
       }
+
       if ((e.ctrlKey || e.metaKey) && e.key === "a") {
         e.preventDefault();
-        setSelectedPaths(new Set(contents.map((n) => n.path)));
+        setSelectedPaths(new Set(orderedPaths));
       }
-    };
-
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [selectedPaths, clipboard, contents, handlePaste]);
+    },
+    [clipboard, contents, fs, handleOpen, handlePaste, lastSelectedPath, selectRange, selectedPaths]
+  );
 
   useEffect(() => {
     const handleStorage = () => {
@@ -906,7 +972,15 @@ export default function FileExplorerApplication() {
 
   return (
     <TooltipProvider>
-      <div className="flex flex-col h-full bg-background text-foreground">
+      <div
+        ref={rootRef}
+        tabIndex={0}
+        className="flex flex-col h-full bg-background text-foreground outline-none"
+        onMouseDownCapture={() => {
+          rootRef.current?.focus();
+        }}
+        onKeyDown={handleExplorerKeyDown}
+      >
         {childWindows}
 
         <Dialog open={Boolean(renameTarget)} onOpenChange={(open) => {

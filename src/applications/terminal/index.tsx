@@ -10,7 +10,7 @@ import { FitAddon } from "@xterm/addon-fit";
 
 import themes from "./themes.json";
 
-import { useSession } from "next-auth/react";
+import { useSession } from "@/auth/client";
 import { getCommandLinePrefix, parseCommand } from "./command-line-routine";
 
 import ansi from "ansi-escape-sequences";
@@ -76,6 +76,11 @@ export default function TerminalApplication({
   }, [terminalTheme]);
 
   const session = useSession();
+  const sessionRef = useRef(session);
+
+  useEffect(() => {
+    sessionRef.current = session;
+  }, [session]);
 
   useEffect(() => {
     if (
@@ -97,9 +102,12 @@ export default function TerminalApplication({
 
         fitAddon.fit();
 
+        const currentSession = sessionRef.current;
         const username =
-          session.status === "authenticated"
-            ? session.data.user.name ?? session.data.user.id + " "
+          currentSession.status === "authenticated"
+            ? (currentSession.data.user.username ??
+                currentSession.data.user.name ??
+                currentSession.data.user.id)
             : "";
 
         figlet(
@@ -129,7 +137,12 @@ export default function TerminalApplication({
             terminal.write(getCommandLinePrefix(username));
 
             terminal.onKey(async (event) => {
-              await parseCommand(terminal, event, session, windowIdentifier);
+              await parseCommand(
+                terminal,
+                event,
+                sessionRef.current,
+                windowIdentifier
+              );
             });
           }
         );

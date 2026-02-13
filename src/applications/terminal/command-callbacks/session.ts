@@ -1,7 +1,7 @@
 import type { Terminal } from "@xterm/xterm";
 
 import type { CommandAutocomplete, CommandCallback } from "./index";
-import { useSession } from "next-auth/react";
+import { useSession } from "@/auth/client";
 
 import commands from "../commands.json";
 
@@ -20,6 +20,9 @@ async function session(
   if (trimmedCommand.toLowerCase().startsWith("session status")) {
     terminal.writeln(" ".repeat(terminal.cols));
     terminal.writeln("Session status: " + session.status);
+    if (session.status === "authenticated") {
+      terminal.writeln("Auth mode: " + (session.isGuest ? "guest" : "user"));
+    }
     terminal.writeln(" ".repeat(terminal.cols));
   } else if (trimmedCommand.toLowerCase().startsWith("session data")) {
     terminal.writeln(" ".repeat(terminal.cols));

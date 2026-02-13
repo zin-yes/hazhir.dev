@@ -11,12 +11,16 @@
     {
       "characterId": "dot",
       "position": "left",
+      "alignX": "left",
+      "alignY": "bottom",
       "x": 80,
       "y": 120
     },
     {
       "characterId": "com",
       "position": "right",
+      "alignX": "left",
+      "alignY": "bottom",
       "x": 380,
       "y": 120
     }

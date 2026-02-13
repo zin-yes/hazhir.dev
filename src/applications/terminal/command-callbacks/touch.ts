@@ -1,7 +1,7 @@
 import type { Terminal } from "@xterm/xterm";
 
 import { useFileSystem } from "@/hooks/use-file-system";
-import { useSession } from "next-auth/react";
+import { useSession } from "@/auth/client";
 import { getCwd } from "./cd";
 import type { CommandAutocomplete, CommandCallback } from "./index";
 import { getPathCompletions } from "./autocomplete";

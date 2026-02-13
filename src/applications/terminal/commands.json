@@ -17,10 +17,10 @@
   },
   {
     "name": "signin",
-    "usage": ["signin"],
-    "examples": ["signin"],
+    "usage": ["signin [modal/google/guest]"],
+    "examples": ["signin", "signin modal", "signin guest"],
     "aliases": [],
-    "description": "Redirects you to the sign in page.",
+    "description": "Opens the sign in modal or starts a temporary guest session.",
     "callbackFunctionName": "signin"
   },
   {
@@ -86,7 +86,7 @@
   {
     "name": "session",
     "usage": ["session <status/data>"],
-    "examples": ["session status", "status data"],
+    "examples": ["session status", "session data"],
     "aliases": [],
     "description": "Displays information about the authentication session.",
     "callbackFunctionName": "session"

@@ -4,7 +4,8 @@ import {
   text,
   primaryKey,
 } from "drizzle-orm/sqlite-core";
-import type { AdapterAccountType } from "next-auth/adapters";
+
+type AdapterAccountType = "oauth" | "oidc" | "email" | "credentials";
 
 export const users = sqliteTable("user", {
   id: text("id")
