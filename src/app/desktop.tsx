@@ -102,7 +102,7 @@ type DesktopSortMode = "name-asc" | "name-desc" | "size-asc" | "size-desc";
 
 const DESKTOP_LAYOUT_STORAGE_KEY = "desktop-icon-layout-v2";
 const DESKTOP_GRID_COL_WIDTH = 124;
-const DESKTOP_GRID_ROW_HEIGHT = 124;
+const DESKTOP_GRID_ROW_HEIGHT = 108;
 const DESKTOP_GRID_PADDING = 12;
 const DESKTOP_ICON_WIDTH = 96;
 const DESKTOP_ICON_HEIGHT = 96;
