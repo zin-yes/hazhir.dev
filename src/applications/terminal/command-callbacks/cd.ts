@@ -1,9 +1,10 @@
 import type { Terminal } from "@xterm/xterm";
 
-import { useFileSystem } from "@/hooks/use-file-system";
 import { useSession } from "@/auth/client";
-import type { CommandAutocomplete, CommandCallback } from "./index";
+import { useFileSystem } from "@/hooks/use-file-system";
+import { getHomePath } from "@/lib/system-user";
 import { getPathCompletions } from "./autocomplete";
+import type { CommandAutocomplete, CommandCallback } from "./index";
 
 // Store current working directory in window for persistence
 declare global {
@@ -16,7 +17,7 @@ function getCwd(): string {
   if (typeof window !== "undefined" && window.terminalCwd) {
     return window.terminalCwd;
   }
-  return "/home/user";
+  return getHomePath();
 }
 
 function setCwd(path: string): void {
@@ -34,11 +35,11 @@ async function cd(
   const fs = useFileSystem();
   const args = fullCommand.trim().split(/\s+/);
   
-  let targetPath = args[1] || "/home/user";
+  let targetPath = args[1] || getHomePath();
   
   // Handle ~ for home directory
   if (targetPath === "~" || targetPath.startsWith("~/")) {
-    targetPath = targetPath.replace("~", "/home/user");
+    targetPath = targetPath.replace("~", getHomePath());
   }
   
   // Handle .. for parent directory

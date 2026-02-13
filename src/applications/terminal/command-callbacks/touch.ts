@@ -1,10 +1,10 @@
 import type { Terminal } from "@xterm/xterm";
 
-import { useFileSystem } from "@/hooks/use-file-system";
 import { useSession } from "@/auth/client";
+import { useFileSystem } from "@/hooks/use-file-system";
+import { getPathCompletions } from "./autocomplete";
 import { getCwd } from "./cd";
 import type { CommandAutocomplete, CommandCallback } from "./index";
-import { getPathCompletions } from "./autocomplete";
 
 async function touch(
   fullCommand: string,
@@ -44,7 +44,9 @@ async function touch(
       continue;
     }
     
-    fs.createFile(parentPath, fileName, "");
+    if (!fs.createFile(parentPath, fileName, "")) {
+      terminal.writeln(`\x1b[31mtouch: cannot touch '${name}': Permission denied\x1b[0m`);
+    }
   }
 }
 

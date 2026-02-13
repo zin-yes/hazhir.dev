@@ -11,7 +11,16 @@ import { FitAddon } from "@xterm/addon-fit";
 import themes from "./themes.json";
 
 import { useSession } from "@/auth/client";
-import { getCommandLinePrefix, parseCommand } from "./command-line-routine";
+import {
+    FILE_PATH_DROP_EVENT,
+    hasFileDragType,
+    readDroppedPathsFromDataTransfer,
+} from "@/lib/file-transfer-dnd";
+import {
+    getCommandLinePrefix,
+    insertTextIntoCommandBuffer,
+    parseCommand,
+} from "./command-line-routine";
 
 import ansi from "ansi-escape-sequences";
 import figlet from "figlet";
@@ -81,6 +90,19 @@ export default function TerminalApplication({
   useEffect(() => {
     sessionRef.current = session;
   }, [session]);
+
+  const quoteShellPath = (path: string) => {
+    if (!/[\s"'`$\\]/.test(path)) return path;
+    return `"${path.replace(/(["`$\\])/g, "\\$1")}"`;
+  };
+
+  const insertDroppedPaths = (paths: string[]) => {
+    if (!terminal) return;
+    const unique = Array.from(new Set(paths.filter(Boolean)));
+    if (unique.length === 0) return;
+    const text = unique.map((path) => quoteShellPath(path)).join(" ");
+    insertTextIntoCommandBuffer(terminal, text);
+  };
 
   useEffect(() => {
     if (
@@ -159,11 +181,96 @@ export default function TerminalApplication({
     session,
   ]);
 
+  useEffect(() => {
+    const root = terminalContainerRef.current;
+    if (!root) return;
+
+    const handleCustomPathDrop = (event: Event) => {
+      const customEvent = event as CustomEvent<{ paths?: string[] }>;
+      const paths = customEvent.detail?.paths;
+      if (!paths || paths.length === 0) return;
+      event.preventDefault();
+      event.stopPropagation();
+      insertDroppedPaths(paths);
+      terminal.focus();
+    };
+
+    root.addEventListener(FILE_PATH_DROP_EVENT, handleCustomPathDrop as EventListener);
+
+    const handleNativeDragOver = (event: DragEvent) => {
+      if (!hasFileDragType(event.dataTransfer) && !(event.dataTransfer?.types?.includes("text/plain") || event.dataTransfer?.types?.includes("text/uri-list"))) {
+        return;
+      }
+      event.preventDefault();
+      if (event.dataTransfer) {
+        event.dataTransfer.dropEffect = "move";
+      }
+    };
+
+    const handleNativeDrop = (event: DragEvent) => {
+      const paths = readDroppedPathsFromDataTransfer(event.dataTransfer);
+      if (paths.length === 0) return;
+      event.preventDefault();
+      event.stopPropagation();
+      insertDroppedPaths(paths);
+      terminal.focus();
+    };
+
+    root.addEventListener("dragenter", handleNativeDragOver, true);
+    root.addEventListener("dragover", handleNativeDragOver, true);
+    root.addEventListener("drop", handleNativeDrop, true);
+
+    return () => {
+      root.removeEventListener(FILE_PATH_DROP_EVENT, handleCustomPathDrop as EventListener);
+      root.removeEventListener("dragenter", handleNativeDragOver, true);
+      root.removeEventListener("dragover", handleNativeDragOver, true);
+      root.removeEventListener("drop", handleNativeDrop, true);
+    };
+  }, [terminal]);
+
   return (
     <div
       className="w-full h-full p-4 flex justify-center items-center"
       style={{ background: terminalTheme.background }}
       ref={terminalContainerRef}
+      data-file-drop-zone="true"
+      data-file-drop-kind="terminal"
+      onDragEnter={(event) => {
+        if (!hasFileDragType(event.dataTransfer) && !(event.dataTransfer.types.includes("text/plain") || event.dataTransfer.types.includes("text/uri-list"))) {
+          return;
+        }
+        event.preventDefault();
+        event.dataTransfer.dropEffect = "move";
+      }}
+      onDragOver={(event) => {
+        if (!hasFileDragType(event.dataTransfer) && !(event.dataTransfer.types.includes("text/plain") || event.dataTransfer.types.includes("text/uri-list"))) {
+          return;
+        }
+        event.preventDefault();
+        event.dataTransfer.dropEffect = "move";
+      }}
+      onDragOverCapture={(event) => {
+        if (!hasFileDragType(event.dataTransfer) && !(event.dataTransfer.types.includes("text/plain") || event.dataTransfer.types.includes("text/uri-list"))) {
+          return;
+        }
+        event.preventDefault();
+        event.dataTransfer.dropEffect = "move";
+      }}
+      onDrop={(event) => {
+        const paths = readDroppedPathsFromDataTransfer(event.dataTransfer);
+        if (paths.length === 0) return;
+        event.preventDefault();
+        insertDroppedPaths(paths);
+        terminal.focus();
+      }}
+      onDropCapture={(event) => {
+        const paths = readDroppedPathsFromDataTransfer(event.dataTransfer);
+        if (paths.length === 0) return;
+        event.preventDefault();
+        event.stopPropagation();
+        insertDroppedPaths(paths);
+        terminal.focus();
+      }}
     >
       <div ref={terminalRef} className="w-full h-full"></div>
       {resizeMessage !== "" ? (

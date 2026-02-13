@@ -1,10 +1,11 @@
 import type { Terminal } from "@xterm/xterm";
 
-import { useFileSystem } from "@/hooks/use-file-system";
 import { useSession } from "@/auth/client";
-import type { CommandAutocomplete, CommandCallback } from "./index";
-import { getCwd } from "./cd";
+import { useFileSystem } from "@/hooks/use-file-system";
+import { getHomePath } from "@/lib/system-user";
 import { getPathCompletions } from "./autocomplete";
+import { getCwd } from "./cd";
+import type { CommandAutocomplete, CommandCallback } from "./index";
 
 async function source(
   fullCommand: string,
@@ -14,11 +15,11 @@ async function source(
 ): Promise<void> {
   const fs = useFileSystem();
   const args = fullCommand.trim().split(/\s+/);
-  const target = args[1] ?? "~/terminal_rc";
+  const target = args[1] ?? "~/.terminal_rc";
 
   let targetPath = target;
   if (targetPath.startsWith("~")) {
-    targetPath = targetPath.replace("~", "/home/user");
+    targetPath = targetPath.replace("~", getHomePath());
   } else if (!targetPath.startsWith("/")) {
     targetPath = fs.normalizePath(`${getCwd()}/${targetPath}`);
   }
@@ -51,14 +52,14 @@ async function source(
 }
 
 const autocomplete: CommandAutocomplete = ({ currentToken }) => {
-  if (currentToken.length === 0) return ["~/terminal_rc"];
+  if (currentToken.length === 0) return ["~/.terminal_rc"];
   const base = getPathCompletions(currentToken, {
     includeFiles: true,
     includeDirs: false,
     includeHidden: true,
     appendDirSlash: false,
   });
-  const suggestions = ["~/terminal_rc", ...base];
+  const suggestions = ["~/.terminal_rc", ...base];
   return suggestions.filter((item) => item.startsWith(currentToken));
 };
 

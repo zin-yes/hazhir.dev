@@ -1,55 +1,57 @@
 "use client";
 
 import {
-  BookText,
-  Calculator,
-  File,
-  FileAudio,
-  FileCode,
-  FileImage,
-  FileText,
-  FileVideo,
-  FolderClosed,
-  Gamepad2,
-  SquareTerminal,
+    BookOpen,
+    BookText,
+    Calculator,
+    File,
+    FileAudio,
+    FileCode,
+    FileImage,
+    FileSymlink,
+    FileText,
+    FileVideo,
+    FolderClosed,
+    Gamepad2,
+    TerminalSquare,
 } from "lucide-react";
 
+import { Button } from "@/components/ui/button";
 import {
-  ContextMenu,
-  ContextMenuContent,
-  ContextMenuItem,
-  ContextMenuRadioGroup,
-  ContextMenuRadioItem,
-  ContextMenuSeparator,
-  ContextMenuSub,
-  ContextMenuSubContent,
-  ContextMenuSubTrigger,
-  ContextMenuTrigger,
+    ContextMenu,
+    ContextMenuContent,
+    ContextMenuItem,
+    ContextMenuRadioGroup,
+    ContextMenuRadioItem,
+    ContextMenuSeparator,
+    ContextMenuSub,
+    ContextMenuSubContent,
+    ContextMenuSubTrigger,
+    ContextMenuTrigger,
 } from "@/components/ui/context-menu";
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
+    Dialog,
+    DialogContent,
+    DialogDescription,
+    DialogFooter,
+    DialogHeader,
+    DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Button } from "@/components/ui/button";
 import { useFileSystem, type FileSystemNode } from "@/hooks/use-file-system";
+import { executeFilePath, isExecutableFile, isShortcutFile } from "@/lib/file-execution";
+import { FILE_PATH_DROP_EVENT, readFileDragPayload } from "@/lib/file-transfer-dnd";
+import { parseShortcut } from "@/lib/shortcut";
+import { getHomePath } from "@/lib/system-user";
 import { cn } from "@/lib/utils";
 
 import { ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { v4 } from "uuid";
+import { createPortal } from "react-dom";
 import {
-  CalculatorApplicationWindow,
-  FileExplorerApplicationWindow,
-  GameApplicationWindow,
-  SingleDocumentApplicationWindow,
-  TerminalApplicationWindow,
-  TextEditorApplicationWindow,
-  VisualNovelApplicationWindow,
+    FileExplorerApplicationWindow,
+    SingleDocumentApplicationWindow,
+    TextEditorApplicationWindow,
 } from "./application-windows";
 
 type DesktopItem = {
@@ -82,7 +84,7 @@ export default function Desktop({
 }) {
   const fs = useFileSystem();
   const fsRef = useRef(fs);
-  const desktopRootPath = "/home/user/Desktop";
+  const desktopRootPath = `${getHomePath()}/Desktop`;
   const containerRef = useRef<HTMLDivElement>(null);
   const iconRefs = useRef<Map<string, HTMLDivElement>>(new Map());
   const dragCandidateRef = useRef<{
@@ -188,6 +190,28 @@ export default function Desktop({
       return <FolderClosed size={30} className="text-blue-200" />;
     }
 
+    if (isShortcutFile(node)) {
+      const shortcut = parseShortcut(node.contents ?? "");
+      const iconName = shortcut?.icon;
+
+      const iconByName: Record<string, ReactNode> = {
+        TerminalSquare: <TerminalSquare size={30} className="text-white" />,
+        FolderClosed: <FolderClosed size={30} className="text-white" />,
+        Gamepad2: <Gamepad2 size={30} className="text-white" />,
+        Calculator: <Calculator size={30} className="text-white" />,
+        BookText: <BookText size={30} className="text-white" />,
+        BookOpen: <BookOpen size={30} className="text-white" />,
+      };
+
+      return iconName && iconByName[iconName]
+        ? iconByName[iconName]
+        : <FileSymlink size={30} className="text-white" />;
+    }
+
+    if (isExecutableFile(node)) {
+      return <FileCode size={30} className="text-orange-200" />;
+    }
+
     const ext = node.name.split(".").pop()?.toLowerCase();
     const iconConfig: { icon: typeof File; color: string } = (() => {
       switch (ext) {
@@ -238,6 +262,13 @@ export default function Desktop({
   const getFileOpenAction = useCallback(
     (node: FileSystemNode) => {
       if (node.type !== "file") return null;
+
+      if (isShortcutFile(node) || isExecutableFile(node)) {
+        return () => {
+          executeFilePath(node.path, fs);
+        };
+      }
+
       const ext = node.name.split(".").pop()?.toLowerCase();
       const textExtensions = new Set([
         "txt",
@@ -253,6 +284,7 @@ export default function Desktop({
         "yaml",
         "xml",
         "toml",
+        "shortcut",
       ]);
       if (textExtensions.has(ext || "")) {
         return () => addWindow(<TextEditorApplicationWindow filePath={node.path} />);
@@ -265,59 +297,15 @@ export default function Desktop({
       }
       return null;
     },
-    [addWindow]
+    [addWindow, fs]
   );
 
   const desktopItems = useMemo<DesktopItem[]>(() => {
-    const shortcuts = [
-      {
-        id: "app-terminal",
-        title: "Terminal",
-        icon: <SquareTerminal size={30} />,
-        kind: "app" as const,
-        onOpen: () => addWindow(<TerminalApplicationWindow identifier={v4()} />),
-      },
-      {
-        id: "app-voxel-game",
-        title: "Voxel Game",
-        icon: <Gamepad2 size={30} />,
-        kind: "app" as const,
-        onOpen: () => addWindow(<GameApplicationWindow />),
-      },
-      {
-        id: "app-visual-novel",
-        title: "Visual Novel",
-        icon: <BookText size={30} />,
-        kind: "app" as const,
-        onOpen: () => addWindow(<VisualNovelApplicationWindow />),
-      },
-      {
-        id: "app-file-explorer",
-        title: "File Explorer",
-        icon: <FolderClosed size={30} />,
-        kind: "app" as const,
-        onOpen: () => addWindow(<FileExplorerApplicationWindow addWindow={addWindow} />),
-      },
-      {
-        id: "app-calculator",
-        title: "Calculator",
-        icon: <Calculator size={30} />,
-        kind: "app" as const,
-        onOpen: () => addWindow(<CalculatorApplicationWindow />),
-      },
-      {
-        id: "file-cv",
-        title: "CV.pdf",
-        icon: <FileText size={30} />,
-        kind: "file" as const,
-        onOpen: () =>
-          addWindow(
-            <SingleDocumentApplicationWindow articleId="CV.pdf" title="CV.pdf" />
-          ),
-      },
-    ];
-
     const nodes = desktopNodes.map((node) => {
+      const shortcutMeta =
+        node.type === "file" && node.name.endsWith(".shortcut")
+          ? parseShortcut(node.contents ?? "")
+          : null;
       const openAction =
         node.type === "directory"
           ? () => addWindow(<FileExplorerApplicationWindow addWindow={addWindow} />)
@@ -325,7 +313,7 @@ export default function Desktop({
 
       return {
         id: node.path,
-        title: node.name,
+        title: shortcutMeta?.iconDisplayText ?? shortcutMeta?.name ?? node.name,
         icon: getFileIcon(node),
         kind: node.type === "directory" ? ("folder" as const) : ("file" as const),
         fileNode: node,
@@ -333,7 +321,7 @@ export default function Desktop({
       };
     });
 
-    return [...shortcuts, ...nodes];
+    return nodes;
   }, [addWindow, desktopNodes, getFileIcon, getFileOpenAction]);
 
   const getDesktopItemSize = useCallback((item: DesktopItem) => {
@@ -371,6 +359,15 @@ export default function Desktop({
       return sorted;
     },
     [getDesktopItemSize]
+  );
+
+  const desktopItemById = useMemo(
+    () =>
+      desktopItems.reduce<Record<string, DesktopItem>>((accumulator, item) => {
+        accumulator[item.id] = item;
+        return accumulator;
+      }, {}),
+    [desktopItems]
   );
 
   const getSlotKey = useCallback((position: DesktopGridPosition) => {
@@ -741,13 +738,65 @@ export default function Desktop({
       updateSelection(nextSelection);
     };
 
-    const handleMouseUp = () => {
+    const handleMouseUp = (event: MouseEvent) => {
       const dragCandidate = dragCandidateRef.current;
       const activeDraggingIds = draggingIdsRef.current;
       const activeDragDelta = dragDeltaRef.current;
       if (dragCandidate && activeDraggingIds.length > 0) {
         const container = containerRef.current;
-        if (container && activeDragDelta) {
+
+        let didExternalTransfer = false;
+        if (container) {
+          const dropTarget = document.elementFromPoint(
+            event.clientX,
+            event.clientY
+          ) as HTMLElement | null;
+          const isInsideDesktop = Boolean(dropTarget && container.contains(dropTarget));
+          if (!isInsideDesktop) {
+            const dropZone = dropTarget?.closest(
+              "[data-file-drop-zone='true']"
+            ) as HTMLElement | null;
+            const dropKind = dropZone?.dataset.fileDropKind;
+            const destinationPath = dropZone?.dataset.fileDropPath;
+
+            const sourcePaths = dragCandidate.dragIds
+              .map((dragId) =>
+                desktopItems.find((item) => item.id === dragId)?.fileNode?.path
+              )
+              .filter((path): path is string => Boolean(path));
+
+            if (sourcePaths.length > 0 && dropKind === "terminal") {
+              dropZone?.dispatchEvent(
+                new CustomEvent(FILE_PATH_DROP_EVENT, {
+                  bubbles: true,
+                  detail: { paths: sourcePaths },
+                })
+              );
+              didExternalTransfer = true;
+            } else if (destinationPath) {
+              if (sourcePaths.length > 0) {
+                const uniquePaths = Array.from(
+                  new Set(sourcePaths.map((item) => fs.normalizePath(item)))
+                );
+
+                uniquePaths.forEach((sourcePath) => {
+                  const sourceNode = fs.getNode(sourcePath);
+                  if (!sourceNode || sourceNode.readOnly) return;
+                  if (
+                    fs.normalizePath(sourceNode.parentPath) ===
+                    fs.normalizePath(destinationPath)
+                  ) {
+                    return;
+                  }
+                  fs.move(sourcePath, destinationPath);
+                });
+                didExternalTransfer = true;
+              }
+            }
+          }
+        }
+
+        if (!didExternalTransfer && container && activeDragDelta) {
           const primarySource = dragCandidate.sourcePositions[dragCandidate.primaryId];
           if (primarySource) {
             const deltaCol = Math.round(activeDragDelta.x / DESKTOP_GRID_COL_WIDTH);
@@ -822,8 +871,13 @@ export default function Desktop({
           }
         }
 
-        updateSelection(new Set(activeDraggingIds));
-        setLastSelectedId(dragCandidate.primaryId);
+        if (didExternalTransfer) {
+          updateSelection(new Set());
+          setLastSelectedId(null);
+        } else {
+          updateSelection(new Set(activeDraggingIds));
+          setLastSelectedId(dragCandidate.primaryId);
+        }
       }
 
       dragCandidateRef.current = null;
@@ -851,7 +905,7 @@ export default function Desktop({
       window.removeEventListener("mouseup", handleMouseUp);
       window.removeEventListener("blur", handleBlur);
     };
-  }, [desktopItems, endSelection, gridCols, gridRows, updateSelection]);
+  }, [desktopItems, endSelection, fs, gridCols, gridRows, updateSelection]);
 
   const handleDesktopContextMenu = useCallback(() => {
     return;
@@ -942,6 +996,10 @@ export default function Desktop({
     if (!renameTargetId) return;
     const item = desktopItems.find((entry) => entry.id === renameTargetId);
     if (!item?.fileNode) return;
+    if (item.fileNode.readOnly) {
+      setRenameError("This item is read-only.");
+      return;
+    }
 
     const trimmed = renameValue.trim();
     if (!trimmed) {
@@ -957,18 +1015,58 @@ export default function Desktop({
 
     const siblingConflict = fs
       .getChildren(item.fileNode.parentPath)
-      .some((node) => node.name === trimmed && node.path !== item.fileNode.path);
+      .some((node) => node.name === trimmed && node.path !== item.fileNode!.path);
 
     if (siblingConflict) {
       setRenameError("An item with this name already exists.");
       return;
     }
 
-    fs.rename(item.fileNode.path, trimmed);
+    if (!fs.rename(item.fileNode.path, trimmed)) {
+      setRenameError("Unable to rename this item.");
+      return;
+    }
     setRenameTargetId(null);
     setRenameValue("");
     setRenameError("");
   }, [desktopItems, fs, renameTargetId, renameValue]);
+
+  const movePathsToDirectory = useCallback(
+    (paths: string[], destinationDirectoryPath: string) => {
+      const uniquePaths = Array.from(new Set(paths.map((item) => fs.normalizePath(item))));
+
+      uniquePaths.forEach((sourcePath) => {
+        const sourceNode = fs.getNode(sourcePath);
+        if (!sourceNode || sourceNode.readOnly) return;
+        if (fs.normalizePath(sourceNode.parentPath) === fs.normalizePath(destinationDirectoryPath)) {
+          return;
+        }
+        fs.move(sourcePath, destinationDirectoryPath);
+      });
+    },
+    [fs]
+  );
+
+  const handleDesktopDropToRoot = useCallback(
+    (event: React.DragEvent<HTMLDivElement>) => {
+      event.preventDefault();
+      const payload = readFileDragPayload(event.dataTransfer);
+      if (!payload?.paths?.length) return;
+      movePathsToDirectory(payload.paths, desktopRootPath);
+    },
+    [desktopRootPath, movePathsToDirectory]
+  );
+
+  const handleDesktopDropToFolder = useCallback(
+    (event: React.DragEvent<HTMLDivElement>, folderPath: string) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const payload = readFileDragPayload(event.dataTransfer);
+      if (!payload?.paths?.length) return;
+      movePathsToDirectory(payload.paths, folderPath);
+    },
+    [movePathsToDirectory]
+  );
 
   const moveSelectionByOffset = useCallback(
     (offset: number, extendRange: boolean) => {
@@ -1062,7 +1160,13 @@ export default function Desktop({
         <div
           ref={containerRef}
           tabIndex={0}
+          data-file-drop-zone="true"
+          data-file-drop-kind="desktop-root"
           className="w-screen h-screen absolute top-0 bottom-0 left-0 right-0 overflow-hidden z-0 select-none"
+          onDragOver={(event) => {
+            event.preventDefault();
+          }}
+          onDrop={handleDesktopDropToRoot}
           onMouseDownCapture={() => {
             containerRef.current?.focus();
           }}
@@ -1131,6 +1235,15 @@ export default function Desktop({
                   <ContextMenuTrigger asChild>
                     <div
                       data-desktop-icon="true"
+                      data-file-drop-zone={
+                        item.fileNode?.type === "directory" ? "true" : undefined
+                      }
+                      data-file-drop-kind={
+                        item.fileNode?.type === "directory" ? "directory" : undefined
+                      }
+                      data-file-drop-path={
+                        item.fileNode?.type === "directory" ? item.fileNode.path : undefined
+                      }
                       ref={(node) => {
                         if (node) {
                           iconRefs.current.set(item.id, node);
@@ -1139,8 +1252,31 @@ export default function Desktop({
                         }
                       }}
                       onMouseDown={(event) => handleIconMouseDown(event, item.id)}
+                      onClick={(event) => {
+                        if (
+                          item.fileNode?.type === "file" &&
+                          item.fileNode.name.endsWith(".shortcut") &&
+                          !event.shiftKey &&
+                          !event.ctrlKey &&
+                          !event.metaKey
+                        ) {
+                          item.onOpen?.();
+                        }
+                      }}
                       onDoubleClick={() => item.onOpen?.()}
                       onContextMenu={(event) => handleIconContextMenu(event, item.id)}
+                      onDragOver={(event) => {
+                        if (item.fileNode?.type === "directory") {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          event.dataTransfer.dropEffect = "move";
+                        }
+                      }}
+                      onDrop={(event) => {
+                        if (item.fileNode?.type === "directory") {
+                          handleDesktopDropToFolder(event, item.fileNode.path);
+                        }
+                      }}
                       className="absolute"
                       style={(() => {
                         const position = itemPositions[item.id] ?? { col: 0, row: 0 };
@@ -1157,10 +1293,11 @@ export default function Desktop({
                         return {
                           left,
                           top,
-                          zIndex: isDragging ? 40 : 1,
+                          zIndex: isDragging ? 40 : 30,
                           transition: isDragging
                             ? "none"
                             : "left 180ms ease-out, top 180ms ease-out",
+                          visibility: isDragging ? "hidden" : "visible",
                         };
                       })()}
                     >
@@ -1196,6 +1333,8 @@ export default function Desktop({
                             "yaml",
                             "xml",
                             "toml",
+                            "shortcut",
+                            "app",
                           ]);
                           return textExtensions.has(ext || "");
                         })() ? (
@@ -1235,10 +1374,16 @@ export default function Desktop({
                     {item.fileNode ? (
                       <>
                         <ContextMenuSeparator />
-                        <ContextMenuItem onClick={() => handleRename(item.id)}>
+                        <ContextMenuItem
+                          onClick={() => handleRename(item.id)}
+                          disabled={Boolean(item.fileNode.readOnly)}
+                        >
                           Rename
                         </ContextMenuItem>
-                        <ContextMenuItem onClick={() => handleDeleteByContext(item.id)}>
+                        <ContextMenuItem
+                          onClick={() => handleDeleteByContext(item.id)}
+                          disabled={Boolean(item.fileNode.readOnly)}
+                        >
                           Delete
                         </ContextMenuItem>
                       </>
@@ -1248,6 +1393,53 @@ export default function Desktop({
               ))}
             </div>
           </div>
+
+          {typeof window !== "undefined" &&
+            draggingIds.length > 0 &&
+            dragDelta &&
+            dragCandidateRef.current &&
+            containerRef.current &&
+            createPortal(
+              <div className="pointer-events-none fixed inset-0 z-[8000]">
+                {draggingIds.map((dragId) => {
+                  const item = desktopItemById[dragId];
+                  if (!item) return null;
+
+                  const source = dragCandidateRef.current?.sourcePositions[dragId];
+                  if (!source) return null;
+
+                  const sourcePixel = dragCandidateRef.current?.sourcePixels[dragId];
+                  const containerRect = containerRef.current?.getBoundingClientRect();
+                  const leftRelative =
+                    (sourcePixel?.left ??
+                      DESKTOP_GRID_PADDING + source.col * DESKTOP_GRID_COL_WIDTH) +
+                    dragDelta.x;
+                  const topRelative =
+                    (sourcePixel?.top ??
+                      DESKTOP_GRID_PADDING + source.row * DESKTOP_GRID_ROW_HEIGHT) +
+                    dragDelta.y;
+
+                  return (
+                    <div
+                      key={`desktop-drag-overlay-${dragId}`}
+                      className="absolute"
+                      style={{
+                        left: (containerRect?.left ?? 0) + leftRelative,
+                        top: (containerRect?.top ?? 0) + topRelative,
+                      }}
+                    >
+                      <DesktopIcon
+                        icon={item.icon}
+                        title={item.title}
+                        selected={selectedSet.has(item.id)}
+                      />
+                    </div>
+                  );
+                })}
+              </div>,
+              document.body
+            )}
+
           {marquee ? (
             <div
               className="absolute border border-white/60 bg-white/15 pointer-events-none rounded-sm"

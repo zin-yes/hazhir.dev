@@ -15,6 +15,11 @@
   box-shadow: 0px 0px 20px -2px var(--pane-in-focus-shadow-color);
 }
 
+.file_drop_hover .body {
+  box-shadow: 0 0 0 2px hsl(var(--primary) / 0.45), 0 0 20px -2px hsl(var(--primary) / 0.35);
+  filter: none !important;
+}
+
 .titleText {
 }
 

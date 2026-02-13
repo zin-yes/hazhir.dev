@@ -1,8 +1,8 @@
 import {
-  integer,
-  sqliteTable,
-  text,
-  primaryKey,
+    integer,
+    primaryKey,
+    sqliteTable,
+    text,
 } from "drizzle-orm/sqlite-core";
 
 type AdapterAccountType = "oauth" | "oidc" | "email" | "credentials";

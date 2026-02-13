@@ -1,10 +1,10 @@
 import type { Terminal } from "@xterm/xterm";
 
-import { useFileSystem } from "@/hooks/use-file-system";
 import { useSession } from "@/auth/client";
+import { useFileSystem } from "@/hooks/use-file-system";
+import { getPathCompletions } from "./autocomplete";
 import { getCwd } from "./cd";
 import type { CommandAutocomplete, CommandCallback } from "./index";
-import { getPathCompletions } from "./autocomplete";
 
 async function mkdir(
   fullCommand: string,
@@ -53,11 +53,20 @@ async function mkdir(
         currentPath += "/" + part;
         if (!fs.exists(currentPath)) {
           const parent = fs.getParentPath(currentPath);
-          fs.createDirectory(parent, part);
+                  if (!fs.createDirectory(parent, part)) {
+                    terminal.writeln(
+                      `\x1b[31mmkdir: cannot create directory '${name}': Permission denied\x1b[0m`
+                    );
+                    break;
+                  }
         }
       }
     } else {
-      fs.createDirectory(parentPath, dirName);
+      if (!fs.createDirectory(parentPath, dirName)) {
+        terminal.writeln(
+          `\x1b[31mmkdir: cannot create directory '${name}': Permission denied\x1b[0m`
+        );
+      }
     }
   }
 }

@@ -1,10 +1,10 @@
 import type { Terminal } from "@xterm/xterm";
 
-import { useFileSystem } from "@/hooks/use-file-system";
 import { useSession } from "@/auth/client";
+import { useFileSystem } from "@/hooks/use-file-system";
+import { getPathCompletions } from "./autocomplete";
 import { getCwd } from "./cd";
 import type { CommandAutocomplete, CommandCallback } from "./index";
-import { getPathCompletions } from "./autocomplete";
 
 async function cat(
   fullCommand: string,

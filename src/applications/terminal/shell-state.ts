@@ -1,3 +1,5 @@
+import { getHomePath } from "@/lib/system-user";
+
 const ENV_STORAGE_KEY = "terminal_env_v1";
 const ALIAS_STORAGE_KEY = "terminal_aliases_v1";
 
@@ -19,7 +21,8 @@ function writeMap(key: string, value: Record<string, string>) {
 
 export function getAllEnv(): Record<string, string> {
   const env = readMap(ENV_STORAGE_KEY);
-  if (!env.HOME) env.HOME = "/home/user";
+  if (!env.HOME) env.HOME = getHomePath();
+  if (!env.PATH) env.PATH = "/applications";
   return env;
 }
 

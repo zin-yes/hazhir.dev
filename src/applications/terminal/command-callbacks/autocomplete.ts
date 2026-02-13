@@ -1,4 +1,5 @@
 import { useFileSystem } from "@/hooks/use-file-system";
+import { getHomePath } from "@/lib/system-user";
 import { getCwd } from "./cd";
 
 export type PathCompletionOptions = {
@@ -16,7 +17,7 @@ export function getPathCompletions(
   const fs = useFileSystem();
   const token = currentToken ?? "";
 
-  const expanded = token.replace(/^~(?=\/|$)/, "/home/user");
+  const expanded = token.replace(/^~(?=\/|$)/, getHomePath());
   const lastSlashIndex = expanded.lastIndexOf("/");
   const baseExpanded = lastSlashIndex >= 0 ? expanded.slice(0, lastSlashIndex + 1) : "";
   const baseDisplay = lastSlashIndex >= 0 ? token.slice(0, lastSlashIndex + 1) : "";

@@ -1,11 +1,12 @@
 import type { Terminal } from "@xterm/xterm";
 
 import { humanFileSize } from "@/applications/file-explorer";
-import { FileSystemNode, useFileSystem } from "@/hooks/use-file-system";
 import { useSession } from "@/auth/client";
+import { FileSystemNode, useFileSystem } from "@/hooks/use-file-system";
+import { getHomePath } from "@/lib/system-user";
+import { getPathCompletions } from "./autocomplete";
 import { getCwd } from "./cd";
 import type { CommandAutocomplete, CommandCallback } from "./index";
-import { getPathCompletions } from "./autocomplete";
 
 async function ls(
   fullCommand: string,
@@ -14,31 +15,37 @@ async function ls(
   windowIdentifier: string
 ): Promise<void> {
   const fs = useFileSystem();
-  const args = fullCommand.trim().split(/\s+/);
-  
-  // Parse flags
-  const showAll = args.includes("-a") || args.includes("-la") || args.includes("-al");
-  const longFormat = args.includes("-l") || args.includes("-la") || args.includes("-al");
-  
-  // Get path argument (ignore flags), default to current working directory
+  const args = fullCommand.trim().split(/\s+/).slice(1);
+
+  let showAll = false;
+  let longFormat = false;
+  let showSize = false;
   let targetPath: string | null = null;
-  for (let i = 1; i < args.length; i++) {
-    if (!args[i].startsWith("-")) {
-      targetPath = args[i];
-      break;
+
+  args.forEach((arg) => {
+    if (arg.startsWith("-") && arg.length > 1) {
+      const flags = arg.slice(1).split("");
+      flags.forEach((flag) => {
+        if (flag === "a") showAll = true;
+        if (flag === "l") longFormat = true;
+        if (flag === "s") showSize = true;
+      });
+      return;
     }
-  }
-  
-  // Use current working directory if no path specified
+
+    if (targetPath === null) {
+      targetPath = arg;
+    }
+  });
+
   if (targetPath === null) {
     targetPath = getCwd();
   } else if (targetPath === "~" || targetPath.startsWith("~/")) {
-    targetPath = targetPath.replace("~", "/home/user");
+    targetPath = targetPath.replace("~", getHomePath());
   } else if (!targetPath.startsWith("/")) {
-    // Relative path - resolve from cwd
     targetPath = fs.normalizePath(`${getCwd()}/${targetPath}`);
   }
-  
+
   targetPath = fs.normalizePath(targetPath);
   
   if (!fs.exists(targetPath)) {
@@ -58,9 +65,10 @@ async function ls(
     return;
   }
   
-  const items = fs
-    .getChildren(targetPath, true)
-    .filter((item) => showAll || !item.isHidden || item.name === ".terminal_history");
+  const items = fs.getChildren(targetPath, true).filter((item) => {
+    const hidden = item.isHidden || item.name.startsWith(".");
+    return showAll || !hidden;
+  });
   
   terminal.writeln("");
   
@@ -70,22 +78,25 @@ async function ls(
       printLongFormat(terminal, item);
     });
   } else {
-    // Grid format
     if (items.length === 0) {
-      // Empty directory - do nothing
+      // Empty directory
     } else {
-      const maxNameLength = Math.max(...items.map(i => i.name.length), 10);
-      const colWidth = maxNameLength + 2;
-      const cols = Math.max(1, Math.floor(terminal.cols / colWidth));
-      
-      for (let i = 0; i < items.length; i += cols) {
-        const row = items.slice(i, i + cols);
-        const line = row.map((item) => {
+      if (showSize) {
+        items.forEach((item) => {
           const color = item.type === "directory" ? "\x1b[34m" : "\x1b[0m";
           const reset = "\x1b[0m";
-          const name = item.name.padEnd(colWidth);
-          return `${color}${name}${reset}`;
-        }).join("");
+          const size = humanFileSize(item.size).padStart(9);
+          terminal.writeln(`${size}  ${color}${item.name}${reset}`);
+        });
+      } else {
+        const line = items
+          .map((item) => {
+            const color = item.type === "directory" ? "\x1b[34m" : "\x1b[0m";
+            const reset = "\x1b[0m";
+            return `${color}${item.name}${reset}`;
+          })
+          .join(" ");
+
         terminal.writeln(line);
       }
     }
@@ -116,7 +127,7 @@ function printLongFormat(terminal: Terminal, item: FileSystemNode) {
 export default ls satisfies CommandCallback;
 
 const autocomplete: CommandAutocomplete = ({ currentToken }) => {
-  const flags = ["-a", "-l", "-la", "-al"];
+  const flags = ["-a", "-l", "-s", "-la", "-al", "-ls", "-sl", "-als", "-asl"];
   if (currentToken.startsWith("-")) {
     return flags.filter((flag) => flag.startsWith(currentToken));
   }

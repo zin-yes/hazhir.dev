@@ -1,24 +1,26 @@
 "use client";
 
 import React, {
-  cloneElement,
-  useEffect,
-  useId,
-  useMemo,
-  useRef,
+    cloneElement,
+    useEffect,
+    useId,
+    useMemo,
+    useRef,
+    useState,
 } from "react";
 
 import Image from "next/image";
 
+import { hasFileDragType } from "@/lib/file-transfer-dnd";
 import styles from "./application-window.module.css";
 
 import { ApplicationWindowType } from "@/hooks/use-operating-system";
 import {
-  addBottomResizeHandleEvent,
-  addDraggingHandleEvent,
-  addLeftResizeHandleEvent,
-  addRightResizeHandleEvent,
-  addTopResizeHandleEvent,
+    addBottomResizeHandleEvent,
+    addDraggingHandleEvent,
+    addLeftResizeHandleEvent,
+    addRightResizeHandleEvent,
+    addTopResizeHandleEvent,
 } from "@/operating-system/application/window/resizability";
 import { AppWindowIcon, Maximize2, Minimize2, X } from "lucide-react";
 import { v4 } from "uuid";
@@ -108,6 +110,8 @@ export default function ApplicationWindow({
   const _identifier = useMemo<string>(() => v4(), []);
 
   const ref = useRef<HTMLDivElement>(null);
+  const fileDropHoverDepthRef = useRef(0);
+  const [isFileDropHover, setIsFileDropHover] = useState(false);
   // Center the pane element.
   useEffect(() => {
     if (ref.current) {
@@ -427,7 +431,38 @@ export default function ApplicationWindow({
   };
 
   return (
-    <div ref={ref} className={styles.pane + " applicationWindow"}>
+    <div
+      ref={ref}
+      className={
+        styles.pane +
+        " applicationWindow " +
+        (isFileDropHover ? styles.file_drop_hover : "")
+      }
+      onDragEnterCapture={(event) => {
+        if (!hasFileDragType(event.dataTransfer)) return;
+        fileDropHoverDepthRef.current += 1;
+        setIsFileDropHover(true);
+      }}
+      onDragOverCapture={(event) => {
+        if (!hasFileDragType(event.dataTransfer)) return;
+        setIsFileDropHover(true);
+      }}
+      onDragLeaveCapture={(event) => {
+        if (!hasFileDragType(event.dataTransfer)) return;
+        fileDropHoverDepthRef.current = Math.max(0, fileDropHoverDepthRef.current - 1);
+        if (fileDropHoverDepthRef.current === 0) {
+          setIsFileDropHover(false);
+        }
+      }}
+      onDropCapture={() => {
+        fileDropHoverDepthRef.current = 0;
+        setIsFileDropHover(false);
+      }}
+      onDragEndCapture={() => {
+        fileDropHoverDepthRef.current = 0;
+        setIsFileDropHover(false);
+      }}
+    >
       <div className={styles.top_group}>
         <div className={styles.top_left_resize_handle}></div>
         <div className={styles.top_resize_handle}></div>

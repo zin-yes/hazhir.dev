@@ -267,12 +267,103 @@ function constructFooter(width: number): string {
 
 const COMMANDS_PER_PAGE = 5;
 
+function printCommandHelp(
+  terminal: Terminal,
+  command: (typeof commands)[number]
+) {
+  const width = terminal.cols;
+  terminal.writeln(" ".repeat(width));
+  terminal.writeln(constructHeaderText(`HELP - ${command.name}`, width));
+
+  constructItemText(command, width).forEach((line) => {
+    terminal.writeln(line);
+  });
+
+  if (command.aliases.length > 0) {
+    terminal.writeln(constructHorizontalSpacer(width));
+    terminal.writeln(
+      sorroundTextWithCharacters(
+        `${ansi.style.bold}Aliases:${ansi.style.reset} ${command.aliases.join(", ")}`,
+        width,
+        TEXT_ROW_SPACER,
+        LEFT_EDGE,
+        RIGHT_EDGE
+      )
+    );
+  }
+
+  if (command.usage.length > 0) {
+    terminal.writeln(constructHorizontalSpacer(width));
+    terminal.writeln(
+      sorroundTextWithCharacters(
+        `${ansi.style.bold}Usage:${ansi.style.reset}`,
+        width,
+        TEXT_ROW_SPACER,
+        LEFT_EDGE,
+        RIGHT_EDGE
+      )
+    );
+    command.usage.forEach((usageLine) => {
+      terminal.writeln(
+        sorroundTextWithCharacters(
+          ` - ${usageLine}`,
+          width,
+          TEXT_ROW_SPACER,
+          LEFT_EDGE,
+          RIGHT_EDGE
+        )
+      );
+    });
+  }
+
+  if (command.examples.length > 0) {
+    terminal.writeln(constructHorizontalSpacer(width));
+    terminal.writeln(
+      sorroundTextWithCharacters(
+        `${ansi.style.bold}Examples:${ansi.style.reset}`,
+        width,
+        TEXT_ROW_SPACER,
+        LEFT_EDGE,
+        RIGHT_EDGE
+      )
+    );
+    command.examples.forEach((exampleLine) => {
+      terminal.writeln(
+        sorroundTextWithCharacters(
+          ` - ${exampleLine}`,
+          width,
+          TEXT_ROW_SPACER,
+          LEFT_EDGE,
+          RIGHT_EDGE
+        )
+      );
+    });
+  }
+
+  terminal.writeln(constructFooter(width));
+  terminal.writeln(" ".repeat(width));
+}
+
 async function help(fullCommand: string, terminal: Terminal): Promise<void> {
-  const args = fullCommand.trim().split(" ");
+  const args = fullCommand.trim().split(/\s+/);
   let currentPage = 0;
 
   if (args.length > 1) {
-    currentPage = Number(args[1]) - 1;
+    const query = args[1];
+    if (/^\d+$/.test(query)) {
+      currentPage = Number(query) - 1;
+    } else {
+      const commandInfo = commands.find(
+        (command) => command.name === query || command.aliases.includes(query)
+      );
+
+      if (!commandInfo) {
+        throw new Error(`Unknown command '${query}'.`);
+      }
+
+      printCommandHelp(terminal, commandInfo);
+      return;
+    }
   }
 
   const width = terminal.cols;

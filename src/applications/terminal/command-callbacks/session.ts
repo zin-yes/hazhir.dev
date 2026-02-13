@@ -1,13 +1,12 @@
 import type { Terminal } from "@xterm/xterm";
 
-import type { CommandAutocomplete, CommandCallback } from "./index";
 import { useSession } from "@/auth/client";
+import type { CommandAutocomplete, CommandCallback } from "./index";
 
 import commands from "../commands.json";
 
 import { all, createEmphasize } from "emphasize";
 
-import ansi from "ansi-escape-sequences";
 
 async function session(
   fullCommand: string,

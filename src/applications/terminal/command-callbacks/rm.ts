@@ -1,10 +1,11 @@
 import type { Terminal } from "@xterm/xterm";
 
-import { useFileSystem } from "@/hooks/use-file-system";
 import { useSession } from "@/auth/client";
+import { useFileSystem } from "@/hooks/use-file-system";
+import { getHomePath } from "@/lib/system-user";
+import { getPathCompletions } from "./autocomplete";
 import { getCwd } from "./cd";
 import type { CommandAutocomplete, CommandCallback } from "./index";
-import { getPathCompletions } from "./autocomplete";
 
 async function rm(
   fullCommand: string,
@@ -47,13 +48,15 @@ async function rm(
     }
     
     // Protect system directories
-    const protectedPaths = ["/", "/home", "/etc", "/usr", "/var", "/tmp"];
+    const protectedPaths = ["/", "/home", getHomePath(), "/applications"];
     if (protectedPaths.includes(targetPath)) {
       terminal.writeln(`\x1b[31mrm: cannot remove '${name}': Permission denied\x1b[0m`);
       continue;
     }
     
-    fs.deleteNode(targetPath);
+    if (!fs.deleteNode(targetPath)) {
+      terminal.writeln(`\x1b[31mrm: cannot remove '${name}': Permission denied\x1b[0m`);
+    }
   }
 }
 
