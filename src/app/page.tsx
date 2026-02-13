@@ -27,7 +27,7 @@ import {
   hasFileDragType,
   readDroppedPathsFromDataTransfer,
 } from "@/lib/file-transfer-dnd";
-import { setCurrentSystemUsername } from "@/lib/system-user";
+import { getHomePath, setCurrentSystemUsername } from "@/lib/system-user";
 import Image from "next/image";
 import { v4 } from "uuid";
 import {
@@ -133,11 +133,17 @@ export default function OperatingSystemPage() {
           addWindow(<VisualNovelApplicationWindow />);
           break;
         case "document-viewer": {
-          const articleId = detail.args?.[0] ?? "CV.pdf";
-          const title = detail.args?.[1] ?? articleId;
+          const defaultDocumentPath = `${getHomePath()}/Documents/CV.document`;
+          const requested = detail.args?.[0];
+          const filePath =
+            requested === "CV"
+              ? defaultDocumentPath
+              : (requested ?? defaultDocumentPath);
+          const title =
+            detail.args?.[1] ?? (filePath.split("/").pop() || "Document");
           addWindow(
             <SingleDocumentApplicationWindow
-              articleId={articleId}
+              filePath={filePath}
               title={title}
             />,
           );

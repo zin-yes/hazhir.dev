@@ -1,9 +1,11 @@
 "use client";
 
+import { generateCVDocumentHtml } from "@/applications/document-viewer/articles/CV";
 import type { FileSystemNode } from "@/hooks/use-file-system";
 import {
-    createAppExecutableContents,
-    createShortcutContents,
+  createAppExecutableContents,
+  createLinkShortcutContents,
+  createShortcutContents,
 } from "@/lib/shortcut";
 
 export type SystemAppDefinition = {
@@ -74,6 +76,8 @@ export function buildDefaultFileSystem(username: string): FileSystemNode[] {
   const homePath = `/home/${username}`;
   const desktopPath = `${homePath}/Desktop`;
   const documentsPath = `${homePath}/Documents`;
+  const cvDocumentPath = `${documentsPath}/CV.document`;
+  const defaultCvDocumentContents = generateCVDocumentHtml();
 
   const baseNodes: FileSystemNode[] = [
     {
@@ -176,6 +180,20 @@ export function buildDefaultFileSystem(username: string): FileSystemNode[] {
       modifiedAt: now,
       isHidden: true,
     },
+    {
+      name: "CV.document",
+      type: "file",
+      path: cvDocumentPath,
+      parentPath: documentsPath,
+      contents: defaultCvDocumentContents,
+      permissions: "rw-r--r--",
+      owner: username,
+      group: username,
+      size: new Blob([defaultCvDocumentContents]).size,
+      createdAt: now,
+      modifiedAt: now,
+      isHidden: false,
+    },
   ];
 
   const executableNodes: FileSystemNode[] = SYSTEM_APPS.map((app) => {
@@ -199,14 +217,17 @@ export function buildDefaultFileSystem(username: string): FileSystemNode[] {
   });
 
   const shortcutNodes: FileSystemNode[] = SYSTEM_APPS.filter(
-    (app) => app.includeDesktopShortcut !== false
+    (app) => app.includeDesktopShortcut !== false,
   ).map((app) => {
     const fileName = `${app.id}.shortcut`;
-    const contents = createShortcutContents(`/applications/${app.executableName}`, {
-      name: app.desktopIconText,
-      icon: app.icon,
-      iconDisplayText: app.desktopIconText,
-    });
+    const contents = createShortcutContents(
+      `/applications/${app.executableName}`,
+      {
+        name: app.desktopIconText,
+        icon: app.icon,
+        iconDisplayText: app.desktopIconText,
+      },
+    );
     return {
       name: fileName,
       type: "file",
@@ -229,8 +250,8 @@ export function buildDefaultFileSystem(username: string): FileSystemNode[] {
       name: "CV",
       icon: "BookOpen",
       iconDisplayText: "CV",
-      args: ["CV.pdf", "CV.pdf"],
-    }
+      args: [cvDocumentPath, "CV.document"],
+    },
   );
 
   const cvShortcutNode: FileSystemNode = {
@@ -248,7 +269,62 @@ export function buildDefaultFileSystem(username: string): FileSystemNode[] {
     isHidden: false,
   };
 
-  return [...baseNodes, ...executableNodes, ...shortcutNodes, cvShortcutNode].map((node) => {
+  const githubShortcutContents = createLinkShortcutContents(
+    "https://github.com/zin-yes/",
+    {
+      name: "GitHub",
+      icon: "FileSymlink",
+      iconDisplayText: "GitHub",
+    },
+  );
+
+  const githubShortcutNode: FileSystemNode = {
+    name: "github.shortcut",
+    type: "file",
+    path: `${desktopPath}/github.shortcut`,
+    parentPath: desktopPath,
+    contents: githubShortcutContents,
+    permissions: "rw-r--r--",
+    owner: username,
+    group: username,
+    size: new Blob([githubShortcutContents]).size,
+    createdAt: now,
+    modifiedAt: now,
+    isHidden: false,
+  };
+
+  const linkedinShortcutContents = createLinkShortcutContents(
+    "https://linkedin.com/in/hazhir-taher",
+    {
+      name: "LinkedIn",
+      icon: "FileSymlink",
+      iconDisplayText: "LinkedIn",
+    },
+  );
+
+  const linkedinShortcutNode: FileSystemNode = {
+    name: "linkedin.shortcut",
+    type: "file",
+    path: `${desktopPath}/linkedin.shortcut`,
+    parentPath: desktopPath,
+    contents: linkedinShortcutContents,
+    permissions: "rw-r--r--",
+    owner: username,
+    group: username,
+    size: new Blob([linkedinShortcutContents]).size,
+    createdAt: now,
+    modifiedAt: now,
+    isHidden: false,
+  };
+
+  return [
+    ...baseNodes,
+    ...executableNodes,
+    ...shortcutNodes,
+    cvShortcutNode,
+    githubShortcutNode,
+    linkedinShortcutNode,
+  ].map((node) => {
     if (node.type !== "file") return node;
     return { ...node, size: new Blob([node.contents ?? ""]).size };
   });

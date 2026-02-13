@@ -271,6 +271,7 @@ export default function Desktop({
       switch (ext) {
         case "txt":
         case "md":
+        case "document":
         case "pdf":
           return { icon: FileText, color: "text-slate-200" };
         case "js":
@@ -344,11 +345,11 @@ export default function Desktop({
         return () =>
           addWindow(<TextEditorApplicationWindow filePath={node.path} />);
       }
-      if (ext === "pdf") {
+      if (ext === "pdf" || ext === "document") {
         return () =>
           addWindow(
             <SingleDocumentApplicationWindow
-              articleId={node.name}
+              filePath={node.path}
               title={node.name}
             />,
           );
@@ -585,6 +586,29 @@ export default function Desktop({
     [],
   );
 
+  const getPreferredDefaultPosition = useCallback(
+    (item: DesktopItem): DesktopGridPosition | null => {
+      const name = item.fileNode?.name?.toLowerCase();
+      if (!name) return null;
+
+      if (name === "file-explorer.shortcut") return { col: 0, row: 0 };
+      if (name === "terminal.shortcut") return { col: 1, row: 0 };
+      if (name === "voxel-game.shortcut") return { col: 2, row: 0 };
+      if (name === "cv.shortcut") {
+        return { col: Math.max(0, gridCols - 1), row: 0 };
+      }
+      if (name === "github.shortcut") {
+        return { col: Math.max(0, gridCols - 1), row: 1 };
+      }
+      if (name === "linkedin.shortcut") {
+        return { col: Math.max(0, gridCols - 1), row: 2 };
+      }
+
+      return null;
+    },
+    [gridCols],
+  );
+
   const applySortedLayout = useCallback(
     (mode: DesktopSortMode) => {
       setSortMode(mode);
@@ -620,8 +644,14 @@ export default function Desktop({
         if (!previousPosition) return;
 
         const clamped = {
-          col: Math.max(0, previousPosition.col),
-          row: Math.max(0, previousPosition.row),
+          col: Math.max(
+            0,
+            Math.min(Math.max(1, gridCols) - 1, previousPosition.col),
+          ),
+          row: Math.max(
+            0,
+            Math.min(Math.max(1, gridRows) - 1, previousPosition.row),
+          ),
         };
         const key = getSlotKey(clamped);
         if (occupied.has(key)) return;
@@ -633,6 +663,17 @@ export default function Desktop({
 
       desktopItems.forEach((item) => {
         if (!pendingIds.has(item.id)) return;
+
+        const preferred = getPreferredDefaultPosition(item);
+        if (preferred) {
+          const preferredKey = getSlotKey(preferred);
+          if (!occupied.has(preferredKey)) {
+            next[item.id] = preferred;
+            occupied.add(preferredKey);
+            pendingIds.delete(item.id);
+            return;
+          }
+        }
 
         const auto = getAutoPosition(occupied, 0);
         next[item.id] = auto;
@@ -646,7 +687,10 @@ export default function Desktop({
     areLayoutsEqual,
     desktopItems,
     getAutoPosition,
+    getPreferredDefaultPosition,
     getSlotKey,
+    gridCols,
+    gridRows,
     layoutHydrated,
   ]);
 
@@ -1903,6 +1947,7 @@ export default function Desktop({
                             "yaml",
                             "xml",
                             "toml",
+                            "document",
                             "shortcut",
                             "app",
                           ]);
@@ -1921,12 +1966,14 @@ export default function Desktop({
                             Open in Text Editor
                           </ContextMenuItem>
                         ) : null}
-                        {item.fileNode.name.toLowerCase().endsWith(".pdf") ? (
+                        {item.fileNode.name
+                          .toLowerCase()
+                          .match(/\.(pdf|document)$/) ? (
                           <ContextMenuItem
                             onClick={() =>
                               addWindow(
                                 <SingleDocumentApplicationWindow
-                                  articleId={item.fileNode!.name}
+                                  filePath={item.fileNode!.path}
                                   title={item.fileNode!.name}
                                 />,
                               )

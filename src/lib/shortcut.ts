@@ -1,13 +1,25 @@
 "use client";
 
-export type ShortcutDefinition = {
-  type: "application";
-  target: string;
-  args: string[];
+type ShortcutMetadata = {
   name?: string;
   icon?: string;
   iconDisplayText?: string;
 };
+
+export type ApplicationShortcutDefinition = ShortcutMetadata & {
+  type: "application";
+  target: string;
+  args: string[];
+};
+
+export type LinkShortcutDefinition = ShortcutMetadata & {
+  type: "link";
+  url: string;
+};
+
+export type ShortcutDefinition =
+  | ApplicationShortcutDefinition
+  | LinkShortcutDefinition;
 
 export type AppExecutableDefinition = {
   type: "application";
@@ -33,25 +45,41 @@ function parseKeyValueText(contents: string): Record<string, string> {
 
 export function parseShortcut(contents: string): ShortcutDefinition | null {
   const parsed = parseKeyValueText(contents);
-  if (parsed.type !== "application") return null;
-  if (!parsed.target) return null;
+  if (parsed.type === "application") {
+    if (!parsed.target) return null;
 
-  return {
-    type: "application",
-    target: parsed.target,
-    args: parsed.args
-      ? parsed.args
-          .split(/\s+/)
-          .map((item) => item.trim())
-          .filter(Boolean)
-      : [],
-    name: parsed.name,
-    icon: parsed.icon,
-    iconDisplayText: parsed.iconDisplayText,
-  };
+    return {
+      type: "application",
+      target: parsed.target,
+      args: parsed.args
+        ? parsed.args
+            .split(/\s+/)
+            .map((item) => item.trim())
+            .filter(Boolean)
+        : [],
+      name: parsed.name,
+      icon: parsed.icon,
+      iconDisplayText: parsed.iconDisplayText,
+    };
+  }
+
+  if (parsed.type === "link") {
+    if (!parsed.url) return null;
+    return {
+      type: "link",
+      url: parsed.url,
+      name: parsed.name,
+      icon: parsed.icon,
+      iconDisplayText: parsed.iconDisplayText,
+    };
+  }
+
+  return null;
 }
 
-export function parseAppExecutable(contents: string): AppExecutableDefinition | null {
+export function parseAppExecutable(
+  contents: string,
+): AppExecutableDefinition | null {
   const parsed = parseKeyValueText(contents);
   if (parsed.type !== "application") return null;
   if (!parsed.appId) return null;
@@ -70,7 +98,7 @@ export function createShortcutContents(
     name?: string;
     icon?: string;
     iconDisplayText?: string;
-  }
+  },
 ) {
   const args = options?.args ?? [];
   return [
@@ -79,15 +107,42 @@ export function createShortcutContents(
     `target=${targetPath}`,
     options?.name ? `name=${options.name}` : "",
     options?.icon ? `icon=${options.icon}` : "",
-    options?.iconDisplayText ? `iconDisplayText=${options.iconDisplayText}` : "",
+    options?.iconDisplayText
+      ? `iconDisplayText=${options.iconDisplayText}`
+      : "",
     `args=${args.join(" ")}`,
   ]
     .filter(Boolean)
     .join("\n");
 }
 
+export function createLinkShortcutContents(
+  url: string,
+  options?: {
+    name?: string;
+    icon?: string;
+    iconDisplayText?: string;
+  },
+) {
+  return [
+    "# hazhir.shortcut v1",
+    "type=link",
+    `url=${url}`,
+    options?.name ? `name=${options.name}` : "",
+    options?.icon ? `icon=${options.icon}` : "",
+    options?.iconDisplayText
+      ? `iconDisplayText=${options.iconDisplayText}`
+      : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
 export function createAppExecutableContents(appId: string, name: string) {
-  return ["# hazhir.app v1", "type=application", `appId=${appId}`, `name=${name}`].join(
-    "\n"
-  );
+  return [
+    "# hazhir.app v1",
+    "type=application",
+    `appId=${appId}`,
+    `name=${name}`,
+  ].join("\n");
 }

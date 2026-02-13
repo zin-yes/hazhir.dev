@@ -13,6 +13,7 @@ import {
 
 import ApplicationWindow from "@/operating-system/application/window";
 
+import { getHomePath } from "@/lib/system-user";
 import LoadingWindow from "@/operating-system/application/window/loading";
 import dynamic from "next/dynamic";
 import { ReactNode, useMemo } from "react";
@@ -160,14 +161,21 @@ export function FileExplorerApplicationWindow({
 }
 
 export function DocumentViewerApplicationWindow({
+  filePath,
   articleId,
 }: {
+  filePath?: string;
   articleId?: string;
 }) {
+  const resolvedFilePath = filePath ?? articleId;
+  const homePath = getHomePath();
+  const displayPath = resolvedFilePath
+    ? resolvedFilePath.replace(homePath, "~")
+    : "~/Documents";
   return (
     <ApplicationWindow
       action_bar={{
-        title: "Document Viewer",
+        title: `Document Viewer - ${displayPath}`,
         icon: {
           svg: <BookOpen />,
         },
@@ -178,25 +186,32 @@ export function DocumentViewerApplicationWindow({
         min_height: 420,
         starting_width: Math.min(980, window.innerWidth - 40),
         starting_height: Math.min(620, window.innerHeight - 40),
-        allow_overflow: false,
+        allow_overflow: true,
       }}
     >
-      <DocumentViewerApplication id={articleId} />
+      <DocumentViewerApplication filePath={resolvedFilePath} />
     </ApplicationWindow>
   );
 }
 
 export function SingleDocumentApplicationWindow({
-  articleId,
+  filePath,
   title,
+  articleId,
 }: {
-  articleId: string;
+  filePath?: string;
   title: string;
+  articleId?: string;
 }) {
+  const resolvedFilePath = filePath ?? articleId;
+  const homePath = getHomePath();
+  const displayPath = resolvedFilePath
+    ? resolvedFilePath.replace(homePath, "~")
+    : title;
   return (
     <ApplicationWindow
       action_bar={{
-        title,
+        title: `Document Viewer - ${displayPath}`,
         icon: {
           svg: <BookOpen />,
         },
@@ -207,10 +222,10 @@ export function SingleDocumentApplicationWindow({
         min_height: 420,
         starting_width: Math.min(820, window.innerWidth - 40),
         starting_height: Math.min(620, window.innerHeight - 40),
-        allow_overflow: false,
+        allow_overflow: true,
       }}
     >
-      <DocumentViewerApplication id={articleId} mode="single" />
+      <DocumentViewerApplication filePath={resolvedFilePath} mode="single" />
     </ApplicationWindow>
   );
 }

@@ -1,5 +1,6 @@
 "use client";
 
+import { generateCVDocumentHtml } from "@/applications/document-viewer/articles/CV";
 import { buildDefaultFileSystem } from "@/config/system-file-system";
 import { getCurrentSystemUsername, getHomePath } from "@/lib/system-user";
 
@@ -70,6 +71,7 @@ export function useFileSystem() {
 
     const parsed = JSON.parse(stored) as FileSystemNode[];
     const username = getCurrentSystemUsername();
+    const homePath = `/home/${username}`;
     const defaults = buildDefaultFileSystem(username);
     const existingPaths = new Set(
       parsed.map((node) => normalizePath(node.path)),
@@ -88,6 +90,31 @@ export function useFileSystem() {
       return (
         isApplicationsExecutable && !existingPaths.has(normalizePath(node.path))
       );
+    });
+
+    const missingDefaultDocuments = defaults.filter((node) => {
+      const normalizedPath = normalizePath(node.path);
+      const isDefaultDocument =
+        node.type === "file" &&
+        normalizedPath.startsWith(`${homePath}/Documents/`) &&
+        node.name.endsWith(".document");
+
+      return isDefaultDocument && !existingPaths.has(normalizedPath);
+    });
+
+    const defaultDesktopShortcutNames = new Set([
+      "github.shortcut",
+      "linkedin.shortcut",
+    ]);
+
+    const missingDefaultDesktopShortcuts = defaults.filter((node) => {
+      const normalizedPath = normalizePath(node.path);
+      const isDefaultDesktopShortcut =
+        node.type === "file" &&
+        normalizedPath.startsWith(`${homePath}/Desktop/`) &&
+        defaultDesktopShortcutNames.has(node.name);
+
+      return isDefaultDesktopShortcut && !existingPaths.has(normalizedPath);
     });
 
     const withDotHiddenFix = parsed.map((node) => {
@@ -112,8 +139,33 @@ export function useFileSystem() {
       };
     });
 
+    const cvDocumentPath = `${homePath}/Documents/CV.document`;
+    const nextGeneratedCvDocument = generateCVDocumentHtml();
+    const withLegacyCvTemplateUpgrade = withProtectionPolicyFix.map((node) => {
+      if (normalizePath(node.path) !== normalizePath(cvDocumentPath)) {
+        return node;
+      }
+
+      if (node.type !== "file") return node;
+      const currentContents = node.contents ?? "";
+      const isLegacyCvTemplate =
+        currentContents.includes('<main class="page">') &&
+        currentContents.includes("<style>") &&
+        currentContents.includes("section-title");
+
+      if (!isLegacyCvTemplate) {
+        return node;
+      }
+
+      return {
+        ...node,
+        contents: nextGeneratedCvDocument,
+        size: new Blob([nextGeneratedCvDocument]).size,
+        modifiedAt: Date.now(),
+      };
+    });
+
     const now = Date.now();
-    const homePath = `/home/${username}`;
     const requiredDirectories: FileSystemNode[] = [
       {
         name: "home",
@@ -173,7 +225,7 @@ export function useFileSystem() {
       },
     ];
 
-    const ensuredCoreDirectories = [...withProtectionPolicyFix];
+    const ensuredCoreDirectories = [...withLegacyCvTemplateUpgrade];
     const ensuredPathSet = new Set(
       ensuredCoreDirectories.map((node) => normalizePath(node.path)),
     );
@@ -186,7 +238,11 @@ export function useFileSystem() {
       }
     });
 
-    if (missingSystemExecutables.length === 0) {
+    if (
+      missingSystemExecutables.length === 0 &&
+      missingDefaultDocuments.length === 0 &&
+      missingDefaultDesktopShortcuts.length === 0
+    ) {
       const changed =
         ensuredCoreDirectories.length !== parsed.length ||
         ensuredCoreDirectories.some((node, index) => node !== parsed[index]);
@@ -199,7 +255,12 @@ export function useFileSystem() {
       return ensuredCoreDirectories;
     }
 
-    const next = [...ensuredCoreDirectories, ...missingSystemExecutables];
+    const next = [
+      ...ensuredCoreDirectories,
+      ...missingSystemExecutables,
+      ...missingDefaultDocuments,
+      ...missingDefaultDesktopShortcuts,
+    ];
     window.localStorage.setItem(FILE_SYSTEM_STORAGE_KEY, JSON.stringify(next));
     return next;
   }

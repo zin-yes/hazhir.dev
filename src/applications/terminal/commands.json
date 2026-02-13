@@ -84,6 +84,17 @@
     "callbackFunctionName": "reload"
   },
   {
+    "name": "link",
+    "usage": ["link <url>"],
+    "examples": [
+      "link https://github.com/zin-yes/",
+      "link https://linkedin.com/in/hazhir-taher"
+    ],
+    "aliases": [],
+    "description": "Opens an external URL in a new browser tab.",
+    "callbackFunctionName": "link"
+  },
+  {
     "name": "session",
     "usage": ["session <status/data>"],
     "examples": ["session status", "session data"],

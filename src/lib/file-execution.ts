@@ -11,22 +11,47 @@ export type FileExecutionResult = {
   message?: string;
 };
 
+function normalizeExternalUrl(raw: string): string | null {
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+
+  const candidate = /^https?:\/\//i.test(trimmed)
+    ? trimmed
+    : `https://${trimmed}`;
+
+  try {
+    const parsed = new URL(candidate);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      return null;
+    }
+    return parsed.toString();
+  } catch {
+    return null;
+  }
+}
+
 function executeApplicationNode(
   node: FileSystemNode,
   fs: FileSystemApi,
-  launchArgs: string[] = []
+  launchArgs: string[] = [],
 ): FileExecutionResult {
   const contents = fs.getFileContents(node.path) ?? "";
   const parsed = parseAppExecutable(contents);
   if (!parsed) {
-    return { ok: false, message: `Invalid app executable format: ${node.name}` };
+    return {
+      ok: false,
+      message: `Invalid app executable format: ${node.name}`,
+    };
   }
 
   requestLaunchApplication(parsed.appId, launchArgs);
   return { ok: true };
 }
 
-export function executeFilePath(path: string, fs: FileSystemApi): FileExecutionResult {
+export function executeFilePath(
+  path: string,
+  fs: FileSystemApi,
+): FileExecutionResult {
   const node = fs.getNode(path);
   if (!node || node.type !== "file") {
     return { ok: false, message: `File not found: ${path}` };
@@ -41,9 +66,33 @@ export function executeFilePath(path: string, fs: FileSystemApi): FileExecutionR
     if (shortcut.type === "application") {
       const targetNode = fs.getNode(shortcut.target);
       if (!targetNode || targetNode.type !== "file") {
-        return { ok: false, message: `Shortcut target not found: ${shortcut.target}` };
+        return {
+          ok: false,
+          message: `Shortcut target not found: ${shortcut.target}`,
+        };
       }
       return executeApplicationNode(targetNode, fs, shortcut.args);
+    }
+
+    if (shortcut.type === "link") {
+      const normalized = normalizeExternalUrl(shortcut.url);
+      if (!normalized) {
+        return {
+          ok: false,
+          message: `Invalid link shortcut URL: ${shortcut.url}`,
+        };
+      }
+
+      const opened = window.open(normalized, "_blank", "noopener,noreferrer");
+      if (!opened) {
+        return {
+          ok: false,
+          message:
+            "Unable to open external link. Please allow pop-ups for this site.",
+        };
+      }
+
+      return { ok: true };
     }
   }
 
@@ -62,5 +111,7 @@ export function isShortcutFile(node: FileSystemNode): boolean {
 }
 
 export function isExecutableFile(node: FileSystemNode): boolean {
-  return node.type === "file" && (node.executable || node.name.endsWith(".app"));
+  return (
+    node.type === "file" && (node.executable || node.name.endsWith(".app"))
+  );
 }

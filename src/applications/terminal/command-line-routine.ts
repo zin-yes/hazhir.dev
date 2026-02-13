@@ -10,6 +10,7 @@ import commands from "./commands.json";
 import Fuse from "fuse.js";
 
 import { useFileSystem } from "@/hooks/use-file-system";
+import { getPathCompletions } from "./command-callbacks/autocomplete";
 import { getCwd } from "./command-callbacks/cd";
 import { getAliases, getEnvVar } from "./shell-state";
 
@@ -152,6 +153,82 @@ function expandAliasesAndEnv(input: string): string {
 
 function hasAlias(aliases: unknown, name: string): boolean {
   return Array.isArray(aliases) && (aliases as string[]).includes(name);
+}
+
+function getExecutableCommandNames(): string[] {
+  const fs = useFileSystem();
+  const rawPath = getEnvVar("PATH") ?? "/applications";
+  const entries = rawPath
+    .split(":")
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+
+  const names = new Set<string>();
+
+  entries.forEach((entry) => {
+    const dirPath = fs.normalizePath(entry);
+    if (!fs.exists(dirPath) || !fs.isDirectory(dirPath)) return;
+
+    fs.getChildren(dirPath, true).forEach((node) => {
+      if (node.type !== "file") return;
+      if (!(node.executable || node.name.endsWith(".app"))) return;
+
+      names.add(node.name);
+      if (node.name.endsWith(".app")) {
+        names.add(node.name.slice(0, -4));
+      }
+    });
+  });
+
+  return Array.from(names);
+}
+
+function getFirstTokenCompletions(currentToken: string): string[] {
+  const token = currentToken ?? "";
+  const isPathLike =
+    token.startsWith("/") ||
+    token.startsWith(".") ||
+    token.startsWith("~") ||
+    token.includes("/");
+
+  if (isPathLike) {
+    const raw = getPathCompletions(token, {
+      includeFiles: true,
+      includeDirs: true,
+      includeHidden: true,
+      appendDirSlash: true,
+      includeDotDirs: true,
+    });
+
+    const expanded = new Set<string>();
+    raw.forEach((value) => {
+      expanded.add(value);
+      if (value.endsWith(".app")) {
+        expanded.add(value.slice(0, -4));
+      }
+    });
+
+    return Array.from(expanded).filter((value) =>
+      token.length > 0 ? value.startsWith(token) : true,
+    );
+  }
+
+  const commandList: string[] = [];
+  commands.forEach((command) => {
+    commandList.push(command.name);
+    command.aliases.forEach((alias) => {
+      commandList.push(alias);
+    });
+  });
+
+  const combined = new Set<string>([
+    ...commandList,
+    ...getExecutableCommandNames(),
+  ]);
+
+  return Array.from(combined).filter((value) =>
+    token.length > 0 ? value.startsWith(token) : true,
+  );
 }
 
 function clearAutocompleteDisplay(terminal: Terminal) {
@@ -814,31 +891,20 @@ export async function parseCommand(
         cursorAtEndOfCommandBuffer &&
         cursorNotOnASpace
       ) {
-        const commandList: string[] = [];
+        const firstTokenMatches = getFirstTokenCompletions(beforeCursor.trim());
 
-        commands.forEach((command) => {
-          commandList.push(command.name);
-          command.aliases.forEach((alias) => {
-            commandList.push(alias);
-          });
-        });
-
-        const searchResult = new Fuse(commandList, { threshold: 0.005 }).search(
-          _commandBuffer.content,
-        );
-
-        if (searchResult.length === 1) {
+        if (firstTokenMatches.length === 1) {
           _commandBuffer = writeToTerminalAndCommandBuffer(
-            searchResult[0].item.substring(
+            firstTokenMatches[0].substring(
               _commandBuffer.cursorPosition,
-              searchResult[0].item.length,
+              firstTokenMatches[0].length,
             ),
             _commandBuffer,
             terminal,
           );
-        } else if (searchResult.length > 1) {
-          const displaySuggestions = searchResult.map((item) =>
-            formatCompletionSuggestionForDisplay(item.item),
+        } else if (firstTokenMatches.length > 1) {
+          const displaySuggestions = firstTokenMatches.map((item) =>
+            formatCompletionSuggestionForDisplay(item),
           );
           const suggestionText = displaySuggestions.join("  ");
           const neededLines = Math.max(
@@ -863,7 +929,12 @@ export async function parseCommand(
           (value) =>
             value.name === commandName || hasAlias(value.aliases, commandName),
         );
-        const autocomplete = commandAutoCompletes[matched?.name ?? commandName];
+        const matchedAutocompleteKey = matched
+          ? commandAutoCompletes[matched.callbackFunctionName]
+            ? matched.callbackFunctionName
+            : matched.name
+          : commandName;
+        const autocomplete = commandAutoCompletes[matchedAutocompleteKey];
 
         if (autocomplete) {
           const argsWithoutCommand = parts.slice(1);

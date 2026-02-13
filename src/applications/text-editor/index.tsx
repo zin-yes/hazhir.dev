@@ -18,13 +18,15 @@ export default function TextEditorApplication({
 }: TextEditorProps) {
   const fs = useFileSystem();
   const operatingSystem = UseOperatingSystem();
-  
+
   const [contents, setContents] = useState<string>("");
   const [originalContents, setOriginalContents] = useState<string>("");
   const [fileName, setFileName] = useState<string>("");
   const [editorTheme] = useState<"vs-dark">("vs-dark");
 
-  const editorRef = useRef<import("monaco-editor").editor.IStandaloneCodeEditor | null>(null);
+  const editorRef = useRef<
+    import("monaco-editor").editor.IStandaloneCodeEditor | null
+  >(null);
   const monacoRef = useRef<Monaco | null>(null);
   const lastLoadedPathRef = useRef<string | null>(null);
 
@@ -47,7 +49,7 @@ export default function TextEditorApplication({
 
       operatingSystem.setApplicationWindowTitle(
         identifier,
-        `Text Editor - ${node.name}`
+        `Text Editor - ${node.name}`,
       );
     } else {
       // File might be new or path might just be a name
@@ -63,7 +65,7 @@ export default function TextEditorApplication({
     if (fileName) {
       operatingSystem.setApplicationWindowTitle(
         identifier,
-        `Text Editor - ${fileName}${isModified ? " ●" : ""}`
+        `Text Editor - ${fileName}${isModified ? " ●" : ""}`,
       );
     }
   }, [isModified, fileName, identifier, operatingSystem]);
@@ -113,8 +115,6 @@ export default function TextEditorApplication({
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [saveFile]);
 
-
-
   const resolveEditorBackground = useCallback(() => "#09090b", []);
 
   const applyMonacoTheme = useCallback(() => {
@@ -154,6 +154,7 @@ export default function TextEditorApplication({
         return "css";
       case "html":
       case "htm":
+      case "document":
         return "html";
       case "md":
       case "markdown":

@@ -17,6 +17,34 @@ async function ls(
 ): Promise<void> {
   const fs = useFileSystem();
   const args = fullCommand.trim().split(/\s+/).slice(1);
+
+  const supportedShort = new Set(["a", "l", "s"]);
+  const supportedLong = new Set(["--all", "--list", "--size"]);
+  const invalidOption = args.find((arg) => {
+    if (!arg.startsWith("-") || arg === "-") return false;
+    if (arg.startsWith("--")) {
+      return !supportedLong.has(arg);
+    }
+
+    return arg
+      .slice(1)
+      .split("")
+      .some((flag) => !supportedShort.has(flag));
+  });
+
+  if (invalidOption) {
+    const invalidFlag = invalidOption.startsWith("--")
+      ? invalidOption.slice(2)
+      : invalidOption
+          .slice(1)
+          .split("")
+          .find((flag) => !supportedShort.has(flag)) ?? invalidOption.slice(1);
+
+    terminal.writeln(`\x1b[31mls: invalid option -- '${invalidFlag}'\x1b[0m`);
+    terminal.writeln("Try 'help ls' for more information.");
+    return;
+  }
+
   const { options, positionals } = parseCommandArguments(args, {
     shortToLong: {
       a: "all",
