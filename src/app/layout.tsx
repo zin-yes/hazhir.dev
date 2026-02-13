@@ -1,5 +1,5 @@
-import { ThemeProvider } from "@/providers/theme-provider";
 import { Toaster } from "@/components/ui/sonner";
+import { ThemeProvider } from "@/providers/theme-provider";
 
 import "./global.css";
 
@@ -14,7 +14,7 @@ const fira_code = Fira_Code({
   subsets: ["latin"],
   weight: ["400", "500", "600", "700"],
   variable: "--font-fira-code",
-})
+});
 
 import type { Metadata } from "next";
 export const metadata: Metadata = {
@@ -30,7 +30,9 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" suppressHydrationWarning className="h-full overflow-hidden">
-      <body className={`${default_font.className} h-full overflow-hidden overscroll-none`}>
+      <body
+        className={`${default_font.className} h-full overflow-hidden overscroll-none`}
+      >
         <ThemeProvider
           enableSystem
           storageKey="currentTheme"

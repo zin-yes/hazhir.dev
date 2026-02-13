@@ -36,7 +36,9 @@ export function setFileClipboard(payload: FileClipboardPayload | null): void {
 
   if (!payload || payload.paths.length === 0) {
     window.localStorage.removeItem(FILE_CLIPBOARD_STORAGE_KEY);
-    window.dispatchEvent(new CustomEvent(FILE_CLIPBOARD_EVENT, { detail: null }));
+    window.dispatchEvent(
+      new CustomEvent(FILE_CLIPBOARD_EVENT, { detail: null }),
+    );
     return;
   }
 
