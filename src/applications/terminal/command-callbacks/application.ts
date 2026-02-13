@@ -1,12 +1,12 @@
 import type { Terminal } from "@xterm/xterm";
 
-import type { CommandAutocomplete, CommandCallback } from "./index";
 import { useSession } from "@/auth/client";
+import type { CommandAutocomplete, CommandCallback } from "./index";
 
 import commands from "../commands.json";
 
-import { all, createEmphasize } from "emphasize";
 import UseOperatingSystem from "@/hooks/use-operating-system";
+import { all, createEmphasize } from "emphasize";
 
 import styles from "@/operating-system/application/window/application-window.module.css";
 

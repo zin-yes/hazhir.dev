@@ -42,6 +42,15 @@ import {
     FileSystemNode,
     useFileSystem,
 } from "@/hooks/use-file-system";
+import { executeFilePath, isExecutableFile, isShortcutFile } from "@/lib/file-execution";
+import {
+    FILE_DRAG_MIME,
+    hasFileDragType,
+    readFileDragPayload,
+    serializeFileDragPayload,
+    setFileDragPreview,
+} from "@/lib/file-transfer-dnd";
+import { getHomePath } from "@/lib/system-user";
 import { cn } from "@/lib/utils";
 import {
     ArrowLeft,
@@ -75,6 +84,7 @@ import {
     RefreshCw,
     Scissors,
     Search,
+    TerminalSquare,
     Trash2,
     Video,
 } from "lucide-react";
@@ -135,6 +145,8 @@ function getFileIcon(node: FileSystemNode, size: number = 18) {
   if (node.type === "directory") {
     const iconMap: Record<string, typeof Folder> = {
       Documents: FileText,
+      applications: Folder,
+      Applications: Folder,
       Downloads: Download,
       Pictures: Image,
       Music: Music,
@@ -143,6 +155,14 @@ function getFileIcon(node: FileSystemNode, size: number = 18) {
     };
     const IconComponent = iconMap[node.name] || Folder;
     return <IconComponent size={size} className="text-blue-400" />;
+  }
+
+  if (isShortcutFile(node)) {
+    return <File size={size} className="text-cyan-400" />;
+  }
+
+  if (isExecutableFile(node)) {
+    return <TerminalSquare size={size} className="text-orange-400" />;
   }
 
   const ext = node.name.split(".").pop()?.toLowerCase();
@@ -209,33 +229,51 @@ interface SidebarBookmark {
   icon: typeof Home;
 }
 
-const BOOKMARKS: SidebarBookmark[] = [
-  { name: "Home", path: "/home/user", icon: Home },
-  { name: "Documents", path: "/home/user/Documents", icon: FileText },
-  { name: "Downloads", path: "/home/user/Downloads", icon: Download },
-  { name: "Pictures", path: "/home/user/Pictures", icon: Image },
-  { name: "Music", path: "/home/user/Music", icon: Music },
-  { name: "Videos", path: "/home/user/Videos", icon: Video },
-];
-
 interface DirectoryTreeItemProps {
   node: FileSystemNode;
   level: number;
   currentPath: string;
   onNavigate: (path: string) => void;
+  onOpenFile: (node: FileSystemNode) => void;
   showHidden: boolean;
+  onDropPathsToDirectory: (paths: string[], destinationDirectoryPath: string) => void;
 }
 
-function DirectoryTreeItem({ node, level, currentPath, onNavigate, showHidden }: DirectoryTreeItemProps) {
+function DirectoryTreeItem({ node, level, currentPath, onNavigate, onOpenFile, showHidden, onDropPathsToDirectory }: DirectoryTreeItemProps) {
   const [isExpanded, setIsExpanded] = useState(false);
   const fs = useFileSystem();
+  const autoExpandTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   
   const children = useMemo(() => {
     if (!isExpanded) return [];
-    return fs.getChildren(node.path, showHidden).filter(n => n.type === "directory");
+    return fs.getChildren(node.path, showHidden);
   }, [isExpanded, node.path, showHidden]);
 
   const isActive = currentPath === node.path;
+
+  useEffect(() => {
+    return () => {
+      if (autoExpandTimerRef.current) {
+        clearTimeout(autoExpandTimerRef.current);
+        autoExpandTimerRef.current = null;
+      }
+    };
+  }, []);
+
+  const clearAutoExpandTimer = useCallback(() => {
+    if (autoExpandTimerRef.current) {
+      clearTimeout(autoExpandTimerRef.current);
+      autoExpandTimerRef.current = null;
+    }
+  }, []);
+
+  const scheduleAutoExpand = useCallback(() => {
+    if (isExpanded || autoExpandTimerRef.current) return;
+    autoExpandTimerRef.current = setTimeout(() => {
+      setIsExpanded(true);
+      autoExpandTimerRef.current = null;
+    }, 1000);
+  }, [isExpanded]);
 
   return (
     <div>
@@ -244,8 +282,33 @@ function DirectoryTreeItem({ node, level, currentPath, onNavigate, showHidden }:
           "flex items-center gap-1 px-2 py-1 cursor-pointer hover:bg-accent/50 rounded-md text-sm",
           isActive && "bg-accent text-accent-foreground"
         )}
+        data-file-drop-zone="true"
+        data-file-drop-kind="directory"
+        data-file-drop-path={node.path}
         style={{ paddingLeft: `${level * 12 + 8}px` }}
         onClick={() => onNavigate(node.path)}
+        onDragEnter={(event) => {
+          if (!hasFileDragType(event.dataTransfer)) return;
+          scheduleAutoExpand();
+        }}
+        onDragOver={(event) => {
+          if (!hasFileDragType(event.dataTransfer)) return;
+          event.preventDefault();
+          event.stopPropagation();
+          event.dataTransfer.dropEffect = "move";
+          scheduleAutoExpand();
+        }}
+        onDragLeave={() => {
+          clearAutoExpandTimer();
+        }}
+        onDrop={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          clearAutoExpandTimer();
+          const payload = readFileDragPayload(event.dataTransfer);
+          if (!payload?.paths?.length) return;
+          onDropPathsToDirectory(payload.paths, node.path);
+        }}
       >
         <button
           className="p-0.5 hover:bg-accent rounded"
@@ -260,23 +323,38 @@ function DirectoryTreeItem({ node, level, currentPath, onNavigate, showHidden }:
             <ChevronRight size={14} className="text-muted-foreground" />
           )}
         </button>
-        {isExpanded ? (
-          <FolderOpen size={16} className="text-blue-400 shrink-0" />
-        ) : (
-          <Folder size={16} className="text-blue-400 shrink-0" />
-        )}
+        {isExpanded ? <FolderOpen size={16} className="text-blue-400 shrink-0" /> : getFileIcon(node, 16)}
         <span className="truncate">{node.name}</span>
       </div>
-      {isExpanded && children.map((child) => (
-        <DirectoryTreeItem
-          key={child.path}
-          node={child}
-          level={level + 1}
-          currentPath={currentPath}
-          onNavigate={onNavigate}
-          showHidden={showHidden}
-        />
-      ))}
+      {isExpanded && children.map((child) => {
+        if (child.type === "directory") {
+          return (
+            <DirectoryTreeItem
+              key={child.path}
+              node={child}
+              level={level + 1}
+              currentPath={currentPath}
+              onNavigate={onNavigate}
+              onOpenFile={onOpenFile}
+              showHidden={showHidden}
+              onDropPathsToDirectory={onDropPathsToDirectory}
+            />
+          );
+        }
+
+        return (
+          <div
+            key={child.path}
+            className="flex items-center gap-1 px-2 py-1 cursor-pointer hover:bg-accent/50 rounded-md text-sm"
+            style={{ paddingLeft: `${(level + 1) * 12 + 8}px` }}
+            onClick={() => onOpenFile(child)}
+          >
+            <span className="w-[15px] shrink-0" />
+            {getFileIcon(child, 16)}
+            <span className="truncate">{child.name}</span>
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -286,6 +364,10 @@ interface FileGridItemProps {
   isSelected: boolean;
   onSelect: (path: string, event: React.MouseEvent<HTMLDivElement>) => void;
   onOpen: (node: FileSystemNode) => void;
+  onOpenInEditor: (node: FileSystemNode) => void;
+  onDragStartItem: (node: FileSystemNode, event: React.DragEvent<HTMLDivElement>) => void;
+  onDragEndItem: () => void;
+  onDropOnDirectory: (directoryPath: string, event: React.DragEvent<HTMLDivElement>) => void;
   onRename: (node: FileSystemNode) => void;
   onDelete: (node: FileSystemNode) => void;
   onCopy: (node: FileSystemNode) => void;
@@ -294,7 +376,29 @@ interface FileGridItemProps {
   onItemRef: (path: string, node: HTMLDivElement | null) => void;
 }
 
-function FileGridItem({ node, isSelected, onSelect, onOpen, onRename, onDelete, onCopy, onCut, onContextSelect, onItemRef }: FileGridItemProps) {
+function FileGridItem({ node, isSelected, onSelect, onOpen, onOpenInEditor, onDragStartItem, onDragEndItem, onDropOnDirectory, onRename, onDelete, onCopy, onCut, onContextSelect, onItemRef }: FileGridItemProps) {
+  const canOpenInEditor =
+    node.type === "file" &&
+    [
+      "txt",
+      "md",
+      "js",
+      "ts",
+      "jsx",
+      "tsx",
+      "json",
+      "css",
+      "html",
+      "yml",
+      "yaml",
+      "xml",
+      "toml",
+      "shortcut",
+      "app",
+      "sh",
+      "bash",
+    ].includes(node.name.split(".").pop()?.toLowerCase() ?? "");
+
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild>
@@ -302,14 +406,43 @@ function FileGridItem({ node, isSelected, onSelect, onOpen, onRename, onDelete, 
           ref={(nodeRef) => onItemRef(node.path, nodeRef)}
           data-file-item="true"
           data-file-hit="true"
+          data-file-drop-zone={node.type === "directory" ? "true" : undefined}
+          data-file-drop-kind={node.type === "directory" ? "directory" : undefined}
+          data-file-drop-path={node.type === "directory" ? node.path : undefined}
+          draggable
           className={cn(
             "flex flex-col items-center gap-1 p-3 rounded-lg cursor-pointer transition-all",
             "hover:bg-primary/10 w-24",
             isSelected && "bg-primary/10 ring-2 ring-primary/40"
           )}
+          onDragStart={(event) => onDragStartItem(node, event)}
+          onDragEnd={onDragEndItem}
+          onDragOver={(event) => {
+            if (node.type === "directory") {
+              event.preventDefault();
+              event.stopPropagation();
+              event.dataTransfer.dropEffect = "move";
+            }
+          }}
+          onDrop={(event) => {
+            if (node.type === "directory") {
+              onDropOnDirectory(node.path, event);
+            }
+          }}
           onMouseDown={(e) => {
             e.stopPropagation();
             onSelect(node.path, e);
+          }}
+          onClick={(e) => {
+            if (
+              node.type === "file" &&
+              node.name.endsWith(".shortcut") &&
+              !e.shiftKey &&
+              !e.ctrlKey &&
+              !e.metaKey
+            ) {
+              onOpen(node);
+            }
           }}
           onContextMenu={(e) => {
             onContextSelect(node.path, e);
@@ -332,6 +465,12 @@ function FileGridItem({ node, isSelected, onSelect, onOpen, onRename, onDelete, 
           <Eye size={16} className="mr-2" />
           Open
         </ContextMenuItem>
+        {canOpenInEditor ? (
+          <ContextMenuItem onClick={() => onOpenInEditor(node)}>
+            <Edit3 size={16} className="mr-2" />
+            Open in Text Editor
+          </ContextMenuItem>
+        ) : null}
         <ContextMenuSeparator />
         <ContextMenuItem onClick={() => onCut(node)}>
           <Scissors size={16} className="mr-2" />
@@ -344,12 +483,16 @@ function FileGridItem({ node, isSelected, onSelect, onOpen, onRename, onDelete, 
           <ContextMenuShortcut>Ctrl+C</ContextMenuShortcut>
         </ContextMenuItem>
         <ContextMenuSeparator />
-        <ContextMenuItem onClick={() => onRename(node)}>
+        <ContextMenuItem onClick={() => onRename(node)} disabled={Boolean(node.readOnly)}>
           <Edit3 size={16} className="mr-2" />
           Rename
           <ContextMenuShortcut>F2</ContextMenuShortcut>
         </ContextMenuItem>
-        <ContextMenuItem onClick={() => onDelete(node)} className="text-destructive">
+        <ContextMenuItem
+          onClick={() => onDelete(node)}
+          disabled={Boolean(node.readOnly)}
+          className="text-destructive"
+        >
           <Trash2 size={16} className="mr-2" />
           Delete
           <ContextMenuShortcut>Del</ContextMenuShortcut>
@@ -361,7 +504,29 @@ function FileGridItem({ node, isSelected, onSelect, onOpen, onRename, onDelete, 
 
 interface FileListItemProps extends FileGridItemProps {}
 
-function FileListItem({ node, isSelected, onSelect, onOpen, onRename, onDelete, onCopy, onCut, onContextSelect, onItemRef }: FileListItemProps) {
+function FileListItem({ node, isSelected, onSelect, onOpen, onOpenInEditor, onDragStartItem, onDragEndItem, onDropOnDirectory, onRename, onDelete, onCopy, onCut, onContextSelect, onItemRef }: FileListItemProps) {
+  const canOpenInEditor =
+    node.type === "file" &&
+    [
+      "txt",
+      "md",
+      "js",
+      "ts",
+      "jsx",
+      "tsx",
+      "json",
+      "css",
+      "html",
+      "yml",
+      "yaml",
+      "xml",
+      "toml",
+      "shortcut",
+      "app",
+      "sh",
+      "bash",
+    ].includes(node.name.split(".").pop()?.toLowerCase() ?? "");
+
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild>
@@ -369,13 +534,42 @@ function FileListItem({ node, isSelected, onSelect, onOpen, onRename, onDelete, 
           ref={(nodeRef) => onItemRef(node.path, nodeRef)}
           data-file-item="true"
           data-file-hit="true"
+          data-file-drop-zone={node.type === "directory" ? "true" : undefined}
+          data-file-drop-kind={node.type === "directory" ? "directory" : undefined}
+          data-file-drop-path={node.type === "directory" ? node.path : undefined}
+          draggable
           className={cn(
             "flex items-center gap-3 px-3 py-2 hover:bg-primary/10 cursor-pointer transition-all border-b border-border/50",
             isSelected && "bg-primary/10"
           )}
+          onDragStart={(event) => onDragStartItem(node, event)}
+          onDragEnd={onDragEndItem}
+          onDragOver={(event) => {
+            if (node.type === "directory") {
+              event.preventDefault();
+              event.stopPropagation();
+              event.dataTransfer.dropEffect = "move";
+            }
+          }}
+          onDrop={(event) => {
+            if (node.type === "directory") {
+              onDropOnDirectory(node.path, event);
+            }
+          }}
           onMouseDown={(e) => {
             e.stopPropagation();
             onSelect(node.path, e);
+          }}
+          onClick={(e) => {
+            if (
+              node.type === "file" &&
+              node.name.endsWith(".shortcut") &&
+              !e.shiftKey &&
+              !e.ctrlKey &&
+              !e.metaKey
+            ) {
+              onOpen(node);
+            }
           }}
           onContextMenu={(e) => {
             onContextSelect(node.path, e);
@@ -406,6 +600,12 @@ function FileListItem({ node, isSelected, onSelect, onOpen, onRename, onDelete, 
           <Eye size={16} className="mr-2" />
           Open
         </ContextMenuItem>
+        {canOpenInEditor ? (
+          <ContextMenuItem onClick={() => onOpenInEditor(node)}>
+            <Edit3 size={16} className="mr-2" />
+            Open in Text Editor
+          </ContextMenuItem>
+        ) : null}
         <ContextMenuSeparator />
         <ContextMenuItem onClick={() => onCut(node)}>
           <Scissors size={16} className="mr-2" />
@@ -418,12 +618,16 @@ function FileListItem({ node, isSelected, onSelect, onOpen, onRename, onDelete, 
           <ContextMenuShortcut>Ctrl+C</ContextMenuShortcut>
         </ContextMenuItem>
         <ContextMenuSeparator />
-        <ContextMenuItem onClick={() => onRename(node)}>
+        <ContextMenuItem onClick={() => onRename(node)} disabled={Boolean(node.readOnly)}>
           <Edit3 size={16} className="mr-2" />
           Rename
           <ContextMenuShortcut>F2</ContextMenuShortcut>
         </ContextMenuItem>
-        <ContextMenuItem onClick={() => onDelete(node)} className="text-destructive">
+        <ContextMenuItem
+          onClick={() => onDelete(node)}
+          disabled={Boolean(node.readOnly)}
+          className="text-destructive"
+        >
           <Trash2 size={16} className="mr-2" />
           Delete
           <ContextMenuShortcut>Del</ContextMenuShortcut>
@@ -435,9 +639,20 @@ function FileListItem({ node, isSelected, onSelect, onOpen, onRename, onDelete, 
 
 export default function FileExplorerApplication() {
   const fs = useFileSystem();
+  const homePath = getHomePath();
+  const bookmarks: SidebarBookmark[] = useMemo(
+    () => [
+      { name: "Home", path: homePath, icon: Home },
+      { name: "Desktop", path: `${homePath}/Desktop`, icon: HardDrive },
+      { name: "Documents", path: `${homePath}/Documents`, icon: FileText },
+      { name: "Applications", path: "/applications", icon: Folder },
+      { name: "Root", path: "/", icon: HardDrive },
+    ],
+    [homePath]
+  );
   
-  const [currentPath, setCurrentPath] = useState("/home/user");
-  const [history, setHistory] = useState<string[]>(["/home/user"]);
+  const [currentPath, setCurrentPath] = useState(homePath);
+  const [history, setHistory] = useState<string[]>([homePath]);
   const [historyIndex, setHistoryIndex] = useState(0);
   
   const [viewMode, setViewMode] = useState<ViewMode>("grid");
@@ -449,6 +664,8 @@ export default function FileExplorerApplication() {
   
   const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set());
   const [lastSelectedPath, setLastSelectedPath] = useState<string | null>(null);
+  const selectedPathsRef = useRef<Set<string>>(new Set());
+  const isFileTransferDraggingRef = useRef(false);
   const [marquee, setMarquee] = useState<{
     x: number;
     y: number;
@@ -464,6 +681,7 @@ export default function FileExplorerApplication() {
   const rootRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const viewportRef = useRef<HTMLDivElement>(null);
+  const breadcrumbHoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const itemRefs = useRef<Map<string, HTMLDivElement>>(new Map());
   const isSelectingRef = useRef(false);
   const selectionOriginRef = useRef<{ x: number; y: number } | null>(null);
@@ -559,6 +777,10 @@ export default function FileExplorerApplication() {
   const updateSelection = useCallback((next: Set<string>) => {
     setSelectedPaths(new Set(next));
   }, []);
+
+  useEffect(() => {
+    selectedPathsRef.current = new Set(selectedPaths);
+  }, [selectedPaths]);
 
   const selectRange = useCallback(
     (fromPath: string, toPath: string) => {
@@ -722,6 +944,11 @@ export default function FileExplorerApplication() {
     if (node.type === "directory") {
       navigate(node.path);
     } else {
+      if (isShortcutFile(node) || isExecutableFile(node)) {
+        executeFilePath(node.path, fs);
+        return;
+      }
+
       const ext = node.name.split(".").pop()?.toLowerCase();
       
       if (ext === "pdf") {
@@ -740,7 +967,17 @@ export default function FileExplorerApplication() {
         setChildWindows((prev) => [...prev, portal]);
       }
     }
-  }, [navigate]);
+  }, [fs, navigate]);
+
+  const handleOpenInEditor = useCallback((node: FileSystemNode) => {
+    if (node.type !== "file") return;
+    const portal = createPortal(
+      <TextEditorApplicationWindow filePath={node.path} />,
+      document.getElementById("operating-system-container") as HTMLDivElement,
+      "text_editor_" + v4()
+    );
+    setChildWindows((prev) => [...prev, portal]);
+  }, []);
 
   const handleRename = useCallback((node: FileSystemNode) => {
     setRenameTarget(node);
@@ -780,6 +1017,79 @@ export default function FileExplorerApplication() {
       setClipboard(null);
     }
   }, [clipboard, currentPath]);
+
+  const movePathsToDirectory = useCallback(
+    (paths: string[], destinationDirectoryPath: string) => {
+      const uniquePaths = Array.from(new Set(paths.map((item) => fs.normalizePath(item))));
+
+      uniquePaths.forEach((sourcePath) => {
+        const sourceNode = fs.getNode(sourcePath);
+        if (!sourceNode || sourceNode.readOnly) return;
+        if (fs.normalizePath(sourceNode.parentPath) === fs.normalizePath(destinationDirectoryPath)) {
+          return;
+        }
+        fs.move(sourcePath, destinationDirectoryPath);
+      });
+    },
+    [fs]
+  );
+
+  const handleDragStartItem = useCallback(
+    (node: FileSystemNode, event: React.DragEvent<HTMLDivElement>) => {
+      const selection = selectedPathsRef.current;
+      const draggedPaths =
+        selection.has(node.path) && selection.size > 0
+          ? Array.from(selection)
+          : [node.path];
+
+      isFileTransferDraggingRef.current = true;
+      event.dataTransfer.setData(FILE_DRAG_MIME, serializeFileDragPayload(draggedPaths));
+      event.dataTransfer.setData("text/plain", draggedPaths.join("\n"));
+      event.dataTransfer.setData("text/uri-list", draggedPaths.join("\n"));
+      event.dataTransfer.effectAllowed = "move";
+      setFileDragPreview(event.dataTransfer, node.name, draggedPaths.length);
+    },
+    []
+  );
+
+  const handleDragEndItem = useCallback(() => {
+    isFileTransferDraggingRef.current = false;
+  }, []);
+
+  const handleDropOnDirectory = useCallback(
+    (directoryPath: string, event: React.DragEvent<HTMLDivElement>) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const payload = readFileDragPayload(event.dataTransfer);
+      if (!payload?.paths?.length) return;
+      movePathsToDirectory(payload.paths, directoryPath);
+    },
+    [movePathsToDirectory]
+  );
+
+  const clearBreadcrumbHoverTimer = useCallback(() => {
+    if (breadcrumbHoverTimerRef.current) {
+      clearTimeout(breadcrumbHoverTimerRef.current);
+      breadcrumbHoverTimerRef.current = null;
+    }
+  }, []);
+
+  const scheduleBreadcrumbAutoNavigate = useCallback(
+    (path: string) => {
+      clearBreadcrumbHoverTimer();
+      breadcrumbHoverTimerRef.current = setTimeout(() => {
+        navigate(path);
+        breadcrumbHoverTimerRef.current = null;
+      }, 1000);
+    },
+    [clearBreadcrumbHoverTimer, navigate]
+  );
+
+  useEffect(() => {
+    return () => {
+      clearBreadcrumbHoverTimer();
+    };
+  }, [clearBreadcrumbHoverTimer]);
 
   const handleCreateFolder = useCallback(() => {
     setCreateMode("folder");
@@ -978,6 +1288,9 @@ export default function FileExplorerApplication() {
       <div
         ref={rootRef}
         tabIndex={0}
+        data-file-drop-zone="true"
+        data-file-drop-kind="explorer-window"
+        data-file-drop-path={currentPath}
         className="flex flex-col h-full bg-background text-foreground outline-none"
         onMouseDownCapture={() => {
           rootRef.current?.focus();
@@ -1133,6 +1446,30 @@ export default function FileExplorerApplication() {
             <button
               onClick={() => navigate("/")}
               className="hover:bg-accent rounded p-0.5 shrink-0"
+                    data-file-drop-zone="true"
+                    data-file-drop-kind="explorer-breadcrumb"
+                    data-file-drop-path="/"
+                    onDragOver={(event) => {
+                      if (!hasFileDragType(event.dataTransfer)) return;
+                      event.preventDefault();
+                      event.stopPropagation();
+                      event.dataTransfer.dropEffect = "move";
+                    }}
+                    onDragEnter={(event) => {
+                      if (!hasFileDragType(event.dataTransfer)) return;
+                      scheduleBreadcrumbAutoNavigate("/");
+                    }}
+                    onDragLeave={() => {
+                      clearBreadcrumbHoverTimer();
+                    }}
+                    onDrop={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      clearBreadcrumbHoverTimer();
+                      const payload = readFileDragPayload(event.dataTransfer);
+                      if (!payload?.paths?.length) return;
+                      movePathsToDirectory(payload.paths, "/");
+                    }}
             >
               <HardDrive size={14} />
             </button>
@@ -1142,6 +1479,30 @@ export default function FileExplorerApplication() {
                 <button
                   onClick={() => navigate(part.path)}
                   className="hover:bg-accent rounded px-1 py-0.5 text-sm truncate max-w-32"
+                        data-file-drop-zone="true"
+                        data-file-drop-kind="explorer-breadcrumb"
+                        data-file-drop-path={part.path}
+                        onDragOver={(event) => {
+                          if (!hasFileDragType(event.dataTransfer)) return;
+                          event.preventDefault();
+                          event.stopPropagation();
+                          event.dataTransfer.dropEffect = "move";
+                        }}
+                        onDragEnter={(event) => {
+                          if (!hasFileDragType(event.dataTransfer)) return;
+                          scheduleBreadcrumbAutoNavigate(part.path);
+                        }}
+                        onDragLeave={() => {
+                          clearBreadcrumbHoverTimer();
+                        }}
+                        onDrop={(event) => {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          clearBreadcrumbHoverTimer();
+                          const payload = readFileDragPayload(event.dataTransfer);
+                          if (!payload?.paths?.length) return;
+                          movePathsToDirectory(payload.paths, part.path);
+                        }}
                 >
                   {part.name}
                 </button>
@@ -1239,7 +1600,7 @@ export default function FileExplorerApplication() {
                   <div className="text-xs font-semibold text-muted-foreground uppercase px-2 mb-2">
                     Places
                   </div>
-                  {BOOKMARKS.map((bookmark) => {
+                  {bookmarks.map((bookmark) => {
                     const Icon = bookmark.icon;
                     return (
                       <button
@@ -1280,7 +1641,9 @@ export default function FileExplorerApplication() {
                       level={1}
                       currentPath={currentPath}
                       onNavigate={navigate}
+                      onOpenFile={handleOpen}
                       showHidden={showHidden}
+                      onDropPathsToDirectory={movePathsToDirectory}
                     />
                   ))}
                 </div>
@@ -1368,7 +1731,21 @@ export default function FileExplorerApplication() {
                 >
                   <div
                     ref={contentRef}
+                    data-file-drop-zone="true"
+                    data-file-drop-kind="explorer-root"
+                    data-file-drop-path={currentPath}
                     className="relative min-h-full w-full select-none"
+                    onDragOver={(event) => {
+                      if (!hasFileDragType(event.dataTransfer)) return;
+                      event.preventDefault();
+                      event.dataTransfer.dropEffect = "move";
+                    }}
+                    onDrop={(event) => {
+                      event.preventDefault();
+                      const payload = readFileDragPayload(event.dataTransfer);
+                      if (!payload?.paths?.length) return;
+                      movePathsToDirectory(payload.paths, currentPath);
+                    }}
                     onContextMenu={(event) => {
                       const target = event.target as HTMLElement;
                       if (target.closest("[data-file-item='true']")) return;
@@ -1386,6 +1763,10 @@ export default function FileExplorerApplication() {
                               onContextSelect={handleContextSelect}
                               onItemRef={handleItemRef}
                               onOpen={handleOpen}
+                              onOpenInEditor={handleOpenInEditor}
+                              onDragStartItem={handleDragStartItem}
+                              onDragEndItem={handleDragEndItem}
+                              onDropOnDirectory={handleDropOnDirectory}
                               onRename={handleRename}
                               onDelete={handleDelete}
                               onCopy={handleCopy}
@@ -1410,6 +1791,10 @@ export default function FileExplorerApplication() {
                               onContextSelect={handleContextSelect}
                               onItemRef={handleItemRef}
                               onOpen={handleOpen}
+                              onOpenInEditor={handleOpenInEditor}
+                              onDragStartItem={handleDragStartItem}
+                              onDragEndItem={handleDragEndItem}
+                              onDropOnDirectory={handleDropOnDirectory}
                               onRename={handleRename}
                               onDelete={handleDelete}
                               onCopy={handleCopy}

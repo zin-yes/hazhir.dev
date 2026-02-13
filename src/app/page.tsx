@@ -1,31 +1,43 @@
 "use client";
 
 import { Button } from "@/components/ui/button";
-import { Gamepad2, TerminalSquare } from "lucide-react";
-import React, { useEffect, useState } from "react";
+import { FileSymlink, Gamepad2, TerminalSquare } from "lucide-react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 
 import {
-  signInWithCredentials,
-  signInAsGuest,
-  signInWithGoogle,
-  useSession,
+    signInAsGuest,
+    signInWithCredentials,
+    signInWithGoogle,
+    useSession,
 } from "@/auth/client";
 import { Calendar } from "@/components/ui/calendar";
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuShortcut,
-  DropdownMenuTrigger,
+    DropdownMenu,
+    DropdownMenuContent,
+    DropdownMenuItem,
+    DropdownMenuShortcut,
+    DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { useAuthPillar } from "@/hooks/use-auth-pillar";
 import UseOperatingSystem from "@/hooks/use-operating-system";
+import { OS_LAUNCH_APPLICATION_EVENT } from "@/lib/application-launcher";
+import {
+    FILE_PATH_DROP_EVENT,
+    hasFileDragType,
+    readDroppedPathsFromDataTransfer,
+} from "@/lib/file-transfer-dnd";
+import { setCurrentSystemUsername } from "@/lib/system-user";
 import Image from "next/image";
 import { v4 } from "uuid";
 import {
-  GameApplicationWindow,
-  TerminalApplicationWindow,
+    CalculatorApplicationWindow,
+    FileExplorerApplicationWindow,
+    GameApplicationWindow,
+    SingleDocumentApplicationWindow,
+    TerminalApplicationWindow,
+    TextEditorApplicationWindow,
+    VisualNovelApplicationWindow,
 } from "./application-windows";
 import Desktop from "./desktop";
 import Wallpaper from "./wallpaper";
@@ -36,10 +48,15 @@ export default function OperatingSystemPage() {
   const [password, setPassword] = useState("");
   const [authError, setAuthError] = useState<string>("");
   const [isAuthPending, setIsAuthPending] = useState(false);
+  const [isSystemUserReady, setIsSystemUserReady] = useState(false);
+  const [isFileTransferDragActive, setIsFileTransferDragActive] = useState(false);
+  const [isOverDropZone, setIsOverDropZone] = useState(false);
+  const [dragCursor, setDragCursor] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const fileDragDepthRef = useRef(0);
 
-  const addWindow = (pane: React.ReactNode) => {
-    setWindows([...windows, pane]);
-  };
+  const addWindow = useCallback((pane: React.ReactNode) => {
+    setWindows((previous) => [...previous, pane]);
+  }, []);
 
   const [time, setTime] = useState<string>(new Date().toLocaleTimeString());
 
@@ -71,6 +88,151 @@ export default function OperatingSystemPage() {
 
   const operatingSystem = UseOperatingSystem();
 
+  useEffect(() => {
+    if (session.status === "authenticated" && session.data?.user) {
+      const user = session.data.user as {
+        username?: string;
+        name?: string;
+        id?: string;
+      };
+      const username = user.username ?? user.name ?? user.id ?? "guest";
+      setCurrentSystemUsername(String(username));
+      setIsSystemUserReady(true);
+      return;
+    }
+
+    if (session.status !== "loading") {
+      setIsSystemUserReady(true);
+    }
+  }, [session]);
+
+  useEffect(() => {
+    const handler = (event: Event) => {
+      const detail = (event as CustomEvent<{ appId: string; args?: string[] }>).detail;
+      if (!detail?.appId) return;
+
+      switch (detail.appId) {
+        case "terminal":
+          addWindow(<TerminalApplicationWindow identifier={v4()} />);
+          break;
+        case "file-explorer":
+          addWindow(<FileExplorerApplicationWindow addWindow={addWindow} />);
+          break;
+        case "voxel-game":
+          addWindow(<GameApplicationWindow />);
+          break;
+        case "calculator":
+          addWindow(<CalculatorApplicationWindow />);
+          break;
+        case "visual-novel":
+          addWindow(<VisualNovelApplicationWindow />);
+          break;
+        case "document-viewer": {
+          const articleId = detail.args?.[0] ?? "CV.pdf";
+          const title = detail.args?.[1] ?? articleId;
+          addWindow(
+            <SingleDocumentApplicationWindow articleId={articleId} title={title} />
+          );
+          break;
+        }
+        case "text-editor": {
+          const filePath = detail.args?.[0];
+          if (!filePath) break;
+          addWindow(<TextEditorApplicationWindow filePath={filePath} />);
+          break;
+        }
+        default:
+          break;
+      }
+    };
+
+    window.addEventListener(OS_LAUNCH_APPLICATION_EVENT, handler);
+    return () => window.removeEventListener(OS_LAUNCH_APPLICATION_EVENT, handler);
+  }, [addWindow]);
+
+  useEffect(() => {
+    const updateDropZoneState = (x: number, y: number) => {
+      const element = document.elementFromPoint(x, y) as HTMLElement | null;
+      setIsOverDropZone(Boolean(element?.closest("[data-file-drop-zone='true']")));
+    };
+
+    const onDragEnter = (event: DragEvent) => {
+      if (!hasFileDragType(event.dataTransfer)) return;
+      fileDragDepthRef.current += 1;
+      setIsFileTransferDragActive(true);
+      setDragCursor({ x: event.clientX, y: event.clientY });
+      updateDropZoneState(event.clientX, event.clientY);
+    };
+
+    const onDragOver = (event: DragEvent) => {
+      if (!hasFileDragType(event.dataTransfer)) return;
+      setIsFileTransferDragActive(true);
+      setDragCursor({ x: event.clientX, y: event.clientY });
+      updateDropZoneState(event.clientX, event.clientY);
+    };
+
+    const onDragLeave = (event: DragEvent) => {
+      if (!hasFileDragType(event.dataTransfer)) return;
+      fileDragDepthRef.current = Math.max(0, fileDragDepthRef.current - 1);
+      if (fileDragDepthRef.current === 0) {
+        setIsFileTransferDragActive(false);
+        setIsOverDropZone(false);
+      } else {
+        setDragCursor({ x: event.clientX, y: event.clientY });
+      }
+    };
+
+    const onDrop = (event: DragEvent) => {
+      const target = document.elementFromPoint(
+        event.clientX,
+        event.clientY
+      ) as HTMLElement | null;
+      const dropZone = target?.closest(
+        "[data-file-drop-zone='true']"
+      ) as HTMLElement | null;
+
+      if (dropZone?.dataset.fileDropKind === "terminal") {
+        const paths = readDroppedPathsFromDataTransfer(event.dataTransfer);
+        if (paths.length > 0) {
+          event.preventDefault();
+          event.stopPropagation();
+          dropZone.dispatchEvent(
+            new CustomEvent(FILE_PATH_DROP_EVENT, {
+              bubbles: true,
+              detail: { paths },
+            })
+          );
+        }
+      }
+
+      fileDragDepthRef.current = 0;
+      setIsFileTransferDragActive(false);
+      setIsOverDropZone(false);
+    };
+
+    const onMouseUp = () => {
+      fileDragDepthRef.current = 0;
+      setIsFileTransferDragActive(false);
+      setIsOverDropZone(false);
+    };
+
+    window.addEventListener("dragenter", onDragEnter, true);
+    window.addEventListener("dragover", onDragOver, true);
+    window.addEventListener("dragleave", onDragLeave, true);
+    window.addEventListener("drop", onDrop, true);
+    window.addEventListener("dragend", onDrop, true);
+    window.addEventListener("mouseup", onMouseUp, true);
+
+    return () => {
+      window.removeEventListener("dragenter", onDragEnter, true);
+      window.removeEventListener("dragover", onDragOver, true);
+      window.removeEventListener("dragleave", onDragLeave, true);
+      window.removeEventListener("drop", onDrop, true);
+      window.removeEventListener("dragend", onDrop, true);
+      window.removeEventListener("mouseup", onMouseUp, true);
+    };
+  }, []);
+
   return (
     <>
       {/* <ContextMenu>
@@ -78,7 +240,7 @@ export default function OperatingSystemPage() {
       <main className="w-screen h-screen absolute top-0 bottom-0 left-0 right-0 overflow-hidden">
         <Wallpaper />
 
-        {shouldShowOperatingSystem && (
+        {shouldShowOperatingSystem && isSystemUserReady && (
           <div
             className={`absolute inset-0 transition-all duration-1000 ease-out will-change-transform ${
               operatingSystemVisible
@@ -167,6 +329,27 @@ export default function OperatingSystemPage() {
                 return <React.Fragment key={index}>{item}</React.Fragment>;
               })}
             </div>
+
+            {isFileTransferDragActive && (
+              <div
+                className="pointer-events-none fixed z-[2147483647] transition-transform"
+                style={{
+                  left: dragCursor.x + 14,
+                  top: dragCursor.y + 14,
+                }}
+              >
+                <div
+                  className={`flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium border backdrop-blur-sm ${
+                    isOverDropZone
+                      ? "bg-emerald-500/20 border-emerald-300/70 text-emerald-100"
+                      : "bg-rose-500/20 border-rose-300/70 text-rose-100"
+                  }`}
+                >
+                  <FileSymlink size={12} />
+                  <span>{isOverDropZone ? "Drop" : "No drop"}</span>
+                </div>
+              </div>
+            )}
           </div>
         )}
 

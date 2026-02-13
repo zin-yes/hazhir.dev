@@ -3,18 +3,22 @@ import ansi from "ansi-escape-sequences";
 
 
 import { useSession } from "@/auth/client";
+import { executeFilePath } from "@/lib/file-execution";
+import { getHomePath } from "@/lib/system-user";
 import commandCallbacks, { commandAutoCompletes } from "./command-callbacks";
 import commands from "./commands.json";
 
 import Fuse from "fuse.js";
 
-import { getCwd } from "./command-callbacks/cd";
 import { useFileSystem } from "@/hooks/use-file-system";
+import { getCwd } from "./command-callbacks/cd";
 import { getAliases, getEnvVar } from "./shell-state";
 
 // FIXME: When resizing the lines dont unwrap and wrap properly.
 
-const TERMINAL_HISTORY_PATH = "/home/user/.terminal_history";
+function getTerminalHistoryPath() {
+  return `${getHomePath()}/.terminal_history`;
+}
 
 interface CommandBuffer {
   content: string;
@@ -38,14 +42,16 @@ function ensureHistoryLoaded(createIfMissing: boolean) {
   if (typeof window === "undefined") return;
   const fs = useFileSystem();
 
-  if (!fs.exists(TERMINAL_HISTORY_PATH)) {
+  const historyPath = getTerminalHistoryPath();
+
+  if (!fs.exists(historyPath)) {
     _commandHistory = [];
     _historyIndex = -1;
     _historyDraft = "";
     _historyLoaded = false;
     _historyPendingCreate = true;
     if (createIfMissing) {
-      fs.createFile("/home/user", ".terminal_history", "");
+      fs.createFile(getHomePath(), ".terminal_history", "");
       _historyLoaded = true;
       _historyPendingCreate = false;
     }
@@ -54,7 +60,7 @@ function ensureHistoryLoaded(createIfMissing: boolean) {
 
   if (_historyLoaded) return;
 
-  const contents = fs.getFileContents(TERMINAL_HISTORY_PATH) ?? "";
+  const contents = fs.getFileContents(historyPath) ?? "";
   _commandHistory = contents
     .split("\n")
     .map((line) => line.trimEnd())
@@ -65,7 +71,7 @@ function ensureHistoryLoaded(createIfMissing: boolean) {
 function syncHistoryWithFileSystem() {
   if (typeof window === "undefined") return;
   const fs = useFileSystem();
-  if (!fs.exists(TERMINAL_HISTORY_PATH)) {
+  if (!fs.exists(getTerminalHistoryPath())) {
     _commandHistory = [];
     _historyIndex = -1;
     _historyDraft = "";
@@ -77,12 +83,13 @@ function syncHistoryWithFileSystem() {
 function persistHistory(createIfMissing: boolean) {
   if (typeof window === "undefined") return;
   const fs = useFileSystem();
-  if (!fs.exists(TERMINAL_HISTORY_PATH)) {
+  const historyPath = getTerminalHistoryPath();
+  if (!fs.exists(historyPath)) {
     if (!createIfMissing) return;
-    fs.createFile("/home/user", ".terminal_history", "");
+    fs.createFile(getHomePath(), ".terminal_history", "");
     _historyPendingCreate = false;
   }
-  fs.updateFile(TERMINAL_HISTORY_PATH, _commandHistory.join("\n"));
+  fs.updateFile(historyPath, _commandHistory.join("\n"));
 }
 
 function appendHistory(command: string) {
@@ -162,10 +169,29 @@ function clearAutocompleteDisplay(terminal: Terminal) {
   _autocompleteLines = 0;
 }
 
+function formatCompletionSuggestionForDisplay(value: string): string {
+  const cwd = getCwd();
+  const home = getHomePath();
+
+  if (!value.startsWith("/")) return value;
+
+  if (value === cwd) return ".";
+  if (value.startsWith(`${cwd}/`)) {
+    return `.${value.slice(cwd.length)}`;
+  }
+
+  if (value === home) return "~";
+  if (value.startsWith(`${home}/`)) {
+    return `~${value.slice(home.length)}`;
+  }
+
+  return value;
+}
+
 export function getCommandLinePrefix(username: string): string {
   const cwd = getCwd();
   // Shorten home directory to ~
-  const displayPath = cwd.replace("/home/user", "~");
+  const displayPath = cwd.replace(getHomePath(), "~");
   
   return (
     "\x1b[38;2;249;117;22m" +
@@ -351,6 +377,16 @@ function moveCursorForward(steps: number, terminal: Terminal) {
   if (steps > 1) terminal.write(ansi.cursor.show);
 }
 
+function getSessionUsername(session: ReturnType<typeof useSession>): string {
+  if (session.status !== "authenticated" || !session.data?.user) return "";
+  const user = session.data.user as {
+    username?: string;
+    name?: string;
+    id?: string;
+  };
+  return user.username ?? user.name ?? user.id ?? "";
+}
+
 async function onCommand(
   commandBuffer: CommandBuffer,
   terminal: Terminal,
@@ -358,12 +394,7 @@ async function onCommand(
   windowIdentifier: string,
   options?: { writePrompt?: boolean }
 ): Promise<CommandBuffer> {
-  const username =
-    session.status === "authenticated"
-      ? (session.data.user.username ??
-          session.data.user.name ??
-          session.data.user.id)
-      : "";
+  const username = getSessionUsername(session);
   const shouldWritePrompt = options?.writePrompt !== false;
 
   if (commandBuffer.content.length === 0) {
@@ -383,6 +414,7 @@ async function onCommand(
   const expandedCommand = expandAliasesAndEnv(commandBuffer.content);
   const tokens = expandedCommand.split(" ");
   const command = tokens[0];
+  const fs = useFileSystem();
 
   const queryForCommand = commands.filter(
     (value) => value.name === command || value.aliases.includes(command)
@@ -391,11 +423,14 @@ async function onCommand(
   const commandExists = queryForCommand !== undefined;
 
   if (commandExists) {
+    const canonicalExpandedCommand =
+      `${queryForCommand.name}${tokens.length > 1 ? ` ${tokens.slice(1).join(" ")}` : ""}`;
+
     clearAutocompleteDisplay(terminal);
     terminal.write(ansi.cursor.hide);
     terminal.writeln("");
     await commandCallbacks[queryForCommand.callbackFunctionName](
-      expandedCommand,
+      canonicalExpandedCommand,
       terminal,
       session,
       windowIdentifier
@@ -420,6 +455,70 @@ async function onCommand(
         terminal.write(ansi.cursor.show);
       });
   } else {
+    const executableResult = (() => {
+      if (!command) return null;
+
+      const resolveCandidates = () => {
+        if (command.startsWith("/") || command.startsWith(".")) {
+          const directPath = command.startsWith("/")
+            ? fs.normalizePath(command)
+            : fs.normalizePath(`${getCwd()}/${command}`);
+          return [directPath, directPath.endsWith(".app") ? "" : `${directPath}.app`].filter(Boolean) as string[];
+        }
+
+        const rawPath = getEnvVar("PATH") ?? "/applications";
+        const pathEntries = rawPath
+          .split(":")
+          .map((entry) => entry.trim())
+          .filter(Boolean);
+
+        const candidates: string[] = [];
+        pathEntries.forEach((entry) => {
+          const base = fs.normalizePath(entry);
+          candidates.push(fs.normalizePath(`${base}/${command}`));
+          if (!command.endsWith(".app")) {
+            candidates.push(fs.normalizePath(`${base}/${command}.app`));
+          }
+        });
+        return candidates;
+      };
+
+      const candidates = resolveCandidates();
+      const executablePath = candidates.find((candidate) => {
+        const node = fs.getNode(candidate);
+        return Boolean(node?.type === "file" && (node.executable || node.name.endsWith(".app")));
+      });
+
+      if (!executablePath) return null;
+      return executeFilePath(executablePath, fs);
+    })();
+
+    if (executableResult?.ok) {
+      clearAutocompleteDisplay(terminal);
+      terminal.writeln("");
+      if (shouldWritePrompt) {
+        terminal.write(getCommandLinePrefix(username));
+      }
+      return {
+        content: "",
+        cursorPosition: 0,
+      };
+    }
+
+    if (executableResult && !executableResult.ok && executableResult.message) {
+      clearAutocompleteDisplay(terminal);
+      terminal.writeln(" ".repeat(terminal.cols));
+      terminal.writeln(ansi.style.red + executableResult.message + ansi.style.reset);
+      terminal.writeln(" ".repeat(terminal.cols));
+      if (shouldWritePrompt) {
+        terminal.write(getCommandLinePrefix(username));
+      }
+      return {
+        content: "",
+        cursorPosition: 0,
+      };
+    }
+
     clearAutocompleteDisplay(terminal);
     const commandList: string[] = [];
 
@@ -508,6 +607,22 @@ export async function executeCommandLine(
   await onCommand(buffer, terminal, session, windowIdentifier, options);
 }
 
+export function insertTextIntoCommandBuffer(terminal: Terminal, rawText: string) {
+  clearAutocompleteDisplay(terminal);
+
+  const content = rawText.replaceAll("\r", " ").replaceAll("\n", " ").trim();
+  if (!content) return;
+
+  const left = _commandBuffer.content.substring(0, _commandBuffer.cursorPosition);
+  const right = _commandBuffer.content.substring(_commandBuffer.cursorPosition);
+
+  const needsLeadingSpace = left.length > 0 && !left.endsWith(" ");
+  const needsTrailingSpace = right.length > 0 && !right.startsWith(" ");
+
+  const text = `${needsLeadingSpace ? " " : ""}${content}${needsTrailingSpace ? " " : ""}`;
+  _commandBuffer = writeToTerminalAndCommandBuffer(text, _commandBuffer, terminal);
+}
+
 export async function parseCommand(
   terminal: Terminal,
   event: { key: string; domEvent: KeyboardEvent },
@@ -527,12 +642,7 @@ export async function parseCommand(
   if (content === "^z") {
     terminal.write(ansi.style.gray + content + ansi.style.reset);
 
-    const username =
-      session.status === "authenticated"
-        ? (session.data.user.username ??
-            session.data.user.name ??
-            session.data.user.id)
-        : "";
+    const username = getSessionUsername(session);
 
     terminal.write("\n" + getCommandLinePrefix(username));
 
@@ -675,8 +785,10 @@ export async function parseCommand(
             terminal
           );
         } else if (searchResult.length > 1) {
-          const suggestionText = searchResult
-            .map((item) => item.item)
+          const displaySuggestions = searchResult.map((item) =>
+            formatCompletionSuggestionForDisplay(item.item)
+          );
+          const suggestionText = displaySuggestions
             .join("  ");
           const neededLines = Math.max(
             1,
@@ -686,11 +798,9 @@ export async function parseCommand(
           terminal.write(cursor.savePosition);
 
           terminal.writeln(" ".repeat(terminal.cols));
-          searchResult
-            .map((item) => item.item)
-            .forEach((command, index) =>
+          displaySuggestions.forEach((command, index) =>
               terminal.write(
-                command + (index !== searchResult.length ? "  " : "")
+                command + (index !== displaySuggestions.length - 1 ? "  " : "")
               )
             );
           terminal.write(cursor.returnToSavedPosition);
@@ -698,7 +808,10 @@ export async function parseCommand(
         }
       } else if (cursorAtEndOfCommandBuffer && parts.length > 0) {
         const commandName = parts[0];
-        const autocomplete = commandAutoCompletes[commandName];
+        const matched = commands.find(
+          (value) => value.name === commandName || value.aliases.includes(commandName)
+        );
+        const autocomplete = commandAutoCompletes[matched?.name ?? commandName];
 
         if (autocomplete) {
           const argsWithoutCommand = parts.slice(1);
@@ -727,13 +840,16 @@ export async function parseCommand(
               terminal
             );
           } else if (matches.length > 1) {
-            const suggestionText = matches.join("  ");
+            const displayMatches = matches.map((item) =>
+              formatCompletionSuggestionForDisplay(item)
+            );
+            const suggestionText = displayMatches.join("  ");
             const neededLines = Math.max(1, Math.ceil(suggestionText.length / terminal.cols));
 
             terminal.write(cursor.savePosition);
             terminal.writeln(" ".repeat(terminal.cols));
-            matches.forEach((item, index) => {
-              terminal.write(item + (index !== matches.length ? "  " : ""));
+            displayMatches.forEach((item, index) => {
+              terminal.write(item + (index !== displayMatches.length - 1 ? "  " : ""));
             });
             terminal.write(cursor.returnToSavedPosition);
             _autocompleteLines = neededLines + 1;

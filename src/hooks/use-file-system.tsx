@@ -1,11 +1,14 @@
 "use client";
 
+import { buildDefaultFileSystem } from "@/config/system-file-system";
+import { getCurrentSystemUsername, getHomePath } from "@/lib/system-user";
+
 export type FileSystemNodeType = "file" | "directory";
 
 export interface FileSystemNode {
   name: string;
   type: FileSystemNodeType;
-  path: string; // Full path like /home/user/documents
+  path: string; // Full path like /home/guest/Documents
   parentPath: string; // Parent directory path
   contents?: string; // Only for files
   permissions: string; // Unix-like permissions e.g., "rwxr-xr-x"
@@ -15,6 +18,9 @@ export interface FileSystemNode {
   createdAt: number; // Unix timestamp
   modifiedAt: number; // Unix timestamp
   isHidden: boolean;
+  readOnly?: boolean;
+  executable?: boolean;
+  system?: boolean;
 }
 
 export interface FileSystemDirectory extends FileSystemNode {
@@ -26,237 +32,76 @@ export interface FileSystemFile extends FileSystemNode {
   contents: string;
   mimeType?: string;
 }
-
-// Default Linux-like file system structure
-const DEFAULT_FILE_SYSTEM: FileSystemNode[] = [
-  // Root directories
-  {
-    name: "home",
-    type: "directory",
-    path: "/home",
-    parentPath: "/",
-    permissions: "rwxr-xr-x",
-    owner: "root",
-    group: "root",
-    size: 4096,
-    createdAt: Date.now(),
-    modifiedAt: Date.now(),
-    isHidden: false,
-  },
-  {
-    name: "user",
-    type: "directory",
-    path: "/home/user",
-    parentPath: "/home",
-    permissions: "rwxr-xr-x",
-    owner: "user",
-    group: "user",
-    size: 4096,
-    createdAt: Date.now(),
-    modifiedAt: Date.now(),
-    isHidden: false,
-  },
-  {
-    name: "Documents",
-    type: "directory",
-    path: "/home/user/Documents",
-    parentPath: "/home/user",
-    permissions: "rwxr-xr-x",
-    owner: "user",
-    group: "user",
-    size: 4096,
-    createdAt: Date.now(),
-    modifiedAt: Date.now(),
-    isHidden: false,
-  },
-  {
-    name: "Downloads",
-    type: "directory",
-    path: "/home/user/Downloads",
-    parentPath: "/home/user",
-    permissions: "rwxr-xr-x",
-    owner: "user",
-    group: "user",
-    size: 4096,
-    createdAt: Date.now(),
-    modifiedAt: Date.now(),
-    isHidden: false,
-  },
-  {
-    name: "Pictures",
-    type: "directory",
-    path: "/home/user/Pictures",
-    parentPath: "/home/user",
-    permissions: "rwxr-xr-x",
-    owner: "user",
-    group: "user",
-    size: 4096,
-    createdAt: Date.now(),
-    modifiedAt: Date.now(),
-    isHidden: false,
-  },
-  {
-    name: "Music",
-    type: "directory",
-    path: "/home/user/Music",
-    parentPath: "/home/user",
-    permissions: "rwxr-xr-x",
-    owner: "user",
-    group: "user",
-    size: 4096,
-    createdAt: Date.now(),
-    modifiedAt: Date.now(),
-    isHidden: false,
-  },
-  {
-    name: "Videos",
-    type: "directory",
-    path: "/home/user/Videos",
-    parentPath: "/home/user",
-    permissions: "rwxr-xr-x",
-    owner: "user",
-    group: "user",
-    size: 4096,
-    createdAt: Date.now(),
-    modifiedAt: Date.now(),
-    isHidden: false,
-  },
-  {
-    name: "Desktop",
-    type: "directory",
-    path: "/home/user/Desktop",
-    parentPath: "/home/user",
-    permissions: "rwxr-xr-x",
-    owner: "user",
-    group: "user",
-    size: 4096,
-    createdAt: Date.now(),
-    modifiedAt: Date.now(),
-    isHidden: false,
-  },
-  {
-    name: ".config",
-    type: "directory",
-    path: "/home/user/.config",
-    parentPath: "/home/user",
-    permissions: "rwxr-xr-x",
-    owner: "user",
-    group: "user",
-    size: 4096,
-    createdAt: Date.now(),
-    modifiedAt: Date.now(),
-    isHidden: true,
-  },
-  {
-    name: "etc",
-    type: "directory",
-    path: "/etc",
-    parentPath: "/",
-    permissions: "rwxr-xr-x",
-    owner: "root",
-    group: "root",
-    size: 4096,
-    createdAt: Date.now(),
-    modifiedAt: Date.now(),
-    isHidden: false,
-  },
-  {
-    name: "var",
-    type: "directory",
-    path: "/var",
-    parentPath: "/",
-    permissions: "rwxr-xr-x",
-    owner: "root",
-    group: "root",
-    size: 4096,
-    createdAt: Date.now(),
-    modifiedAt: Date.now(),
-    isHidden: false,
-  },
-  {
-    name: "tmp",
-    type: "directory",
-    path: "/tmp",
-    parentPath: "/",
-    permissions: "rwxrwxrwx",
-    owner: "root",
-    group: "root",
-    size: 4096,
-    createdAt: Date.now(),
-    modifiedAt: Date.now(),
-    isHidden: false,
-  },
-  {
-    name: "usr",
-    type: "directory",
-    path: "/usr",
-    parentPath: "/",
-    permissions: "rwxr-xr-x",
-    owner: "root",
-    group: "root",
-    size: 4096,
-    createdAt: Date.now(),
-    modifiedAt: Date.now(),
-    isHidden: false,
-  },
-  // Sample files
-  {
-    name: "readme.txt",
-    type: "file",
-    path: "/home/user/Documents/readme.txt",
-    parentPath: "/home/user/Documents",
-    contents: "Welcome to the file system!\n\nThis is a simulated Linux file system.",
-    permissions: "rw-r--r--",
-    owner: "user",
-    group: "user",
-    size: 71,
-    createdAt: Date.now(),
-    modifiedAt: Date.now(),
-    isHidden: false,
-  },
-  {
-    name: ".bashrc",
-    type: "file",
-    path: "/home/user/.bashrc",
-    parentPath: "/home/user",
-    contents: "# ~/.bashrc\n\n# User specific aliases and functions\nalias ll='ls -la'\nalias la='ls -A'\n\nexport PATH=$HOME/bin:$PATH",
-    permissions: "rw-r--r--",
-    owner: "user",
-    group: "user",
-    size: 125,
-    createdAt: Date.now(),
-    modifiedAt: Date.now(),
-    isHidden: true,
-  },
-  {
-    name: ".profile",
-    type: "file",
-    path: "/home/user/.profile",
-    parentPath: "/home/user",
-    contents: "# ~/.profile\n\n# Set default editor\nexport EDITOR=vim\n\n# Source bashrc\nif [ -f ~/.bashrc ]; then\n    . ~/.bashrc\nfi",
-    permissions: "rw-r--r--",
-    owner: "user",
-    group: "user",
-    size: 132,
-    createdAt: Date.now(),
-    modifiedAt: Date.now(),
-    isHidden: true,
-  },
-];
-
-const FILE_SYSTEM_STORAGE_KEY = "filesystem_v2";
+const FILE_SYSTEM_STORAGE_KEY = "filesystem_v6";
 
 export function useFileSystem() {
+  function normalizePath(path: string): string {
+    const raw = (path || "").replace(/\/+/g, "/");
+    const forcedAbsolute = raw.startsWith("/") ? raw : `/${raw}`;
+    const segments = forcedAbsolute.split("/");
+    const resolved: string[] = [];
+
+    for (const segment of segments) {
+      if (!segment || segment === ".") continue;
+      if (segment === "..") {
+        if (resolved.length > 0) resolved.pop();
+        continue;
+      }
+      resolved.push(segment);
+    }
+
+    return resolved.length === 0 ? "/" : `/${resolved.join("/")}`;
+  }
+
   function getFileSystem(): FileSystemNode[] {
-    if (typeof window === "undefined") return DEFAULT_FILE_SYSTEM;
+    if (typeof window === "undefined") {
+      return buildDefaultFileSystem("guest");
+    }
     
     const stored = window.localStorage.getItem(FILE_SYSTEM_STORAGE_KEY);
     if (!stored) {
-      // Initialize with default file system
-      window.localStorage.setItem(FILE_SYSTEM_STORAGE_KEY, JSON.stringify(DEFAULT_FILE_SYSTEM));
-      return DEFAULT_FILE_SYSTEM;
+      const defaults = buildDefaultFileSystem(getCurrentSystemUsername());
+      window.localStorage.setItem(FILE_SYSTEM_STORAGE_KEY, JSON.stringify(defaults));
+      return defaults;
     }
-    return JSON.parse(stored);
+
+    const parsed = JSON.parse(stored) as FileSystemNode[];
+    const defaults = buildDefaultFileSystem(getCurrentSystemUsername());
+    const existingPaths = new Set(parsed.map((node) => normalizePath(node.path)));
+
+    const missingSystemExecutables = defaults.filter((node) => {
+      if (node.path === "/applications") {
+        return !existingPaths.has("/applications");
+      }
+
+      const isApplicationsExecutable =
+        node.path.startsWith("/applications/") &&
+        node.type === "file" &&
+        Boolean(node.executable);
+
+      return isApplicationsExecutable && !existingPaths.has(normalizePath(node.path));
+    });
+
+    const withDotHiddenFix = parsed.map((node) => {
+      const shouldBeHidden = node.name.startsWith(".");
+      if (node.isHidden === shouldBeHidden) return node;
+      return {
+        ...node,
+        isHidden: shouldBeHidden,
+      };
+    });
+
+    if (missingSystemExecutables.length === 0) {
+      const changed = withDotHiddenFix.some((node, index) => node !== parsed[index]);
+      if (changed) {
+        window.localStorage.setItem(FILE_SYSTEM_STORAGE_KEY, JSON.stringify(withDotHiddenFix));
+      }
+      return withDotHiddenFix;
+    }
+
+    const next = [...withDotHiddenFix, ...missingSystemExecutables];
+    window.localStorage.setItem(FILE_SYSTEM_STORAGE_KEY, JSON.stringify(next));
+    return next;
   }
 
   function saveFileSystem(nodes: FileSystemNode[]) {
@@ -264,16 +109,22 @@ export function useFileSystem() {
     window.dispatchEvent(new Event("storage"));
   }
 
-  function normalizePath(path: string): string {
-    // Remove trailing slash, except for root
-    let normalized = path.replace(/\/+/g, "/");
-    if (normalized.length > 1 && normalized.endsWith("/")) {
-      normalized = normalized.slice(0, -1);
-    }
-    if (!normalized.startsWith("/")) {
-      normalized = "/" + normalized;
-    }
-    return normalized;
+  function isNodeReadOnly(path: string): boolean {
+    const node = getNode(path);
+    return Boolean(node?.readOnly);
+  }
+
+  function hasReadOnlyDescendant(path: string): boolean {
+    const normalized = normalizePath(path);
+    return getFileSystem().some(
+      (node) => node.path.startsWith(`${normalized}/`) && Boolean(node.readOnly)
+    );
+  }
+
+  function canWriteToDirectory(path: string): boolean {
+    const node = getNode(path);
+    if (!node || node.type !== "directory") return false;
+    return !node.readOnly;
   }
 
   function getParentPath(path: string): string {
@@ -350,6 +201,9 @@ export function useFileSystem() {
     
     if (exists(fullPath)) return false;
     if (!exists(parentPath) && parentPath !== "/") return false;
+    if (!canWriteToDirectory(parentPath)) return false;
+
+    const username = getCurrentSystemUsername();
 
     const fs = getFileSystem();
     fs.push({
@@ -358,8 +212,8 @@ export function useFileSystem() {
       path: fullPath,
       parentPath,
       permissions: "rwxr-xr-x",
-      owner: "user",
-      group: "user",
+      owner: username,
+      group: username,
       size: 4096,
       createdAt: Date.now(),
       modifiedAt: Date.now(),
@@ -375,6 +229,9 @@ export function useFileSystem() {
     
     if (exists(fullPath)) return false;
     if (!exists(parentPath) && parentPath !== "/") return false;
+    if (!canWriteToDirectory(parentPath)) return false;
+
+    const username = getCurrentSystemUsername();
 
     const fs = getFileSystem();
     fs.push({
@@ -384,8 +241,8 @@ export function useFileSystem() {
       parentPath,
       contents,
       permissions: "rw-r--r--",
-      owner: "user",
-      group: "user",
+      owner: username,
+      group: username,
       size: new Blob([contents]).size,
       createdAt: Date.now(),
       modifiedAt: Date.now(),
@@ -397,6 +254,8 @@ export function useFileSystem() {
 
   function updateFile(path: string, contents: string): boolean {
     const normalized = normalizePath(path);
+    if (isNodeReadOnly(normalized)) return false;
+
     const fs = getFileSystem();
     const index = fs.findIndex((node) => node.path === normalized && node.type === "file");
     
@@ -414,6 +273,8 @@ export function useFileSystem() {
 
   function rename(path: string, newName: string): boolean {
     const normalized = normalizePath(path);
+    if (isNodeReadOnly(normalized)) return false;
+
     const fs = getFileSystem();
     const index = fs.findIndex((node) => node.path === normalized);
     
@@ -421,6 +282,7 @@ export function useFileSystem() {
 
     const node = fs[index];
     const newPath = normalizePath(`${node.parentPath}/${newName}`);
+    if (!canWriteToDirectory(node.parentPath)) return false;
     
     // Check if new path already exists
     if (exists(newPath)) return false;
@@ -454,6 +316,8 @@ export function useFileSystem() {
   function deleteNode(path: string): boolean {
     const normalized = normalizePath(path);
     if (normalized === "/") return false;
+    if (isNodeReadOnly(normalized)) return false;
+    if (hasReadOnlyDescendant(normalized)) return false;
     
     let fs = getFileSystem();
     const node = fs.find((n) => n.path === normalized);
@@ -474,6 +338,8 @@ export function useFileSystem() {
   function move(sourcePath: string, destPath: string): boolean {
     const srcNormalized = normalizePath(sourcePath);
     const destNormalized = normalizePath(destPath);
+    if (isNodeReadOnly(srcNormalized)) return false;
+    if (!canWriteToDirectory(destNormalized)) return false;
     
     const fs = getFileSystem();
     const srcIndex = fs.findIndex((node) => node.path === srcNormalized);
@@ -482,6 +348,15 @@ export function useFileSystem() {
     if (!isDirectory(destNormalized)) return false;
 
     const srcNode = fs[srcIndex];
+
+    if (
+      srcNode.type === "directory" &&
+      (destNormalized === srcNormalized ||
+        destNormalized.startsWith(`${srcNormalized}/`))
+    ) {
+      return false;
+    }
+
     const newPath = normalizePath(`${destNormalized}/${srcNode.name}`);
     
     if (exists(newPath)) return false;
@@ -514,6 +389,7 @@ export function useFileSystem() {
   function copy(sourcePath: string, destPath: string): boolean {
     const srcNormalized = normalizePath(sourcePath);
     const destNormalized = normalizePath(destPath);
+    if (!canWriteToDirectory(destNormalized)) return false;
     
     const fs = getFileSystem();
     const srcNode = fs.find((node) => node.path === srcNormalized);
@@ -645,5 +521,7 @@ export function useFileSystem() {
     normalizePath,
     getParentPath,
     getNodeName,
+    isNodeReadOnly,
+    getHomePath,
   };
 }

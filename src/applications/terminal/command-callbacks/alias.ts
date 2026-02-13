@@ -1,8 +1,8 @@
 import type { Terminal } from "@xterm/xterm";
 
-import type { CommandAutocomplete, CommandCallback } from "./index";
-import { getAliases, removeAlias, setAlias } from "../shell-state";
 import { useSession } from "@/auth/client";
+import { getAliases, removeAlias, setAlias } from "../shell-state";
+import type { CommandAutocomplete, CommandCallback } from "./index";
 
 async function alias(
   fullCommand: string,

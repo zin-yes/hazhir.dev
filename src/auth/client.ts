@@ -1,13 +1,13 @@
 "use client";
 
-import { authClient } from "@/lib/auth-client";
 import {
-  clearGuestSession,
-  createGuestSession,
-  dismissSignInModal,
-  requestSignInModal,
-  useAuthPillar,
+    clearGuestSession,
+    createGuestSession,
+    dismissSignInModal,
+    requestSignInModal,
+    useAuthPillar,
 } from "@/hooks/use-auth-pillar";
+import { authClient } from "@/lib/auth-client";
 
 type SessionStatus = "loading" | "authenticated" | "unauthenticated";
 
@@ -118,4 +118,5 @@ export function signInAsGuest() {
   return createGuestSession();
 }
 
-export { requestSignInModal, dismissSignInModal };
+export { dismissSignInModal, requestSignInModal };
+

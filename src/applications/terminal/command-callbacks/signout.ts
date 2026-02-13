@@ -1,7 +1,7 @@
 import type { Terminal } from "@xterm/xterm";
 
-import type { CommandAutocomplete, CommandCallback } from "./index";
 import { signOut, useSession } from "@/auth/client";
+import type { CommandAutocomplete, CommandCallback } from "./index";
 
 import ansi from "ansi-escape-sequences";
 

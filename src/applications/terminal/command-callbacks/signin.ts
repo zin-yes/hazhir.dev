@@ -1,11 +1,11 @@
 import type { Terminal } from "@xterm/xterm";
 
-import type { CommandAutocomplete, CommandCallback } from "./index";
 import {
-  requestSignInModal,
-  signInAsGuest,
-  useSession,
+    requestSignInModal,
+    signInAsGuest,
+    useSession,
 } from "@/auth/client";
+import type { CommandAutocomplete, CommandCallback } from "./index";
 
 import ansi from "ansi-escape-sequences";
 

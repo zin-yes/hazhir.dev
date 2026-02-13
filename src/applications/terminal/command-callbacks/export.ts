@@ -1,8 +1,8 @@
 import type { Terminal } from "@xterm/xterm";
 
-import type { CommandAutocomplete, CommandCallback } from "./index";
-import { getAllEnv, setEnvVar } from "../shell-state";
 import { useSession } from "@/auth/client";
+import { getAllEnv, setEnvVar } from "../shell-state";
+import type { CommandAutocomplete, CommandCallback } from "./index";
 
 async function exportCommand(
   fullCommand: string,

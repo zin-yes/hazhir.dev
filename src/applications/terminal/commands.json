@@ -58,7 +58,7 @@
   {
     "name": "source",
     "usage": ["source [path]"],
-    "examples": ["source ~/terminal_rc", "source /home/user/terminal_rc"],
+    "examples": ["source ~/.terminal_rc", "source /home/guest/.terminal_rc"],
     "aliases": ["."],
     "description": "Loads and executes commands from a script file.",
     "callbackFunctionName": "source"
@@ -93,16 +93,16 @@
   },
   {
     "name": "ls",
-    "usage": ["ls [-la] [path]"],
-    "examples": ["ls", "ls -la", "ls /home/user/Documents"],
+    "usage": ["ls [-a] [-l] [-s] [path]"],
+    "examples": ["ls", "ls -la", "ls -s", "ls ~/Documents"],
     "aliases": [],
-    "description": "Lists directory contents. Use -a to show hidden files, -l for long format.",
+    "description": "Lists directory contents. Use -a to show hidden files, -l for long format, -s to show sizes in short view.",
     "callbackFunctionName": "ls"
   },
   {
     "name": "cd",
     "usage": ["cd [path]"],
-    "examples": ["cd", "cd /home/user", "cd ..", "cd ~/Documents"],
+    "examples": ["cd", "cd ~", "cd ..", "cd ~/Documents"],
     "aliases": [],
     "description": "Changes the current working directory.",
     "callbackFunctionName": "cd"
@@ -126,10 +126,26 @@
   {
     "name": "touch",
     "usage": ["touch <file>"],
-    "examples": ["touch newfile.txt", "touch /home/user/test.md"],
+    "examples": ["touch newfile.txt", "touch ~/Documents/test.md"],
     "aliases": [],
     "description": "Creates an empty file or updates file timestamps.",
     "callbackFunctionName": "touch"
+  },
+  {
+    "name": "cp",
+    "usage": ["cp <source> <destination-directory>"],
+    "examples": ["cp file.txt ~/Documents", "cp ~/Desktop/file-explorer.shortcut ~/Documents"],
+    "aliases": [],
+    "description": "Copies a file or directory into a destination directory.",
+    "callbackFunctionName": "cp"
+  },
+  {
+    "name": "mv",
+    "usage": ["mv <source> <destination|new-name>"],
+    "examples": ["mv file.txt ~/Documents", "mv old.txt new.txt"],
+    "aliases": [],
+    "description": "Moves or renames a file or directory.",
+    "callbackFunctionName": "mv"
   },
   {
     "name": "rm",
@@ -142,9 +158,67 @@
   {
     "name": "cat",
     "usage": ["cat <file>"],
-    "examples": ["cat readme.txt", "cat /home/user/.bashrc"],
+    "examples": ["cat .terminal_rc", "cat ~/.terminal_rc"],
     "aliases": [],
     "description": "Displays the contents of a file.",
     "callbackFunctionName": "cat"
+  },
+  {
+    "name": "text-editor",
+    "usage": ["text-editor <file>"],
+    "examples": ["text-editor ./notes.txt", "text-editor ~/Documents/todo.md"],
+    "aliases": ["edit"],
+    "description": "Opens a file in the Text Editor. Creates the file if it does not exist.",
+    "callbackFunctionName": "textEditor"
+  },
+  {
+    "name": "terminal",
+    "usage": ["terminal"],
+    "examples": ["terminal"],
+    "aliases": [],
+    "description": "Launches the Terminal application.",
+    "callbackFunctionName": "runApp",
+    "icon": "TerminalSquare",
+    "iconDisplayText": "Terminal"
+  },
+  {
+    "name": "file-explorer",
+    "usage": ["file-explorer"],
+    "examples": ["file-explorer"],
+    "aliases": ["files"],
+    "description": "Launches the File Explorer application.",
+    "callbackFunctionName": "runApp",
+    "icon": "FolderClosed",
+    "iconDisplayText": "Files"
+  },
+  {
+    "name": "voxel-game",
+    "usage": ["voxel-game"],
+    "examples": ["voxel-game"],
+    "aliases": ["game"],
+    "description": "Launches the Voxel Game application.",
+    "callbackFunctionName": "runApp",
+    "icon": "Gamepad2",
+    "iconDisplayText": "Voxel Game"
+  },
+  {
+    "name": "calculator",
+    "usage": ["calculator"],
+    "examples": ["calculator"],
+    "aliases": ["calc"],
+    "description": "Launches the Calculator application.",
+    "callbackFunctionName": "runApp",
+    "icon": "Calculator",
+    "iconDisplayText": "Calculator"
+  },
+  {
+    "name": "visual-novel",
+    "usage": ["visual-novel"],
+    "examples": ["visual-novel"],
+    "aliases": ["vn"],
+    "description": "Launches the Visual Novel application.",
+    "callbackFunctionName": "runApp",
+    "icon": "BookText",
+    "iconDisplayText": "Visual Novel"
   }
 ]
