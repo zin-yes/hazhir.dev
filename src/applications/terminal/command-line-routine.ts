@@ -37,6 +37,15 @@ let _historyIndex = -1;
 let _historyDraft = "";
 let _historyPendingCreate = false;
 let _autocompleteLines = 0;
+let _autocompleteSuggestions: string[] = [];
+let _autocompleteSelectedIndex = -1;
+let _autocompleteContextKey = "";
+
+function resetAutocompleteState() {
+  _autocompleteSuggestions = [];
+  _autocompleteSelectedIndex = -1;
+  _autocompleteContextKey = "";
+}
 
 function ensureHistoryLoaded(createIfMissing: boolean) {
   if (typeof window === "undefined") return;
@@ -247,6 +256,59 @@ function clearAutocompleteDisplay(terminal: Terminal) {
 
   terminal.write(cursor.returnToSavedPosition);
   _autocompleteLines = 0;
+}
+
+function renderAutocompleteSuggestions(
+  terminal: Terminal,
+  suggestions: string[],
+  selectedIndex: number,
+) {
+  const displaySuggestions = suggestions.map((item, index) => {
+    const formatted = formatCompletionSuggestionForDisplay(item);
+    return index === selectedIndex ? `\x1b[7m${formatted}\x1b[0m` : formatted;
+  });
+
+  const plainDisplay = suggestions.map((item) =>
+    formatCompletionSuggestionForDisplay(item),
+  );
+  const suggestionText = plainDisplay.join("  ");
+  const neededLines = Math.max(1, Math.ceil(suggestionText.length / terminal.cols));
+
+  terminal.write(cursor.savePosition);
+  terminal.writeln(" ".repeat(terminal.cols));
+  displaySuggestions.forEach((item, index) => {
+    terminal.write(item + (index !== displaySuggestions.length - 1 ? "  " : ""));
+  });
+  terminal.write(cursor.returnToSavedPosition);
+  _autocompleteLines = neededLines + 1;
+}
+
+function applyAutocompleteSelection(
+  terminal: Terminal,
+  previousToken: string,
+  nextToken: string,
+) {
+  if (previousToken.length > 0) {
+    _commandBuffer = removeFromTerminalAndCommandBuffer(
+      previousToken.length,
+      _commandBuffer,
+      terminal,
+    );
+  }
+
+  _commandBuffer = writeToTerminalAndCommandBuffer(
+    nextToken,
+    _commandBuffer,
+    terminal,
+  );
+}
+
+function sameSuggestions(a: string[], b: string[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i += 1) {
+    if (a[i] !== b[i]) return false;
+  }
+  return true;
 }
 
 function formatCompletionSuggestionForDisplay(value: string): string {
@@ -758,8 +820,9 @@ export async function parseCommand(
   session: ReturnType<typeof useSession>,
   windowIdentifier: string,
 ) {
-  if (event.domEvent.key !== "Tab") {
+  if (event.domEvent.key !== "Tab" && event.domEvent.key !== "Enter") {
     clearAutocompleteDisplay(terminal);
+    resetAutocompleteState();
   }
   const content = `${event.domEvent.ctrlKey ? "^" : ""}${event.domEvent.key}`;
 
@@ -846,6 +909,12 @@ export async function parseCommand(
       }
       break;
     case "Enter":
+      if (_autocompleteSuggestions.length > 0 && _autocompleteSelectedIndex >= 0) {
+        clearAutocompleteDisplay(terminal);
+        resetAutocompleteState();
+        break;
+      }
+
       _commandBuffer = await onCommand(
         _commandBuffer,
         terminal,
@@ -873,6 +942,9 @@ export async function parseCommand(
       _commandBuffer.cursorPosition -= start.length;
       break;
     case "Tab":
+      event.domEvent.preventDefault();
+      event.domEvent.stopPropagation();
+
       const beforeCursor = _commandBuffer.content.substring(
         0,
         _commandBuffer.cursorPosition,
@@ -891,37 +963,65 @@ export async function parseCommand(
         cursorAtEndOfCommandBuffer &&
         cursorNotOnASpace
       ) {
-        const firstTokenMatches = getFirstTokenCompletions(beforeCursor.trim());
+        const firstToken = beforeCursor.trim();
+        const firstTokenMatches = getFirstTokenCompletions(firstToken);
+        const contextKey = "first";
+        const hasCycleContext =
+          _autocompleteContextKey === contextKey &&
+          _autocompleteSuggestions.length > 1;
+        const suggestions = hasCycleContext
+          ? _autocompleteSuggestions
+          : firstTokenMatches;
 
-        if (firstTokenMatches.length === 1) {
+        if (suggestions.length === 1 && !hasCycleContext) {
           _commandBuffer = writeToTerminalAndCommandBuffer(
-            firstTokenMatches[0].substring(
+            suggestions[0].substring(
               _commandBuffer.cursorPosition,
-              firstTokenMatches[0].length,
+              suggestions[0].length,
             ),
             _commandBuffer,
             terminal,
           );
-        } else if (firstTokenMatches.length > 1) {
-          const displaySuggestions = firstTokenMatches.map((item) =>
-            formatCompletionSuggestionForDisplay(item),
-          );
-          const suggestionText = displaySuggestions.join("  ");
-          const neededLines = Math.max(
-            1,
-            Math.ceil(suggestionText.length / terminal.cols),
-          );
+          resetAutocompleteState();
+        } else if (suggestions.length > 1) {
+          const shouldResetCycle =
+            _autocompleteContextKey !== contextKey ||
+            !sameSuggestions(_autocompleteSuggestions, suggestions);
 
-          terminal.write(cursor.savePosition);
+          if (shouldResetCycle) {
+            _autocompleteSuggestions = suggestions;
+            _autocompleteSelectedIndex = event.domEvent.shiftKey
+              ? suggestions.length - 1
+              : 0;
+            _autocompleteContextKey = contextKey;
 
-          terminal.writeln(" ".repeat(terminal.cols));
-          displaySuggestions.forEach((command, index) =>
-            terminal.write(
-              command + (index !== displaySuggestions.length - 1 ? "  " : ""),
-            ),
+            applyAutocompleteSelection(
+              terminal,
+              firstToken,
+              _autocompleteSuggestions[_autocompleteSelectedIndex],
+            );
+          } else {
+            const previous =
+              _autocompleteSuggestions[_autocompleteSelectedIndex] ?? "";
+            _autocompleteSelectedIndex =
+              (_autocompleteSelectedIndex +
+                (event.domEvent.shiftKey ? -1 : 1) +
+                _autocompleteSuggestions.length) %
+              _autocompleteSuggestions.length;
+
+            applyAutocompleteSelection(
+              terminal,
+              previous,
+              _autocompleteSuggestions[_autocompleteSelectedIndex],
+            );
+          }
+
+          clearAutocompleteDisplay(terminal);
+          renderAutocompleteSuggestions(
+            terminal,
+            _autocompleteSuggestions,
+            _autocompleteSelectedIndex,
           );
-          terminal.write(cursor.returnToSavedPosition);
-          _autocompleteLines = neededLines + 1;
         }
       } else if (cursorAtEndOfCommandBuffer && parts.length > 0) {
         const commandName = parts[0];
@@ -956,34 +1056,61 @@ export async function parseCommand(
             currentToken.length === 0
               ? completions
               : completions.filter((item) => item.startsWith(currentToken));
+          const contextKey = `args:${matchedAutocompleteKey}:${currentIndex}:${beforeCursor.slice(0, Math.max(0, beforeCursor.length - currentToken.length))}`;
+          const hasCycleContext =
+            _autocompleteContextKey === contextKey &&
+            _autocompleteSuggestions.length > 1;
+          const suggestions = hasCycleContext ? _autocompleteSuggestions : matches;
 
-          if (matches.length === 1) {
+          if (suggestions.length === 1 && !hasCycleContext) {
             _commandBuffer = writeToTerminalAndCommandBuffer(
-              matches[0].substring(currentToken.length),
+              suggestions[0].substring(currentToken.length),
               _commandBuffer,
               terminal,
             );
-          } else if (matches.length > 1) {
-            const displayMatches = matches.map((item) =>
-              formatCompletionSuggestionForDisplay(item),
-            );
-            const suggestionText = displayMatches.join("  ");
-            const neededLines = Math.max(
-              1,
-              Math.ceil(suggestionText.length / terminal.cols),
-            );
+            resetAutocompleteState();
+          } else if (suggestions.length > 1) {
+            const shouldResetCycle =
+              _autocompleteContextKey !== contextKey ||
+              !sameSuggestions(_autocompleteSuggestions, suggestions);
 
-            terminal.write(cursor.savePosition);
-            terminal.writeln(" ".repeat(terminal.cols));
-            displayMatches.forEach((item, index) => {
-              terminal.write(
-                item + (index !== displayMatches.length - 1 ? "  " : ""),
+            if (shouldResetCycle) {
+              _autocompleteSuggestions = suggestions;
+              _autocompleteSelectedIndex = event.domEvent.shiftKey
+                ? suggestions.length - 1
+                : 0;
+              _autocompleteContextKey = contextKey;
+
+              applyAutocompleteSelection(
+                terminal,
+                currentToken,
+                _autocompleteSuggestions[_autocompleteSelectedIndex],
               );
-            });
-            terminal.write(cursor.returnToSavedPosition);
-            _autocompleteLines = neededLines + 1;
+            } else {
+              const previous =
+                _autocompleteSuggestions[_autocompleteSelectedIndex] ?? "";
+              _autocompleteSelectedIndex =
+                (_autocompleteSelectedIndex +
+                  (event.domEvent.shiftKey ? -1 : 1) +
+                  _autocompleteSuggestions.length) %
+                _autocompleteSuggestions.length;
+
+              applyAutocompleteSelection(
+                terminal,
+                previous,
+                _autocompleteSuggestions[_autocompleteSelectedIndex],
+              );
+            }
+
+            clearAutocompleteDisplay(terminal);
+            renderAutocompleteSuggestions(
+              terminal,
+              _autocompleteSuggestions,
+              _autocompleteSelectedIndex,
+            );
           }
         } else {
+          resetAutocompleteState();
           _commandBuffer = writeToTerminalAndCommandBuffer(
             "    ",
             _commandBuffer,
@@ -991,6 +1118,7 @@ export async function parseCommand(
           );
         }
       } else {
+        resetAutocompleteState();
         _commandBuffer = writeToTerminalAndCommandBuffer(
           "    ",
           _commandBuffer,
