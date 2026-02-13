@@ -1,13 +1,79 @@
 export const FILE_DRAG_MIME = "application/x-hazhir-file-paths";
 export const FILE_PATH_DROP_EVENT = "hazhir-file-path-drop";
 
+type InternalDragState = {
+  active: boolean;
+  paths: string[];
+  updatedAt: number;
+};
+
+const FILE_DRAG_STATE_KEY = "__hazhir_file_drag_state__";
+const INTERNAL_DRAG_PATH_TTL_MS = 5000;
+
+let internalDragStateFallback: InternalDragState = {
+  active: false,
+  paths: [],
+  updatedAt: 0,
+};
+
+function getInternalDragState(): InternalDragState {
+  if (typeof window === "undefined") {
+    return internalDragStateFallback;
+  }
+
+  const scopedWindow = window as unknown as Record<string, unknown>;
+  const existing = scopedWindow[FILE_DRAG_STATE_KEY] as
+    | InternalDragState
+    | undefined;
+
+  if (existing) {
+    return existing;
+  }
+
+  const initialized: InternalDragState = {
+    active: false,
+    paths: [],
+    updatedAt: 0,
+  };
+  scopedWindow[FILE_DRAG_STATE_KEY] = initialized;
+  return initialized;
+}
+
 export type FileDragPayload = {
   paths: string[];
 };
 
-export function hasFileDragType(dataTransfer: DataTransfer | null | undefined): boolean {
+export function hasFileDragType(
+  dataTransfer: DataTransfer | null | undefined,
+): boolean {
   if (!dataTransfer) return false;
   return Array.from(dataTransfer.types ?? []).includes(FILE_DRAG_MIME);
+}
+
+export function hasPathLikeDragType(
+  dataTransfer: DataTransfer | null | undefined,
+): boolean {
+  const internalState = getInternalDragState();
+  if (internalState.active) return true;
+  if (!dataTransfer) return false;
+  const types = new Set(Array.from(dataTransfer.types ?? []));
+  return (
+    types.has(FILE_DRAG_MIME) ||
+    types.has("text/plain") ||
+    types.has("text/uri-list")
+  );
+}
+
+export function setInternalFileDragActive(active: boolean): void {
+  const internalState = getInternalDragState();
+  internalState.active = active;
+  internalState.updatedAt = Date.now();
+}
+
+export function setInternalDraggedPaths(paths: string[]): void {
+  const internalState = getInternalDragState();
+  internalState.paths = paths.filter((item) => typeof item === "string");
+  internalState.updatedAt = Date.now();
 }
 
 export function serializeFileDragPayload(paths: string[]): string {
@@ -15,7 +81,7 @@ export function serializeFileDragPayload(paths: string[]): string {
 }
 
 export function readFileDragPayload(
-  dataTransfer: DataTransfer | null | undefined
+  dataTransfer: DataTransfer | null | undefined,
 ): FileDragPayload | null {
   if (!hasFileDragType(dataTransfer)) return null;
   const raw = dataTransfer?.getData(FILE_DRAG_MIME);
@@ -25,7 +91,9 @@ export function readFileDragPayload(
     const parsed = JSON.parse(raw) as FileDragPayload;
     if (!Array.isArray(parsed.paths) || parsed.paths.length === 0) return null;
     return {
-      paths: parsed.paths.filter((item): item is string => typeof item === "string"),
+      paths: parsed.paths.filter(
+        (item): item is string => typeof item === "string",
+      ),
     };
   } catch {
     return null;
@@ -33,7 +101,7 @@ export function readFileDragPayload(
 }
 
 export function readDroppedPathsFromDataTransfer(
-  dataTransfer: DataTransfer | null | undefined
+  dataTransfer: DataTransfer | null | undefined,
 ): string[] {
   if (!dataTransfer) return [];
 
@@ -51,7 +119,14 @@ export function readDroppedPathsFromDataTransfer(
   }
 
   const uriList = dataTransfer.getData("text/uri-list")?.trim();
-  if (!uriList) return [];
+  if (!uriList) {
+    const internalState = getInternalDragState();
+    const age = Date.now() - internalState.updatedAt;
+    if (internalState.paths.length > 0 && age <= INTERNAL_DRAG_PATH_TTL_MS) {
+      return [...internalState.paths];
+    }
+    return [];
+  }
 
   return uriList
     .split(/\r?\n+/)
@@ -64,12 +139,12 @@ export function setFileDragPreview(
   label: string,
   count: number,
   kind: "file" | "directory" = "file",
-  sourceElement?: HTMLElement | null
+  sourceElement?: HTMLElement | null,
 ) {
   if (typeof document === "undefined") return;
 
   const sourceIcon = sourceElement?.querySelector(
-    "[data-file-icon='true']"
+    "[data-file-icon='true']",
   ) as HTMLElement | null;
 
   const preview = document.createElement("div");
@@ -83,13 +158,14 @@ export function setFileDragPreview(
   preview.style.overflow = "hidden";
   preview.style.boxSizing = "border-box";
   preview.style.borderRadius = "16px";
-  preview.style.padding = "12px 8px 10px 8px";
-  preview.style.background = "rgba(255,255,255,0.16)";
-  preview.style.border = "1px solid rgba(255,255,255,0.34)";
-  preview.style.boxShadow = "0 10px 28px rgba(2, 6, 23, 0.35)";
+  preview.style.padding = "12px 8px";
+  preview.style.background = "rgba(255,255,255,0.15)";
+  preview.style.border = "1px solid rgba(255,255,255,0.26)";
+  preview.style.boxShadow = "0 8px 22px rgba(2, 6, 23, 0.33)";
   preview.style.backdropFilter = "blur(8px)";
   preview.style.color = "white";
-  preview.style.font = "500 12px/1.2 Inter, system-ui, -apple-system, Segoe UI, sans-serif";
+  preview.style.font =
+    "500 12px/1.2 Inter, system-ui, -apple-system, Segoe UI, sans-serif";
   preview.style.textAlign = "center";
 
   const icon = document.createElement("div");
@@ -151,7 +227,7 @@ export function setFileDragPreview(
   }
 
   document.body.appendChild(preview);
-  dataTransfer.setDragImage(preview, 52, 70);
+  dataTransfer.setDragImage(preview, 50, 108);
 
   requestAnimationFrame(() => {
     preview.remove();

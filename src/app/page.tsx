@@ -5,39 +5,39 @@ import { FileSymlink, Gamepad2, TerminalSquare } from "lucide-react";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 
 import {
-    signInAsGuest,
-    signInWithCredentials,
-    signInWithGoogle,
-    useSession,
+  signInAsGuest,
+  signInWithCredentials,
+  signInWithGoogle,
+  useSession,
 } from "@/auth/client";
 import { Calendar } from "@/components/ui/calendar";
 import {
-    DropdownMenu,
-    DropdownMenuContent,
-    DropdownMenuItem,
-    DropdownMenuShortcut,
-    DropdownMenuTrigger,
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuShortcut,
+  DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { useAuthPillar } from "@/hooks/use-auth-pillar";
 import UseOperatingSystem from "@/hooks/use-operating-system";
 import { OS_LAUNCH_APPLICATION_EVENT } from "@/lib/application-launcher";
 import {
-    FILE_PATH_DROP_EVENT,
-    hasFileDragType,
-    readDroppedPathsFromDataTransfer,
+  FILE_PATH_DROP_EVENT,
+  hasFileDragType,
+  readDroppedPathsFromDataTransfer,
 } from "@/lib/file-transfer-dnd";
 import { setCurrentSystemUsername } from "@/lib/system-user";
 import Image from "next/image";
 import { v4 } from "uuid";
 import {
-    CalculatorApplicationWindow,
-    FileExplorerApplicationWindow,
-    GameApplicationWindow,
-    SingleDocumentApplicationWindow,
-    TerminalApplicationWindow,
-    TextEditorApplicationWindow,
-    VisualNovelApplicationWindow,
+  CalculatorApplicationWindow,
+  FileExplorerApplicationWindow,
+  GameApplicationWindow,
+  SingleDocumentApplicationWindow,
+  TerminalApplicationWindow,
+  TextEditorApplicationWindow,
+  VisualNovelApplicationWindow,
 } from "./application-windows";
 import Desktop from "./desktop";
 import Wallpaper from "./wallpaper";
@@ -49,9 +49,13 @@ export default function OperatingSystemPage() {
   const [authError, setAuthError] = useState<string>("");
   const [isAuthPending, setIsAuthPending] = useState(false);
   const [isSystemUserReady, setIsSystemUserReady] = useState(false);
-  const [isFileTransferDragActive, setIsFileTransferDragActive] = useState(false);
+  const [isFileTransferDragActive, setIsFileTransferDragActive] =
+    useState(false);
   const [isOverDropZone, setIsOverDropZone] = useState(false);
-  const [dragCursor, setDragCursor] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const [dragCursor, setDragCursor] = useState<{ x: number; y: number }>({
+    x: 0,
+    y: 0,
+  });
   const fileDragDepthRef = useRef(0);
 
   const addWindow = useCallback((pane: React.ReactNode) => {
@@ -108,7 +112,8 @@ export default function OperatingSystemPage() {
 
   useEffect(() => {
     const handler = (event: Event) => {
-      const detail = (event as CustomEvent<{ appId: string; args?: string[] }>).detail;
+      const detail = (event as CustomEvent<{ appId: string; args?: string[] }>)
+        .detail;
       if (!detail?.appId) return;
 
       switch (detail.appId) {
@@ -131,7 +136,10 @@ export default function OperatingSystemPage() {
           const articleId = detail.args?.[0] ?? "CV.pdf";
           const title = detail.args?.[1] ?? articleId;
           addWindow(
-            <SingleDocumentApplicationWindow articleId={articleId} title={title} />
+            <SingleDocumentApplicationWindow
+              articleId={articleId}
+              title={title}
+            />,
           );
           break;
         }
@@ -147,13 +155,16 @@ export default function OperatingSystemPage() {
     };
 
     window.addEventListener(OS_LAUNCH_APPLICATION_EVENT, handler);
-    return () => window.removeEventListener(OS_LAUNCH_APPLICATION_EVENT, handler);
+    return () =>
+      window.removeEventListener(OS_LAUNCH_APPLICATION_EVENT, handler);
   }, [addWindow]);
 
   useEffect(() => {
     const updateDropZoneState = (x: number, y: number) => {
       const element = document.elementFromPoint(x, y) as HTMLElement | null;
-      setIsOverDropZone(Boolean(element?.closest("[data-file-drop-zone='true']")));
+      setIsOverDropZone(
+        Boolean(element?.closest("[data-file-drop-zone='true']")),
+      );
     };
 
     const onDragEnter = (event: DragEvent) => {
@@ -185,10 +196,10 @@ export default function OperatingSystemPage() {
     const onDrop = (event: DragEvent) => {
       const target = document.elementFromPoint(
         event.clientX,
-        event.clientY
+        event.clientY,
       ) as HTMLElement | null;
       const dropZone = target?.closest(
-        "[data-file-drop-zone='true']"
+        "[data-file-drop-zone='true']",
       ) as HTMLElement | null;
 
       if (dropZone?.dataset.fileDropKind === "terminal") {
@@ -200,7 +211,7 @@ export default function OperatingSystemPage() {
             new CustomEvent(FILE_PATH_DROP_EVENT, {
               bubbles: true,
               detail: { paths },
-            })
+            }),
           );
         }
       }
@@ -272,7 +283,7 @@ export default function OperatingSystemPage() {
                         <TerminalApplicationWindow
                           identifier={v4()}
                           key={operatingSystem.getApplicationWindows().length}
-                        />
+                        />,
                       );
                     }}
                   >
@@ -287,7 +298,7 @@ export default function OperatingSystemPage() {
                       addWindow(
                         <GameApplicationWindow
                           key={operatingSystem.getApplicationWindows().length}
-                        />
+                        />,
                       );
                     }}
                   >
@@ -335,14 +346,14 @@ export default function OperatingSystemPage() {
                 className="pointer-events-none fixed z-[2147483647] transition-transform"
                 style={{
                   left: dragCursor.x + 10,
-                  top: dragCursor.y - 28,
+                  top: dragCursor.y - 34,
                 }}
               >
                 <div
-                  className={`flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium border backdrop-blur-sm ${
+                  className={`flex items-center gap-1 rounded-md px-2 py-1 text-xs font-semibold border ${
                     isOverDropZone
-                      ? "bg-emerald-600/95 border-emerald-200 text-white shadow-lg shadow-emerald-900/40"
-                      : "bg-rose-700/95 border-rose-200 text-white shadow-lg shadow-rose-950/50"
+                      ? "bg-emerald-700 border-emerald-200 text-white shadow-lg shadow-emerald-950/50"
+                      : "bg-rose-800 border-rose-200 text-white shadow-lg shadow-rose-950/60"
                   }`}
                 >
                   <FileSymlink size={12} />
@@ -357,8 +368,12 @@ export default function OperatingSystemPage() {
           <div className="absolute inset-0 z-[10000] bg-black/55 backdrop-blur-sm flex items-center justify-center p-4">
             <div className="w-full max-w-md rounded-2xl border border-white/20 bg-background/80 shadow-2xl p-6">
               <div className="mb-6 text-center text-white">
-                <h1 className="text-2xl font-semibold tracking-wide">hazhir.dev</h1>
-                <p className="text-sm text-white/70 mt-1">Sign in to unlock your desktop</p>
+                <h1 className="text-2xl font-semibold tracking-wide">
+                  hazhir.dev
+                </h1>
+                <p className="text-sm text-white/70 mt-1">
+                  Sign in to unlock your desktop
+                </p>
               </div>
 
               <div className="space-y-3">
@@ -415,12 +430,16 @@ export default function OperatingSystemPage() {
                           });
 
                           if (result.error) {
-                            setAuthError(result.error.message || "Invalid credentials.");
+                            setAuthError(
+                              result.error.message || "Invalid credentials.",
+                            );
                           } else {
                             dismissSignInModal();
                           }
                         } catch {
-                          setAuthError("Credentials sign-in failed. Please try again.");
+                          setAuthError(
+                            "Credentials sign-in failed. Please try again.",
+                          );
                         } finally {
                           setIsAuthPending(false);
                         }
@@ -445,7 +464,9 @@ export default function OperatingSystemPage() {
                 </Button>
 
                 {authError && (
-                  <p className="text-sm text-red-300 text-center">{authError}</p>
+                  <p className="text-sm text-red-300 text-center">
+                    {authError}
+                  </p>
                 )}
               </div>
             </div>

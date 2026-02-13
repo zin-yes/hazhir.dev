@@ -158,7 +158,10 @@
   {
     "name": "cp",
     "usage": ["cp <source> <destination-directory>"],
-    "examples": ["cp file.txt ~/Documents", "cp ~/Desktop/file-explorer.shortcut ~/Documents"],
+    "examples": [
+      "cp file.txt ~/Documents",
+      "cp ~/Desktop/file-explorer.shortcut ~/Documents"
+    ],
     "aliases": [],
     "description": "Copies a file or directory into a destination directory.",
     "callbackFunctionName": "cp"

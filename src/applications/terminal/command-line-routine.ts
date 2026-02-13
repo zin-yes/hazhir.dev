@@ -1,7 +1,6 @@
 import type { Terminal } from "@xterm/xterm";
 import ansi from "ansi-escape-sequences";
 
-
 import { useSession } from "@/auth/client";
 import { executeFilePath } from "@/lib/file-execution";
 import { getHomePath } from "@/lib/system-user";
@@ -110,7 +109,7 @@ function appendHistory(command: string) {
 function replaceCommandBuffer(newContent: string, terminal: Terminal) {
   const end = _commandBuffer.content.substring(
     _commandBuffer.cursorPosition,
-    _commandBuffer.content.length
+    _commandBuffer.content.length,
   );
   moveCursorForward(end.length, terminal);
   _commandBuffer.cursorPosition = _commandBuffer.content.length;
@@ -119,14 +118,14 @@ function replaceCommandBuffer(newContent: string, terminal: Terminal) {
     _commandBuffer = removeFromTerminalAndCommandBuffer(
       _commandBuffer.content.length,
       _commandBuffer,
-      terminal
+      terminal,
     );
   }
 
   _commandBuffer = writeToTerminalAndCommandBuffer(
     newContent,
     _commandBuffer,
-    terminal
+    terminal,
   );
 }
 
@@ -196,7 +195,7 @@ export function getCommandLinePrefix(username: string): string {
   const cwd = getCwd();
   // Shorten home directory to ~
   const displayPath = cwd.replace(getHomePath(), "~");
-  
+
   return (
     "\x1b[38;2;249;117;22m" +
     username +
@@ -225,7 +224,7 @@ export const COMMAND_LINE_PREFIX =
 function writeToTerminalAndCommandBuffer(
   content: string,
   commandBuffer: CommandBuffer,
-  terminal: Terminal
+  terminal: Terminal,
 ): CommandBuffer {
   let result: CommandBuffer = commandBuffer;
 
@@ -234,7 +233,7 @@ function writeToTerminalAndCommandBuffer(
   const start = result.content.substring(0, result.cursorPosition);
   const end = result.content.substring(
     result.cursorPosition,
-    result.content.length
+    result.content.length,
   );
 
   const startingCursorX = terminal.buffer.active.cursorX;
@@ -286,7 +285,7 @@ function writeToTerminalAndCommandBuffer(
 function removeFromTerminalAndCommandBuffer(
   steps: number,
   commandBuffer: CommandBuffer,
-  terminal: Terminal
+  terminal: Terminal,
 ): CommandBuffer {
   let result: CommandBuffer = commandBuffer;
 
@@ -295,7 +294,7 @@ function removeFromTerminalAndCommandBuffer(
   const start = result.content.substring(0, result.cursorPosition - steps);
   const end = result.content.substring(
     result.cursorPosition,
-    result.content.length
+    result.content.length,
   );
 
   const startingCursorX = terminal.buffer.active.cursorX;
@@ -316,7 +315,7 @@ function removeFromTerminalAndCommandBuffer(
     result = {
       content: commandBuffer.content.substring(
         0,
-        commandBuffer.cursorPosition - steps
+        commandBuffer.cursorPosition - steps,
       ),
       cursorPosition: commandBuffer.cursorPosition - steps,
     };
@@ -396,7 +395,7 @@ async function onCommand(
   terminal: Terminal,
   session: ReturnType<typeof useSession>,
   windowIdentifier: string,
-  options?: { writePrompt?: boolean }
+  options?: { writePrompt?: boolean },
 ): Promise<CommandBuffer> {
   const username = getSessionUsername(session);
   const shouldWritePrompt = options?.writePrompt !== false;
@@ -421,7 +420,7 @@ async function onCommand(
   const fs = useFileSystem();
 
   const queryForCommand = commands.filter(
-    (value) => value.name === command || hasAlias(value.aliases, command)
+    (value) => value.name === command || hasAlias(value.aliases, command),
   )[0];
 
   const commandExists = queryForCommand !== undefined;
@@ -432,12 +431,13 @@ async function onCommand(
       clearAutocompleteDisplay(terminal);
       terminal.write(ansi.cursor.hide);
       terminal.writeln("");
-      await commandCallbacks.help(
-        `help ${queryForCommand.name}`,
-        terminal,
-        session,
-        windowIdentifier
-      )
+      await commandCallbacks
+        .help(
+          `help ${queryForCommand.name}`,
+          terminal,
+          session,
+          windowIdentifier,
+        )
         .catch((error: Error) => {
           terminal.writeln(" ".repeat(terminal.cols));
           terminal.write(ansi.style.red);
@@ -458,8 +458,7 @@ async function onCommand(
       };
     }
 
-    const canonicalExpandedCommand =
-      `${queryForCommand.name}${tokens.length > 1 ? ` ${tokens.slice(1).join(" ")}` : ""}`;
+    const canonicalExpandedCommand = `${queryForCommand.name}${tokens.length > 1 ? ` ${tokens.slice(1).join(" ")}` : ""}`;
 
     clearAutocompleteDisplay(terminal);
     terminal.write(ansi.cursor.hide);
@@ -468,7 +467,7 @@ async function onCommand(
       canonicalExpandedCommand,
       terminal,
       session,
-      windowIdentifier
+      windowIdentifier,
     )
       .catch((error: Error) => {
         terminal.writeln(" ".repeat(terminal.cols));
@@ -498,7 +497,10 @@ async function onCommand(
           const directPath = command.startsWith("/")
             ? fs.normalizePath(command)
             : fs.normalizePath(`${getCwd()}/${command}`);
-          return [directPath, directPath.endsWith(".app") ? "" : `${directPath}.app`].filter(Boolean) as string[];
+          return [
+            directPath,
+            directPath.endsWith(".app") ? "" : `${directPath}.app`,
+          ].filter(Boolean) as string[];
         }
 
         const rawPath = getEnvVar("PATH") ?? "/applications";
@@ -521,7 +523,10 @@ async function onCommand(
       const candidates = resolveCandidates();
       const executablePath = candidates.find((candidate) => {
         const node = fs.getNode(candidate);
-        return Boolean(node?.type === "file" && (node.executable || node.name.endsWith(".app")));
+        return Boolean(
+          node?.type === "file" &&
+          (node.executable || node.name.endsWith(".app")),
+        );
       });
 
       if (!executablePath) return null;
@@ -543,7 +548,9 @@ async function onCommand(
     if (executableResult && !executableResult.ok && executableResult.message) {
       clearAutocompleteDisplay(terminal);
       terminal.writeln(" ".repeat(terminal.cols));
-      terminal.writeln(ansi.style.red + executableResult.message + ansi.style.reset);
+      terminal.writeln(
+        ansi.style.red + executableResult.message + ansi.style.reset,
+      );
       terminal.writeln(" ".repeat(terminal.cols));
       if (shouldWritePrompt) {
         terminal.write(getCommandLinePrefix(username));
@@ -565,7 +572,7 @@ async function onCommand(
     });
 
     const searchResult = new Fuse(commandList, {}).search(
-      commandBuffer.content
+      commandBuffer.content,
     );
 
     if (searchResult.length > 0) {
@@ -589,7 +596,7 @@ async function onCommand(
           "`" +
           ansi.style.red +
           "?" +
-          ansi.style.reset
+          ansi.style.reset,
       );
       terminal.writeln(" ".repeat(terminal.cols));
       if (shouldWritePrompt) {
@@ -608,7 +615,7 @@ async function onCommand(
           "`" +
           ansi.style.red +
           "." +
-          ansi.style.reset
+          ansi.style.reset,
       );
       terminal.writeln(" ".repeat(terminal.cols));
       if (shouldWritePrompt) {
@@ -633,7 +640,7 @@ export async function executeCommandLine(
   terminal: Terminal,
   session: ReturnType<typeof useSession>,
   windowIdentifier: string,
-  options?: { writePrompt?: boolean }
+  options?: { writePrompt?: boolean },
 ) {
   const buffer: CommandBuffer = {
     content: command,
@@ -642,27 +649,37 @@ export async function executeCommandLine(
   await onCommand(buffer, terminal, session, windowIdentifier, options);
 }
 
-export function insertTextIntoCommandBuffer(terminal: Terminal, rawText: string) {
+export function insertTextIntoCommandBuffer(
+  terminal: Terminal,
+  rawText: string,
+) {
   clearAutocompleteDisplay(terminal);
 
   const content = rawText.replaceAll("\r", " ").replaceAll("\n", " ").trim();
   if (!content) return;
 
-  const left = _commandBuffer.content.substring(0, _commandBuffer.cursorPosition);
+  const left = _commandBuffer.content.substring(
+    0,
+    _commandBuffer.cursorPosition,
+  );
   const right = _commandBuffer.content.substring(_commandBuffer.cursorPosition);
 
   const needsLeadingSpace = left.length > 0 && !left.endsWith(" ");
   const needsTrailingSpace = right.length > 0 && !right.startsWith(" ");
 
   const text = `${needsLeadingSpace ? " " : ""}${content}${needsTrailingSpace ? " " : ""}`;
-  _commandBuffer = writeToTerminalAndCommandBuffer(text, _commandBuffer, terminal);
+  _commandBuffer = writeToTerminalAndCommandBuffer(
+    text,
+    _commandBuffer,
+    terminal,
+  );
 }
 
 export async function parseCommand(
   terminal: Terminal,
   event: { key: string; domEvent: KeyboardEvent },
   session: ReturnType<typeof useSession>,
-  windowIdentifier: string
+  windowIdentifier: string,
 ) {
   if (event.domEvent.key !== "Tab") {
     clearAutocompleteDisplay(terminal);
@@ -698,7 +715,7 @@ export async function parseCommand(
       _commandBuffer = writeToTerminalAndCommandBuffer(
         clipboardContents.replaceAll("\n", "").replaceAll("\r", ""),
         _commandBuffer,
-        terminal
+        terminal,
       );
     });
     return;
@@ -708,7 +725,7 @@ export async function parseCommand(
     terminal.select(
       terminal.buffer.active.cursorX - _commandBuffer.cursorPosition,
       terminal.buffer.active.cursorY,
-      _commandBuffer.content.length
+      _commandBuffer.content.length,
     );
     return;
   }
@@ -729,7 +746,7 @@ export async function parseCommand(
           for (let i = 0; i < _commandBuffer.cursorPosition; i++) {
             const cursorCurrentlyOnASpace =
               _commandBuffer.content.charAt(
-                _commandBuffer.cursorPosition - 1 - i
+                _commandBuffer.cursorPosition - 1 - i,
               ) === " ";
 
             if (cursorCurrentlyOnASpace !== cursorStartedOnASpace) break;
@@ -740,13 +757,13 @@ export async function parseCommand(
           _commandBuffer = removeFromTerminalAndCommandBuffer(
             toBeRemoved,
             _commandBuffer,
-            terminal
+            terminal,
           );
         } else {
           _commandBuffer = removeFromTerminalAndCommandBuffer(
             1,
             _commandBuffer,
-            terminal
+            terminal,
           );
         }
       }
@@ -757,13 +774,13 @@ export async function parseCommand(
         terminal,
         session,
         windowIdentifier,
-        { writePrompt: true }
+        { writePrompt: true },
       );
       break;
     case "End":
       const end = _commandBuffer.content.substring(
         _commandBuffer.cursorPosition,
-        _commandBuffer.content.length
+        _commandBuffer.content.length,
       );
 
       moveCursorForward(end.length, terminal);
@@ -772,7 +789,7 @@ export async function parseCommand(
     case "Home":
       const start = _commandBuffer.content.substring(
         0,
-        _commandBuffer.cursorPosition
+        _commandBuffer.cursorPosition,
       );
 
       moveCursorBack(start.length, terminal);
@@ -781,7 +798,7 @@ export async function parseCommand(
     case "Tab":
       const beforeCursor = _commandBuffer.content.substring(
         0,
-        _commandBuffer.cursorPosition
+        _commandBuffer.cursorPosition,
       );
       const args = _commandBuffer.content.split(" ");
 
@@ -807,44 +824,44 @@ export async function parseCommand(
         });
 
         const searchResult = new Fuse(commandList, { threshold: 0.005 }).search(
-          _commandBuffer.content
+          _commandBuffer.content,
         );
 
         if (searchResult.length === 1) {
           _commandBuffer = writeToTerminalAndCommandBuffer(
             searchResult[0].item.substring(
               _commandBuffer.cursorPosition,
-              searchResult[0].item.length
+              searchResult[0].item.length,
             ),
             _commandBuffer,
-            terminal
+            terminal,
           );
         } else if (searchResult.length > 1) {
           const displaySuggestions = searchResult.map((item) =>
-            formatCompletionSuggestionForDisplay(item.item)
+            formatCompletionSuggestionForDisplay(item.item),
           );
-          const suggestionText = displaySuggestions
-            .join("  ");
+          const suggestionText = displaySuggestions.join("  ");
           const neededLines = Math.max(
             1,
-            Math.ceil(suggestionText.length / terminal.cols)
+            Math.ceil(suggestionText.length / terminal.cols),
           );
 
           terminal.write(cursor.savePosition);
 
           terminal.writeln(" ".repeat(terminal.cols));
           displaySuggestions.forEach((command, index) =>
-              terminal.write(
-                command + (index !== displaySuggestions.length - 1 ? "  " : "")
-              )
-            );
+            terminal.write(
+              command + (index !== displaySuggestions.length - 1 ? "  " : ""),
+            ),
+          );
           terminal.write(cursor.returnToSavedPosition);
           _autocompleteLines = neededLines + 1;
         }
       } else if (cursorAtEndOfCommandBuffer && parts.length > 0) {
         const commandName = parts[0];
         const matched = commands.find(
-          (value) => value.name === commandName || hasAlias(value.aliases, commandName)
+          (value) =>
+            value.name === commandName || hasAlias(value.aliases, commandName),
         );
         const autocomplete = commandAutoCompletes[matched?.name ?? commandName];
 
@@ -852,7 +869,7 @@ export async function parseCommand(
           const argsWithoutCommand = parts.slice(1);
           const currentToken = hasTrailingSpace
             ? ""
-            : parts[parts.length - 1] ?? "";
+            : (parts[parts.length - 1] ?? "");
           const currentIndex = hasTrailingSpace
             ? argsWithoutCommand.length
             : Math.max(argsWithoutCommand.length - 1, 0);
@@ -864,27 +881,33 @@ export async function parseCommand(
             cwd: getCwd(),
           });
 
-          const matches = currentToken.length === 0
-            ? completions
-            : completions.filter((item) => item.startsWith(currentToken));
+          const matches =
+            currentToken.length === 0
+              ? completions
+              : completions.filter((item) => item.startsWith(currentToken));
 
           if (matches.length === 1) {
             _commandBuffer = writeToTerminalAndCommandBuffer(
               matches[0].substring(currentToken.length),
               _commandBuffer,
-              terminal
+              terminal,
             );
           } else if (matches.length > 1) {
             const displayMatches = matches.map((item) =>
-              formatCompletionSuggestionForDisplay(item)
+              formatCompletionSuggestionForDisplay(item),
             );
             const suggestionText = displayMatches.join("  ");
-            const neededLines = Math.max(1, Math.ceil(suggestionText.length / terminal.cols));
+            const neededLines = Math.max(
+              1,
+              Math.ceil(suggestionText.length / terminal.cols),
+            );
 
             terminal.write(cursor.savePosition);
             terminal.writeln(" ".repeat(terminal.cols));
             displayMatches.forEach((item, index) => {
-              terminal.write(item + (index !== displayMatches.length - 1 ? "  " : ""));
+              terminal.write(
+                item + (index !== displayMatches.length - 1 ? "  " : ""),
+              );
             });
             terminal.write(cursor.returnToSavedPosition);
             _autocompleteLines = neededLines + 1;
@@ -893,14 +916,14 @@ export async function parseCommand(
           _commandBuffer = writeToTerminalAndCommandBuffer(
             "    ",
             _commandBuffer,
-            terminal
+            terminal,
           );
         }
       } else {
         _commandBuffer = writeToTerminalAndCommandBuffer(
           "    ",
           _commandBuffer,
-          terminal
+          terminal,
         );
       }
       break;
@@ -955,7 +978,7 @@ export async function parseCommand(
           for (let i = 0; i < _commandBuffer.cursorPosition; i++) {
             const cursorCurrentlyOnASpace =
               _commandBuffer.content.charAt(
-                _commandBuffer.cursorPosition - 1 - i
+                _commandBuffer.cursorPosition - 1 - i,
               ) === " ";
 
             if (cursorCurrentlyOnASpace !== cursorStartedOnASpace) break;
@@ -992,7 +1015,7 @@ export async function parseCommand(
           ) {
             const cursorCurrentlyOnASpace =
               _commandBuffer.content.charAt(
-                _commandBuffer.cursorPosition + i
+                _commandBuffer.cursorPosition + i,
               ) === " ";
 
             if (cursorCurrentlyOnASpace !== cursorStartedOnASpace) break;
@@ -1017,7 +1040,7 @@ export async function parseCommand(
       _commandBuffer = writeToTerminalAndCommandBuffer(
         content,
         _commandBuffer,
-        terminal
+        terminal,
       );
       break;
   }

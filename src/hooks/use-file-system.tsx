@@ -57,18 +57,23 @@ export function useFileSystem() {
     if (typeof window === "undefined") {
       return buildDefaultFileSystem("guest");
     }
-    
+
     const stored = window.localStorage.getItem(FILE_SYSTEM_STORAGE_KEY);
     if (!stored) {
       const defaults = buildDefaultFileSystem(getCurrentSystemUsername());
-      window.localStorage.setItem(FILE_SYSTEM_STORAGE_KEY, JSON.stringify(defaults));
+      window.localStorage.setItem(
+        FILE_SYSTEM_STORAGE_KEY,
+        JSON.stringify(defaults),
+      );
       return defaults;
     }
 
     const parsed = JSON.parse(stored) as FileSystemNode[];
     const username = getCurrentSystemUsername();
     const defaults = buildDefaultFileSystem(username);
-    const existingPaths = new Set(parsed.map((node) => normalizePath(node.path)));
+    const existingPaths = new Set(
+      parsed.map((node) => normalizePath(node.path)),
+    );
 
     const missingSystemExecutables = defaults.filter((node) => {
       if (node.path === "/applications") {
@@ -80,7 +85,9 @@ export function useFileSystem() {
         node.type === "file" &&
         Boolean(node.executable);
 
-      return isApplicationsExecutable && !existingPaths.has(normalizePath(node.path));
+      return (
+        isApplicationsExecutable && !existingPaths.has(normalizePath(node.path))
+      );
     });
 
     const withDotHiddenFix = parsed.map((node) => {
@@ -168,7 +175,7 @@ export function useFileSystem() {
 
     const ensuredCoreDirectories = [...withProtectionPolicyFix];
     const ensuredPathSet = new Set(
-      ensuredCoreDirectories.map((node) => normalizePath(node.path))
+      ensuredCoreDirectories.map((node) => normalizePath(node.path)),
     );
 
     requiredDirectories.forEach((directoryNode) => {
@@ -184,7 +191,10 @@ export function useFileSystem() {
         ensuredCoreDirectories.length !== parsed.length ||
         ensuredCoreDirectories.some((node, index) => node !== parsed[index]);
       if (changed) {
-        window.localStorage.setItem(FILE_SYSTEM_STORAGE_KEY, JSON.stringify(ensuredCoreDirectories));
+        window.localStorage.setItem(
+          FILE_SYSTEM_STORAGE_KEY,
+          JSON.stringify(ensuredCoreDirectories),
+        );
       }
       return ensuredCoreDirectories;
     }
@@ -201,7 +211,9 @@ export function useFileSystem() {
 
   function isNodeReadOnly(path: string): boolean {
     const normalized = normalizePath(path);
-    return normalized === "/applications" || normalized.startsWith("/applications/");
+    return (
+      normalized === "/applications" || normalized.startsWith("/applications/")
+    );
   }
 
   function hasReadOnlyDescendant(path: string): boolean {
@@ -210,7 +222,7 @@ export function useFileSystem() {
       (node) =>
         node.path.startsWith(`${normalized}/`) &&
         (normalizePath(node.path) === "/applications" ||
-          normalizePath(node.path).startsWith("/applications/"))
+          normalizePath(node.path).startsWith("/applications/")),
     );
   }
 
@@ -218,7 +230,10 @@ export function useFileSystem() {
     const normalized = normalizePath(path);
     const node = getNode(path);
     if (!node || node.type !== "directory") return false;
-    if (normalized === "/applications" || normalized.startsWith("/applications/")) {
+    if (
+      normalized === "/applications" ||
+      normalized.startsWith("/applications/")
+    ) {
       return false;
     }
     return true;
@@ -263,16 +278,18 @@ export function useFileSystem() {
   function getChildren(path: string, showHidden = false): FileSystemNode[] {
     const normalized = normalizePath(path);
     const fs = getFileSystem();
-    return fs.filter((node) => {
-      const matches = node.parentPath === normalized;
-      if (!showHidden && node.isHidden) return false;
-      return matches;
-    }).sort((a, b) => {
-      // Directories first, then alphabetically
-      if (a.type === "directory" && b.type === "file") return -1;
-      if (a.type === "file" && b.type === "directory") return 1;
-      return a.name.localeCompare(b.name);
-    });
+    return fs
+      .filter((node) => {
+        const matches = node.parentPath === normalized;
+        if (!showHidden && node.isHidden) return false;
+        return matches;
+      })
+      .sort((a, b) => {
+        // Directories first, then alphabetically
+        if (a.type === "directory" && b.type === "file") return -1;
+        if (a.type === "file" && b.type === "directory") return 1;
+        return a.name.localeCompare(b.name);
+      });
   }
 
   function getAllDirectories(): FileSystemNode[] {
@@ -295,7 +312,7 @@ export function useFileSystem() {
   function createDirectory(path: string, name: string): boolean {
     const parentPath = normalizePath(path);
     const fullPath = normalizePath(`${parentPath}/${name}`);
-    
+
     if (exists(fullPath)) return false;
     if (!exists(parentPath) && parentPath !== "/") return false;
     if (!canWriteToDirectory(parentPath)) return false;
@@ -320,10 +337,14 @@ export function useFileSystem() {
     return true;
   }
 
-  function createFile(path: string, name: string, contents: string = ""): boolean {
+  function createFile(
+    path: string,
+    name: string,
+    contents: string = "",
+  ): boolean {
     const parentPath = normalizePath(path);
     const fullPath = normalizePath(`${parentPath}/${name}`);
-    
+
     if (exists(fullPath)) return false;
     if (!exists(parentPath) && parentPath !== "/") return false;
     if (!canWriteToDirectory(parentPath)) return false;
@@ -354,8 +375,10 @@ export function useFileSystem() {
     if (isNodeReadOnly(normalized)) return false;
 
     const fs = getFileSystem();
-    const index = fs.findIndex((node) => node.path === normalized && node.type === "file");
-    
+    const index = fs.findIndex(
+      (node) => node.path === normalized && node.type === "file",
+    );
+
     if (index === -1) return false;
 
     fs[index] = {
@@ -374,13 +397,13 @@ export function useFileSystem() {
 
     const fs = getFileSystem();
     const index = fs.findIndex((node) => node.path === normalized);
-    
+
     if (index === -1) return false;
 
     const node = fs[index];
     const newPath = normalizePath(`${node.parentPath}/${newName}`);
     if (!canWriteToDirectory(node.parentPath)) return false;
-    
+
     // Check if new path already exists
     if (exists(newPath)) return false;
 
@@ -400,7 +423,10 @@ export function useFileSystem() {
           fs[i] = {
             ...child,
             path: child.path.replace(normalized, newPath),
-            parentPath: child.parentPath === normalized ? newPath : child.parentPath.replace(normalized, newPath),
+            parentPath:
+              child.parentPath === normalized
+                ? newPath
+                : child.parentPath.replace(normalized, newPath),
           };
         }
       });
@@ -415,15 +441,17 @@ export function useFileSystem() {
     if (normalized === "/") return false;
     if (isNodeReadOnly(normalized)) return false;
     if (hasReadOnlyDescendant(normalized)) return false;
-    
+
     let fs = getFileSystem();
     const node = fs.find((n) => n.path === normalized);
-    
+
     if (!node) return false;
 
     // If directory, delete all children recursively
     if (node.type === "directory") {
-      fs = fs.filter((n) => !n.path.startsWith(normalized + "/") && n.path !== normalized);
+      fs = fs.filter(
+        (n) => !n.path.startsWith(normalized + "/") && n.path !== normalized,
+      );
     } else {
       fs = fs.filter((n) => n.path !== normalized);
     }
@@ -437,10 +465,10 @@ export function useFileSystem() {
     const destNormalized = normalizePath(destPath);
     if (isNodeReadOnly(srcNormalized)) return false;
     if (!canWriteToDirectory(destNormalized)) return false;
-    
+
     const fs = getFileSystem();
     const srcIndex = fs.findIndex((node) => node.path === srcNormalized);
-    
+
     if (srcIndex === -1) return false;
     if (!isDirectory(destNormalized)) return false;
 
@@ -455,7 +483,7 @@ export function useFileSystem() {
     }
 
     const newPath = normalizePath(`${destNormalized}/${srcNode.name}`);
-    
+
     if (exists(newPath)) return false;
 
     // Update source node
@@ -473,7 +501,10 @@ export function useFileSystem() {
           fs[i] = {
             ...child,
             path: child.path.replace(srcNormalized, newPath),
-            parentPath: child.parentPath === srcNormalized ? newPath : child.parentPath.replace(srcNormalized, newPath),
+            parentPath:
+              child.parentPath === srcNormalized
+                ? newPath
+                : child.parentPath.replace(srcNormalized, newPath),
           };
         }
       });
@@ -487,10 +518,10 @@ export function useFileSystem() {
     const srcNormalized = normalizePath(sourcePath);
     const destNormalized = normalizePath(destPath);
     if (!canWriteToDirectory(destNormalized)) return false;
-    
+
     const fs = getFileSystem();
     const srcNode = fs.find((node) => node.path === srcNormalized);
-    
+
     if (!srcNode) return false;
     if (!isDirectory(destNormalized)) return false;
 
@@ -498,7 +529,7 @@ export function useFileSystem() {
     let newName = srcNode.name;
     let newPath = normalizePath(`${destNormalized}/${newName}`);
     let counter = 1;
-    
+
     while (exists(newPath)) {
       const nameParts = srcNode.name.split(".");
       if (nameParts.length > 1) {
@@ -537,7 +568,10 @@ export function useFileSystem() {
         fs.push({
           ...child,
           path: child.path.replace(srcNormalized, newPath),
-          parentPath: child.parentPath === srcNormalized ? newPath : child.parentPath.replace(srcNormalized, newPath),
+          parentPath:
+            child.parentPath === srcNormalized
+              ? newPath
+              : child.parentPath.replace(srcNormalized, newPath),
           createdAt: Date.now(),
           modifiedAt: Date.now(),
         });
@@ -548,7 +582,9 @@ export function useFileSystem() {
     return true;
   }
 
-  function getDirectoryTree(path: string = "/"): FileSystemNode & { children?: FileSystemNode[] } {
+  function getDirectoryTree(
+    path: string = "/",
+  ): FileSystemNode & { children?: FileSystemNode[] } {
     const node = getNode(path);
     if (!node || node.type !== "directory") {
       return node as FileSystemNode;
@@ -564,12 +600,16 @@ export function useFileSystem() {
     return { ...node, children };
   }
 
-  function searchFiles(query: string, startPath: string = "/"): FileSystemNode[] {
+  function searchFiles(
+    query: string,
+    startPath: string = "/",
+  ): FileSystemNode[] {
     const normalized = normalizePath(startPath);
     const lowerQuery = query.toLowerCase();
-    
+
     return getFileSystem().filter((node) => {
-      if (!node.path.startsWith(normalized === "/" ? "" : normalized)) return false;
+      if (!node.path.startsWith(normalized === "/" ? "" : normalized))
+        return false;
       return node.name.toLowerCase().includes(lowerQuery);
     });
   }
@@ -582,13 +622,17 @@ export function useFileSystem() {
     return undefined;
   }
 
-  function getStats(path: string): { files: number; directories: number; totalSize: number } | undefined {
+  function getStats(
+    path: string,
+  ): { files: number; directories: number; totalSize: number } | undefined {
     const normalized = normalizePath(path);
     if (!exists(normalized)) return undefined;
 
     const fs = getFileSystem();
-    const descendants = fs.filter((n) => 
-      n.path.startsWith(normalized === "/" ? "" : normalized + "/") || n.path === normalized
+    const descendants = fs.filter(
+      (n) =>
+        n.path.startsWith(normalized === "/" ? "" : normalized + "/") ||
+        n.path === normalized,
     );
 
     return {

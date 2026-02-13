@@ -108,7 +108,7 @@ function sorroundTextWithCharacters(
   width: number,
   spacer: string,
   leftEdge: string,
-  rightEdge: string
+  rightEdge: string,
 ): string {
   const spacesLeftOver =
     width -
@@ -134,7 +134,7 @@ function sorroundTextWithCharactersCentered(
   width: number,
   spacer: string,
   leftEdge: string,
-  rightEdge: string
+  rightEdge: string,
 ): string {
   const spacesLeftOver =
     width -
@@ -168,7 +168,7 @@ function constructItemText(
     description: string;
     callbackFunctionName: string;
   },
-  width: number
+  width: number,
 ): string[] {
   const spacesLeftOver =
     width -
@@ -199,7 +199,7 @@ function constructItemText(
       width,
       ITEM_SPACER,
       LEFT_EDGE,
-      RIGHT_EDGE
+      RIGHT_EDGE,
     );
     let lines = [nameHeader];
 
@@ -214,9 +214,9 @@ function constructItemText(
             width,
             TEXT_ROW_SPACER,
             LEFT_EDGE,
-            RIGHT_EDGE
-          )
-        )
+            RIGHT_EDGE,
+          ),
+        ),
       );
     return lines;
   }
@@ -290,10 +290,7 @@ type TerminalCommandMeta = {
   argumentDefinitions?: CommandArgumentDefinition[];
 };
 
-function printCommandHelp(
-  terminal: Terminal,
-  command: TerminalCommandMeta
-) {
+function printCommandHelp(terminal: Terminal, command: TerminalCommandMeta) {
   const width = terminal.cols;
   terminal.writeln(" ".repeat(width));
   terminal.writeln(constructHeaderText(`HELP - ${command.name}`, width));
@@ -310,8 +307,8 @@ function printCommandHelp(
         width,
         TEXT_ROW_SPACER,
         LEFT_EDGE,
-        RIGHT_EDGE
-      )
+        RIGHT_EDGE,
+      ),
     );
   }
 
@@ -323,8 +320,8 @@ function printCommandHelp(
         width,
         TEXT_ROW_SPACER,
         LEFT_EDGE,
-        RIGHT_EDGE
-      )
+        RIGHT_EDGE,
+      ),
     );
     command.usage.forEach((usageLine) => {
       terminal.writeln(
@@ -333,8 +330,8 @@ function printCommandHelp(
           width,
           TEXT_ROW_SPACER,
           LEFT_EDGE,
-          RIGHT_EDGE
-        )
+          RIGHT_EDGE,
+        ),
       );
     });
   }
@@ -347,8 +344,8 @@ function printCommandHelp(
         width,
         TEXT_ROW_SPACER,
         LEFT_EDGE,
-        RIGHT_EDGE
-      )
+        RIGHT_EDGE,
+      ),
     );
     command.examples.forEach((exampleLine) => {
       terminal.writeln(
@@ -357,8 +354,8 @@ function printCommandHelp(
           width,
           TEXT_ROW_SPACER,
           LEFT_EDGE,
-          RIGHT_EDGE
-        )
+          RIGHT_EDGE,
+        ),
       );
     });
   }
@@ -372,8 +369,8 @@ function printCommandHelp(
         width,
         TEXT_ROW_SPACER,
         LEFT_EDGE,
-        RIGHT_EDGE
-      )
+        RIGHT_EDGE,
+      ),
     );
     argumentDefinitions.forEach((argument) => {
       const requiredText = argument.required ? "required" : "optional";
@@ -383,8 +380,8 @@ function printCommandHelp(
           width,
           TEXT_ROW_SPACER,
           LEFT_EDGE,
-          RIGHT_EDGE
-        )
+          RIGHT_EDGE,
+        ),
       );
     });
   }
@@ -405,8 +402,8 @@ function printCommandHelp(
         width,
         TEXT_ROW_SPACER,
         LEFT_EDGE,
-        RIGHT_EDGE
-      )
+        RIGHT_EDGE,
+      ),
     );
     optionDefinitions.forEach((option) => {
       const names = option.short
@@ -418,8 +415,8 @@ function printCommandHelp(
           width,
           TEXT_ROW_SPACER,
           LEFT_EDGE,
-          RIGHT_EDGE
-        )
+          RIGHT_EDGE,
+        ),
       );
     });
   }
@@ -439,7 +436,7 @@ async function help(fullCommand: string, terminal: Terminal): Promise<void> {
       currentPage = Number(query) - 1;
     } else {
       const commandInfo = commands.find(
-        (command) => command.name === query || command.aliases.includes(query)
+        (command) => command.name === query || command.aliases.includes(query),
       );
 
       if (!commandInfo) {
@@ -455,7 +452,7 @@ async function help(fullCommand: string, terminal: Terminal): Promise<void> {
 
   const currentPageCommands = commandList.slice(
     currentPage * COMMANDS_PER_PAGE,
-    currentPage * COMMANDS_PER_PAGE + COMMANDS_PER_PAGE
+    currentPage * COMMANDS_PER_PAGE + COMMANDS_PER_PAGE,
   );
 
   if (currentPageCommands.length > 0) {
@@ -485,8 +482,8 @@ async function help(fullCommand: string, terminal: Terminal): Promise<void> {
           width,
           " ",
           "",
-          ""
-        )
+          "",
+        ),
       );
     }
     terminal.writeln(" ".repeat(terminal.cols));
@@ -496,7 +493,7 @@ async function help(fullCommand: string, terminal: Terminal): Promise<void> {
       "Incorrect command usage; usage & examples: \n\nUsage(s):\n - " +
         commandInfo?.usage.join("\n - ") +
         "\n\nExample(s):\n - " +
-        commandInfo?.examples.join("\n - ")
+        commandInfo?.examples.join("\n - "),
     );
   }
 }

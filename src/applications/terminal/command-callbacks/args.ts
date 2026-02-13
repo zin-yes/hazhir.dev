@@ -11,7 +11,7 @@ type ParseOptionsConfig = {
 
 export function parseCommandArguments(
   args: string[],
-  config?: ParseOptionsConfig
+  config?: ParseOptionsConfig,
 ): ParsedArgs {
   const options = new Set<string>();
   const positionals: string[] = [];

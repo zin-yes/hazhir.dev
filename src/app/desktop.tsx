@@ -1,57 +1,86 @@
 "use client";
 
 import {
-    BookOpen,
-    BookText,
-    Calculator,
-    File,
-    FileAudio,
-    FileCode,
-    FileImage,
-    FileSymlink,
-    FileText,
-    FileVideo,
-    FolderClosed,
-    Gamepad2,
-    TerminalSquare,
+  BookOpen,
+  BookText,
+  Calculator,
+  ClipboardPaste,
+  Copy,
+  Edit3,
+  Eye,
+  File,
+  FileAudio,
+  FileCode,
+  FileImage,
+  FileSymlink,
+  FileText,
+  FileVideo,
+  FilePlus,
+  FolderClosed,
+  FolderPlus,
+  Gamepad2,
+  RefreshCw,
+  Scissors,
+  Trash2,
+  ArrowUpDown,
+  TerminalSquare,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
-    ContextMenu,
-    ContextMenuContent,
-    ContextMenuItem,
-    ContextMenuRadioGroup,
-    ContextMenuRadioItem,
-    ContextMenuSeparator,
-    ContextMenuSub,
-    ContextMenuSubContent,
-    ContextMenuSubTrigger,
-    ContextMenuTrigger,
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuRadioGroup,
+  ContextMenuRadioItem,
+  ContextMenuSeparator,
+  ContextMenuSub,
+  ContextMenuSubContent,
+  ContextMenuSubTrigger,
+  ContextMenuTrigger,
 } from "@/components/ui/context-menu";
 import {
-    Dialog,
-    DialogContent,
-    DialogDescription,
-    DialogFooter,
-    DialogHeader,
-    DialogTitle,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useFileSystem, type FileSystemNode } from "@/hooks/use-file-system";
-import { executeFilePath, isExecutableFile, isShortcutFile } from "@/lib/file-execution";
-import { FILE_PATH_DROP_EVENT, readFileDragPayload } from "@/lib/file-transfer-dnd";
+import {
+  executeFilePath,
+  isExecutableFile,
+  isShortcutFile,
+} from "@/lib/file-execution";
+import {
+  FILE_PATH_DROP_EVENT,
+  readFileDragPayload,
+} from "@/lib/file-transfer-dnd";
+import {
+  getFileClipboard,
+  setFileClipboard,
+  subscribeToFileClipboard,
+} from "@/lib/file-clipboard";
 import { parseShortcut } from "@/lib/shortcut";
 import { getHomePath } from "@/lib/system-user";
 import { cn } from "@/lib/utils";
 
-import { ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  ReactNode,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { createPortal } from "react-dom";
 import {
-    FileExplorerApplicationWindow,
-    SingleDocumentApplicationWindow,
-    TextEditorApplicationWindow,
+  FileExplorerApplicationWindow,
+  SingleDocumentApplicationWindow,
+  TextEditorApplicationWindow,
 } from "./application-windows";
 
 type DesktopItem = {
@@ -86,6 +115,8 @@ export default function Desktop({
   const fsRef = useRef(fs);
   const desktopRootPath = `${getHomePath()}/Desktop`;
   const containerRef = useRef<HTMLDivElement>(null);
+  const gridLayerRef = useRef<HTMLDivElement>(null);
+  const desktopContextPointRef = useRef<{ x: number; y: number } | null>(null);
   const iconRefs = useRef<Map<string, HTMLDivElement>>(new Map());
   const dragCandidateRef = useRef<{
     primaryId: string;
@@ -104,12 +135,22 @@ export default function Desktop({
   const [renameTargetId, setRenameTargetId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const [renameError, setRenameError] = useState("");
+  const [createMode, setCreateMode] = useState<"file" | "folder" | null>(
+    null,
+  );
+  const [createValue, setCreateValue] = useState("");
+  const [createError, setCreateError] = useState("");
+  const [clipboard, setClipboard] = useState(getFileClipboard);
   const [sortMode, setSortMode] = useState<DesktopSortMode>("name-asc");
   const [gridRows, setGridRows] = useState(6);
   const [gridCols, setGridCols] = useState(8);
-  const [itemPositions, setItemPositions] = useState<Record<string, DesktopGridPosition>>({});
+  const [itemPositions, setItemPositions] = useState<
+    Record<string, DesktopGridPosition>
+  >({});
   const [draggingIds, setDraggingIds] = useState<string[]>([]);
-  const [dragDelta, setDragDelta] = useState<{ x: number; y: number } | null>(null);
+  const [dragDelta, setDragDelta] = useState<{ x: number; y: number } | null>(
+    null,
+  );
   const draggingIdsRef = useRef<string[]>([]);
   const dragDeltaRef = useRef<{ x: number; y: number } | null>(null);
   const [marquee, setMarquee] = useState<{
@@ -125,6 +166,12 @@ export default function Desktop({
   useEffect(() => {
     fsRef.current = fs;
   }, [fs]);
+
+  useEffect(() => {
+    return subscribeToFileClipboard((nextClipboard) => {
+      setClipboard(nextClipboard);
+    });
+  }, []);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -145,7 +192,7 @@ export default function Desktop({
     if (!layoutHydrated || typeof window === "undefined") return;
     window.localStorage.setItem(
       DESKTOP_LAYOUT_STORAGE_KEY,
-      JSON.stringify(itemPositions)
+      JSON.stringify(itemPositions),
     );
   }, [itemPositions, layoutHydrated]);
 
@@ -156,15 +203,21 @@ export default function Desktop({
     const recalculateGrid = () => {
       const usableHeight = Math.max(
         container.clientHeight - DESKTOP_GRID_PADDING * 2,
-        DESKTOP_ICON_HEIGHT
+        DESKTOP_ICON_HEIGHT,
       );
       const usableWidth = Math.max(
         container.clientWidth - DESKTOP_GRID_PADDING * 2,
-        DESKTOP_ICON_WIDTH
+        DESKTOP_ICON_WIDTH,
       );
 
-      const nextRows = Math.max(1, Math.floor(usableHeight / DESKTOP_GRID_ROW_HEIGHT));
-      const nextCols = Math.max(1, Math.floor(usableWidth / DESKTOP_GRID_COL_WIDTH));
+      const nextRows = Math.max(
+        1,
+        Math.floor(usableHeight / DESKTOP_GRID_ROW_HEIGHT),
+      );
+      const nextCols = Math.max(
+        1,
+        Math.floor(usableWidth / DESKTOP_GRID_COL_WIDTH),
+      );
       setGridRows(nextRows);
       setGridCols(nextCols);
     };
@@ -203,9 +256,11 @@ export default function Desktop({
         BookOpen: <BookOpen size={30} className="text-white" />,
       };
 
-      return iconName && iconByName[iconName]
-        ? iconByName[iconName]
-        : <FileSymlink size={30} className="text-white" />;
+      return iconName && iconByName[iconName] ? (
+        iconByName[iconName]
+      ) : (
+        <FileSymlink size={30} className="text-white" />
+      );
     }
 
     if (isExecutableFile(node)) {
@@ -287,17 +342,21 @@ export default function Desktop({
         "shortcut",
       ]);
       if (textExtensions.has(ext || "")) {
-        return () => addWindow(<TextEditorApplicationWindow filePath={node.path} />);
+        return () =>
+          addWindow(<TextEditorApplicationWindow filePath={node.path} />);
       }
       if (ext === "pdf") {
         return () =>
           addWindow(
-            <SingleDocumentApplicationWindow articleId={node.name} title={node.name} />
+            <SingleDocumentApplicationWindow
+              articleId={node.name}
+              title={node.name}
+            />,
           );
       }
       return null;
     },
-    [addWindow, fs]
+    [addWindow, fs],
   );
 
   const desktopItems = useMemo<DesktopItem[]>(() => {
@@ -308,14 +367,21 @@ export default function Desktop({
           : null;
       const openAction =
         node.type === "directory"
-          ? () => addWindow(<FileExplorerApplicationWindow addWindow={addWindow} />)
+          ? () =>
+              addWindow(
+                <FileExplorerApplicationWindow
+                  addWindow={addWindow}
+                  initialPath={node.path}
+                />,
+              )
           : getFileOpenAction(node);
 
       return {
         id: node.path,
         title: shortcutMeta?.iconDisplayText ?? shortcutMeta?.name ?? node.name,
         icon: getFileIcon(node),
-        kind: node.type === "directory" ? ("folder" as const) : ("file" as const),
+        kind:
+          node.type === "directory" ? ("folder" as const) : ("file" as const),
         fileNode: node,
         onOpen: openAction,
       };
@@ -358,7 +424,7 @@ export default function Desktop({
       });
       return sorted;
     },
-    [getDesktopItemSize]
+    [getDesktopItemSize],
   );
 
   const desktopItemById = useMemo(
@@ -367,7 +433,7 @@ export default function Desktop({
         accumulator[item.id] = item;
         return accumulator;
       }, {}),
-    [desktopItems]
+    [desktopItems],
   );
 
   const getSlotKey = useCallback((position: DesktopGridPosition) => {
@@ -389,13 +455,117 @@ export default function Desktop({
       }
       return { col: 0, row: 0 };
     },
-    [gridCols]
+    [gridCols],
+  );
+
+  const getGridPositionFromClientPoint = useCallback(
+    (clientX: number, clientY: number): DesktopGridPosition => {
+      const layerRect =
+        gridLayerRef.current?.getBoundingClientRect() ??
+        containerRef.current?.getBoundingClientRect();
+
+      if (!layerRect) {
+        return { col: 0, row: 0 };
+      }
+
+      const rawCol = Math.round(
+        (clientX - layerRect.left - DESKTOP_GRID_PADDING - DESKTOP_ICON_WIDTH / 2) /
+          DESKTOP_GRID_COL_WIDTH,
+      );
+      const rawRow = Math.round(
+        (clientY - layerRect.top - DESKTOP_GRID_PADDING - DESKTOP_ICON_HEIGHT / 2) /
+          DESKTOP_GRID_ROW_HEIGHT,
+      );
+
+      return {
+        col: Math.max(0, Math.min(Math.max(1, gridCols) - 1, rawCol)),
+        row: Math.max(0, Math.min(Math.max(1, gridRows) - 1, rawRow)),
+      };
+    },
+    [gridCols, gridRows],
+  );
+
+  const findNearestAvailablePosition = useCallback(
+    (
+      occupied: Set<string>,
+      desired: DesktopGridPosition,
+      fallbackStartIndex: number,
+    ): DesktopGridPosition => {
+      const safeCols = Math.max(1, gridCols);
+      const safeRows = Math.max(1, gridRows);
+
+      let best: { position: DesktopGridPosition; score: number } | null = null;
+
+      for (let row = 0; row < safeRows; row += 1) {
+        for (let col = 0; col < safeCols; col += 1) {
+          const key = `${col}:${row}`;
+          if (occupied.has(key)) continue;
+
+          const dx = col - desired.col;
+          const dy = row - desired.row;
+          const score = dx * dx + dy * dy;
+          if (!best || score < best.score) {
+            best = {
+              position: { col, row },
+              score,
+            };
+          }
+        }
+      }
+
+      return best?.position ?? getAutoPosition(occupied, fallbackStartIndex);
+    },
+    [getAutoPosition, gridCols, gridRows],
+  );
+
+  const placePathsNearClientPoint = useCallback(
+    (paths: string[], clientX: number, clientY: number) => {
+      if (!paths.length) return;
+
+      const normalizedPaths = Array.from(
+        new Set(paths.map((path) => fs.normalizePath(path))),
+      );
+      const currentDesktopIds = new Set(desktopItems.map((item) => item.id));
+      const desired = getGridPositionFromClientPoint(clientX, clientY);
+
+      setItemPositions((previous) => {
+        const next = { ...previous };
+        const movingSet = new Set(normalizedPaths);
+        const occupied = new Set<string>();
+
+        Object.entries(next).forEach(([id, position]) => {
+          if (!currentDesktopIds.has(id)) return;
+          if (movingSet.has(id)) return;
+          occupied.add(`${position.col}:${position.row}`);
+        });
+
+        normalizedPaths.forEach((path, index) => {
+          const fallbackStartIndex = desired.row * Math.max(1, gridCols) + desired.col + index;
+          const placement = findNearestAvailablePosition(
+            occupied,
+            desired,
+            fallbackStartIndex,
+          );
+          next[path] = placement;
+          occupied.add(`${placement.col}:${placement.row}`);
+        });
+
+        return next;
+      });
+    },
+    [
+      desktopItems,
+      findNearestAvailablePosition,
+      fs,
+      getGridPositionFromClientPoint,
+      gridCols,
+    ],
   );
 
   const areLayoutsEqual = useCallback(
     (
       left: Record<string, DesktopGridPosition>,
-      right: Record<string, DesktopGridPosition>
+      right: Record<string, DesktopGridPosition>,
     ) => {
       const leftKeys = Object.keys(left);
       const rightKeys = Object.keys(right);
@@ -406,7 +576,7 @@ export default function Desktop({
         return Boolean(r) && l.col === r.col && l.row === r.row;
       });
     },
-    []
+    [],
   );
 
   const applySortedLayout = useCallback(
@@ -424,7 +594,7 @@ export default function Desktop({
         return next;
       });
     },
-    [desktopItems, getAutoPosition, getSlotKey, sortDesktopItems]
+    [desktopItems, getAutoPosition, getSlotKey, sortDesktopItems],
   );
 
   useEffect(() => {
@@ -455,10 +625,10 @@ export default function Desktop({
         pendingIds.delete(id);
       });
 
-      desktopItems.forEach((item, index) => {
+      desktopItems.forEach((item) => {
         if (!pendingIds.has(item.id)) return;
 
-        const auto = getAutoPosition(occupied, index);
+        const auto = getAutoPosition(occupied, 0);
         next[item.id] = auto;
         occupied.add(getSlotKey(auto));
         pendingIds.delete(item.id);
@@ -466,7 +636,13 @@ export default function Desktop({
 
       return areLayoutsEqual(previous, next) ? previous : next;
     });
-  }, [areLayoutsEqual, desktopItems, getAutoPosition, getSlotKey, layoutHydrated]);
+  }, [
+    areLayoutsEqual,
+    desktopItems,
+    getAutoPosition,
+    getSlotKey,
+    layoutHydrated,
+  ]);
 
   const visualOrderedItemIds = useMemo(() => {
     return [...desktopItems]
@@ -499,14 +675,15 @@ export default function Desktop({
       const fromIndex = visualOrderedItemIds.findIndex((id) => id === fromId);
       const toIndex = visualOrderedItemIds.findIndex((id) => id === toId);
       if (fromIndex === -1 || toIndex === -1) return;
-      const [start, end] = fromIndex < toIndex ? [fromIndex, toIndex] : [toIndex, fromIndex];
+      const [start, end] =
+        fromIndex < toIndex ? [fromIndex, toIndex] : [toIndex, fromIndex];
       const next = new Set<string>();
       for (let i = start; i <= end; i += 1) {
         next.add(visualOrderedItemIds[i]);
       }
       updateSelection(next);
     },
-    [updateSelection, visualOrderedItemIds]
+    [updateSelection, visualOrderedItemIds],
   );
 
   const handleIconMouseDown = useCallback(
@@ -518,32 +695,31 @@ export default function Desktop({
 
       if (!event.shiftKey && !event.ctrlKey && !event.metaKey) {
         const iconRect = iconRefs.current.get(id)?.getBoundingClientRect();
-        const dragIds = selectedSet.has(id) && selectedSet.size > 0 ? selectedIds : [id];
-        const sourcePositions = dragIds.reduce<Record<string, DesktopGridPosition>>(
-          (accumulator, dragId) => {
-            const source = itemPositions[dragId];
-            if (source) {
-              accumulator[dragId] = source;
-            }
-            return accumulator;
-          },
-          {}
-        );
-        const sourcePixels = dragIds.reduce<Record<string, { left: number; top: number }>>(
-          (accumulator, dragId) => {
-            const node = iconRefs.current.get(dragId);
-            const container = containerRef.current;
-            if (!node || !container) return accumulator;
-            const nodeRect = node.getBoundingClientRect();
-            const containerRect = container.getBoundingClientRect();
-            accumulator[dragId] = {
-              left: nodeRect.left - containerRect.left,
-              top: nodeRect.top - containerRect.top,
-            };
-            return accumulator;
-          },
-          {}
-        );
+        const dragIds =
+          selectedSet.has(id) && selectedSet.size > 0 ? selectedIds : [id];
+        const sourcePositions = dragIds.reduce<
+          Record<string, DesktopGridPosition>
+        >((accumulator, dragId) => {
+          const source = itemPositions[dragId];
+          if (source) {
+            accumulator[dragId] = source;
+          }
+          return accumulator;
+        }, {});
+        const sourcePixels = dragIds.reduce<
+          Record<string, { left: number; top: number }>
+        >((accumulator, dragId) => {
+          const node = iconRefs.current.get(dragId);
+          const container = containerRef.current;
+          if (!node || !container) return accumulator;
+          const nodeRect = node.getBoundingClientRect();
+          const containerRect = container.getBoundingClientRect();
+          accumulator[dragId] = {
+            left: nodeRect.left - containerRect.left,
+            top: nodeRect.top - containerRect.top,
+          };
+          return accumulator;
+        }, {});
 
         if (iconRect && sourcePositions[id] && sourcePixels[id]) {
           dragCandidateRef.current = {
@@ -585,7 +761,14 @@ export default function Desktop({
       updateSelection(new Set([id]));
       setLastSelectedId(id);
     },
-    [itemPositions, lastSelectedId, selectRange, selectedIds, selectedSet, updateSelection]
+    [
+      itemPositions,
+      lastSelectedId,
+      selectRange,
+      selectedIds,
+      selectedSet,
+      updateSelection,
+    ],
   );
 
   const handleIconContextMenu = useCallback(
@@ -596,7 +779,7 @@ export default function Desktop({
         setLastSelectedId(id);
       }
     },
-    [selectedSet, updateSelection]
+    [selectedSet, updateSelection],
   );
 
   const startMarquee = useCallback(
@@ -609,16 +792,20 @@ export default function Desktop({
       if (!container) return;
 
       const rect = container.getBoundingClientRect();
-      const origin = { x: event.clientX - rect.left, y: event.clientY - rect.top };
+      const origin = {
+        x: event.clientX - rect.left,
+        y: event.clientY - rect.top,
+      };
       selectionOriginRef.current = origin;
       isSelectingRef.current = true;
-      selectionBaseRef.current = event.ctrlKey || event.metaKey ? new Set(selectedSet) : new Set();
+      selectionBaseRef.current =
+        event.ctrlKey || event.metaKey ? new Set(selectedSet) : new Set();
       setMarquee({ x: origin.x, y: origin.y, width: 0, height: 0 });
       if (!event.ctrlKey && !event.metaKey) {
         updateSelection(new Set());
       }
     },
-    [selectedSet, updateSelection]
+    [selectedSet, updateSelection],
   );
 
   const endSelection = useCallback(() => {
@@ -648,15 +835,19 @@ export default function Desktop({
         if (!container) return;
         const rect = container.getBoundingClientRect();
 
-        const primarySource = dragCandidate.sourcePositions[dragCandidate.primaryId];
-        const primarySourcePixel = dragCandidate.sourcePixels[dragCandidate.primaryId];
+        const primarySource =
+          dragCandidate.sourcePositions[dragCandidate.primaryId];
+        const primarySourcePixel =
+          dragCandidate.sourcePixels[dragCandidate.primaryId];
         if (!primarySource || !primarySourcePixel) return;
 
         const pointerX = event.clientX - rect.left;
         const pointerY = event.clientY - rect.top;
 
-        const rawDeltaX = pointerX - dragCandidate.offsetX - primarySourcePixel.left;
-        const rawDeltaY = pointerY - dragCandidate.offsetY - primarySourcePixel.top;
+        const rawDeltaX =
+          pointerX - dragCandidate.offsetX - primarySourcePixel.left;
+        const rawDeltaY =
+          pointerY - dragCandidate.offsetY - primarySourcePixel.top;
 
         let minBaseLeft = Number.POSITIVE_INFINITY;
         let minBaseTop = Number.POSITIVE_INFINITY;
@@ -674,7 +865,8 @@ export default function Desktop({
           maxBaseTop = Math.max(maxBaseTop, top);
         });
 
-        if (!Number.isFinite(minBaseLeft) || !Number.isFinite(minBaseTop)) return;
+        if (!Number.isFinite(minBaseLeft) || !Number.isFinite(minBaseTop))
+          return;
 
         const minDeltaXAllowed = DESKTOP_GRID_PADDING - minBaseLeft;
         const maxDeltaXAllowed =
@@ -702,7 +894,10 @@ export default function Desktop({
       if (!container) return;
 
       const rect = container.getBoundingClientRect();
-      const current = { x: event.clientX - rect.left, y: event.clientY - rect.top };
+      const current = {
+        x: event.clientX - rect.left,
+        y: event.clientY - rect.top,
+      };
       const origin = selectionOriginRef.current;
       const x = Math.min(origin.x, current.x);
       const y = Math.min(origin.y, current.y);
@@ -710,13 +905,18 @@ export default function Desktop({
       const height = Math.abs(origin.y - current.y);
       setMarquee({ x, y, width, height });
 
-      const selectionRect = { left: x, top: y, right: x + width, bottom: y + height };
+      const selectionRect = {
+        left: x,
+        top: y,
+        right: x + width,
+        bottom: y + height,
+      };
       const nextSelection = new Set(selectionBaseRef.current);
       desktopItems.forEach((item) => {
         const element = iconRefs.current.get(item.id);
         if (!element) return;
         const hitTarget = element.querySelector(
-          "[data-desktop-hit='true']"
+          "[data-desktop-hit='true']",
         ) as HTMLElement | null;
         const iconRect = (hitTarget ?? element).getBoundingClientRect();
         const relative = {
@@ -750,25 +950,29 @@ export default function Desktop({
         if (container) {
           const dropTarget = document.elementFromPoint(
             event.clientX,
-            event.clientY
+            event.clientY,
           ) as HTMLElement | null;
           const dropZone = dropTarget?.closest(
-            "[data-file-drop-zone='true']"
+            "[data-file-drop-zone='true']",
           ) as HTMLElement | null;
           const dropKind = dropZone?.dataset.fileDropKind;
           const destinationPath = dropZone?.dataset.fileDropPath;
-          const isInsideDesktop = Boolean(dropTarget && container.contains(dropTarget));
+          const isInsideDesktop = Boolean(
+            dropTarget && container.contains(dropTarget),
+          );
 
           if (isInsideDesktop && dropKind === "directory" && destinationPath) {
             const sourcePaths = dragCandidate.dragIds
-              .map((dragId) =>
-                desktopItems.find((item) => item.id === dragId)?.fileNode?.path
+              .map(
+                (dragId) =>
+                  desktopItems.find((item) => item.id === dragId)?.fileNode
+                    ?.path,
               )
               .filter((path): path is string => Boolean(path));
 
             if (sourcePaths.length > 0) {
               const uniquePaths = Array.from(
-                new Set(sourcePaths.map((item) => fs.normalizePath(item)))
+                new Set(sourcePaths.map((item) => fs.normalizePath(item))),
               );
 
               uniquePaths.forEach((sourcePath) => {
@@ -789,8 +993,10 @@ export default function Desktop({
 
           if (!isInsideDesktop) {
             const sourcePaths = dragCandidate.dragIds
-              .map((dragId) =>
-                desktopItems.find((item) => item.id === dragId)?.fileNode?.path
+              .map(
+                (dragId) =>
+                  desktopItems.find((item) => item.id === dragId)?.fileNode
+                    ?.path,
               )
               .filter((path): path is string => Boolean(path));
 
@@ -799,13 +1005,13 @@ export default function Desktop({
                 new CustomEvent(FILE_PATH_DROP_EVENT, {
                   bubbles: true,
                   detail: { paths: sourcePaths },
-                })
+                }),
               );
               didExternalTransfer = true;
             } else if (destinationPath) {
               if (sourcePaths.length > 0) {
                 const uniquePaths = Array.from(
-                  new Set(sourcePaths.map((item) => fs.normalizePath(item)))
+                  new Set(sourcePaths.map((item) => fs.normalizePath(item))),
                 );
 
                 uniquePaths.forEach((sourcePath) => {
@@ -825,11 +1031,21 @@ export default function Desktop({
           }
         }
 
-        if (!didExternalTransfer && !didFolderDropTransfer && container && activeDragDelta) {
-          const primarySource = dragCandidate.sourcePositions[dragCandidate.primaryId];
+        if (
+          !didExternalTransfer &&
+          !didFolderDropTransfer &&
+          container &&
+          activeDragDelta
+        ) {
+          const primarySource =
+            dragCandidate.sourcePositions[dragCandidate.primaryId];
           if (primarySource) {
-            const deltaCol = Math.round(activeDragDelta.x / DESKTOP_GRID_COL_WIDTH);
-            const deltaRow = Math.round(activeDragDelta.y / DESKTOP_GRID_ROW_HEIGHT);
+            const deltaCol = Math.round(
+              activeDragDelta.x / DESKTOP_GRID_COL_WIDTH,
+            );
+            const deltaRow = Math.round(
+              activeDragDelta.y / DESKTOP_GRID_ROW_HEIGHT,
+            );
 
             setItemPositions((previous) => {
               const next = { ...previous };
@@ -843,11 +1059,16 @@ export default function Desktop({
               });
 
               const movedOrder = dragCandidate.dragIds
-                .map((id) => ({ id, source: dragCandidate.sourcePositions[id] }))
+                .map((id) => ({
+                  id,
+                  source: dragCandidate.sourcePositions[id],
+                }))
                 .filter((entry) => Boolean(entry.source))
                 .sort((a, b) => {
-                  if (a.source!.row !== b.source!.row) return a.source!.row - b.source!.row;
-                  if (a.source!.col !== b.source!.col) return a.source!.col - b.source!.col;
+                  if (a.source!.row !== b.source!.row)
+                    return a.source!.row - b.source!.row;
+                  if (a.source!.col !== b.source!.col)
+                    return a.source!.col - b.source!.col;
                   return a.id.localeCompare(b.id);
                 });
 
@@ -857,7 +1078,11 @@ export default function Desktop({
                 let startIndex =
                   Math.max(0, Math.min(safeCols - 1, startCol)) +
                   Math.max(0, Math.min(safeRows - 1, startRow)) * safeCols;
-                for (let probe = startIndex; probe < safeCols * safeRows; probe += 1) {
+                for (
+                  let probe = startIndex;
+                  probe < safeCols * safeRows;
+                  probe += 1
+                ) {
                   const col = probe % safeCols;
                   const row = Math.floor(probe / safeCols);
                   const key = `${col}:${row}`;
@@ -879,11 +1104,11 @@ export default function Desktop({
                 if (!source) return;
                 const desiredCol = Math.max(
                   0,
-                  Math.min(gridCols - 1, source.col + deltaCol)
+                  Math.min(gridCols - 1, source.col + deltaCol),
                 );
                 const desiredRow = Math.max(
                   0,
-                  Math.min(gridRows - 1, source.row + deltaRow)
+                  Math.min(gridRows - 1, source.row + deltaRow),
                 );
                 const desiredKey = `${desiredCol}:${desiredRow}`;
 
@@ -936,9 +1161,17 @@ export default function Desktop({
     };
   }, [desktopItems, endSelection, fs, gridCols, gridRows, updateSelection]);
 
-  const handleDesktopContextMenu = useCallback(() => {
-    return;
-  }, []);
+  const handleDesktopContextMenu = useCallback(
+    (event: React.MouseEvent<HTMLDivElement>) => {
+      if (event.clientX > 0 || event.clientY > 0) {
+        desktopContextPointRef.current = {
+          x: event.clientX,
+          y: event.clientY,
+        };
+      }
+    },
+    [],
+  );
 
   const createUniqueName = useCallback(
     (baseName: string) => {
@@ -955,22 +1188,62 @@ export default function Desktop({
       }
       return candidate;
     },
-    [desktopRootPath, fs]
+    [desktopRootPath, fs],
   );
 
   const handleCreateFolder = useCallback(() => {
-    const name = window.prompt("Folder name", "New Folder");
-    if (!name) return;
-    const unique = createUniqueName(name);
-    fs.createDirectory(desktopRootPath, unique);
-  }, [createUniqueName, desktopRootPath, fs]);
+    setCreateMode("folder");
+    setCreateValue("New Folder");
+    setCreateError("");
+  }, []);
 
   const handleCreateTextFile = useCallback(() => {
-    const name = window.prompt("File name", "New Text Document.txt");
-    if (!name) return;
-    const unique = createUniqueName(name);
-    fs.createFile(desktopRootPath, unique, "");
-  }, [createUniqueName, desktopRootPath, fs]);
+    setCreateMode("file");
+    setCreateValue("New Text Document.txt");
+    setCreateError("");
+  }, []);
+
+  const handleCreateSubmit = useCallback(() => {
+    if (!createMode) return;
+    const trimmed = createValue.trim();
+    if (!trimmed) {
+      setCreateError("Name is required.");
+      return;
+    }
+
+    const unique = createUniqueName(trimmed);
+    const ok =
+      createMode === "folder"
+        ? fs.createDirectory(desktopRootPath, unique)
+        : fs.createFile(desktopRootPath, unique, "");
+
+    if (!ok) {
+      setCreateError("Unable to create this item.");
+      return;
+    }
+
+    const createdPath = fs.normalizePath(`${desktopRootPath}/${unique}`);
+    const fallbackRect =
+      gridLayerRef.current?.getBoundingClientRect() ??
+      containerRef.current?.getBoundingClientRect();
+    const fallbackPoint = {
+      x: (fallbackRect?.left ?? 0) + (fallbackRect?.width ?? 0) / 2,
+      y: (fallbackRect?.top ?? 0) + (fallbackRect?.height ?? 0) / 2,
+    };
+    const targetPoint = desktopContextPointRef.current ?? fallbackPoint;
+    placePathsNearClientPoint([createdPath], targetPoint.x, targetPoint.y);
+
+    setCreateMode(null);
+    setCreateValue("");
+    setCreateError("");
+  }, [
+    createMode,
+    createUniqueName,
+    createValue,
+    desktopRootPath,
+    fs,
+    placePathsNearClientPoint,
+  ]);
 
   const handleDeleteSelected = useCallback(() => {
     const targets = desktopItems.filter((item) => selectedSet.has(item.id));
@@ -988,7 +1261,7 @@ export default function Desktop({
       if (!clickedItem?.fileNode) return;
 
       const selectedFileTargets = desktopItems.filter(
-        (item) => selectedSet.has(item.id) && Boolean(item.fileNode)
+        (item) => selectedSet.has(item.id) && Boolean(item.fileNode),
       );
 
       const shouldDeleteSelection =
@@ -1007,7 +1280,124 @@ export default function Desktop({
       updateSelection(new Set());
       setLastSelectedId(null);
     },
-    [desktopItems, fs, selectedSet, updateSelection]
+    [desktopItems, fs, selectedSet, updateSelection],
+  );
+
+  const getClipboardTargetsForItem = useCallback(
+    (itemId: string) => {
+      const selectedFileTargets = desktopItems.filter(
+        (item) => selectedSet.has(item.id) && Boolean(item.fileNode),
+      );
+
+      if (selectedSet.has(itemId) && selectedFileTargets.length > 0) {
+        return selectedFileTargets;
+      }
+
+      const clickedItem = desktopItems.find(
+        (item) => item.id === itemId && Boolean(item.fileNode),
+      );
+      return clickedItem ? [clickedItem] : [];
+    },
+    [desktopItems, selectedSet],
+  );
+
+  const handleCopyByContext = useCallback(
+    (itemId: string) => {
+      const targets = getClipboardTargetsForItem(itemId)
+        .map((item) => item.fileNode?.path)
+        .filter((path): path is string => Boolean(path));
+      if (targets.length === 0) return;
+      setFileClipboard({ mode: "copy", paths: targets, updatedAt: Date.now() });
+    },
+    [getClipboardTargetsForItem],
+  );
+
+  const handleCutByContext = useCallback(
+    (itemId: string) => {
+      const targets = getClipboardTargetsForItem(itemId)
+        .map((item) => item.fileNode?.path)
+        .filter((path): path is string => Boolean(path));
+      if (targets.length === 0) return;
+      setFileClipboard({ mode: "cut", paths: targets, updatedAt: Date.now() });
+    },
+    [getClipboardTargetsForItem],
+  );
+
+  const copySelectionToClipboard = useCallback(() => {
+    const targets = desktopItems
+      .filter((item) => selectedSet.has(item.id))
+      .map((item) => item.fileNode?.path)
+      .filter((path): path is string => Boolean(path));
+
+    if (targets.length === 0) return;
+    setFileClipboard({ mode: "copy", paths: targets, updatedAt: Date.now() });
+  }, [desktopItems, selectedSet]);
+
+  const cutSelectionToClipboard = useCallback(() => {
+    const targets = desktopItems
+      .filter((item) => selectedSet.has(item.id))
+      .map((item) => item.fileNode?.path)
+      .filter((path): path is string => Boolean(path));
+
+    if (targets.length === 0) return;
+    setFileClipboard({ mode: "cut", paths: targets, updatedAt: Date.now() });
+  }, [desktopItems, selectedSet]);
+
+  const pasteClipboardToDirectory = useCallback(
+    (
+      destinationDirectoryPath: string,
+      clientPoint?: { x: number; y: number } | null,
+    ) => {
+      if (!clipboard?.paths?.length) return;
+
+      const pastedPaths: string[] = [];
+      let movedAny = false;
+
+      clipboard.paths.forEach((path) => {
+        const sourceNode = fs.getNode(path);
+        if (!sourceNode || sourceNode.readOnly) return;
+
+        const expectedPath = fs.normalizePath(
+          `${destinationDirectoryPath}/${sourceNode.name}`,
+        );
+
+        if (clipboard.mode === "copy") {
+          if (fs.copy(sourceNode.path, destinationDirectoryPath)) {
+            const childNodes = fs
+              .getChildren(destinationDirectoryPath, true)
+              .filter((node) => node.name.startsWith(sourceNode.name));
+            const exact = childNodes.find((node) => node.path === expectedPath);
+            const newest = childNodes.sort(
+              (a, b) => b.modifiedAt - a.modifiedAt,
+            )[0];
+            pastedPaths.push((exact ?? newest)?.path ?? expectedPath);
+          }
+          return;
+        }
+
+        if (fs.move(sourceNode.path, destinationDirectoryPath)) {
+          movedAny = true;
+          pastedPaths.push(expectedPath);
+        }
+      });
+
+      if (destinationDirectoryPath === desktopRootPath && pastedPaths.length > 0) {
+        const fallbackRect =
+          gridLayerRef.current?.getBoundingClientRect() ??
+          containerRef.current?.getBoundingClientRect();
+        const fallbackPoint = {
+          x: (fallbackRect?.left ?? 0) + (fallbackRect?.width ?? 0) / 2,
+          y: (fallbackRect?.top ?? 0) + (fallbackRect?.height ?? 0) / 2,
+        };
+        const target = clientPoint ?? desktopContextPointRef.current ?? fallbackPoint;
+        placePathsNearClientPoint(pastedPaths, target.x, target.y);
+      }
+
+      if (clipboard.mode === "cut" && movedAny) {
+        setFileClipboard(null);
+      }
+    },
+    [clipboard, desktopRootPath, fs, placePathsNearClientPoint],
   );
 
   const handleRename = useCallback(
@@ -1018,7 +1408,7 @@ export default function Desktop({
       setRenameValue(item.fileNode.name);
       setRenameError("");
     },
-    [desktopItems]
+    [desktopItems],
   );
 
   const handleRenameSubmit = useCallback(() => {
@@ -1044,7 +1434,9 @@ export default function Desktop({
 
     const siblingConflict = fs
       .getChildren(item.fileNode.parentPath)
-      .some((node) => node.name === trimmed && node.path !== item.fileNode!.path);
+      .some(
+        (node) => node.name === trimmed && node.path !== item.fileNode!.path,
+      );
 
     if (siblingConflict) {
       setRenameError("An item with this name already exists.");
@@ -1061,19 +1453,32 @@ export default function Desktop({
   }, [desktopItems, fs, renameTargetId, renameValue]);
 
   const movePathsToDirectory = useCallback(
-    (paths: string[], destinationDirectoryPath: string) => {
-      const uniquePaths = Array.from(new Set(paths.map((item) => fs.normalizePath(item))));
+    (paths: string[], destinationDirectoryPath: string): string[] => {
+      const uniquePaths = Array.from(
+        new Set(paths.map((item) => fs.normalizePath(item))),
+      );
+
+      const movedPaths: string[] = [];
 
       uniquePaths.forEach((sourcePath) => {
         const sourceNode = fs.getNode(sourcePath);
         if (!sourceNode || sourceNode.readOnly) return;
-        if (fs.normalizePath(sourceNode.parentPath) === fs.normalizePath(destinationDirectoryPath)) {
+        if (
+          fs.normalizePath(sourceNode.parentPath) ===
+          fs.normalizePath(destinationDirectoryPath)
+        ) {
           return;
         }
-        fs.move(sourcePath, destinationDirectoryPath);
+        if (fs.move(sourcePath, destinationDirectoryPath)) {
+          movedPaths.push(
+            fs.normalizePath(`${destinationDirectoryPath}/${sourceNode.name}`),
+          );
+        }
       });
+
+      return movedPaths;
     },
-    [fs]
+    [fs],
   );
 
   const handleDesktopDropToRoot = useCallback(
@@ -1081,9 +1486,12 @@ export default function Desktop({
       event.preventDefault();
       const payload = readFileDragPayload(event.dataTransfer);
       if (!payload?.paths?.length) return;
-      movePathsToDirectory(payload.paths, desktopRootPath);
+      const movedPaths = movePathsToDirectory(payload.paths, desktopRootPath);
+      if (movedPaths.length > 0) {
+        placePathsNearClientPoint(movedPaths, event.clientX, event.clientY);
+      }
     },
-    [desktopRootPath, movePathsToDirectory]
+    [desktopRootPath, movePathsToDirectory, placePathsNearClientPoint],
   );
 
   const handleDesktopDropToFolder = useCallback(
@@ -1094,7 +1502,7 @@ export default function Desktop({
       if (!payload?.paths?.length) return;
       movePathsToDirectory(payload.paths, folderPath);
     },
-    [movePathsToDirectory]
+    [movePathsToDirectory],
   );
 
   const moveSelectionByOffset = useCallback(
@@ -1116,7 +1524,7 @@ export default function Desktop({
 
       const nextIndex = Math.max(
         0,
-        Math.min(visualOrderedItemIds.length - 1, currentIndex + offset)
+        Math.min(visualOrderedItemIds.length - 1, currentIndex + offset),
       );
       const nextId = visualOrderedItemIds[nextIndex];
       if (!nextId) return;
@@ -1130,9 +1538,20 @@ export default function Desktop({
       setLastSelectedId(nextId);
       iconRefs.current
         .get(nextId)
-        ?.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "nearest" });
+        ?.scrollIntoView({
+          behavior: "smooth",
+          block: "nearest",
+          inline: "nearest",
+        });
     },
-    [lastSelectedId, selectRange, selectedIds, selectedSet, updateSelection, visualOrderedItemIds]
+    [
+      lastSelectedId,
+      selectRange,
+      selectedIds,
+      selectedSet,
+      updateSelection,
+      visualOrderedItemIds,
+    ],
   );
 
   const handleOpenSelected = useCallback(() => {
@@ -1157,6 +1576,27 @@ export default function Desktop({
         if (isEditable) return;
       }
 
+      const isModifier = event.ctrlKey || event.metaKey;
+      const key = event.key.toLowerCase();
+
+      if (isModifier && key === "c" && selectedIds.length > 0) {
+        event.preventDefault();
+        copySelectionToClipboard();
+        return;
+      }
+
+      if (isModifier && key === "x" && selectedIds.length > 0) {
+        event.preventDefault();
+        cutSelectionToClipboard();
+        return;
+      }
+
+      if (isModifier && key === "v" && clipboard) {
+        event.preventDefault();
+        pasteClipboardToDirectory(desktopRootPath, desktopContextPointRef.current);
+        return;
+      }
+
       if (event.key === "ArrowLeft" || event.key === "ArrowUp") {
         event.preventDefault();
         moveSelectionByOffset(-1, event.shiftKey);
@@ -1175,12 +1615,25 @@ export default function Desktop({
         return;
       }
 
-      if ((event.key === "Delete" || event.key === "Backspace") && selectedIds.length > 0) {
+      if (
+        (event.key === "Delete" || event.key === "Backspace") &&
+        selectedIds.length > 0
+      ) {
         event.preventDefault();
         handleDeleteSelected();
       }
     },
-    [handleDeleteSelected, handleOpenSelected, moveSelectionByOffset, selectedIds.length]
+    [
+      handleDeleteSelected,
+      handleOpenSelected,
+      copySelectionToClipboard,
+      cutSelectionToClipboard,
+      clipboard,
+      desktopRootPath,
+      moveSelectionByOffset,
+      pasteClipboardToDirectory,
+      selectedIds.length,
+    ],
   );
 
   return (
@@ -1257,8 +1710,65 @@ export default function Desktop({
             </DialogContent>
           </Dialog>
 
+          <Dialog
+            open={Boolean(createMode)}
+            onOpenChange={(open) => {
+              if (!open) {
+                setCreateMode(null);
+                setCreateValue("");
+                setCreateError("");
+              }
+            }}
+          >
+            <DialogContent className="sm:max-w-md">
+              <DialogHeader>
+                <DialogTitle>
+                  {createMode === "folder" ? "New Folder" : "New File"}
+                </DialogTitle>
+                <DialogDescription>
+                  Create a {createMode === "folder" ? "folder" : "file"} on
+                  your Desktop.
+                </DialogDescription>
+              </DialogHeader>
+              <div className="grid gap-2">
+                <Label htmlFor="desktop-create-input">Name</Label>
+                <Input
+                  id="desktop-create-input"
+                  value={createValue}
+                  onChange={(event) => {
+                    setCreateValue(event.target.value);
+                    if (createError) setCreateError("");
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      handleCreateSubmit();
+                    }
+                  }}
+                  autoFocus
+                />
+                {createError ? (
+                  <div className="text-xs text-destructive">{createError}</div>
+                ) : null}
+              </div>
+              <DialogFooter>
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setCreateMode(null);
+                    setCreateValue("");
+                    setCreateError("");
+                  }}
+                >
+                  Cancel
+                </Button>
+                <Button onClick={handleCreateSubmit}>Create</Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+
           <div className="h-[calc(100vh-52px)] w-full bottom-0 left-0 right-0 absolute p-4">
-            <div className="relative w-full h-full">
+            <div ref={gridLayerRef} className="relative w-full h-full">
               {desktopItems.map((item) => (
                 <ContextMenu key={item.id}>
                   <ContextMenuTrigger asChild>
@@ -1268,10 +1778,14 @@ export default function Desktop({
                         item.fileNode?.type === "directory" ? "true" : undefined
                       }
                       data-file-drop-kind={
-                        item.fileNode?.type === "directory" ? "directory" : undefined
+                        item.fileNode?.type === "directory"
+                          ? "directory"
+                          : undefined
                       }
                       data-file-drop-path={
-                        item.fileNode?.type === "directory" ? item.fileNode.path : undefined
+                        item.fileNode?.type === "directory"
+                          ? item.fileNode.path
+                          : undefined
                       }
                       ref={(node) => {
                         if (node) {
@@ -1280,20 +1794,13 @@ export default function Desktop({
                           iconRefs.current.delete(item.id);
                         }
                       }}
-                      onMouseDown={(event) => handleIconMouseDown(event, item.id)}
-                      onClick={(event) => {
-                        if (
-                          item.fileNode?.type === "file" &&
-                          item.fileNode.name.endsWith(".shortcut") &&
-                          !event.shiftKey &&
-                          !event.ctrlKey &&
-                          !event.metaKey
-                        ) {
-                          item.onOpen?.();
-                        }
-                      }}
+                      onMouseDown={(event) =>
+                        handleIconMouseDown(event, item.id)
+                      }
                       onDoubleClick={() => item.onOpen?.()}
-                      onContextMenu={(event) => handleIconContextMenu(event, item.id)}
+                      onContextMenu={(event) =>
+                        handleIconContextMenu(event, item.id)
+                      }
                       onDragOver={(event) => {
                         if (item.fileNode?.type === "directory") {
                           event.preventDefault();
@@ -1308,17 +1815,32 @@ export default function Desktop({
                       }}
                       className="absolute"
                       style={(() => {
-                        const position = itemPositions[item.id] ?? { col: 0, row: 0 };
+                        const activeDelta = dragDelta ?? { x: 0, y: 0 };
+                        const position = itemPositions[item.id] ?? {
+                          col: 0,
+                          row: 0,
+                        };
                         const isDragging =
-                          draggingIds.includes(item.id) && dragDelta && dragCandidateRef.current;
-                        const source = dragCandidateRef.current?.sourcePositions[item.id] ?? position;
-                        const sourcePixel = dragCandidateRef.current?.sourcePixels[item.id];
+                          draggingIds.includes(item.id) && Boolean(dragCandidateRef.current);
+                        const source =
+                          dragCandidateRef.current?.sourcePositions[item.id] ??
+                          position;
+                        const sourcePixel =
+                          dragCandidateRef.current?.sourcePixels[item.id];
                         const left = isDragging
-                          ? (sourcePixel?.left ?? DESKTOP_GRID_PADDING + source.col * DESKTOP_GRID_COL_WIDTH) + dragDelta.x
-                          : DESKTOP_GRID_PADDING + position.col * DESKTOP_GRID_COL_WIDTH;
+                          ? (sourcePixel?.left ??
+                              DESKTOP_GRID_PADDING +
+                                source.col * DESKTOP_GRID_COL_WIDTH) +
+                            activeDelta.x
+                          : DESKTOP_GRID_PADDING +
+                            position.col * DESKTOP_GRID_COL_WIDTH;
                         const top = isDragging
-                          ? (sourcePixel?.top ?? DESKTOP_GRID_PADDING + source.row * DESKTOP_GRID_ROW_HEIGHT) + dragDelta.y
-                          : DESKTOP_GRID_PADDING + position.row * DESKTOP_GRID_ROW_HEIGHT;
+                          ? (sourcePixel?.top ??
+                              DESKTOP_GRID_PADDING +
+                                source.row * DESKTOP_GRID_ROW_HEIGHT) +
+                            activeDelta.y
+                          : DESKTOP_GRID_PADDING +
+                            position.row * DESKTOP_GRID_ROW_HEIGHT;
                         return {
                           left,
                           top,
@@ -1330,11 +1852,13 @@ export default function Desktop({
                         };
                       })()}
                     >
-                      <DesktopIcon
-                        icon={item.icon}
-                        title={item.title}
-                        selected={selectedSet.has(item.id)}
-                      />
+                      {draggingIds.includes(item.id) && dragCandidateRef.current ? null : (
+                        <DesktopIcon
+                          icon={item.icon}
+                          title={item.title}
+                          selected={selectedSet.has(item.id)}
+                        />
+                      )}
                     </div>
                   </ContextMenuTrigger>
                   <ContextMenuContent className="w-52">
@@ -1342,12 +1866,16 @@ export default function Desktop({
                       onClick={() => item.onOpen?.()}
                       disabled={!item.onOpen}
                     >
+                      <Eye size={16} className="mr-2" />
                       Open
                     </ContextMenuItem>
                     {item.kind === "file" && item.fileNode && (
                       <>
                         {(() => {
-                          const ext = item.fileNode!.name.split(".").pop()?.toLowerCase();
+                          const ext = item
+                            .fileNode!.name.split(".")
+                            .pop()
+                            ?.toLowerCase();
                           const textExtensions = new Set([
                             "txt",
                             "md",
@@ -1372,10 +1900,11 @@ export default function Desktop({
                               addWindow(
                                 <TextEditorApplicationWindow
                                   filePath={item.fileNode!.path}
-                                />
+                                />,
                               )
                             }
                           >
+                            <Edit3 size={16} className="mr-2" />
                             Open in Text Editor
                           </ContextMenuItem>
                         ) : null}
@@ -1386,10 +1915,11 @@ export default function Desktop({
                                 <SingleDocumentApplicationWindow
                                   articleId={item.fileNode!.name}
                                   title={item.fileNode!.name}
-                                />
+                                />,
                               )
                             }
                           >
+                            <Eye size={16} className="mr-2" />
                             Open in Document Viewer
                           </ContextMenuItem>
                         ) : null}
@@ -1397,22 +1927,45 @@ export default function Desktop({
                     )}
                     {item.kind === "folder" && (
                       <ContextMenuItem onClick={() => item.onOpen?.()}>
+                        <Eye size={16} className="mr-2" />
                         Open in File Explorer
                       </ContextMenuItem>
                     )}
                     {item.fileNode ? (
                       <>
                         <ContextMenuSeparator />
+                        <ContextMenuItem onClick={() => handleCutByContext(item.id)}>
+                          <Scissors size={16} className="mr-2" />
+                          Cut
+                        </ContextMenuItem>
+                        <ContextMenuItem onClick={() => handleCopyByContext(item.id)}>
+                          <Copy size={16} className="mr-2" />
+                          Copy
+                        </ContextMenuItem>
+                        {clipboard && item.fileNode.type === "directory" ? (
+                          <ContextMenuItem
+                            onClick={() =>
+                              pasteClipboardToDirectory(item.fileNode!.path)
+                            }
+                            disabled={Boolean(item.fileNode.readOnly)}
+                          >
+                            <ClipboardPaste size={16} className="mr-2" />
+                            Paste
+                          </ContextMenuItem>
+                        ) : null}
+                        <ContextMenuSeparator />
                         <ContextMenuItem
                           onClick={() => handleRename(item.id)}
                           disabled={Boolean(item.fileNode.readOnly)}
                         >
+                          <Edit3 size={16} className="mr-2" />
                           Rename
                         </ContextMenuItem>
                         <ContextMenuItem
                           onClick={() => handleDeleteByContext(item.id)}
                           disabled={Boolean(item.fileNode.readOnly)}
                         >
+                          <Trash2 size={16} className="mr-2" />
                           Delete
                         </ContextMenuItem>
                       </>
@@ -1425,28 +1978,31 @@ export default function Desktop({
 
           {typeof window !== "undefined" &&
             draggingIds.length > 0 &&
-            dragDelta &&
             dragCandidateRef.current &&
             containerRef.current &&
             createPortal(
               <div className="pointer-events-none fixed inset-0 z-[8000]">
                 {draggingIds.map((dragId) => {
+                  const activeDelta = dragDelta ?? { x: 0, y: 0 };
                   const item = desktopItemById[dragId];
                   if (!item) return null;
 
-                  const source = dragCandidateRef.current?.sourcePositions[dragId];
+                  const source =
+                    dragCandidateRef.current?.sourcePositions[dragId];
                   if (!source) return null;
 
-                  const sourcePixel = dragCandidateRef.current?.sourcePixels[dragId];
-                  const containerRect = containerRef.current?.getBoundingClientRect();
+                  const sourcePixel =
+                    dragCandidateRef.current?.sourcePixels[dragId];
+                  const containerRect =
+                    containerRef.current?.getBoundingClientRect();
                   const leftRelative =
                     (sourcePixel?.left ??
-                      DESKTOP_GRID_PADDING + source.col * DESKTOP_GRID_COL_WIDTH) +
-                    dragDelta.x;
+                      DESKTOP_GRID_PADDING +
+                        source.col * DESKTOP_GRID_COL_WIDTH) + activeDelta.x;
                   const topRelative =
                     (sourcePixel?.top ??
-                      DESKTOP_GRID_PADDING + source.row * DESKTOP_GRID_ROW_HEIGHT) +
-                    dragDelta.y;
+                      DESKTOP_GRID_PADDING +
+                        source.row * DESKTOP_GRID_ROW_HEIGHT) + activeDelta.y;
 
                   return (
                     <div
@@ -1466,7 +2022,7 @@ export default function Desktop({
                   );
                 })}
               </div>,
-              document.body
+              document.body,
             )}
 
           {marquee ? (
@@ -1483,16 +2039,35 @@ export default function Desktop({
         </div>
       </ContextMenuTrigger>
       <ContextMenuContent className="w-52">
-        <ContextMenuItem onClick={handleCreateFolder}>New Folder</ContextMenuItem>
+        <ContextMenuItem onClick={handleCreateFolder}>
+          <FolderPlus size={16} className="mr-2" />
+          New Folder
+        </ContextMenuItem>
         <ContextMenuItem onClick={handleCreateTextFile}>
+          <FilePlus size={16} className="mr-2" />
           New Text Document
         </ContextMenuItem>
+        {clipboard ? (
+          <ContextMenuItem
+            onClick={() =>
+              pasteClipboardToDirectory(desktopRootPath, desktopContextPointRef.current)
+            }
+          >
+            <ClipboardPaste size={16} className="mr-2" />
+            Paste
+          </ContextMenuItem>
+        ) : null}
         <ContextMenuSub>
-          <ContextMenuSubTrigger>Sort by</ContextMenuSubTrigger>
+          <ContextMenuSubTrigger>
+            <ArrowUpDown size={16} className="mr-2" />
+            Sort by
+          </ContextMenuSubTrigger>
           <ContextMenuSubContent className="w-56">
             <ContextMenuRadioGroup
               value={sortMode}
-              onValueChange={(value) => applySortedLayout(value as DesktopSortMode)}
+              onValueChange={(value) =>
+                applySortedLayout(value as DesktopSortMode)
+              }
             >
               <ContextMenuRadioItem value="name-asc">
                 Alphabetical (A → Z)
@@ -1510,7 +2085,10 @@ export default function Desktop({
           </ContextMenuSubContent>
         </ContextMenuSub>
         <ContextMenuSeparator />
-        <ContextMenuItem onClick={loadDesktopNodes}>Refresh</ContextMenuItem>
+        <ContextMenuItem onClick={loadDesktopNodes}>
+          <RefreshCw size={16} className="mr-2" />
+          Refresh
+        </ContextMenuItem>
       </ContextMenuContent>
     </ContextMenu>
   );
@@ -1531,7 +2109,7 @@ function DesktopIcon({
       className={cn(
         "w-24 rounded-2xl px-2 py-3 text-white cursor-pointer transition-all duration-200",
         "bg-white/15 backdrop-blur-xl hover:bg-white/25",
-        selected && "bg-white/30 ring-2 ring-white/70"
+        selected && "bg-white/30 ring-2 ring-white/70",
       )}
     >
       <div className="h-[32px] w-full flex justify-center items-center">

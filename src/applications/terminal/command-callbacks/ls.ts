@@ -4,8 +4,8 @@ import { humanFileSize } from "@/applications/file-explorer";
 import { useSession } from "@/auth/client";
 import { FileSystemNode, useFileSystem } from "@/hooks/use-file-system";
 import { getHomePath } from "@/lib/system-user";
-import { getPathCompletions } from "./autocomplete";
 import { parseCommandArguments } from "./args";
+import { getPathCompletions } from "./autocomplete";
 import { getCwd } from "./cd";
 import type { CommandAutocomplete, CommandCallback } from "./index";
 
