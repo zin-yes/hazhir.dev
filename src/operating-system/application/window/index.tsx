@@ -1,12 +1,12 @@
 "use client";
 
 import React, {
-    cloneElement,
-    useEffect,
-    useId,
-    useMemo,
-    useRef,
-    useState,
+  cloneElement,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
 } from "react";
 
 import Image from "next/image";
@@ -16,11 +16,11 @@ import styles from "./application-window.module.css";
 
 import { ApplicationWindowType } from "@/hooks/use-operating-system";
 import {
-    addBottomResizeHandleEvent,
-    addDraggingHandleEvent,
-    addLeftResizeHandleEvent,
-    addRightResizeHandleEvent,
-    addTopResizeHandleEvent,
+  addBottomResizeHandleEvent,
+  addDraggingHandleEvent,
+  addLeftResizeHandleEvent,
+  addRightResizeHandleEvent,
+  addTopResizeHandleEvent,
 } from "@/operating-system/application/window/resizability";
 import { AppWindowIcon, Maximize2, Minimize2, X } from "lucide-react";
 import { v4 } from "uuid";
@@ -56,7 +56,8 @@ class ApplicationErrorBoundary extends React.Component<
         <div className="w-full h-full flex flex-col items-center justify-center bg-background text-foreground p-6">
           <div className="text-lg font-semibold">Something went wrong</div>
           <div className="text-sm text-muted-foreground mt-2 text-center">
-            This application failed to load. Try closing and reopening the window.
+            This application failed to load. Try closing and reopening the
+            window.
           </div>
           {this.state.error?.message ? (
             <div className="mt-3 text-xs text-muted-foreground break-all text-center">
@@ -137,107 +138,107 @@ export default function ApplicationWindow({
       ref.current.style.height = `${settings.starting_height!}px`;
 
       const titleElement = ref.current.getElementsByClassName(
-        styles.title
+        styles.title,
       )[0] as HTMLDivElement;
       const rightResizeHandleElement = ref.current.getElementsByClassName(
-        styles.right_resize_handle
+        styles.right_resize_handle,
       )[0] as HTMLDivElement;
       const leftResizeHandleElement = ref.current.getElementsByClassName(
-        styles.left_resize_handle
+        styles.left_resize_handle,
       )[0] as HTMLDivElement;
       const topResizeHandleElement = ref.current.getElementsByClassName(
-        styles.top_resize_handle
+        styles.top_resize_handle,
       )[0] as HTMLDivElement;
       const bottomResizeHandleElement = ref.current.getElementsByClassName(
-        styles.bottom_resize_handle
+        styles.bottom_resize_handle,
       )[0] as HTMLDivElement;
       const bottomRightResizeHandleElement = ref.current.getElementsByClassName(
-        styles.bottom_right_resize_handle
+        styles.bottom_right_resize_handle,
       )[0] as HTMLDivElement;
       const topRightResizeHandleElement = ref.current.getElementsByClassName(
-        styles.top_right_resize_handle
+        styles.top_right_resize_handle,
       )[0] as HTMLDivElement;
       const bottomLeftResizeHandleElement = ref.current.getElementsByClassName(
-        styles.bottom_left_resize_handle
+        styles.bottom_left_resize_handle,
       )[0] as HTMLDivElement;
       const topLeftResizeHandleElement = ref.current.getElementsByClassName(
-        styles.top_left_resize_handle
+        styles.top_left_resize_handle,
       )[0] as HTMLDivElement;
 
       // Set up resize functionality for right resize handle.
       addRightResizeHandleEvent(
         rightResizeHandleElement,
         ref.current,
-        settings.min_width!
+        settings.min_width!,
       );
 
       // Set up resize functionality for bottom right resize handle.
       addBottomResizeHandleEvent(
         bottomRightResizeHandleElement,
         ref.current,
-        settings.min_height!
+        settings.min_height!,
       );
       addRightResizeHandleEvent(
         bottomRightResizeHandleElement,
         ref.current,
-        settings.min_width!
+        settings.min_width!,
       );
 
       // Set up resize functionality for top right resize handle.
       addTopResizeHandleEvent(
         topRightResizeHandleElement,
         ref.current,
-        settings.min_height!
+        settings.min_height!,
       );
       addRightResizeHandleEvent(
         topRightResizeHandleElement,
         ref.current,
-        settings.min_width!
+        settings.min_width!,
       );
 
       // Set up resize functionality for left resize handle.
       addLeftResizeHandleEvent(
         leftResizeHandleElement,
         ref.current,
-        settings.min_width!
+        settings.min_width!,
       );
 
       // Set up resize functionality for bottom left resize handle.
       addBottomResizeHandleEvent(
         bottomLeftResizeHandleElement,
         ref.current,
-        settings.min_height!
+        settings.min_height!,
       );
       addLeftResizeHandleEvent(
         bottomLeftResizeHandleElement,
         ref.current,
-        settings.min_width!
+        settings.min_width!,
       );
 
       // Set up resize functionality for top left resize handle.
       addTopResizeHandleEvent(
         topLeftResizeHandleElement,
         ref.current,
-        settings.min_height!
+        settings.min_height!,
       );
       addLeftResizeHandleEvent(
         topLeftResizeHandleElement,
         ref.current,
-        settings.min_width!
+        settings.min_width!,
       );
 
       // Set up resize functionality for bottom resize handle.
       addBottomResizeHandleEvent(
         bottomResizeHandleElement,
         ref.current,
-        settings.min_height!
+        settings.min_height!,
       );
 
       // Set up resize functionality for top resize handle.
       addTopResizeHandleEvent(
         topResizeHandleElement,
         ref.current,
-        settings.min_height!
+        settings.min_height!,
       );
 
       // Dragging handle for the pane.
@@ -270,7 +271,7 @@ export default function ApplicationWindow({
       }, 700);
 
       const titleElement = ref.current.getElementsByClassName(
-        styles.title
+        styles.title,
       )[0] as HTMLDivElement;
       if (titleElement) {
         titleElement.style.pointerEvents = "none";
@@ -297,7 +298,7 @@ export default function ApplicationWindow({
         ).style.borderRadius = "0.7em";
 
         const titleElement = ref.current.getElementsByClassName(
-          styles.title
+          styles.title,
         )[0] as HTMLDivElement;
         if (titleElement) {
           titleElement.style.pointerEvents = "";
@@ -344,18 +345,21 @@ export default function ApplicationWindow({
       // This keeps all windows in the range 1-N where N is the number of windows
       windows.forEach((window, index) => {
         const bodyElement = window.element.getElementsByClassName(
-          styles.body
+          styles.body,
         )[0] as HTMLDivElement;
         bodyElement.classList.remove(styles.pane_in_focus);
         bodyElement.style.filter = isFirefox
           ? "brightness(80%)"
           : "blur(1px) brightness(80%)";
-        
+
         // Assign z-index based on position in sorted array
         // But if it's the current window, it gets the highest
         if (window.element === ref.current) {
           window.element.style.zIndex = String(windows.length);
-        } else if (index >= windows.indexOf(windows.find(w => w.element === ref.current)!)) {
+        } else if (
+          index >=
+          windows.indexOf(windows.find((w) => w.element === ref.current)!)
+        ) {
           // Shift down windows that were above the current one
           window.element.style.zIndex = String(index);
         } else {
@@ -365,7 +369,7 @@ export default function ApplicationWindow({
 
       // Focus the current window
       const thisPanesBodyElement = ref.current.getElementsByClassName(
-        styles.body
+        styles.body,
       )[0] as HTMLDivElement;
 
       if (!thisPanesBodyElement.classList.contains(styles.pane_in_focus)) {
@@ -406,7 +410,7 @@ export default function ApplicationWindow({
 
       if (topPane) {
         const topPanesBodyElement = topPane.getElementsByClassName(
-          styles.body
+          styles.body,
         )[0] as HTMLDivElement;
 
         if (!topPanesBodyElement.classList.contains(styles.pane_in_focus)) {
@@ -453,7 +457,10 @@ export default function ApplicationWindow({
       }}
       onDragLeaveCapture={(event) => {
         if (!hasFileDragType(event.dataTransfer)) return;
-        fileDropHoverDepthRef.current = Math.max(0, fileDropHoverDepthRef.current - 1);
+        fileDropHoverDepthRef.current = Math.max(
+          0,
+          fileDropHoverDepthRef.current - 1,
+        );
         if (fileDropHoverDepthRef.current === 0) {
           setIsFileDropHover(false);
         }

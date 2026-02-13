@@ -117,6 +117,16 @@ export function useFileSystem() {
       return isDefaultDesktopShortcut && !existingPaths.has(normalizedPath);
     });
 
+    const missingDefaultMenuShortcuts = defaults.filter((node) => {
+      const normalizedPath = normalizePath(node.path);
+      const isDefaultMenuShortcut =
+        node.type === "file" &&
+        normalizedPath.startsWith(`${homePath}/.menu/`) &&
+        node.name.endsWith(".shortcut");
+
+      return isDefaultMenuShortcut && !existingPaths.has(normalizedPath);
+    });
+
     const withDotHiddenFix = parsed.map((node) => {
       const shouldBeHidden = node.name.startsWith(".");
       if (node.isHidden === shouldBeHidden) return node;
@@ -164,6 +174,21 @@ export function useFileSystem() {
         modifiedAt: Date.now(),
       };
     });
+
+    const deprecatedDefaultDesktopShortcutNames = new Set([
+      "calculator.shortcut",
+      "visual-novel.shortcut",
+    ]);
+
+    const withoutDeprecatedDefaultDesktopShortcuts =
+      withLegacyCvTemplateUpgrade.filter((node) => {
+        const normalizedPath = normalizePath(node.path);
+        const isDeprecatedDesktopShortcut =
+          node.type === "file" &&
+          normalizedPath.startsWith(`${homePath}/Desktop/`) &&
+          deprecatedDefaultDesktopShortcutNames.has(node.name);
+        return !isDeprecatedDesktopShortcut;
+      });
 
     const now = Date.now();
     const requiredDirectories: FileSystemNode[] = [
@@ -223,9 +248,23 @@ export function useFileSystem() {
         isHidden: false,
         readOnly: false,
       },
+      {
+        name: ".menu",
+        type: "directory",
+        path: `${homePath}/.menu`,
+        parentPath: homePath,
+        permissions: "rwxr-xr-x",
+        owner: username,
+        group: username,
+        size: 4096,
+        createdAt: now,
+        modifiedAt: now,
+        isHidden: true,
+        readOnly: false,
+      },
     ];
 
-    const ensuredCoreDirectories = [...withLegacyCvTemplateUpgrade];
+    const ensuredCoreDirectories = [...withoutDeprecatedDefaultDesktopShortcuts];
     const ensuredPathSet = new Set(
       ensuredCoreDirectories.map((node) => normalizePath(node.path)),
     );
@@ -241,7 +280,8 @@ export function useFileSystem() {
     if (
       missingSystemExecutables.length === 0 &&
       missingDefaultDocuments.length === 0 &&
-      missingDefaultDesktopShortcuts.length === 0
+      missingDefaultDesktopShortcuts.length === 0 &&
+      missingDefaultMenuShortcuts.length === 0
     ) {
       const changed =
         ensuredCoreDirectories.length !== parsed.length ||
@@ -260,6 +300,7 @@ export function useFileSystem() {
       ...missingSystemExecutables,
       ...missingDefaultDocuments,
       ...missingDefaultDesktopShortcuts,
+      ...missingDefaultMenuShortcuts,
     ];
     window.localStorage.setItem(FILE_SYSTEM_STORAGE_KEY, JSON.stringify(next));
     return next;

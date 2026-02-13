@@ -1,8 +1,26 @@
 "use client";
 
 import { Button } from "@/components/ui/button";
-import { FileSymlink, Gamepad2, TerminalSquare } from "lucide-react";
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import {
+  BookOpen,
+  BookText,
+  Calculator,
+  Circle,
+  ExternalLink,
+  File,
+  FileSymlink,
+  FolderClosed,
+  Gamepad2,
+  Search,
+  TerminalSquare,
+} from "lucide-react";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 
 import {
   signInAsGuest,
@@ -15,23 +33,25 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuShortcut,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { useAuthPillar } from "@/hooks/use-auth-pillar";
-import UseOperatingSystem from "@/hooks/use-operating-system";
+import { useFileSystem } from "@/hooks/use-file-system";
 import { OS_LAUNCH_APPLICATION_EVENT } from "@/lib/application-launcher";
+import { executeFilePath } from "@/lib/file-execution";
 import {
   FILE_PATH_DROP_EVENT,
   hasFileDragType,
   readDroppedPathsFromDataTransfer,
 } from "@/lib/file-transfer-dnd";
+import { type ShortcutDefinition, parseShortcut } from "@/lib/shortcut";
 import { getHomePath, setCurrentSystemUsername } from "@/lib/system-user";
 import Image from "next/image";
 import { v4 } from "uuid";
 import {
   CalculatorApplicationWindow,
+  DocumentViewerApplicationWindow,
   FileExplorerApplicationWindow,
   GameApplicationWindow,
   SingleDocumentApplicationWindow,
@@ -42,7 +62,37 @@ import {
 import Desktop from "./desktop";
 import Wallpaper from "./wallpaper";
 
+type MenuShortcutItem = {
+  path: string;
+  shortcut: ShortcutDefinition;
+  label: string;
+  description: string;
+  iconName: string;
+};
+
+function renderShortcutIcon(iconName?: string) {
+  switch (iconName) {
+    case "TerminalSquare":
+      return <TerminalSquare size={16} className="text-white/90" />;
+    case "FolderClosed":
+      return <FolderClosed size={16} className="text-white/90" />;
+    case "Gamepad2":
+      return <Gamepad2 size={16} className="text-white/90" />;
+    case "Calculator":
+      return <Calculator size={16} className="text-white/90" />;
+    case "BookText":
+      return <BookText size={16} className="text-white/90" />;
+    case "BookOpen":
+      return <BookOpen size={16} className="text-white/90" />;
+    case "FileSymlink":
+      return <FileSymlink size={16} className="text-white/90" />;
+    default:
+      return <File size={16} className="text-white/90" />;
+  }
+}
 export default function OperatingSystemPage() {
+  const fs = useFileSystem();
+  const fsRef = useRef(fs);
   const [windows, setWindows] = useState<React.ReactNode[]>([]);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -61,6 +111,59 @@ export default function OperatingSystemPage() {
   const addWindow = useCallback((pane: React.ReactNode) => {
     setWindows((previous) => [...previous, pane]);
   }, []);
+
+  useEffect(() => {
+    fsRef.current = fs;
+  }, [fs]);
+
+  const [menuSearchValue, setMenuSearchValue] = useState("");
+  const [menuItems, setMenuItems] = useState<MenuShortcutItem[]>([]);
+  const [menuHoveredDescription, setMenuHoveredDescription] = useState("");
+
+  const loadMenuItems = useCallback(() => {
+    const menuPath = `${getHomePath()}/.menu`;
+    const children = fsRef.current.getChildren(menuPath, true);
+
+    const nextItems = children
+      .filter((node) => node.type === "file" && node.name.endsWith(".shortcut"))
+      .map((node) => {
+        const parsed = parseShortcut(
+          fsRef.current.getFileContents(node.path) ?? "",
+        );
+        if (!parsed) return null;
+        const label =
+          parsed.name ??
+          parsed.iconDisplayText ??
+          node.name.replace(/\.shortcut$/i, "");
+
+        return {
+          path: node.path,
+          shortcut: parsed,
+          label,
+          description: parsed.description ?? "",
+          iconName: parsed.icon ?? "",
+        } satisfies MenuShortcutItem;
+      })
+      .filter(Boolean) as MenuShortcutItem[];
+
+    nextItems.sort((a, b) => a.label.localeCompare(b.label));
+    setMenuItems(nextItems);
+  }, []);
+
+  useEffect(() => {
+    loadMenuItems();
+    window.addEventListener("storage", loadMenuItems);
+    return () => window.removeEventListener("storage", loadMenuItems);
+  }, [loadMenuItems]);
+
+  const filteredMenuItems = useMemo(() => {
+    const query = menuSearchValue.trim().toLowerCase();
+    if (!query) return menuItems;
+    return menuItems.filter((item) => {
+      const haystack = `${item.label} ${item.description}`.toLowerCase();
+      return haystack.includes(query);
+    });
+  }, [menuItems, menuSearchValue]);
 
   const [time, setTime] = useState<string>(new Date().toLocaleTimeString());
 
@@ -89,8 +192,6 @@ export default function OperatingSystemPage() {
 
     setOperatingSystemVisible(false);
   }, [shouldShowOperatingSystem]);
-
-  const operatingSystem = UseOperatingSystem();
 
   useEffect(() => {
     if (session.status === "authenticated" && session.data?.user) {
@@ -138,12 +239,16 @@ export default function OperatingSystemPage() {
           addWindow(<VisualNovelApplicationWindow />);
           break;
         case "document-viewer": {
-          const defaultDocumentPath = `${getHomePath()}/Documents/CV.document`;
           const requested = detail.args?.[0];
+          if (!requested) {
+            addWindow(<DocumentViewerApplicationWindow />);
+            break;
+          }
+
           const filePath =
             requested === "CV"
-              ? defaultDocumentPath
-              : (requested ?? defaultDocumentPath);
+              ? `${getHomePath()}/Documents/CV.document`
+              : requested;
           const title =
             detail.args?.[1] ?? (filePath.split("/").pop() || "Document");
           addWindow(
@@ -156,7 +261,6 @@ export default function OperatingSystemPage() {
         }
         case "text-editor": {
           const filePath = detail.args?.[0];
-          if (!filePath) break;
           addWindow(<TextEditorApplicationWindow filePath={filePath} />);
           break;
         }
@@ -280,44 +384,77 @@ export default function OperatingSystemPage() {
                 <DropdownMenuTrigger asChild>
                   <Button
                     variant={"ghost"}
-                    className="h-7 rounded-[10px] px-4 text-base bg-black/20 hover:bg-white hover:text-primary"
-                    disabled
+                    size="icon"
+                    className="h-7 w-7 rounded-full bg-black/20 hover:bg-white/20"
+                    aria-label="Open menu"
                   >
-                    Activites
+                    <Circle className="size-3.5 fill-white text-white stroke-none" />
                   </Button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent className="ml-2 mt-2 w-80 p-1 rounded-xl bg-background/40 backdrop-blur-xl flex flex-col gap-1 z-9999">
-                  <DropdownMenuItem
-                    className="rounded-[10px] p-3.5 py-2 text-base"
-                    onClick={() => {
-                      addWindow(
-                        <TerminalApplicationWindow
-                          identifier={v4()}
-                          key={operatingSystem.getApplicationWindows().length}
-                        />,
-                      );
-                    }}
-                  >
-                    Start new terminal window
-                    <DropdownMenuShortcut>
-                      <TerminalSquare size={18} />
-                    </DropdownMenuShortcut>
-                  </DropdownMenuItem>
-                  <DropdownMenuItem
-                    className="rounded-[10px] p-3.5 py-2 text-base"
-                    onClick={() => {
-                      addWindow(
-                        <GameApplicationWindow
-                          key={operatingSystem.getApplicationWindows().length}
-                        />,
-                      );
-                    }}
-                  >
-                    Start new voxel game window
-                    <DropdownMenuShortcut>
-                      <Gamepad2 size={18} />
-                    </DropdownMenuShortcut>
-                  </DropdownMenuItem>
+                <DropdownMenuContent
+                  align="start"
+                  sideOffset={8}
+                  className="ml-2 mt-1 w-[420px] rounded-2xl border border-white/10 bg-background/85 p-3 backdrop-blur-2xl z-9999"
+                >
+                  <div className="rounded-xl border border-white/10 bg-black/20 px-3 py-2 flex items-center gap-2 text-sm text-white/75">
+                    <Search size={14} className="opacity-80" />
+                    <Input
+                      value={menuSearchValue}
+                      onChange={(event) =>
+                        setMenuSearchValue(event.target.value)
+                      }
+                      onKeyDown={(event) => event.stopPropagation()}
+                      placeholder="Search apps"
+                      className="h-6 border-0 bg-transparent p-0 text-sm text-white placeholder:text-white/50 focus-visible:ring-0"
+                    />
+                  </div>
+
+                  <div className="mt-3 px-1 text-xs font-medium text-white/70">
+                    Apps
+                  </div>
+
+                  <div className="mt-2 max-h-72 overflow-y-auto rounded-xl border border-white/10 bg-black/15 p-1">
+                    {filteredMenuItems.length > 0 ? (
+                      filteredMenuItems.map((item) => (
+                        <DropdownMenuItem
+                          key={item.path}
+                          title={item.description}
+                          className="rounded-lg px-2.5 py-2 text-sm text-white data-[highlighted]:bg-white/15"
+                          onMouseEnter={() =>
+                            setMenuHoveredDescription(item.description)
+                          }
+                          onClick={() => {
+                            const result = executeFilePath(
+                              item.path,
+                              fsRef.current,
+                            );
+                            if (!result.ok) {
+                              console.warn(result.message);
+                            }
+                            setMenuSearchValue("");
+                          }}
+                        >
+                          {renderShortcutIcon(item.iconName)}
+                          <span className="truncate">{item.label}</span>
+                          {item.shortcut.type === "link" ? (
+                            <ExternalLink
+                              size={14}
+                              className="ml-auto text-white/70"
+                            />
+                          ) : null}
+                        </DropdownMenuItem>
+                      ))
+                    ) : (
+                      <div className="px-3 py-4 text-sm text-white/60">
+                        No matching apps.
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="mt-2 rounded-lg border border-white/10 bg-black/10 px-2.5 py-2 text-xs text-white/70 min-h-8">
+                    {menuHoveredDescription ||
+                      "Hover an item to view its description."}
+                  </div>
                 </DropdownMenuContent>
               </DropdownMenu>
               <CalendarDropdown time={time} />

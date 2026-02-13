@@ -62,10 +62,10 @@ const VisualNovelApplication = dynamic(
 export function TextEditorApplicationWindow({
   filePath,
 }: {
-  filePath: string;
+  filePath?: string;
 }) {
   const identifier = useMemo(() => v4(), []);
-  const fileName = filePath.split("/").pop() || "Untitled";
+  const fileName = filePath?.split("/").pop() || "Text Editor";
   return (
     <ApplicationWindow
       action_bar={{

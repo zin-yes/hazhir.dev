@@ -7,7 +7,10 @@ import { getPathCompletions } from "./autocomplete";
 import { getCwd } from "./cd";
 import type { CommandAutocomplete, CommandCallback } from "./index";
 
-function resolvePath(fs: ReturnType<typeof useFileSystem>, value: string): string {
+function resolvePath(
+  fs: ReturnType<typeof useFileSystem>,
+  value: string,
+): string {
   if (value === "~" || value.startsWith("~/")) {
     return fs.normalizePath(value.replace("~", getHomePath()));
   }
@@ -21,35 +24,39 @@ async function mkdir(
   fullCommand: string,
   terminal: Terminal,
   session: ReturnType<typeof useSession>,
-  windowIdentifier: string
+  windowIdentifier: string,
 ): Promise<void> {
   const fs = useFileSystem();
   const args = fullCommand.trim().split(/\s+/);
-  
+
   if (args.length < 2) {
     terminal.writeln("\x1b[31mmkdir: missing operand\x1b[0m");
     return;
   }
-  
+
   const createParents = args.includes("-p");
-  const names = args.slice(1).filter(a => !a.startsWith("-"));
-  
+  const names = args.slice(1).filter((a) => !a.startsWith("-"));
+
   for (const name of names) {
     const targetPath = resolvePath(fs, name);
-    
+
     const parentPath = fs.getParentPath(targetPath);
     const dirName = fs.getNodeName(targetPath);
-    
+
     if (!createParents && !fs.exists(parentPath)) {
-      terminal.writeln(`\x1b[31mmkdir: cannot create directory '${name}': No such file or directory\x1b[0m`);
+      terminal.writeln(
+        `\x1b[31mmkdir: cannot create directory '${name}': No such file or directory\x1b[0m`,
+      );
       continue;
     }
-    
+
     if (fs.exists(targetPath)) {
-      terminal.writeln(`\x1b[31mmkdir: cannot create directory '${name}': File exists\x1b[0m`);
+      terminal.writeln(
+        `\x1b[31mmkdir: cannot create directory '${name}': File exists\x1b[0m`,
+      );
       continue;
     }
-    
+
     // Create parent directories if -p flag is set
     if (createParents) {
       const parts = targetPath.split("/").filter(Boolean);
@@ -58,18 +65,18 @@ async function mkdir(
         currentPath += "/" + part;
         if (!fs.exists(currentPath)) {
           const parent = fs.getParentPath(currentPath);
-                  if (!fs.createDirectory(parent, part)) {
-                    terminal.writeln(
-                      `\x1b[31mmkdir: cannot create directory '${name}': Permission denied\x1b[0m`
-                    );
-                    break;
-                  }
+          if (!fs.createDirectory(parent, part)) {
+            terminal.writeln(
+              `\x1b[31mmkdir: cannot create directory '${name}': Permission denied\x1b[0m`,
+            );
+            break;
+          }
         }
       }
     } else {
       if (!fs.createDirectory(parentPath, dirName)) {
         terminal.writeln(
-          `\x1b[31mmkdir: cannot create directory '${name}': Permission denied\x1b[0m`
+          `\x1b[31mmkdir: cannot create directory '${name}': Permission denied\x1b[0m`,
         );
       }
     }

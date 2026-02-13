@@ -4,6 +4,7 @@ type ShortcutMetadata = {
   name?: string;
   icon?: string;
   iconDisplayText?: string;
+  description?: string;
 };
 
 export type ApplicationShortcutDefinition = ShortcutMetadata & {
@@ -60,6 +61,7 @@ export function parseShortcut(contents: string): ShortcutDefinition | null {
       name: parsed.name,
       icon: parsed.icon,
       iconDisplayText: parsed.iconDisplayText,
+      description: parsed.description,
     };
   }
 
@@ -71,6 +73,7 @@ export function parseShortcut(contents: string): ShortcutDefinition | null {
       name: parsed.name,
       icon: parsed.icon,
       iconDisplayText: parsed.iconDisplayText,
+      description: parsed.description,
     };
   }
 
@@ -98,6 +101,7 @@ export function createShortcutContents(
     name?: string;
     icon?: string;
     iconDisplayText?: string;
+    description?: string;
   },
 ) {
   const args = options?.args ?? [];
@@ -110,6 +114,7 @@ export function createShortcutContents(
     options?.iconDisplayText
       ? `iconDisplayText=${options.iconDisplayText}`
       : "",
+    options?.description ? `description=${options.description}` : "",
     `args=${args.join(" ")}`,
   ]
     .filter(Boolean)
@@ -122,6 +127,7 @@ export function createLinkShortcutContents(
     name?: string;
     icon?: string;
     iconDisplayText?: string;
+    description?: string;
   },
 ) {
   return [
@@ -133,6 +139,7 @@ export function createLinkShortcutContents(
     options?.iconDisplayText
       ? `iconDisplayText=${options.iconDisplayText}`
       : "",
+    options?.description ? `description=${options.description}` : "",
   ]
     .filter(Boolean)
     .join("\n");

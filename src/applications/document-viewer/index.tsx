@@ -1,10 +1,13 @@
 "use client";
 
+import FileExplorerApplication from "@/applications/file-explorer";
+import ApplicationEmptyState from "@/components/system/application-empty-state";
+import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { useFileSystem, type FileSystemNode } from "@/hooks/use-file-system";
 import { OS_LAUNCH_APPLICATION_EVENT } from "@/lib/application-launcher";
 import { getHomePath } from "@/lib/system-user";
 import { cn } from "@/lib/utils";
-import { ChevronDown } from "lucide-react";
+import { ChevronDown, FileSearch } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 const LIGHT_DOCUMENT_THEME = {
@@ -92,7 +95,10 @@ function escapeHtml(value: string): string {
     .replaceAll("'", "&#39;");
 }
 
-function buildPrintableDocumentHtml(fileName: string, contents: string): string {
+function buildPrintableDocumentHtml(
+  fileName: string,
+  contents: string,
+): string {
   const printBaseStyle = `
     @page {
       size: A4;
@@ -273,6 +279,7 @@ export default function DocumentViewerApplication({
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
   const [showSinglePageDownHint, setShowSinglePageDownHint] = useState(false);
   const [showFullPageDownHint, setShowFullPageDownHint] = useState(false);
+  const [isPickerOpen, setIsPickerOpen] = useState(false);
 
   const documentFiles = useMemo(() => {
     return fs.getChildren(documentsRootPath, true).filter((node) => {
@@ -285,16 +292,21 @@ export default function DocumentViewerApplication({
   useEffect(() => {
     if (filePath) {
       setSelectedPath(fs.normalizePath(filePath));
+      return;
     }
-  }, [filePath, fs]);
+    setSelectedPath(undefined);
+    // Intentionally only react to external filePath changes.
+    // Local selections (via picker/sidebar) should not be reset.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filePath]);
 
   const selected = useMemo<FileSystemNode | undefined>(() => {
     if (selectedPath) {
       const node = fs.getNode(selectedPath);
       if (node?.type === "file") return node;
     }
-    return documentFiles[0];
-  }, [documentFiles, fs, selectedPath]);
+    return undefined;
+  }, [fs, selectedPath]);
 
   const selectedContents = useMemo(() => {
     if (!selected) return "";
@@ -357,7 +369,9 @@ export default function DocumentViewerApplication({
   };
 
   const getWindowElement = () =>
-    containerRef.current?.closest(".applicationWindow") as HTMLDivElement | null;
+    containerRef.current?.closest(
+      ".applicationWindow",
+    ) as HTMLDivElement | null;
 
   const closeWindow = () => {
     const windowElement = getWindowElement();
@@ -447,35 +461,61 @@ export default function DocumentViewerApplication({
     });
   };
 
-  const missingRequested = Boolean(filePath && !fs.getNode(filePath));
-
-  if (!selected && documentFiles.length === 0) {
-    return (
-      <div className="w-full h-full flex items-center justify-center text-muted-foreground">
-        No documents found in Documents.
-      </div>
-    );
-  }
+  const emptyStateView = (
+    <div className="h-full w-full bg-background">
+      <ApplicationEmptyState
+        icon={<FileSearch className="size-5" />}
+        title="No file open"
+        description="Open a document to start reading. This viewer accepts only .document files."
+        actionLabel="Open file"
+        onAction={() => setIsPickerOpen(true)}
+      />
+      <Dialog open={isPickerOpen} onOpenChange={setIsPickerOpen}>
+        <DialogContent className="w-[min(99vw,1720px)] max-w-[min(99vw,1720px)] sm:max-w-[min(99vw,1720px)] h-[min(90vh,860px)] p-0 overflow-hidden">
+          <FileExplorerApplication
+            initialPath={`${getHomePath()}/Documents`}
+            picker={{
+              enabled: true,
+              selectionMode: "file",
+              allowedFileExtensions: ["document"],
+              rootPath: getHomePath(),
+              onCancel: () => setIsPickerOpen(false),
+              onPick: (node) => {
+                setIsPickerOpen(false);
+                window.dispatchEvent(
+                  new CustomEvent(OS_LAUNCH_APPLICATION_EVENT, {
+                    detail: {
+                      appId: "document-viewer",
+                      args: [node.path, node.name],
+                    },
+                  }),
+                );
+                closeWindow();
+              },
+            }}
+          />
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
 
   if (mode === "single") {
+    if (!selected) {
+      return emptyStateView;
+    }
+
     return (
       <div
         ref={containerRef}
         className="relative flex h-full w-full flex-col bg-background text-foreground"
       >
         <div ref={singleScrollRef} className="relative flex-1 overflow-y-auto">
-          {selected ? (
-            <div className="px-5 py-4">
-              <DocumentCanvas
-                fileName={selected.name}
-                contents={selectedContents}
-              />
-            </div>
-          ) : (
-            <div className="px-5 py-4 text-muted-foreground">
-              No document selected.
-            </div>
-          )}
+          <div className="px-5 py-4">
+            <DocumentCanvas
+              fileName={selected.name}
+              contents={selectedContents}
+            />
+          </div>
         </div>
         <button
           type="button"
@@ -496,45 +536,15 @@ export default function DocumentViewerApplication({
   }
 
   return (
-    <div ref={containerRef} className="w-full h-full bg-background text-foreground flex flex-col">
-      <div className="flex flex-1 min-h-0">
-        <aside className="w-64 border-r border-border/60 flex flex-col">
-          <div className="px-4 py-3 text-sm font-semibold">Documents</div>
-          <div className="flex-1 overflow-y-auto px-2 pb-2">
-            <ul>
-              {documentFiles.map((doc) => {
-                const isActive = doc.path === selected?.path;
-                return (
-                  <li key={doc.path}>
-                    <button
-                      type="button"
-                      onClick={() => setSelectedPath(doc.path)}
-                      className={cn(
-                        "w-full text-left rounded-md px-3 py-2 transition-colors",
-                        "hover:bg-accent hover:text-accent-foreground",
-                        isActive && "bg-accent text-accent-foreground",
-                      )}
-                    >
-                      <div className="text-sm font-medium">{doc.name}</div>
-                      <div className="text-xs text-muted-foreground">
-                        {doc.path}
-                      </div>
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
-          </div>
-        </aside>
-
+    <div
+      ref={containerRef}
+      className="w-full h-full bg-background text-foreground flex flex-col"
+    >
+      {!selected ? (
+        emptyStateView
+      ) : (
         <div className="relative flex-1 bg-muted/30">
           <div ref={fullScrollRef} className="h-full overflow-y-auto">
-            {missingRequested ? (
-              <div className="px-5 pt-2 text-xs text-destructive">
-                Requested path "{filePath}" was not found. Showing the first
-                available document instead.
-              </div>
-            ) : null}
             <div className="px-5 py-4 min-h-full">
               {selected ? (
                 <DocumentCanvas
@@ -542,7 +552,9 @@ export default function DocumentViewerApplication({
                   contents={selectedContents}
                 />
               ) : (
-                <div className="text-muted-foreground">No document selected.</div>
+                <div className="text-muted-foreground">
+                  No document selected.
+                </div>
               )}
             </div>
           </div>
@@ -562,7 +574,7 @@ export default function DocumentViewerApplication({
             <ChevronDown className="size-4" />
           </button>
         </div>
-      </div>
+      )}
     </div>
   );
 }

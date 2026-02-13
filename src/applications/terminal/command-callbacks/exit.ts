@@ -1,8 +1,8 @@
 import type { Terminal } from "@xterm/xterm";
 
 import { useSession } from "@/auth/client";
-import type { CommandAutocomplete, CommandCallback } from "./index";
 import { clearCwd } from "./cd";
+import type { CommandAutocomplete, CommandCallback } from "./index";
 
 import styles from "@/operating-system/application/window/application-window.module.css";
 
@@ -10,7 +10,7 @@ async function exit(
   fullCommand: string,
   terminal: Terminal,
   session: ReturnType<typeof useSession>,
-  windowIdentifier: string
+  windowIdentifier: string,
 ): Promise<void> {
   clearCwd(windowIdentifier);
 
@@ -56,7 +56,7 @@ async function exit(
 
     if (topPane) {
       const thisPanesBodyElement = topPane.getElementsByClassName(
-        styles.body
+        styles.body,
       )[0] as HTMLDivElement;
 
       if (!thisPanesBodyElement.classList.contains(styles.pane_in_focus)) {

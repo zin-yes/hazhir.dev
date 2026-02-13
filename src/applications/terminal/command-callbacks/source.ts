@@ -11,7 +11,7 @@ async function source(
   fullCommand: string,
   terminal: Terminal,
   session: ReturnType<typeof useSession>,
-  windowIdentifier: string
+  windowIdentifier: string,
 ): Promise<void> {
   const fs = useFileSystem();
   const args = fullCommand.trim().split(/\s+/);
@@ -27,7 +27,9 @@ async function source(
   targetPath = fs.normalizePath(targetPath);
 
   if (!fs.exists(targetPath)) {
-    terminal.writeln(`\x1b[31msource: ${target}: No such file or directory\x1b[0m`);
+    terminal.writeln(
+      `\x1b[31msource: ${target}: No such file or directory\x1b[0m`,
+    );
     return;
   }
 

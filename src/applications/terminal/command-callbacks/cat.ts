@@ -7,7 +7,10 @@ import { getPathCompletions } from "./autocomplete";
 import { getCwd } from "./cd";
 import type { CommandAutocomplete, CommandCallback } from "./index";
 
-function resolvePath(fs: ReturnType<typeof useFileSystem>, value: string): string {
+function resolvePath(
+  fs: ReturnType<typeof useFileSystem>,
+  value: string,
+): string {
   if (value === "~" || value.startsWith("~/")) {
     return fs.normalizePath(value.replace("~", getHomePath()));
   }
@@ -21,36 +24,38 @@ async function cat(
   fullCommand: string,
   terminal: Terminal,
   session: ReturnType<typeof useSession>,
-  windowIdentifier: string
+  windowIdentifier: string,
 ): Promise<void> {
   const fs = useFileSystem();
   const args = fullCommand.trim().split(/\s+/);
-  
+
   if (args.length < 2) {
     terminal.writeln("\x1b[31mcat: missing file operand\x1b[0m");
     return;
   }
-  
+
   const names = args.slice(1);
-  
+
   for (const name of names) {
     const targetPath = resolvePath(fs, name);
-    
+
     if (!fs.exists(targetPath)) {
-      terminal.writeln(`\x1b[31mcat: ${name}: No such file or directory\x1b[0m`);
+      terminal.writeln(
+        `\x1b[31mcat: ${name}: No such file or directory\x1b[0m`,
+      );
       continue;
     }
-    
+
     const node = fs.getNode(targetPath);
     if (node?.type === "directory") {
       terminal.writeln(`\x1b[31mcat: ${name}: Is a directory\x1b[0m`);
       continue;
     }
-    
+
     const contents = fs.getFileContents(targetPath);
     if (contents !== undefined) {
       const lines = contents.split("\n");
-      lines.forEach(line => {
+      lines.forEach((line) => {
         terminal.writeln(line);
       });
     }

@@ -72,7 +72,10 @@ export function executeFilePath(
           message: `Shortcut target not found: ${shortcut.target}`,
         };
       }
-      return executeApplicationNode(targetNode, fs, [...shortcut.args, ...launchArgs]);
+      return executeApplicationNode(targetNode, fs, [
+        ...shortcut.args,
+        ...launchArgs,
+      ]);
     }
 
     if (shortcut.type === "link") {

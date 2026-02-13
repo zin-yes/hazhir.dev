@@ -14,6 +14,7 @@ export type SystemAppDefinition = {
   displayName: string;
   icon: string;
   desktopIconText: string;
+  menuDescription?: string;
   includeDesktopShortcut?: boolean;
 };
 
@@ -24,6 +25,7 @@ export const SYSTEM_APPS: SystemAppDefinition[] = [
     displayName: "Terminal",
     icon: "TerminalSquare",
     desktopIconText: "Terminal",
+    menuDescription: "Run shell commands and scripts.",
   },
   {
     id: "file-explorer",
@@ -31,6 +33,7 @@ export const SYSTEM_APPS: SystemAppDefinition[] = [
     displayName: "File Explorer",
     icon: "FolderClosed",
     desktopIconText: "Files",
+    menuDescription: "Browse and manage files.",
   },
   {
     id: "voxel-game",
@@ -38,6 +41,7 @@ export const SYSTEM_APPS: SystemAppDefinition[] = [
     displayName: "Voxel Game",
     icon: "Gamepad2",
     desktopIconText: "Voxel Game",
+    menuDescription: "Play the built-in voxel game.",
   },
   {
     id: "calculator",
@@ -45,6 +49,8 @@ export const SYSTEM_APPS: SystemAppDefinition[] = [
     displayName: "Calculator",
     icon: "Calculator",
     desktopIconText: "Calculator",
+    menuDescription: "Perform quick calculations.",
+    includeDesktopShortcut: false,
   },
   {
     id: "visual-novel",
@@ -52,6 +58,8 @@ export const SYSTEM_APPS: SystemAppDefinition[] = [
     displayName: "Visual Novel",
     icon: "BookText",
     desktopIconText: "Visual Novel",
+    menuDescription: "Launch the visual novel app.",
+    includeDesktopShortcut: false,
   },
   {
     id: "text-editor",
@@ -59,6 +67,7 @@ export const SYSTEM_APPS: SystemAppDefinition[] = [
     displayName: "Text Editor",
     icon: "BookText",
     desktopIconText: "Text Editor",
+    menuDescription: "Edit text and code files.",
     includeDesktopShortcut: false,
   },
   {
@@ -67,6 +76,7 @@ export const SYSTEM_APPS: SystemAppDefinition[] = [
     displayName: "Document Viewer",
     icon: "BookOpen",
     desktopIconText: "Document Viewer",
+    menuDescription: "Open and read .document files.",
     includeDesktopShortcut: false,
   },
 ];
@@ -75,6 +85,7 @@ export function buildDefaultFileSystem(username: string): FileSystemNode[] {
   const now = Date.now();
   const homePath = `/home/${username}`;
   const desktopPath = `${homePath}/Desktop`;
+  const menuPath = `${homePath}/.menu`;
   const documentsPath = `${homePath}/Documents`;
   const cvDocumentPath = `${documentsPath}/CV.document`;
   const defaultCvDocumentContents = generateCVDocumentHtml();
@@ -119,6 +130,19 @@ export function buildDefaultFileSystem(username: string): FileSystemNode[] {
       createdAt: now,
       modifiedAt: now,
       isHidden: false,
+    },
+    {
+      name: ".menu",
+      type: "directory",
+      path: menuPath,
+      parentPath: homePath,
+      permissions: "rwxr-xr-x",
+      owner: username,
+      group: username,
+      size: 4096,
+      createdAt: now,
+      modifiedAt: now,
+      isHidden: true,
     },
     {
       name: "Documents",
@@ -244,6 +268,39 @@ export function buildDefaultFileSystem(username: string): FileSystemNode[] {
     };
   });
 
+  const menuShortcutNodes: FileSystemNode[] = SYSTEM_APPS.filter(
+    (app) => app.id !== "link",
+  ).map((app) => {
+    const fileName = `${app.id}.shortcut`;
+    const menuLabel =
+      app.id === "visual-novel"
+        ? "Visual Novel (work in progress)"
+        : app.displayName;
+    const contents = createShortcutContents(
+      `/applications/${app.executableName}`,
+      {
+        name: menuLabel,
+        icon: app.icon,
+        iconDisplayText: menuLabel,
+        description: app.menuDescription ?? `Open ${app.displayName}`,
+      },
+    );
+    return {
+      name: fileName,
+      type: "file",
+      path: `${menuPath}/${fileName}`,
+      parentPath: menuPath,
+      contents,
+      permissions: "rw-r--r--",
+      owner: username,
+      group: username,
+      size: new Blob([contents]).size,
+      createdAt: now,
+      modifiedAt: now,
+      isHidden: false,
+    };
+  });
+
   const cvShortcutContents = createShortcutContents(
     "/applications/document-viewer.app",
     {
@@ -321,6 +378,7 @@ export function buildDefaultFileSystem(username: string): FileSystemNode[] {
     ...baseNodes,
     ...executableNodes,
     ...shortcutNodes,
+    ...menuShortcutNodes,
     cvShortcutNode,
     githubShortcutNode,
     linkedinShortcutNode,

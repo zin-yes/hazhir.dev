@@ -8,7 +8,10 @@ import { getPathCompletions } from "./autocomplete";
 import { getCwd } from "./cd";
 import type { CommandAutocomplete, CommandCallback } from "./index";
 
-function resolvePath(fs: ReturnType<typeof useFileSystem>, value: string): string {
+function resolvePath(
+  fs: ReturnType<typeof useFileSystem>,
+  value: string,
+): string {
   if (value === "~" || value.startsWith("~/")) {
     return fs.normalizePath(value.replace("~", getHomePath()));
   }
@@ -53,12 +56,13 @@ async function textEditor(
   fullCommand: string,
   terminal: Terminal,
   session: ReturnType<typeof useSession>,
-  windowIdentifier: string
+  windowIdentifier: string,
 ): Promise<void> {
   const fs = useFileSystem();
   const trimmed = fullCommand.trim();
   const firstSpaceIndex = trimmed.indexOf(" ");
-  const remainder = firstSpaceIndex === -1 ? "" : trimmed.slice(firstSpaceIndex + 1);
+  const remainder =
+    firstSpaceIndex === -1 ? "" : trimmed.slice(firstSpaceIndex + 1);
   const arg = parseFirstArg(remainder);
 
   if (!arg) {
@@ -79,7 +83,9 @@ async function textEditor(
     const name = fs.getNodeName(targetPath);
 
     if (!fs.exists(parent) || !fs.isDirectory(parent)) {
-      terminal.writeln(`\x1b[31mtext-editor: ${arg}: No such file or directory\x1b[0m`);
+      terminal.writeln(
+        `\x1b[31mtext-editor: ${arg}: No such file or directory\x1b[0m`,
+      );
       return;
     }
 
