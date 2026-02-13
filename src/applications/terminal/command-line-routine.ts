@@ -11,7 +11,7 @@ import Fuse from "fuse.js";
 
 import { useFileSystem } from "@/hooks/use-file-system";
 import { getPathCompletions } from "./command-callbacks/autocomplete";
-import { getCwd } from "./command-callbacks/cd";
+import { getCwd, setActiveTerminalWindow } from "./command-callbacks/cd";
 import { getAliases, getEnvVar } from "./shell-state";
 
 // FIXME: When resizing the lines dont unwrap and wrap properly.
@@ -182,9 +182,10 @@ function getExecutableCommandNames(): string[] {
       if (node.type !== "file") return;
       if (!(node.executable || node.name.endsWith(".app"))) return;
 
-      names.add(node.name);
       if (node.name.endsWith(".app")) {
         names.add(node.name.slice(0, -4));
+      } else {
+        names.add(node.name);
       }
     });
   });
@@ -211,9 +212,10 @@ function getFirstTokenCompletions(currentToken: string): string[] {
 
     const expanded = new Set<string>();
     raw.forEach((value) => {
-      expanded.add(value);
       if (value.endsWith(".app")) {
         expanded.add(value.slice(0, -4));
+      } else {
+        expanded.add(value);
       }
     });
 
@@ -536,6 +538,8 @@ async function onCommand(
   windowIdentifier: string,
   options?: { writePrompt?: boolean },
 ): Promise<CommandBuffer> {
+  setActiveTerminalWindow(windowIdentifier);
+
   const username = getSessionUsername(session);
   const shouldWritePrompt = options?.writePrompt !== false;
 
@@ -669,7 +673,7 @@ async function onCommand(
       });
 
       if (!executablePath) return null;
-      return executeFilePath(executablePath, fs);
+      return executeFilePath(executablePath, fs, tokens.slice(1));
     })();
 
     if (executableResult?.ok) {
@@ -781,6 +785,8 @@ export async function executeCommandLine(
   windowIdentifier: string,
   options?: { writePrompt?: boolean },
 ) {
+  setActiveTerminalWindow(windowIdentifier);
+
   const buffer: CommandBuffer = {
     content: command,
     cursorPosition: command.length,
@@ -820,6 +826,8 @@ export async function parseCommand(
   session: ReturnType<typeof useSession>,
   windowIdentifier: string,
 ) {
+  setActiveTerminalWindow(windowIdentifier);
+
   if (event.domEvent.key !== "Tab" && event.domEvent.key !== "Enter") {
     clearAutocompleteDisplay(terminal);
     resetAutocompleteState();
@@ -1046,6 +1054,7 @@ export async function parseCommand(
             : Math.max(argsWithoutCommand.length - 1, 0);
 
           const completions = autocomplete({
+            commandName: matched?.name ?? commandName,
             args: argsWithoutCommand,
             currentIndex,
             currentToken,

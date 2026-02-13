@@ -221,10 +221,10 @@
   },
   {
     "name": "file-explorer",
-    "usage": ["file-explorer"],
-    "examples": ["file-explorer"],
+    "usage": ["file-explorer [folder-path]"],
+    "examples": ["file-explorer", "file-explorer ~/Documents", "file-explorer ./Projects"],
     "aliases": ["files"],
-    "description": "Launches the File Explorer application.",
+    "description": "Launches the File Explorer application, optionally opening a specific folder.",
     "callbackFunctionName": "runApp",
     "icon": "FolderClosed",
     "iconDisplayText": "Files"

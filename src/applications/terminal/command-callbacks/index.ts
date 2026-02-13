@@ -38,6 +38,7 @@ export type CommandCallback = (
 ) => Promise<void>;
 
 export type CommandAutocomplete = (params: {
+  commandName: string;
   args: string[];
   currentIndex: number;
   currentToken: string;

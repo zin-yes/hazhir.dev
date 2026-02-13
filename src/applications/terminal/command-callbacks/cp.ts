@@ -63,6 +63,7 @@ const autocomplete: CommandAutocomplete = ({ currentIndex, currentToken }) => {
       includeDirs: true,
       includeHidden: true,
       appendDirSlash: true,
+      includeDotDirs: true,
     });
   }
 
@@ -71,6 +72,7 @@ const autocomplete: CommandAutocomplete = ({ currentIndex, currentToken }) => {
     includeDirs: true,
     includeHidden: true,
     appendDirSlash: true,
+    includeDotDirs: true,
   });
 };
 

@@ -21,6 +21,7 @@ import {
     insertTextIntoCommandBuffer,
     parseCommand,
 } from "./command-line-routine";
+import { setActiveTerminalWindow } from "./command-callbacks/cd";
 
 import ansi from "ansi-escape-sequences";
 import figlet from "figlet";
@@ -156,6 +157,7 @@ export default function TerminalApplication({
               terminal.writeln(" ".repeat(terminal.cols));
             }
 
+            setActiveTerminalWindow(windowIdentifier);
             terminal.write(getCommandLinePrefix(username));
 
             terminal.onKey(async (event) => {

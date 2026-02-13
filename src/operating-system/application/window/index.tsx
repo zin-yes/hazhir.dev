@@ -105,6 +105,8 @@ export default function ApplicationWindow({
   };
 }) {
   let maximized = false;
+  const isFirefox =
+    typeof navigator !== "undefined" && /firefox/i.test(navigator.userAgent);
   const bodyId = useId();
   const titleId = useId();
   const _identifier = useMemo<string>(() => v4(), []);
@@ -345,7 +347,9 @@ export default function ApplicationWindow({
           styles.body
         )[0] as HTMLDivElement;
         bodyElement.classList.remove(styles.pane_in_focus);
-        bodyElement.style.filter = "blur(1px) brightness(80%)";
+        bodyElement.style.filter = isFirefox
+          ? "brightness(80%)"
+          : "blur(1px) brightness(80%)";
         
         // Assign z-index based on position in sorted array
         // But if it's the current window, it gets the highest
