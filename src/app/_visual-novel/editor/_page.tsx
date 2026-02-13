@@ -866,6 +866,8 @@ export default function VisualNovelEditorPage() {
   };
 
   const choosePreview = (choice: DialogChoiceJson) => {
+    if (!previewSegment) return;
+
     if (choice.nextSegmentId) {
       setPreviewHistory((prev) => [...prev, previewSegment.id]);
       setPreviewSegmentId(choice.nextSegmentId);
