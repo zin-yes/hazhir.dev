@@ -264,7 +264,9 @@ export function useFileSystem() {
       },
     ];
 
-    const ensuredCoreDirectories = [...withoutDeprecatedDefaultDesktopShortcuts];
+    const ensuredCoreDirectories = [
+      ...withoutDeprecatedDefaultDesktopShortcuts,
+    ];
     const ensuredPathSet = new Set(
       ensuredCoreDirectories.map((node) => normalizePath(node.path)),
     );

@@ -126,11 +126,18 @@ export default function TerminalApplication({
         fitAddon.fit();
 
         const currentSession = sessionRef.current;
+        const currentUser =
+          currentSession.status === "authenticated"
+            ? (currentSession.data?.user as
+                | { username?: string; name?: string; id?: string }
+                | undefined)
+            : undefined;
         const username =
           currentSession.status === "authenticated"
-            ? (currentSession.data.user.username ??
-              currentSession.data.user.name ??
-              currentSession.data.user.id)
+            ? (currentUser?.username ??
+              currentUser?.name ??
+              currentUser?.id ??
+              "")
             : "";
 
         figlet(
