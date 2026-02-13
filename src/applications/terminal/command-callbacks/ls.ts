@@ -5,6 +5,7 @@ import { useSession } from "@/auth/client";
 import { FileSystemNode, useFileSystem } from "@/hooks/use-file-system";
 import { getHomePath } from "@/lib/system-user";
 import { getPathCompletions } from "./autocomplete";
+import { parseCommandArguments } from "./args";
 import { getCwd } from "./cd";
 import type { CommandAutocomplete, CommandCallback } from "./index";
 
@@ -12,31 +13,23 @@ async function ls(
   fullCommand: string,
   terminal: Terminal,
   session: ReturnType<typeof useSession>,
-  windowIdentifier: string
+  windowIdentifier: string,
 ): Promise<void> {
   const fs = useFileSystem();
   const args = fullCommand.trim().split(/\s+/).slice(1);
-
-  let showAll = false;
-  let longFormat = false;
-  let showSize = false;
-  let targetPath: string | null = null;
-
-  args.forEach((arg) => {
-    if (arg.startsWith("-") && arg.length > 1) {
-      const flags = arg.slice(1).split("");
-      flags.forEach((flag) => {
-        if (flag === "a") showAll = true;
-        if (flag === "l") longFormat = true;
-        if (flag === "s") showSize = true;
-      });
-      return;
-    }
-
-    if (targetPath === null) {
-      targetPath = arg;
-    }
+  const { options, positionals } = parseCommandArguments(args, {
+    shortToLong: {
+      a: "all",
+      l: "list",
+      s: "size",
+    },
+    longOnly: ["all", "list", "size"],
   });
+
+  const showAll = options.has("all");
+  const longFormat = options.has("list");
+  const showSize = options.has("size");
+  let targetPath: string | null = positionals[0] ?? null;
 
   if (targetPath === null) {
     targetPath = getCwd();
@@ -47,12 +40,14 @@ async function ls(
   }
 
   targetPath = fs.normalizePath(targetPath);
-  
+
   if (!fs.exists(targetPath)) {
-    terminal.writeln(`\x1b[31mls: cannot access '${targetPath}': No such file or directory\x1b[0m`);
+    terminal.writeln(
+      `\x1b[31mls: cannot access '${targetPath}': No such file or directory\x1b[0m`,
+    );
     return;
   }
-  
+
   if (!fs.isDirectory(targetPath)) {
     const node = fs.getNode(targetPath);
     if (node) {
@@ -64,14 +59,14 @@ async function ls(
     }
     return;
   }
-  
+
   const items = fs.getChildren(targetPath, true).filter((item) => {
     const hidden = item.isHidden || item.name.startsWith(".");
     return showAll || !hidden;
   });
-  
+
   terminal.writeln("");
-  
+
   if (longFormat) {
     terminal.writeln(`total ${items.length}`);
     items.forEach((item) => {
@@ -95,13 +90,13 @@ async function ls(
             const reset = "\x1b[0m";
             return `${color}${item.name}${reset}`;
           })
-          .join(" ");
+          .join("  ");
 
         terminal.writeln(line);
       }
     }
   }
-  
+
   terminal.writeln("");
 }
 
@@ -120,14 +115,29 @@ function printLongFormat(terminal: Terminal, item: FileSystemNode) {
   });
   const color = item.type === "directory" ? "\x1b[34m" : "\x1b[0m";
   const reset = "\x1b[0m";
-  
-  terminal.writeln(`${typeChar}${perms} ${owner} ${group} ${size} ${dateStr} ${color}${item.name}${reset}`);
+
+  terminal.writeln(
+    `${typeChar}${perms} ${owner} ${group} ${size} ${dateStr} ${color}${item.name}${reset}`,
+  );
 }
 
 export default ls satisfies CommandCallback;
 
 const autocomplete: CommandAutocomplete = ({ currentToken }) => {
-  const flags = ["-a", "-l", "-s", "-la", "-al", "-ls", "-sl", "-als", "-asl"];
+  const flags = [
+    "-a",
+    "-l",
+    "-s",
+    "-la",
+    "-al",
+    "-ls",
+    "-sl",
+    "-als",
+    "-asl",
+    "--all",
+    "--list",
+    "--size",
+  ];
   if (currentToken.startsWith("-")) {
     return flags.filter((flag) => flag.startsWith(currentToken));
   }

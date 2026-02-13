@@ -8,6 +8,7 @@ export const env = createEnv({
     BETTER_AUTH_SECRET: z.string().optional(),
     BETTER_AUTH_GOOGLE_CLIENT_ID: z.string().optional(),
     BETTER_AUTH_GOOGLE_CLIENT_SECRET: z.string().optional(),
+    BETTER_AUTH_BASE_URL: z.string().optional(),
     NODE_ENV: z
       .enum(["development", "test", "production"])
       .default("development"),
@@ -24,6 +25,7 @@ export const env = createEnv({
     BETTER_AUTH_GOOGLE_CLIENT_SECRET:
       process.env.BETTER_AUTH_GOOGLE_CLIENT_SECRET ??
       process.env.GOOGLE_CLIENT_SECRET,
+    BETTER_AUTH_BASE_URL: process.env.BETTER_AUTH_BASE_URL,
     NODE_ENV: process.env.NODE_ENV,
   },
 

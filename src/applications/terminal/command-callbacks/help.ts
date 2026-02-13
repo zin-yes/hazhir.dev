@@ -267,9 +267,32 @@ function constructFooter(width: number): string {
 
 const COMMANDS_PER_PAGE = 5;
 
+type CommandOptionDefinition = {
+  long: string;
+  short?: string;
+  description: string;
+};
+
+type CommandArgumentDefinition = {
+  name: string;
+  required?: boolean;
+  description: string;
+};
+
+type TerminalCommandMeta = {
+  name: string;
+  usage: string[];
+  examples: string[];
+  aliases: string[];
+  description: string;
+  callbackFunctionName: string;
+  optionDefinitions?: CommandOptionDefinition[];
+  argumentDefinitions?: CommandArgumentDefinition[];
+};
+
 function printCommandHelp(
   terminal: Terminal,
-  command: (typeof commands)[number]
+  command: TerminalCommandMeta
 ) {
   const width = terminal.cols;
   terminal.writeln(" ".repeat(width));
@@ -340,11 +363,73 @@ function printCommandHelp(
     });
   }
 
+  const argumentDefinitions = command.argumentDefinitions ?? [];
+  if (argumentDefinitions.length > 0) {
+    terminal.writeln(constructHorizontalSpacer(width));
+    terminal.writeln(
+      sorroundTextWithCharacters(
+        `${ansi.style.bold}Arguments:${ansi.style.reset}`,
+        width,
+        TEXT_ROW_SPACER,
+        LEFT_EDGE,
+        RIGHT_EDGE
+      )
+    );
+    argumentDefinitions.forEach((argument) => {
+      const requiredText = argument.required ? "required" : "optional";
+      terminal.writeln(
+        sorroundTextWithCharacters(
+          ` - ${argument.name} (${requiredText}): ${argument.description}`,
+          width,
+          TEXT_ROW_SPACER,
+          LEFT_EDGE,
+          RIGHT_EDGE
+        )
+      );
+    });
+  }
+
+  const optionDefinitions = [
+    ...(command.optionDefinitions ?? []),
+    {
+      long: "help",
+      description: "Show command help (same as: help <command>)",
+    },
+  ];
+
+  if (optionDefinitions.length > 0) {
+    terminal.writeln(constructHorizontalSpacer(width));
+    terminal.writeln(
+      sorroundTextWithCharacters(
+        `${ansi.style.bold}Options:${ansi.style.reset}`,
+        width,
+        TEXT_ROW_SPACER,
+        LEFT_EDGE,
+        RIGHT_EDGE
+      )
+    );
+    optionDefinitions.forEach((option) => {
+      const names = option.short
+        ? `-${option.short}, --${option.long}`
+        : `--${option.long}`;
+      terminal.writeln(
+        sorroundTextWithCharacters(
+          ` - ${names}: ${option.description}`,
+          width,
+          TEXT_ROW_SPACER,
+          LEFT_EDGE,
+          RIGHT_EDGE
+        )
+      );
+    });
+  }
+
   terminal.writeln(constructFooter(width));
   terminal.writeln(" ".repeat(width));
 }
 
 async function help(fullCommand: string, terminal: Terminal): Promise<void> {
+  const commandList = commands as TerminalCommandMeta[];
   const args = fullCommand.trim().split(/\s+/);
   let currentPage = 0;
 
@@ -361,14 +446,14 @@ async function help(fullCommand: string, terminal: Terminal): Promise<void> {
         throw new Error(`Unknown command '${query}'.`);
       }
 
-      printCommandHelp(terminal, commandInfo);
+      printCommandHelp(terminal, commandInfo as TerminalCommandMeta);
       return;
     }
   }
 
   const width = terminal.cols;
 
-  const currentPageCommands = commands.slice(
+  const currentPageCommands = commandList.slice(
     currentPage * COMMANDS_PER_PAGE,
     currentPage * COMMANDS_PER_PAGE + COMMANDS_PER_PAGE
   );
@@ -386,7 +471,7 @@ async function help(fullCommand: string, terminal: Terminal): Promise<void> {
       }
     });
     terminal.writeln(constructFooter(width));
-    const totalPages = Math.ceil(commands.length / COMMANDS_PER_PAGE);
+    const totalPages = Math.ceil(commandList.length / COMMANDS_PER_PAGE);
     if (totalPages > 1) {
       terminal.writeln(
         sorroundTextWithCharactersCentered(

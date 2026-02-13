@@ -93,11 +93,35 @@
   },
   {
     "name": "ls",
-    "usage": ["ls [-a] [-l] [-s] [path]"],
-    "examples": ["ls", "ls -la", "ls -s", "ls ~/Documents"],
+    "usage": ["ls [options] [path]"],
+    "examples": ["ls", "ls -la", "ls --list --all", "ls --size ~/Documents"],
     "aliases": [],
     "description": "Lists directory contents. Use -a to show hidden files, -l for long format, -s to show sizes in short view.",
-    "callbackFunctionName": "ls"
+    "callbackFunctionName": "ls",
+    "argumentDefinitions": [
+      {
+        "name": "path",
+        "required": false,
+        "description": "Directory or file path (absolute or relative). Defaults to current directory."
+      }
+    ],
+    "optionDefinitions": [
+      {
+        "short": "a",
+        "long": "all",
+        "description": "Include hidden entries (dotfiles)."
+      },
+      {
+        "short": "l",
+        "long": "list",
+        "description": "Use long/list view output."
+      },
+      {
+        "short": "s",
+        "long": "size",
+        "description": "Show size column in short output."
+      }
+    ]
   },
   {
     "name": "cd",

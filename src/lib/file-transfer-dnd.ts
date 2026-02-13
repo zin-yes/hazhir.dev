@@ -62,30 +62,96 @@ export function readDroppedPathsFromDataTransfer(
 export function setFileDragPreview(
   dataTransfer: DataTransfer,
   label: string,
-  count: number
+  count: number,
+  kind: "file" | "directory" = "file",
+  sourceElement?: HTMLElement | null
 ) {
   if (typeof document === "undefined") return;
+
+  const sourceIcon = sourceElement?.querySelector(
+    "[data-file-icon='true']"
+  ) as HTMLElement | null;
+
   const preview = document.createElement("div");
   preview.style.position = "fixed";
   preview.style.left = "-10000px";
   preview.style.top = "-10000px";
   preview.style.pointerEvents = "none";
   preview.style.zIndex = "2147483647";
-  preview.style.padding = "8px 10px";
-  preview.style.borderRadius = "10px";
-  preview.style.background = "rgba(15, 23, 42, 0.92)";
-  preview.style.color = "#e2e8f0";
-  preview.style.border = "1px solid rgba(148, 163, 184, 0.45)";
-  preview.style.boxShadow = "0 8px 28px rgba(2, 6, 23, 0.45)";
-  preview.style.font = "500 12px/1.2 Inter, system-ui, -apple-system, Segoe UI, sans-serif";
-  preview.style.whiteSpace = "nowrap";
-  preview.style.maxWidth = "360px";
-  preview.style.textOverflow = "ellipsis";
+  preview.style.width = "96px";
+  preview.style.position = "relative";
   preview.style.overflow = "hidden";
-  preview.textContent = count > 1 ? `${count} items` : label;
+  preview.style.boxSizing = "border-box";
+  preview.style.borderRadius = "16px";
+  preview.style.padding = "12px 8px 10px 8px";
+  preview.style.background = "rgba(255,255,255,0.16)";
+  preview.style.border = "1px solid rgba(255,255,255,0.34)";
+  preview.style.boxShadow = "0 10px 28px rgba(2, 6, 23, 0.35)";
+  preview.style.backdropFilter = "blur(8px)";
+  preview.style.color = "white";
+  preview.style.font = "500 12px/1.2 Inter, system-ui, -apple-system, Segoe UI, sans-serif";
+  preview.style.textAlign = "center";
+
+  const icon = document.createElement("div");
+  if (sourceIcon) {
+    const iconClone = sourceIcon.cloneNode(true) as HTMLElement;
+    iconClone.style.width = "30px";
+    iconClone.style.height = "30px";
+    iconClone.style.display = "flex";
+    iconClone.style.alignItems = "center";
+    iconClone.style.justifyContent = "center";
+    iconClone.style.pointerEvents = "none";
+
+    const svg = iconClone.querySelector("svg") as SVGElement | null;
+    if (svg) {
+      svg.setAttribute("width", "30");
+      svg.setAttribute("height", "30");
+    }
+
+    icon.appendChild(iconClone);
+  } else {
+    icon.textContent = kind === "directory" ? "📁" : "📄";
+    icon.style.fontSize = "30px";
+  }
+  icon.style.lineHeight = "1";
+  icon.style.height = "32px";
+  icon.style.display = "flex";
+  icon.style.alignItems = "center";
+  icon.style.justifyContent = "center";
+  preview.appendChild(icon);
+
+  const title = document.createElement("div");
+  title.style.marginTop = "8px";
+  title.style.lineHeight = "16px";
+  title.style.maxHeight = "32px";
+  title.style.overflow = "hidden";
+  title.style.wordBreak = "break-word";
+  title.textContent = count > 1 ? `${count} items` : label;
+  preview.appendChild(title);
+
+  if (count > 1) {
+    const badge = document.createElement("div");
+    badge.textContent = String(count);
+    badge.style.position = "absolute";
+    badge.style.right = "4px";
+    badge.style.top = "4px";
+    badge.style.minWidth = "22px";
+    badge.style.height = "22px";
+    badge.style.padding = "0 6px";
+    badge.style.borderRadius = "999px";
+    badge.style.background = "rgba(99,102,241,0.95)";
+    badge.style.border = "1px solid rgba(255,255,255,0.75)";
+    badge.style.display = "flex";
+    badge.style.alignItems = "center";
+    badge.style.justifyContent = "center";
+    badge.style.fontSize = "11px";
+    badge.style.fontWeight = "700";
+    badge.style.color = "white";
+    preview.appendChild(badge);
+  }
 
   document.body.appendChild(preview);
-  dataTransfer.setDragImage(preview, 160, 16);
+  dataTransfer.setDragImage(preview, 52, 70);
 
   requestAnimationFrame(() => {
     preview.remove();

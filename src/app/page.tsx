@@ -334,15 +334,15 @@ export default function OperatingSystemPage() {
               <div
                 className="pointer-events-none fixed z-[2147483647] transition-transform"
                 style={{
-                  left: dragCursor.x + 14,
-                  top: dragCursor.y + 14,
+                  left: dragCursor.x + 10,
+                  top: dragCursor.y - 28,
                 }}
               >
                 <div
                   className={`flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium border backdrop-blur-sm ${
                     isOverDropZone
-                      ? "bg-emerald-500/20 border-emerald-300/70 text-emerald-100"
-                      : "bg-rose-500/20 border-rose-300/70 text-rose-100"
+                      ? "bg-emerald-600/95 border-emerald-200 text-white shadow-lg shadow-emerald-900/40"
+                      : "bg-rose-700/95 border-rose-200 text-white shadow-lg shadow-rose-950/50"
                   }`}
                 >
                   <FileSymlink size={12} />
