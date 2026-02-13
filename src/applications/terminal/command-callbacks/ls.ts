@@ -175,6 +175,7 @@ const autocomplete: CommandAutocomplete = ({ currentToken }) => {
     includeDirs: true,
     includeHidden: true,
     appendDirSlash: true,
+    includeDotDirs: true,
   });
 };
 

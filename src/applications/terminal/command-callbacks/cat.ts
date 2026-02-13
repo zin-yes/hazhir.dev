@@ -2,9 +2,20 @@ import type { Terminal } from "@xterm/xterm";
 
 import { useSession } from "@/auth/client";
 import { useFileSystem } from "@/hooks/use-file-system";
+import { getHomePath } from "@/lib/system-user";
 import { getPathCompletions } from "./autocomplete";
 import { getCwd } from "./cd";
 import type { CommandAutocomplete, CommandCallback } from "./index";
+
+function resolvePath(fs: ReturnType<typeof useFileSystem>, value: string): string {
+  if (value === "~" || value.startsWith("~/")) {
+    return fs.normalizePath(value.replace("~", getHomePath()));
+  }
+  if (value.startsWith("/")) {
+    return fs.normalizePath(value);
+  }
+  return fs.normalizePath(`${getCwd()}/${value}`);
+}
 
 async function cat(
   fullCommand: string,
@@ -23,13 +34,7 @@ async function cat(
   const names = args.slice(1);
   
   for (const name of names) {
-    let targetPath: string;
-    
-    if (name.startsWith("/")) {
-      targetPath = fs.normalizePath(name);
-    } else {
-      targetPath = fs.normalizePath(`${getCwd()}/${name}`);
-    }
+    const targetPath = resolvePath(fs, name);
     
     if (!fs.exists(targetPath)) {
       terminal.writeln(`\x1b[31mcat: ${name}: No such file or directory\x1b[0m`);
@@ -58,6 +63,7 @@ const autocomplete: CommandAutocomplete = ({ currentToken }) => {
     includeDirs: false,
     includeHidden: true,
     appendDirSlash: false,
+    includeDotDirs: true,
   });
 };
 

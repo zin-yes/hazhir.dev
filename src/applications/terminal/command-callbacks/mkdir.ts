@@ -2,9 +2,20 @@ import type { Terminal } from "@xterm/xterm";
 
 import { useSession } from "@/auth/client";
 import { useFileSystem } from "@/hooks/use-file-system";
+import { getHomePath } from "@/lib/system-user";
 import { getPathCompletions } from "./autocomplete";
 import { getCwd } from "./cd";
 import type { CommandAutocomplete, CommandCallback } from "./index";
+
+function resolvePath(fs: ReturnType<typeof useFileSystem>, value: string): string {
+  if (value === "~" || value.startsWith("~/")) {
+    return fs.normalizePath(value.replace("~", getHomePath()));
+  }
+  if (value.startsWith("/")) {
+    return fs.normalizePath(value);
+  }
+  return fs.normalizePath(`${getCwd()}/${value}`);
+}
 
 async function mkdir(
   fullCommand: string,
@@ -24,13 +35,7 @@ async function mkdir(
   const names = args.slice(1).filter(a => !a.startsWith("-"));
   
   for (const name of names) {
-    let targetPath: string;
-    
-    if (name.startsWith("/")) {
-      targetPath = fs.normalizePath(name);
-    } else {
-      targetPath = fs.normalizePath(`${getCwd()}/${name}`);
-    }
+    const targetPath = resolvePath(fs, name);
     
     const parentPath = fs.getParentPath(targetPath);
     const dirName = fs.getNodeName(targetPath);
@@ -83,6 +88,7 @@ const autocomplete: CommandAutocomplete = ({ currentToken }) => {
     includeDirs: true,
     includeHidden: true,
     appendDirSlash: true,
+    includeDotDirs: true,
   });
 };
 

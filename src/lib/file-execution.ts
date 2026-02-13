@@ -51,6 +51,7 @@ function executeApplicationNode(
 export function executeFilePath(
   path: string,
   fs: FileSystemApi,
+  launchArgs: string[] = [],
 ): FileExecutionResult {
   const node = fs.getNode(path);
   if (!node || node.type !== "file") {
@@ -71,7 +72,7 @@ export function executeFilePath(
           message: `Shortcut target not found: ${shortcut.target}`,
         };
       }
-      return executeApplicationNode(targetNode, fs, shortcut.args);
+      return executeApplicationNode(targetNode, fs, [...shortcut.args, ...launchArgs]);
     }
 
     if (shortcut.type === "link") {
@@ -100,7 +101,7 @@ export function executeFilePath(
     if (!node.executable && !node.name.endsWith(".app")) {
       return { ok: false, message: `${node.name}: Permission denied` };
     }
-    return executeApplicationNode(node, fs);
+    return executeApplicationNode(node, fs, launchArgs);
   }
 
   return { ok: false, message: `${node.name}: is not executable` };

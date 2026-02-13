@@ -7,6 +7,16 @@ import { getPathCompletions } from "./autocomplete";
 import { getCwd } from "./cd";
 import type { CommandAutocomplete, CommandCallback } from "./index";
 
+function resolvePath(fs: ReturnType<typeof useFileSystem>, value: string): string {
+  if (value === "~" || value.startsWith("~/")) {
+    return fs.normalizePath(value.replace("~", getHomePath()));
+  }
+  if (value.startsWith("/")) {
+    return fs.normalizePath(value);
+  }
+  return fs.normalizePath(`${getCwd()}/${value}`);
+}
+
 async function rm(
   fullCommand: string,
   terminal: Terminal,
@@ -26,13 +36,7 @@ async function rm(
   const names = args.slice(1).filter(a => !a.startsWith("-"));
   
   for (const name of names) {
-    let targetPath: string;
-    
-    if (name.startsWith("/")) {
-      targetPath = fs.normalizePath(name);
-    } else {
-      targetPath = fs.normalizePath(`${getCwd()}/${name}`);
-    }
+    const targetPath = resolvePath(fs, name);
     
     if (!fs.exists(targetPath)) {
       if (!force) {
@@ -72,6 +76,7 @@ const autocomplete: CommandAutocomplete = ({ currentToken }) => {
     includeDirs: true,
     includeHidden: true,
     appendDirSlash: true,
+    includeDotDirs: true,
   });
 };
 

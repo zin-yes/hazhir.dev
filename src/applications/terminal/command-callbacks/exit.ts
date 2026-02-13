@@ -2,6 +2,7 @@ import type { Terminal } from "@xterm/xterm";
 
 import { useSession } from "@/auth/client";
 import type { CommandAutocomplete, CommandCallback } from "./index";
+import { clearCwd } from "./cd";
 
 import styles from "@/operating-system/application/window/application-window.module.css";
 
@@ -11,6 +12,8 @@ async function exit(
   session: ReturnType<typeof useSession>,
   windowIdentifier: string
 ): Promise<void> {
+  clearCwd(windowIdentifier);
+
   const element = document.getElementById(windowIdentifier) as HTMLDivElement;
 
   function getTopElement(a: HTMLElement, b: HTMLElement) {

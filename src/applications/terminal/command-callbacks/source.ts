@@ -58,6 +58,7 @@ const autocomplete: CommandAutocomplete = ({ currentToken }) => {
     includeDirs: false,
     includeHidden: true,
     appendDirSlash: false,
+    includeDotDirs: true,
   });
   const suggestions = ["~/.terminal_rc", ...base];
   return suggestions.filter((item) => item.startsWith(currentToken));

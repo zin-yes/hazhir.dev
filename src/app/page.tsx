@@ -121,7 +121,12 @@ export default function OperatingSystemPage() {
           addWindow(<TerminalApplicationWindow identifier={v4()} />);
           break;
         case "file-explorer":
-          addWindow(<FileExplorerApplicationWindow addWindow={addWindow} />);
+          addWindow(
+            <FileExplorerApplicationWindow
+              addWindow={addWindow}
+              initialPath={detail.args?.[0]}
+            />,
+          );
           break;
         case "voxel-game":
           addWindow(<GameApplicationWindow />);

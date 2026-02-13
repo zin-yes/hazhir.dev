@@ -9,20 +9,66 @@ import type { CommandAutocomplete, CommandCallback } from "./index";
 // Store current working directory in window for persistence
 declare global {
   interface Window {
-    terminalCwd?: string;
+    terminalCwdByWindow?: Record<string, string>;
+    activeTerminalWindowId?: string;
   }
 }
 
-function getCwd(): string {
-  if (typeof window !== "undefined" && window.terminalCwd) {
-    return window.terminalCwd;
-  }
-  return getHomePath();
+function getActiveWindowId(fallback?: string): string | null {
+  if (typeof window === "undefined") return null;
+  return fallback ?? window.activeTerminalWindowId ?? null;
 }
 
-function setCwd(path: string): void {
-  if (typeof window !== "undefined") {
-    window.terminalCwd = path;
+function getCwd(windowIdentifier?: string): string {
+  const home = getHomePath();
+  if (typeof window === "undefined") {
+    return home;
+  }
+
+  if (!window.terminalCwdByWindow) {
+    window.terminalCwdByWindow = {};
+  }
+
+  const activeId = getActiveWindowId(windowIdentifier);
+  if (!activeId) {
+    return home;
+  }
+
+  return window.terminalCwdByWindow[activeId] ?? home;
+}
+
+function setCwd(path: string, windowIdentifier?: string): void {
+  if (typeof window === "undefined") return;
+
+  const activeId = getActiveWindowId(windowIdentifier);
+  if (!activeId) return;
+
+  if (!window.terminalCwdByWindow) {
+    window.terminalCwdByWindow = {};
+  }
+
+  window.terminalCwdByWindow[activeId] = path;
+}
+
+function setActiveTerminalWindow(windowIdentifier: string): void {
+  if (typeof window === "undefined") return;
+  window.activeTerminalWindowId = windowIdentifier;
+
+  if (!window.terminalCwdByWindow) {
+    window.terminalCwdByWindow = {};
+  }
+
+  if (!window.terminalCwdByWindow[windowIdentifier]) {
+    window.terminalCwdByWindow[windowIdentifier] = getHomePath();
+  }
+}
+
+function clearCwd(windowIdentifier: string): void {
+  if (typeof window === "undefined") return;
+  if (!window.terminalCwdByWindow) return;
+  delete window.terminalCwdByWindow[windowIdentifier];
+  if (window.activeTerminalWindowId === windowIdentifier) {
+    window.activeTerminalWindowId = undefined;
   }
 }
 
@@ -64,11 +110,11 @@ async function cd(
     return;
   }
   
-  setCwd(targetPath);
+  setCwd(targetPath, windowIdentifier);
 }
 
 export default cd satisfies CommandCallback;
-export { getCwd, setCwd };
+export { clearCwd, getCwd, setActiveTerminalWindow, setCwd };
 
 const autocomplete: CommandAutocomplete = ({ currentToken }) => {
   return getPathCompletions(currentToken, {
