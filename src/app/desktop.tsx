@@ -746,19 +746,48 @@ export default function Desktop({
         const container = containerRef.current;
 
         let didExternalTransfer = false;
+        let didFolderDropTransfer = false;
         if (container) {
           const dropTarget = document.elementFromPoint(
             event.clientX,
             event.clientY
           ) as HTMLElement | null;
+          const dropZone = dropTarget?.closest(
+            "[data-file-drop-zone='true']"
+          ) as HTMLElement | null;
+          const dropKind = dropZone?.dataset.fileDropKind;
+          const destinationPath = dropZone?.dataset.fileDropPath;
           const isInsideDesktop = Boolean(dropTarget && container.contains(dropTarget));
-          if (!isInsideDesktop) {
-            const dropZone = dropTarget?.closest(
-              "[data-file-drop-zone='true']"
-            ) as HTMLElement | null;
-            const dropKind = dropZone?.dataset.fileDropKind;
-            const destinationPath = dropZone?.dataset.fileDropPath;
 
+          if (isInsideDesktop && dropKind === "directory" && destinationPath) {
+            const sourcePaths = dragCandidate.dragIds
+              .map((dragId) =>
+                desktopItems.find((item) => item.id === dragId)?.fileNode?.path
+              )
+              .filter((path): path is string => Boolean(path));
+
+            if (sourcePaths.length > 0) {
+              const uniquePaths = Array.from(
+                new Set(sourcePaths.map((item) => fs.normalizePath(item)))
+              );
+
+              uniquePaths.forEach((sourcePath) => {
+                const sourceNode = fs.getNode(sourcePath);
+                if (!sourceNode || sourceNode.readOnly) return;
+                if (
+                  fs.normalizePath(sourceNode.parentPath) ===
+                  fs.normalizePath(destinationPath)
+                ) {
+                  return;
+                }
+                fs.move(sourcePath, destinationPath);
+              });
+
+              didFolderDropTransfer = true;
+            }
+          }
+
+          if (!isInsideDesktop) {
             const sourcePaths = dragCandidate.dragIds
               .map((dragId) =>
                 desktopItems.find((item) => item.id === dragId)?.fileNode?.path
@@ -796,7 +825,7 @@ export default function Desktop({
           }
         }
 
-        if (!didExternalTransfer && container && activeDragDelta) {
+        if (!didExternalTransfer && !didFolderDropTransfer && container && activeDragDelta) {
           const primarySource = dragCandidate.sourcePositions[dragCandidate.primaryId];
           if (primarySource) {
             const deltaCol = Math.round(activeDragDelta.x / DESKTOP_GRID_COL_WIDTH);
@@ -871,7 +900,7 @@ export default function Desktop({
           }
         }
 
-        if (didExternalTransfer) {
+        if (didExternalTransfer || didFolderDropTransfer) {
           updateSelection(new Set());
           setLastSelectedId(null);
         } else {
@@ -1162,7 +1191,7 @@ export default function Desktop({
           tabIndex={0}
           data-file-drop-zone="true"
           data-file-drop-kind="desktop-root"
-          className="w-screen h-screen absolute top-0 bottom-0 left-0 right-0 overflow-hidden z-0 select-none"
+          className="w-screen h-screen absolute top-0 bottom-0 left-0 right-0 overflow-hidden z-0 select-none outline-none focus:outline-none"
           onDragOver={(event) => {
             event.preventDefault();
           }}

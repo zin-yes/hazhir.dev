@@ -449,7 +449,7 @@ function FileGridItem({ node, isSelected, onSelect, onOpen, onOpenInEditor, onDr
           }}
           onDoubleClick={() => onOpen(node)}
         >
-          <div className="w-12 h-12 flex items-center justify-center">
+          <div data-file-icon="true" className="w-12 h-12 flex items-center justify-center">
             {getFileIcon(node, 40)}
           </div>
           <span
@@ -576,7 +576,7 @@ function FileListItem({ node, isSelected, onSelect, onOpen, onOpenInEditor, onDr
           }}
           onDoubleClick={() => onOpen(node)}
         >
-          <div className="w-5 flex items-center justify-center shrink-0">
+          <div data-file-icon="true" className="w-5 flex items-center justify-center shrink-0">
             {getFileIcon(node, 18)}
           </div>
           <div className="flex-1 min-w-0">
@@ -801,6 +801,12 @@ export default function FileExplorerApplication() {
     (path: string, event: React.MouseEvent<HTMLDivElement>) => {
       if (event.button !== 0) return;
       rootRef.current?.focus();
+
+      if (selectedPaths.has(path) && selectedPaths.size > 1 && !event.ctrlKey && !event.metaKey && !event.shiftKey) {
+        setLastSelectedPath(path);
+        return;
+      }
+
       if (event.shiftKey && lastSelectedPath) {
         selectRange(lastSelectedPath, path);
         setLastSelectedPath(path);
@@ -1047,7 +1053,13 @@ export default function FileExplorerApplication() {
       event.dataTransfer.setData("text/plain", draggedPaths.join("\n"));
       event.dataTransfer.setData("text/uri-list", draggedPaths.join("\n"));
       event.dataTransfer.effectAllowed = "move";
-      setFileDragPreview(event.dataTransfer, node.name, draggedPaths.length);
+      setFileDragPreview(
+        event.dataTransfer,
+        node.name,
+        draggedPaths.length,
+        node.type,
+        event.currentTarget
+      );
     },
     []
   );

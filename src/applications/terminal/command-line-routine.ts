@@ -151,6 +151,10 @@ function expandAliasesAndEnv(input: string): string {
   });
 }
 
+function hasAlias(aliases: unknown, name: string): boolean {
+  return Array.isArray(aliases) && (aliases as string[]).includes(name);
+}
+
 function clearAutocompleteDisplay(terminal: Terminal) {
   if (_autocompleteLines <= 0) return;
 
@@ -417,12 +421,43 @@ async function onCommand(
   const fs = useFileSystem();
 
   const queryForCommand = commands.filter(
-    (value) => value.name === command || value.aliases.includes(command)
+    (value) => value.name === command || hasAlias(value.aliases, command)
   )[0];
 
   const commandExists = queryForCommand !== undefined;
 
   if (commandExists) {
+    const helpRequested = tokens.slice(1).includes("--help");
+    if (helpRequested && queryForCommand.name !== "help") {
+      clearAutocompleteDisplay(terminal);
+      terminal.write(ansi.cursor.hide);
+      terminal.writeln("");
+      await commandCallbacks.help(
+        `help ${queryForCommand.name}`,
+        terminal,
+        session,
+        windowIdentifier
+      )
+        .catch((error: Error) => {
+          terminal.writeln(" ".repeat(terminal.cols));
+          terminal.write(ansi.style.red);
+          terminal.write(error.message);
+          terminal.write(ansi.style.reset);
+          terminal.writeln(" ".repeat(terminal.cols));
+        })
+        .finally(() => {
+          if (shouldWritePrompt) {
+            terminal.write(getCommandLinePrefix(username));
+          }
+          terminal.write(ansi.cursor.show);
+        });
+
+      return {
+        content: "",
+        cursorPosition: 0,
+      };
+    }
+
     const canonicalExpandedCommand =
       `${queryForCommand.name}${tokens.length > 1 ? ` ${tokens.slice(1).join(" ")}` : ""}`;
 
@@ -809,7 +844,7 @@ export async function parseCommand(
       } else if (cursorAtEndOfCommandBuffer && parts.length > 0) {
         const commandName = parts[0];
         const matched = commands.find(
-          (value) => value.name === commandName || value.aliases.includes(commandName)
+          (value) => value.name === commandName || hasAlias(value.aliases, commandName)
         );
         const autocomplete = commandAutoCompletes[matched?.name ?? commandName];
 

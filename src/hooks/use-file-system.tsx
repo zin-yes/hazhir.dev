@@ -66,7 +66,8 @@ export function useFileSystem() {
     }
 
     const parsed = JSON.parse(stored) as FileSystemNode[];
-    const defaults = buildDefaultFileSystem(getCurrentSystemUsername());
+    const username = getCurrentSystemUsername();
+    const defaults = buildDefaultFileSystem(username);
     const existingPaths = new Set(parsed.map((node) => normalizePath(node.path)));
 
     const missingSystemExecutables = defaults.filter((node) => {
@@ -91,15 +92,104 @@ export function useFileSystem() {
       };
     });
 
-    if (missingSystemExecutables.length === 0) {
-      const changed = withDotHiddenFix.some((node, index) => node !== parsed[index]);
-      if (changed) {
-        window.localStorage.setItem(FILE_SYSTEM_STORAGE_KEY, JSON.stringify(withDotHiddenFix));
+    const isApplicationsPath = (path: string) =>
+      path === "/applications" || path.startsWith("/applications/");
+
+    const withProtectionPolicyFix = withDotHiddenFix.map((node) => {
+      const normalizedPath = normalizePath(node.path);
+      const shouldBeReadOnly = isApplicationsPath(normalizedPath);
+      if (Boolean(node.readOnly) === shouldBeReadOnly) return node;
+      return {
+        ...node,
+        readOnly: shouldBeReadOnly,
+      };
+    });
+
+    const now = Date.now();
+    const homePath = `/home/${username}`;
+    const requiredDirectories: FileSystemNode[] = [
+      {
+        name: "home",
+        type: "directory",
+        path: "/home",
+        parentPath: "/",
+        permissions: "rwxr-xr-x",
+        owner: "root",
+        group: "root",
+        size: 4096,
+        createdAt: now,
+        modifiedAt: now,
+        isHidden: false,
+        readOnly: false,
+      },
+      {
+        name: username,
+        type: "directory",
+        path: homePath,
+        parentPath: "/home",
+        permissions: "rwxr-xr-x",
+        owner: username,
+        group: username,
+        size: 4096,
+        createdAt: now,
+        modifiedAt: now,
+        isHidden: false,
+        readOnly: false,
+      },
+      {
+        name: "Desktop",
+        type: "directory",
+        path: `${homePath}/Desktop`,
+        parentPath: homePath,
+        permissions: "rwxr-xr-x",
+        owner: username,
+        group: username,
+        size: 4096,
+        createdAt: now,
+        modifiedAt: now,
+        isHidden: false,
+        readOnly: false,
+      },
+      {
+        name: "Documents",
+        type: "directory",
+        path: `${homePath}/Documents`,
+        parentPath: homePath,
+        permissions: "rwxr-xr-x",
+        owner: username,
+        group: username,
+        size: 4096,
+        createdAt: now,
+        modifiedAt: now,
+        isHidden: false,
+        readOnly: false,
+      },
+    ];
+
+    const ensuredCoreDirectories = [...withProtectionPolicyFix];
+    const ensuredPathSet = new Set(
+      ensuredCoreDirectories.map((node) => normalizePath(node.path))
+    );
+
+    requiredDirectories.forEach((directoryNode) => {
+      const path = normalizePath(directoryNode.path);
+      if (!ensuredPathSet.has(path)) {
+        ensuredCoreDirectories.push(directoryNode);
+        ensuredPathSet.add(path);
       }
-      return withDotHiddenFix;
+    });
+
+    if (missingSystemExecutables.length === 0) {
+      const changed =
+        ensuredCoreDirectories.length !== parsed.length ||
+        ensuredCoreDirectories.some((node, index) => node !== parsed[index]);
+      if (changed) {
+        window.localStorage.setItem(FILE_SYSTEM_STORAGE_KEY, JSON.stringify(ensuredCoreDirectories));
+      }
+      return ensuredCoreDirectories;
     }
 
-    const next = [...withDotHiddenFix, ...missingSystemExecutables];
+    const next = [...ensuredCoreDirectories, ...missingSystemExecutables];
     window.localStorage.setItem(FILE_SYSTEM_STORAGE_KEY, JSON.stringify(next));
     return next;
   }
@@ -110,21 +200,28 @@ export function useFileSystem() {
   }
 
   function isNodeReadOnly(path: string): boolean {
-    const node = getNode(path);
-    return Boolean(node?.readOnly);
+    const normalized = normalizePath(path);
+    return normalized === "/applications" || normalized.startsWith("/applications/");
   }
 
   function hasReadOnlyDescendant(path: string): boolean {
     const normalized = normalizePath(path);
     return getFileSystem().some(
-      (node) => node.path.startsWith(`${normalized}/`) && Boolean(node.readOnly)
+      (node) =>
+        node.path.startsWith(`${normalized}/`) &&
+        (normalizePath(node.path) === "/applications" ||
+          normalizePath(node.path).startsWith("/applications/"))
     );
   }
 
   function canWriteToDirectory(path: string): boolean {
+    const normalized = normalizePath(path);
     const node = getNode(path);
     if (!node || node.type !== "directory") return false;
-    return !node.readOnly;
+    if (normalized === "/applications" || normalized.startsWith("/applications/")) {
+      return false;
+    }
+    return true;
   }
 
   function getParentPath(path: string): string {

@@ -1,7 +1,0 @@
-import { auth } from "@/auth";
-import { toNextJsHandler } from "better-auth/next-js";
-
-export const { GET, POST } = toNextJsHandler(auth);
-
-export const dynamic = "force-dynamic";
-export const runtime = "nodejs";
