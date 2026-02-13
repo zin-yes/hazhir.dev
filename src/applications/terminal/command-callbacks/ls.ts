@@ -35,10 +35,10 @@ async function ls(
   if (invalidOption) {
     const invalidFlag = invalidOption.startsWith("--")
       ? invalidOption.slice(2)
-      : invalidOption
+      : (invalidOption
           .slice(1)
           .split("")
-          .find((flag) => !supportedShort.has(flag)) ?? invalidOption.slice(1);
+          .find((flag) => !supportedShort.has(flag)) ?? invalidOption.slice(1));
 
     terminal.writeln(`\x1b[31mls: invalid option -- '${invalidFlag}'\x1b[0m`);
     terminal.writeln("Try 'help ls' for more information.");

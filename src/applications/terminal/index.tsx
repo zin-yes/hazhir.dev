@@ -12,16 +12,16 @@ import themes from "./themes.json";
 
 import { useSession } from "@/auth/client";
 import {
-    FILE_PATH_DROP_EVENT,
-    hasFileDragType,
-    readDroppedPathsFromDataTransfer,
+  FILE_PATH_DROP_EVENT,
+  hasFileDragType,
+  readDroppedPathsFromDataTransfer,
 } from "@/lib/file-transfer-dnd";
-import {
-    getCommandLinePrefix,
-    insertTextIntoCommandBuffer,
-    parseCommand,
-} from "./command-line-routine";
 import { setActiveTerminalWindow } from "./command-callbacks/cd";
+import {
+  getCommandLinePrefix,
+  insertTextIntoCommandBuffer,
+  parseCommand,
+} from "./command-line-routine";
 
 import ansi from "ansi-escape-sequences";
 import figlet from "figlet";
@@ -37,7 +37,7 @@ export default function TerminalApplication({
   let debouncedReszieMessage = "";
   const setResizeMessageDebounced = lodash.debounce(
     (value: string) => setResizeMessage(value),
-    600
+    600,
   );
 
   const { systemTheme: theme } = useTheme();
@@ -68,7 +68,7 @@ export default function TerminalApplication({
         setResizeMessage(`${terminal.cols} x ${terminal.rows}`);
         setResizeMessageDebounced("");
       }),
-    [terminal, fitAddon]
+    [terminal, fitAddon],
   );
   useEffect(() => {
     if (resizeMessage !== "") {
@@ -129,8 +129,8 @@ export default function TerminalApplication({
         const username =
           currentSession.status === "authenticated"
             ? (currentSession.data.user.username ??
-                currentSession.data.user.name ??
-                currentSession.data.user.id)
+              currentSession.data.user.name ??
+              currentSession.data.user.id)
             : "";
 
         figlet(
@@ -152,7 +152,7 @@ export default function TerminalApplication({
                   "`" +
                   ansi.style.reset +
                   "." +
-                  ansi.style.reset
+                  ansi.style.reset,
               );
               terminal.writeln(" ".repeat(terminal.cols));
             }
@@ -165,10 +165,10 @@ export default function TerminalApplication({
                 terminal,
                 event,
                 sessionRef.current,
-                windowIdentifier
+                windowIdentifier,
               );
             });
-          }
+          },
         );
 
         terminal.onData(() => {});
@@ -197,10 +197,19 @@ export default function TerminalApplication({
       terminal.focus();
     };
 
-    root.addEventListener(FILE_PATH_DROP_EVENT, handleCustomPathDrop as EventListener);
+    root.addEventListener(
+      FILE_PATH_DROP_EVENT,
+      handleCustomPathDrop as EventListener,
+    );
 
     const handleNativeDragOver = (event: DragEvent) => {
-      if (!hasFileDragType(event.dataTransfer) && !(event.dataTransfer?.types?.includes("text/plain") || event.dataTransfer?.types?.includes("text/uri-list"))) {
+      if (
+        !hasFileDragType(event.dataTransfer) &&
+        !(
+          event.dataTransfer?.types?.includes("text/plain") ||
+          event.dataTransfer?.types?.includes("text/uri-list")
+        )
+      ) {
         return;
       }
       event.preventDefault();
@@ -223,7 +232,10 @@ export default function TerminalApplication({
     root.addEventListener("drop", handleNativeDrop, true);
 
     return () => {
-      root.removeEventListener(FILE_PATH_DROP_EVENT, handleCustomPathDrop as EventListener);
+      root.removeEventListener(
+        FILE_PATH_DROP_EVENT,
+        handleCustomPathDrop as EventListener,
+      );
       root.removeEventListener("dragenter", handleNativeDragOver, true);
       root.removeEventListener("dragover", handleNativeDragOver, true);
       root.removeEventListener("drop", handleNativeDrop, true);
@@ -238,21 +250,39 @@ export default function TerminalApplication({
       data-file-drop-zone="true"
       data-file-drop-kind="terminal"
       onDragEnter={(event) => {
-        if (!hasFileDragType(event.dataTransfer) && !(event.dataTransfer.types.includes("text/plain") || event.dataTransfer.types.includes("text/uri-list"))) {
+        if (
+          !hasFileDragType(event.dataTransfer) &&
+          !(
+            event.dataTransfer.types.includes("text/plain") ||
+            event.dataTransfer.types.includes("text/uri-list")
+          )
+        ) {
           return;
         }
         event.preventDefault();
         event.dataTransfer.dropEffect = "move";
       }}
       onDragOver={(event) => {
-        if (!hasFileDragType(event.dataTransfer) && !(event.dataTransfer.types.includes("text/plain") || event.dataTransfer.types.includes("text/uri-list"))) {
+        if (
+          !hasFileDragType(event.dataTransfer) &&
+          !(
+            event.dataTransfer.types.includes("text/plain") ||
+            event.dataTransfer.types.includes("text/uri-list")
+          )
+        ) {
           return;
         }
         event.preventDefault();
         event.dataTransfer.dropEffect = "move";
       }}
       onDragOverCapture={(event) => {
-        if (!hasFileDragType(event.dataTransfer) && !(event.dataTransfer.types.includes("text/plain") || event.dataTransfer.types.includes("text/uri-list"))) {
+        if (
+          !hasFileDragType(event.dataTransfer) &&
+          !(
+            event.dataTransfer.types.includes("text/plain") ||
+            event.dataTransfer.types.includes("text/uri-list")
+          )
+        ) {
           return;
         }
         event.preventDefault();

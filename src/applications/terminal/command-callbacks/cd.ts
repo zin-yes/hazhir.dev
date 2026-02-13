@@ -76,18 +76,18 @@ async function cd(
   fullCommand: string,
   terminal: Terminal,
   session: ReturnType<typeof useSession>,
-  windowIdentifier: string
+  windowIdentifier: string,
 ): Promise<void> {
   const fs = useFileSystem();
   const args = fullCommand.trim().split(/\s+/);
-  
+
   let targetPath = args[1] || getHomePath();
-  
+
   // Handle ~ for home directory
   if (targetPath === "~" || targetPath.startsWith("~/")) {
     targetPath = targetPath.replace("~", getHomePath());
   }
-  
+
   // Handle .. for parent directory
   if (targetPath === "..") {
     targetPath = fs.getParentPath(getCwd());
@@ -97,19 +97,23 @@ async function cd(
     // Relative path
     targetPath = fs.normalizePath(`${getCwd()}/${targetPath}`);
   }
-  
+
   targetPath = fs.normalizePath(targetPath);
-  
+
   if (!fs.exists(targetPath)) {
-    terminal.writeln(`\x1b[31mcd: ${args[1] || targetPath}: No such file or directory\x1b[0m`);
+    terminal.writeln(
+      `\x1b[31mcd: ${args[1] || targetPath}: No such file or directory\x1b[0m`,
+    );
     return;
   }
-  
+
   if (!fs.isDirectory(targetPath)) {
-    terminal.writeln(`\x1b[31mcd: ${args[1] || targetPath}: Not a directory\x1b[0m`);
+    terminal.writeln(
+      `\x1b[31mcd: ${args[1] || targetPath}: Not a directory\x1b[0m`,
+    );
     return;
   }
-  
+
   setCwd(targetPath, windowIdentifier);
 }
 

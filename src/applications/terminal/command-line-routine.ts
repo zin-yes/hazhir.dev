@@ -274,12 +274,17 @@ function renderAutocompleteSuggestions(
     formatCompletionSuggestionForDisplay(item),
   );
   const suggestionText = plainDisplay.join("  ");
-  const neededLines = Math.max(1, Math.ceil(suggestionText.length / terminal.cols));
+  const neededLines = Math.max(
+    1,
+    Math.ceil(suggestionText.length / terminal.cols),
+  );
 
   terminal.write(cursor.savePosition);
   terminal.writeln(" ".repeat(terminal.cols));
   displaySuggestions.forEach((item, index) => {
-    terminal.write(item + (index !== displaySuggestions.length - 1 ? "  " : ""));
+    terminal.write(
+      item + (index !== displaySuggestions.length - 1 ? "  " : ""),
+    );
   });
   terminal.write(cursor.returnToSavedPosition);
   _autocompleteLines = neededLines + 1;
@@ -917,7 +922,10 @@ export async function parseCommand(
       }
       break;
     case "Enter":
-      if (_autocompleteSuggestions.length > 0 && _autocompleteSelectedIndex >= 0) {
+      if (
+        _autocompleteSuggestions.length > 0 &&
+        _autocompleteSelectedIndex >= 0
+      ) {
         clearAutocompleteDisplay(terminal);
         resetAutocompleteState();
         break;
@@ -1069,7 +1077,9 @@ export async function parseCommand(
           const hasCycleContext =
             _autocompleteContextKey === contextKey &&
             _autocompleteSuggestions.length > 1;
-          const suggestions = hasCycleContext ? _autocompleteSuggestions : matches;
+          const suggestions = hasCycleContext
+            ? _autocompleteSuggestions
+            : matches;
 
           if (suggestions.length === 1 && !hasCycleContext) {
             _commandBuffer = writeToTerminalAndCommandBuffer(

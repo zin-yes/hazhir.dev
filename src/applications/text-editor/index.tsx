@@ -1,14 +1,19 @@
 "use client";
 
+import FileExplorerApplication from "@/applications/file-explorer";
+import ApplicationEmptyState from "@/components/system/application-empty-state";
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { useFileSystem } from "@/hooks/use-file-system";
 import UseOperatingSystem from "@/hooks/use-operating-system";
+import { OS_LAUNCH_APPLICATION_EVENT } from "@/lib/application-launcher";
+import { getHomePath } from "@/lib/system-user";
 import MonacoEditor, { type Monaco } from "@monaco-editor/react";
-import { Save } from "lucide-react";
+import { FileSearch, Save } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 interface TextEditorProps {
-  filePath: string;
+  filePath?: string;
   identifier: string;
 }
 
@@ -23,6 +28,8 @@ export default function TextEditorApplication({
   const [originalContents, setOriginalContents] = useState<string>("");
   const [fileName, setFileName] = useState<string>("");
   const [editorTheme] = useState<"vs-dark">("vs-dark");
+  const [isPickerOpen, setIsPickerOpen] = useState(false);
+  const shellRef = useRef<HTMLDivElement | null>(null);
 
   const editorRef = useRef<
     import("monaco-editor").editor.IStandaloneCodeEditor | null
@@ -32,8 +39,33 @@ export default function TextEditorApplication({
 
   const isModified = contents !== originalContents;
 
+  const closeWindow = useCallback(() => {
+    const windowElement = shellRef.current?.closest(
+      ".applicationWindow",
+    ) as HTMLDivElement | null;
+    if (!windowElement) return;
+
+    windowElement.style.opacity = "0";
+    windowElement.style.transform = "scale(0)";
+    window.setTimeout(() => {
+      const parent = windowElement.parentElement;
+      if (parent?.contains(windowElement)) {
+        parent.removeChild(windowElement);
+      }
+    }, 600);
+  }, []);
+
   // Initialize file contents
   useEffect(() => {
+    if (!filePath) {
+      lastLoadedPathRef.current = null;
+      setFileName("Text Editor");
+      setContents("");
+      setOriginalContents("");
+      operatingSystem.setApplicationWindowTitle(identifier, "Text Editor");
+      return;
+    }
+
     if (lastLoadedPathRef.current === filePath) {
       return;
     }
@@ -72,6 +104,8 @@ export default function TextEditorApplication({
 
   // Listen for external file changes
   useEffect(() => {
+    if (!filePath) return;
+
     const handleStorageChange = () => {
       const fileContents = fs.getFileContents(filePath);
       if (fileContents !== undefined) {
@@ -95,6 +129,7 @@ export default function TextEditorApplication({
   }, []);
 
   const saveFile = useCallback(() => {
+    if (!filePath) return;
     if (fs.updateFile(filePath, contents)) {
       setOriginalContents(contents);
     }
@@ -139,7 +174,7 @@ export default function TextEditorApplication({
 
   const lineCount = contents.split("\n").length;
   const language = useMemo(() => {
-    const name = fileName || filePath.split("/").pop() || "";
+    const name = fileName || filePath?.split("/").pop() || "";
     const ext = name.split(".").pop()?.toLowerCase();
     switch (ext) {
       case "ts":
@@ -177,6 +212,46 @@ export default function TextEditorApplication({
         return "plaintext";
     }
   }, [fileName, filePath]);
+
+  if (!filePath) {
+    return (
+      <div ref={shellRef} className="h-full w-full bg-background">
+        <ApplicationEmptyState
+          icon={<FileSearch className="size-5" />}
+          title="No file open"
+          description="Open a file to start editing."
+          actionLabel="Open file"
+          onAction={() => setIsPickerOpen(true)}
+        />
+
+        <Dialog open={isPickerOpen} onOpenChange={setIsPickerOpen}>
+          <DialogContent className="w-[min(99vw,1720px)] max-w-[min(99vw,1720px)] sm:max-w-[min(99vw,1720px)] h-[min(90vh,860px)] p-0 overflow-hidden">
+            <FileExplorerApplication
+              initialPath={`${getHomePath()}/Documents`}
+              picker={{
+                enabled: true,
+                selectionMode: "file",
+                rootPath: getHomePath(),
+                onCancel: () => setIsPickerOpen(false),
+                onPick: (node) => {
+                  setIsPickerOpen(false);
+                  window.dispatchEvent(
+                    new CustomEvent(OS_LAUNCH_APPLICATION_EVENT, {
+                      detail: {
+                        appId: "text-editor",
+                        args: [node.path],
+                      },
+                    }),
+                  );
+                  closeWindow();
+                },
+              }}
+            />
+          </DialogContent>
+        </Dialog>
+      </div>
+    );
+  }
 
   return (
     <div className="w-full h-full bg-background flex flex-col">

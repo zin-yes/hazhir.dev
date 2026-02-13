@@ -14,7 +14,10 @@ function hasAlias(aliases: unknown, name: string): boolean {
   return Array.isArray(aliases) && (aliases as string[]).includes(name);
 }
 
-function resolvePath(fs: ReturnType<typeof useFileSystem>, value: string): string {
+function resolvePath(
+  fs: ReturnType<typeof useFileSystem>,
+  value: string,
+): string {
   if (value === "~" || value.startsWith("~/")) {
     return fs.normalizePath(value.replace("~", getHomePath()));
   }
@@ -28,7 +31,7 @@ async function runApp(
   fullCommand: string,
   terminal: Terminal,
   session: ReturnType<typeof useSession>,
-  windowIdentifier: string
+  windowIdentifier: string,
 ): Promise<void> {
   const fs = useFileSystem();
   const parts = fullCommand.trim().split(/\s+/);
@@ -36,7 +39,8 @@ async function runApp(
   const launchArgs = parts.slice(1);
 
   const commandMeta = commands.find(
-    (entry) => entry.name === commandName || hasAlias(entry.aliases, commandName),
+    (entry) =>
+      entry.name === commandName || hasAlias(entry.aliases, commandName),
   );
 
   const resolvedAppId =
@@ -62,7 +66,9 @@ async function runApp(
     }
 
     if (!fs.isDirectory(initialPath)) {
-      terminal.writeln(`\x1b[31mfile-explorer: ${launchArgs[0]}: Not a directory\x1b[0m`);
+      terminal.writeln(
+        `\x1b[31mfile-explorer: ${launchArgs[0]}: Not a directory\x1b[0m`,
+      );
       return;
     }
 
@@ -90,7 +96,8 @@ const autocomplete: CommandAutocomplete = ({
   currentToken,
 }) => {
   const invokedByAppCommand =
-    commandName !== "run-app" && SYSTEM_APPS.some((app) => app.id === commandName);
+    commandName !== "run-app" &&
+    SYSTEM_APPS.some((app) => app.id === commandName);
 
   if (invokedByAppCommand && commandName === "file-explorer") {
     return getPathCompletions(currentToken, {
@@ -113,7 +120,9 @@ const autocomplete: CommandAutocomplete = ({
       });
     }
 
-    return SYSTEM_APPS.map((app) => app.id).filter((id) => id.startsWith(currentToken));
+    return SYSTEM_APPS.map((app) => app.id).filter((id) =>
+      id.startsWith(currentToken),
+    );
   }
 
   if (currentIndex === 1) {

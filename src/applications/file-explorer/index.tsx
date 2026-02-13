@@ -1,7 +1,7 @@
 "use client";
 
 import {
-  DocumentViewerApplicationWindow,
+  SingleDocumentApplicationWindow,
   TextEditorApplicationWindow,
 } from "@/app/application-windows";
 import { Button } from "@/components/ui/button";
@@ -110,6 +110,17 @@ import { v4 } from "uuid";
 type ViewMode = "grid" | "list";
 type SortBy = "name" | "size" | "modified" | "type";
 type SortOrder = "asc" | "desc";
+
+export type FileExplorerSelectionMode = "file" | "directory";
+
+export type FileExplorerPickerOptions = {
+  enabled: boolean;
+  selectionMode?: FileExplorerSelectionMode;
+  allowedFileExtensions?: string[];
+  rootPath?: string;
+  onPick?: (node: FileSystemNode) => void;
+  onCancel?: () => void;
+};
 
 export function humanFileSize(bytes: number, si = false, dp = 1) {
   const thresh = si ? 1000 : 1024;
@@ -709,28 +720,116 @@ function FileListItem({
 
 export default function FileExplorerApplication({
   initialPath,
+  picker,
 }: {
   initialPath?: string;
+  picker?: FileExplorerPickerOptions;
 }) {
   const fs = useFileSystem();
   const homePath = getHomePath();
+  const isPickerMode = Boolean(picker?.enabled);
+  const pickerSelectionMode = picker?.selectionMode ?? "file";
+  const pickerRootPath = useMemo(() => {
+    const requested = picker?.rootPath
+      ? fs.normalizePath(picker.rootPath)
+      : homePath;
+    if (fs.exists(requested) && fs.isDirectory(requested)) return requested;
+    return homePath;
+  }, [picker?.rootPath, fs, homePath]);
+  const pickerExtensionSet = useMemo(
+    () =>
+      new Set(
+        (picker?.allowedFileExtensions ?? [])
+          .map((item) => item.toLowerCase().replace(/^\./, ""))
+          .filter(Boolean),
+      ),
+    [picker?.allowedFileExtensions],
+  );
+
+  const isWithinPickerRoot = useCallback(
+    (path: string) => {
+      if (!isPickerMode) return true;
+      const normalized = fs.normalizePath(path);
+      return (
+        normalized === pickerRootPath ||
+        normalized.startsWith(`${pickerRootPath}/`)
+      );
+    },
+    [fs, isPickerMode, pickerRootPath],
+  );
+
+  const isAllowedPickerFile = useCallback(
+    (node: FileSystemNode) => {
+      if (node.type !== "file") return false;
+      if (pickerSelectionMode === "directory") return false;
+      if (pickerExtensionSet.size === 0) return true;
+      const ext = node.name.split(".").pop()?.toLowerCase() ?? "";
+      return pickerExtensionSet.has(ext);
+    },
+    [pickerExtensionSet, pickerSelectionMode],
+  );
+
+  const isPickerSelectable = useCallback(
+    (node: FileSystemNode) => {
+      if (!isPickerMode) return true;
+      if (!isWithinPickerRoot(node.path)) return false;
+      if (pickerSelectionMode === "directory") {
+        return node.type === "directory";
+      }
+      return isAllowedPickerFile(node);
+    },
+    [
+      isAllowedPickerFile,
+      isPickerMode,
+      isWithinPickerRoot,
+      pickerSelectionMode,
+    ],
+  );
+
   const initialExplorerPath = useMemo(() => {
+    if (isPickerMode) {
+      if (!initialPath) return pickerRootPath;
+      const normalized = fs.normalizePath(initialPath);
+      if (
+        fs.exists(normalized) &&
+        fs.isDirectory(normalized) &&
+        isWithinPickerRoot(normalized)
+      ) {
+        return normalized;
+      }
+      return pickerRootPath;
+    }
+
     if (!initialPath) return homePath;
     const normalized = fs.normalizePath(initialPath);
     if (fs.exists(normalized) && fs.isDirectory(normalized)) {
       return normalized;
     }
     return homePath;
-  }, [fs, homePath, initialPath]);
+  }, [
+    fs,
+    homePath,
+    initialPath,
+    isPickerMode,
+    isWithinPickerRoot,
+    pickerRootPath,
+  ]);
   const bookmarks: SidebarBookmark[] = useMemo(
-    () => [
-      { name: "Home", path: homePath, icon: Home },
-      { name: "Desktop", path: `${homePath}/Desktop`, icon: HardDrive },
-      { name: "Documents", path: `${homePath}/Documents`, icon: FileText },
-      { name: "Applications", path: "/applications", icon: Folder },
-      { name: "Root", path: "/", icon: HardDrive },
-    ],
-    [homePath],
+    () =>
+      isPickerMode
+        ? [{ name: "Browse", path: pickerRootPath, icon: Folder }]
+        : [
+            { name: "Home", path: homePath, icon: Home },
+            { name: "Desktop", path: `${homePath}/Desktop`, icon: HardDrive },
+            {
+              name: "Documents",
+              path: `${homePath}/Documents`,
+              icon: FileText,
+            },
+            { name: "Applications", path: "/applications", icon: Folder },
+            { name: "Root", path: "/", icon: HardDrive },
+          ],
+    [homePath, isPickerMode, pickerRootPath],
   );
 
   const [currentPath, setCurrentPath] = useState(initialExplorerPath);
@@ -789,6 +888,14 @@ export default function FileExplorerApplication({
       items = fs.getChildren(currentPath, showHidden);
     }
 
+    if (isPickerMode) {
+      items = items.filter((node) => {
+        if (!isWithinPickerRoot(node.path)) return false;
+        if (node.type === "directory") return true;
+        return isAllowedPickerFile(node);
+      });
+    }
+
     items.sort((a, b) => {
       if (a.type !== b.type) {
         return a.type === "directory" ? -1 : 1;
@@ -817,6 +924,9 @@ export default function FileExplorerApplication({
     return items;
   }, [
     currentPath,
+    isAllowedPickerFile,
+    isPickerMode,
+    isWithinPickerRoot,
     showHidden,
     searchQuery,
     isSearching,
@@ -828,6 +938,7 @@ export default function FileExplorerApplication({
   const navigate = useCallback(
     (path: string) => {
       const normalized = fs.normalizePath(path);
+      if (!isWithinPickerRoot(normalized)) return;
       if (fs.exists(normalized) && fs.isDirectory(normalized)) {
         setCurrentPath(normalized);
         setSelectedPaths(new Set());
@@ -838,7 +949,7 @@ export default function FileExplorerApplication({
         setHistoryIndex(newHistory.length - 1);
       }
     },
-    [history, historyIndex],
+    [fs, history, historyIndex, isWithinPickerRoot],
   );
 
   const goBack = useCallback(() => {
@@ -858,11 +969,19 @@ export default function FileExplorerApplication({
   }, [history, historyIndex]);
 
   const goUp = useCallback(() => {
+    if (isPickerMode && currentPath === pickerRootPath) return;
     const parent = fs.getParentPath(currentPath);
-    if (parent !== currentPath) {
+    if (parent !== currentPath && isWithinPickerRoot(parent)) {
       navigate(parent);
     }
-  }, [currentPath, navigate]);
+  }, [
+    currentPath,
+    fs,
+    isPickerMode,
+    isWithinPickerRoot,
+    navigate,
+    pickerRootPath,
+  ]);
 
   const refresh = useCallback(() => {
     setRefreshTrigger((prev) => prev + 1);
@@ -1072,7 +1191,18 @@ export default function FileExplorerApplication({
     (node: FileSystemNode) => {
       if (node.type === "directory") {
         navigate(node.path);
+        if (isPickerMode && pickerSelectionMode === "directory") {
+          setSelectedPaths(new Set([node.path]));
+          setLastSelectedPath(node.path);
+        }
       } else {
+        if (isPickerMode) {
+          if (isPickerSelectable(node)) {
+            picker?.onPick?.(node);
+          }
+          return;
+        }
+
         if (isShortcutFile(node) || isExecutableFile(node)) {
           executeFilePath(node.path, fs);
           return;
@@ -1082,7 +1212,10 @@ export default function FileExplorerApplication({
 
         if (ext === "pdf" || ext === "document") {
           const portal = createPortal(
-            <DocumentViewerApplicationWindow filePath={node.path} />,
+            <SingleDocumentApplicationWindow
+              filePath={node.path}
+              title={node.name}
+            />,
             document.getElementById(
               "operating-system-container",
             ) as HTMLDivElement,
@@ -1101,51 +1234,79 @@ export default function FileExplorerApplication({
         }
       }
     },
-    [fs, navigate],
+    [
+      fs,
+      isPickerMode,
+      isPickerSelectable,
+      navigate,
+      picker,
+      pickerSelectionMode,
+    ],
   );
 
-  const handleOpenInEditor = useCallback((node: FileSystemNode) => {
-    if (node.type !== "file") return;
-    const portal = createPortal(
-      <TextEditorApplicationWindow filePath={node.path} />,
-      document.getElementById("operating-system-container") as HTMLDivElement,
-      "text_editor_" + v4(),
-    );
-    setChildWindows((prev) => [...prev, portal]);
-  }, []);
+  const handleOpenInEditor = useCallback(
+    (node: FileSystemNode) => {
+      if (isPickerMode) return;
+      if (node.type !== "file") return;
+      const portal = createPortal(
+        <TextEditorApplicationWindow filePath={node.path} />,
+        document.getElementById("operating-system-container") as HTMLDivElement,
+        "text_editor_" + v4(),
+      );
+      setChildWindows((prev) => [...prev, portal]);
+    },
+    [isPickerMode],
+  );
 
-  const handleRename = useCallback((node: FileSystemNode) => {
-    setRenameTarget(node);
-    setRenameValue(node.name);
-    setRenameError("");
-  }, []);
+  const handleRename = useCallback(
+    (node: FileSystemNode) => {
+      if (isPickerMode) return;
+      setRenameTarget(node);
+      setRenameValue(node.name);
+      setRenameError("");
+    },
+    [isPickerMode],
+  );
 
-  const handleDelete = useCallback((node: FileSystemNode) => {
-    fs.deleteNode(node.path);
-    setSelectedPaths((prev) => {
-      const newSet = new Set(prev);
-      newSet.delete(node.path);
-      return newSet;
-    });
-  }, []);
+  const handleDelete = useCallback(
+    (node: FileSystemNode) => {
+      if (isPickerMode) return;
+      fs.deleteNode(node.path);
+      setSelectedPaths((prev) => {
+        const newSet = new Set(prev);
+        newSet.delete(node.path);
+        return newSet;
+      });
+    },
+    [fs, isPickerMode],
+  );
 
-  const handleCopy = useCallback((node: FileSystemNode) => {
-    setFileClipboard({
-      mode: "copy",
-      paths: [node.path],
-      updatedAt: Date.now(),
-    });
-  }, []);
+  const handleCopy = useCallback(
+    (node: FileSystemNode) => {
+      if (isPickerMode) return;
+      setFileClipboard({
+        mode: "copy",
+        paths: [node.path],
+        updatedAt: Date.now(),
+      });
+    },
+    [isPickerMode],
+  );
 
-  const handleCut = useCallback((node: FileSystemNode) => {
-    setFileClipboard({
-      mode: "cut",
-      paths: [node.path],
-      updatedAt: Date.now(),
-    });
-  }, []);
+  const handleCut = useCallback(
+    (node: FileSystemNode) => {
+      if (isPickerMode) return;
+      setFileClipboard({
+        mode: "cut",
+        paths: [node.path],
+        updatedAt: Date.now(),
+      });
+    },
+    [isPickerMode],
+  );
 
   const handlePaste = useCallback(() => {
+    if (isPickerMode) return;
     if (!clipboard) return;
 
     let movedAny = false;
@@ -1164,10 +1325,11 @@ export default function FileExplorerApplication({
     if (clipboard.mode === "cut" && movedAny) {
       setFileClipboard(null);
     }
-  }, [clipboard, currentPath, fs]);
+  }, [clipboard, currentPath, fs, isPickerMode]);
 
   const movePathsToDirectory = useCallback(
     (paths: string[], destinationDirectoryPath: string) => {
+      if (isPickerMode) return;
       const uniquePaths = Array.from(
         new Set(paths.map((item) => fs.normalizePath(item))),
       );
@@ -1184,7 +1346,7 @@ export default function FileExplorerApplication({
         fs.move(sourcePath, destinationDirectoryPath);
       });
     },
-    [fs],
+    [fs, isPickerMode],
   );
 
   const handleDragStartItem = useCallback(
@@ -1281,18 +1443,21 @@ export default function FileExplorerApplication({
   }, [clearBreadcrumbHoverTimer]);
 
   const handleCreateFolder = useCallback(() => {
+    if (isPickerMode) return;
     setCreateMode("folder");
     setCreateValue("New Folder");
     setCreateError("");
-  }, []);
+  }, [isPickerMode]);
 
   const handleCreateFile = useCallback(() => {
+    if (isPickerMode) return;
     setCreateMode("file");
     setCreateValue("New File.txt");
     setCreateError("");
-  }, []);
+  }, [isPickerMode]);
 
   const handleRenameSubmit = useCallback(() => {
+    if (isPickerMode) return;
     if (!renameTarget) return;
     const trimmed = renameValue.trim();
     if (!trimmed) {
@@ -1312,9 +1477,10 @@ export default function FileExplorerApplication({
     }
     fs.rename(renameTarget.path, trimmed);
     setRenameTarget(null);
-  }, [fs, renameTarget, renameValue]);
+  }, [fs, isPickerMode, renameTarget, renameValue]);
 
   const handleCreateSubmit = useCallback(() => {
+    if (isPickerMode) return;
     if (!createMode) return;
     const trimmed = createValue.trim();
     if (!trimmed) {
@@ -1332,7 +1498,7 @@ export default function FileExplorerApplication({
       fs.createFile(currentPath, trimmed, "");
     }
     setCreateMode(null);
-  }, [createMode, createValue, currentPath, fs]);
+  }, [createMode, createValue, currentPath, fs, isPickerMode]);
 
   const handleExplorerKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLDivElement>) => {
@@ -1484,10 +1650,21 @@ export default function FileExplorerApplication({
 
   const rootDirs = useMemo(() => {
     void refreshTrigger;
+    const root = isPickerMode ? pickerRootPath : "/";
     return fs
-      .getChildren("/", showHidden)
+      .getChildren(root, showHidden)
       .filter((n) => n.type === "directory");
-  }, [showHidden, refreshTrigger]);
+  }, [fs, isPickerMode, pickerRootPath, showHidden, refreshTrigger]);
+
+  const pickerSelectedNode = useMemo(() => {
+    if (!isPickerMode) return undefined;
+    const selectedPath = Array.from(selectedPaths)[0];
+    if (!selectedPath) return undefined;
+    const node = fs.getNode(selectedPath);
+    if (!node) return undefined;
+    if (!isPickerSelectable(node)) return undefined;
+    return node;
+  }, [fs, isPickerMode, isPickerSelectable, selectedPaths]);
 
   const stats = useMemo(() => {
     return {
@@ -1796,32 +1973,34 @@ export default function FileExplorerApplication({
             </Tooltip>
           </div>
 
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="icon-sm">
-                <MoreVertical size={16} />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem onClick={handleCreateFolder}>
-                <FolderPlus size={16} className="mr-2" />
-                New Folder
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={handleCreateFile}>
-                <FilePlus size={16} className="mr-2" />
-                New File
-              </DropdownMenuItem>
-              {clipboard ? (
-                <>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem onClick={handlePaste}>
-                    <ClipboardPaste size={16} className="mr-2" />
-                    Paste
-                  </DropdownMenuItem>
-                </>
-              ) : null}
-            </DropdownMenuContent>
-          </DropdownMenu>
+          {!isPickerMode ? (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" size="icon-sm">
+                  <MoreVertical size={16} />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onClick={handleCreateFolder}>
+                  <FolderPlus size={16} className="mr-2" />
+                  New Folder
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={handleCreateFile}>
+                  <FilePlus size={16} className="mr-2" />
+                  New File
+                </DropdownMenuItem>
+                {clipboard ? (
+                  <>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem onClick={handlePaste}>
+                      <ClipboardPaste size={16} className="mr-2" />
+                      Paste
+                    </DropdownMenuItem>
+                  </>
+                ) : null}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          ) : null}
         </div>
 
         <div className="flex flex-1 min-h-0">
@@ -1861,14 +2040,17 @@ export default function FileExplorerApplication({
                     File System
                   </div>
                   <button
-                    onClick={() => navigate("/")}
+                    onClick={() =>
+                      navigate(isPickerMode ? pickerRootPath : "/")
+                    }
                     className={cn(
                       "flex items-center gap-2 w-full px-2 py-1 rounded-md text-sm hover:bg-accent/50",
-                      currentPath === "/" && "bg-accent text-accent-foreground",
+                      currentPath === (isPickerMode ? pickerRootPath : "/") &&
+                        "bg-accent text-accent-foreground",
                     )}
                   >
                     <HardDrive size={16} className="text-muted-foreground" />
-                    <span>/</span>
+                    <span>{isPickerMode ? pickerRootPath : "/"}</span>
                   </button>
                   {rootDirs.map((dir) => (
                     <DirectoryTreeItem
@@ -2065,14 +2247,18 @@ export default function FileExplorerApplication({
                 </ScrollArea>
               </ContextMenuTrigger>
               <ContextMenuContent className="w-48">
-                <ContextMenuItem onClick={handleCreateFolder}>
-                  <FolderPlus size={16} className="mr-2" />
-                  New Folder
-                </ContextMenuItem>
-                <ContextMenuItem onClick={handleCreateFile}>
-                  <FilePlus size={16} className="mr-2" />
-                  New File
-                </ContextMenuItem>
+                {!isPickerMode ? (
+                  <ContextMenuItem onClick={handleCreateFolder}>
+                    <FolderPlus size={16} className="mr-2" />
+                    New Folder
+                  </ContextMenuItem>
+                ) : null}
+                {!isPickerMode ? (
+                  <ContextMenuItem onClick={handleCreateFile}>
+                    <FilePlus size={16} className="mr-2" />
+                    New File
+                  </ContextMenuItem>
+                ) : null}
                 {clipboard ? (
                   <>
                     <ContextMenuSeparator />
@@ -2083,7 +2269,7 @@ export default function FileExplorerApplication({
                     </ContextMenuItem>
                   </>
                 ) : null}
-                <ContextMenuSeparator />
+                {!isPickerMode ? <ContextMenuSeparator /> : null}
                 <ContextMenuItem onClick={() => setShowHidden(!showHidden)}>
                   {showHidden ? (
                     <EyeOff size={16} className="mr-2" />
@@ -2101,22 +2287,54 @@ export default function FileExplorerApplication({
           </div>
         </div>
 
-        <div className="flex items-center justify-between px-3 py-1.5 border-t border-border bg-muted/30 text-xs text-muted-foreground">
-          <div className="flex items-center gap-4">
-            <span>{stats.total} items</span>
-            {stats.selected > 0 && <span>{stats.selected} selected</span>}
+        {isPickerMode ? (
+          <div className="flex items-center justify-between gap-3 px-3 py-2 border-t border-border bg-muted/30 text-xs text-muted-foreground">
+            <div className="truncate">
+              {pickerSelectedNode
+                ? `Selected: ${pickerSelectedNode.name}`
+                : pickerSelectionMode === "directory"
+                  ? "Select a folder"
+                  : "Select a file"}
+            </div>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => picker?.onCancel?.()}
+              >
+                Cancel
+              </Button>
+              <Button
+                size="sm"
+                onClick={() => {
+                  if (!pickerSelectedNode) return;
+                  picker?.onPick?.(pickerSelectedNode);
+                }}
+                disabled={!pickerSelectedNode}
+              >
+                Open
+              </Button>
+            </div>
           </div>
-          <div className="flex items-center gap-4">
-            <span>
-              {stats.folders} folders, {stats.files} files
-            </span>
-            {clipboard && (
-              <span className="text-primary">
-                {clipboard.paths.length} item(s) in clipboard ({clipboard.mode})
+        ) : (
+          <div className="flex items-center justify-between px-3 py-1.5 border-t border-border bg-muted/30 text-xs text-muted-foreground">
+            <div className="flex items-center gap-4">
+              <span>{stats.total} items</span>
+              {stats.selected > 0 && <span>{stats.selected} selected</span>}
+            </div>
+            <div className="flex items-center gap-4">
+              <span>
+                {stats.folders} folders, {stats.files} files
               </span>
-            )}
+              {clipboard && (
+                <span className="text-primary">
+                  {clipboard.paths.length} item(s) in clipboard (
+                  {clipboard.mode})
+                </span>
+              )}
+            </div>
           </div>
-        </div>
+        )}
       </div>
     </TooltipProvider>
   );
