@@ -1,94 +1,109 @@
 "use client";
 
 import {
-    DocumentViewerApplicationWindow,
-    TextEditorApplicationWindow,
+  DocumentViewerApplicationWindow,
+  TextEditorApplicationWindow,
 } from "@/app/application-windows";
 import { Button } from "@/components/ui/button";
 import {
-    ContextMenu,
-    ContextMenuContent,
-    ContextMenuItem,
-    ContextMenuSeparator,
-    ContextMenuShortcut,
-    ContextMenuTrigger,
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuShortcut,
+  ContextMenuTrigger,
 } from "@/components/ui/context-menu";
 import {
-    Dialog,
-    DialogContent,
-    DialogDescription,
-    DialogFooter,
-    DialogHeader,
-    DialogTitle,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
 } from "@/components/ui/dialog";
 import {
-    DropdownMenu,
-    DropdownMenuContent,
-    DropdownMenuItem,
-    DropdownMenuSeparator,
-    DropdownMenuTrigger,
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import {
-    Tooltip,
-    TooltipContent,
-    TooltipProvider,
-    TooltipTrigger,
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { FileSystemNode, useFileSystem } from "@/hooks/use-file-system";
 import {
-    FileSystemNode,
-    useFileSystem,
-} from "@/hooks/use-file-system";
-import { executeFilePath, isExecutableFile, isShortcutFile } from "@/lib/file-execution";
+  executeFilePath,
+  isExecutableFile,
+  isShortcutFile,
+} from "@/lib/file-execution";
 import {
-    FILE_DRAG_MIME,
-    hasFileDragType,
-    readFileDragPayload,
-    serializeFileDragPayload,
-    setFileDragPreview,
+  getFileClipboard,
+  setFileClipboard,
+  subscribeToFileClipboard,
+} from "@/lib/file-clipboard";
+import {
+  FILE_DRAG_MIME,
+  readDroppedPathsFromDataTransfer,
+  serializeFileDragPayload,
+  setInternalFileDragActive,
+  setInternalDraggedPaths,
+  setFileDragPreview,
 } from "@/lib/file-transfer-dnd";
 import { getHomePath } from "@/lib/system-user";
 import { cn } from "@/lib/utils";
 import {
-    ArrowLeft,
-    ArrowRight,
-    ArrowUp,
-    ChevronDown,
-    ChevronRight,
-    Copy,
-    Download,
-    Edit3,
-    Eye,
-    EyeOff,
-    File,
-    FileAudio,
-    FileCode,
-    FileImage,
-    FileJson,
-    FilePlus,
-    FileText,
-    FileVideo,
-    Folder,
-    FolderOpen,
-    FolderPlus,
-    Grid3X3,
-    HardDrive,
-    Home,
-    Image,
-    LayoutList,
-    MoreVertical,
-    Music,
-    RefreshCw,
-    Scissors,
-    Search,
-    TerminalSquare,
-    Trash2,
-    Video,
+  ArrowLeft,
+  ArrowRight,
+  ArrowUp,
+  ClipboardPaste,
+  ChevronDown,
+  ChevronRight,
+  Copy,
+  Download,
+  Edit3,
+  Eye,
+  EyeOff,
+  File,
+  FileAudio,
+  FileCode,
+  FileImage,
+  FileJson,
+  FilePlus,
+  FileText,
+  FileVideo,
+  Folder,
+  FolderOpen,
+  FolderPlus,
+  Grid3X3,
+  HardDrive,
+  Home,
+  Image,
+  LayoutList,
+  MoreVertical,
+  Music,
+  RefreshCw,
+  Scissors,
+  Search,
+  TerminalSquare,
+  Trash2,
+  Video,
 } from "lucide-react";
-import { ReactPortal, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  ReactPortal,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { createPortal } from "react-dom";
 import { v4 } from "uuid";
 
@@ -236,14 +251,25 @@ interface DirectoryTreeItemProps {
   onNavigate: (path: string) => void;
   onOpenFile: (node: FileSystemNode) => void;
   showHidden: boolean;
-  onDropPathsToDirectory: (paths: string[], destinationDirectoryPath: string) => void;
+  onDropPathsToDirectory: (
+    paths: string[],
+    destinationDirectoryPath: string,
+  ) => void;
 }
 
-function DirectoryTreeItem({ node, level, currentPath, onNavigate, onOpenFile, showHidden, onDropPathsToDirectory }: DirectoryTreeItemProps) {
+function DirectoryTreeItem({
+  node,
+  level,
+  currentPath,
+  onNavigate,
+  onOpenFile,
+  showHidden,
+  onDropPathsToDirectory,
+}: DirectoryTreeItemProps) {
   const [isExpanded, setIsExpanded] = useState(false);
   const fs = useFileSystem();
   const autoExpandTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  
+
   const children = useMemo(() => {
     if (!isExpanded) return [];
     return fs.getChildren(node.path, showHidden);
@@ -280,7 +306,7 @@ function DirectoryTreeItem({ node, level, currentPath, onNavigate, onOpenFile, s
       <div
         className={cn(
           "flex items-center gap-1 px-2 py-1 cursor-pointer hover:bg-accent/50 rounded-md text-sm",
-          isActive && "bg-accent text-accent-foreground"
+          isActive && "bg-accent text-accent-foreground",
         )}
         data-file-drop-zone="true"
         data-file-drop-kind="directory"
@@ -288,11 +314,10 @@ function DirectoryTreeItem({ node, level, currentPath, onNavigate, onOpenFile, s
         style={{ paddingLeft: `${level * 12 + 8}px` }}
         onClick={() => onNavigate(node.path)}
         onDragEnter={(event) => {
-          if (!hasFileDragType(event.dataTransfer)) return;
+          event.preventDefault();
           scheduleAutoExpand();
         }}
         onDragOver={(event) => {
-          if (!hasFileDragType(event.dataTransfer)) return;
           event.preventDefault();
           event.stopPropagation();
           event.dataTransfer.dropEffect = "move";
@@ -305,9 +330,9 @@ function DirectoryTreeItem({ node, level, currentPath, onNavigate, onOpenFile, s
           event.preventDefault();
           event.stopPropagation();
           clearAutoExpandTimer();
-          const payload = readFileDragPayload(event.dataTransfer);
-          if (!payload?.paths?.length) return;
-          onDropPathsToDirectory(payload.paths, node.path);
+          const paths = readDroppedPathsFromDataTransfer(event.dataTransfer);
+          if (!paths.length) return;
+          onDropPathsToDirectory(paths, node.path);
         }}
       >
         <button
@@ -323,38 +348,43 @@ function DirectoryTreeItem({ node, level, currentPath, onNavigate, onOpenFile, s
             <ChevronRight size={14} className="text-muted-foreground" />
           )}
         </button>
-        {isExpanded ? <FolderOpen size={16} className="text-blue-400 shrink-0" /> : getFileIcon(node, 16)}
+        {isExpanded ? (
+          <FolderOpen size={16} className="text-blue-400 shrink-0" />
+        ) : (
+          getFileIcon(node, 16)
+        )}
         <span className="truncate">{node.name}</span>
       </div>
-      {isExpanded && children.map((child) => {
-        if (child.type === "directory") {
-          return (
-            <DirectoryTreeItem
-              key={child.path}
-              node={child}
-              level={level + 1}
-              currentPath={currentPath}
-              onNavigate={onNavigate}
-              onOpenFile={onOpenFile}
-              showHidden={showHidden}
-              onDropPathsToDirectory={onDropPathsToDirectory}
-            />
-          );
-        }
+      {isExpanded &&
+        children.map((child) => {
+          if (child.type === "directory") {
+            return (
+              <DirectoryTreeItem
+                key={child.path}
+                node={child}
+                level={level + 1}
+                currentPath={currentPath}
+                onNavigate={onNavigate}
+                onOpenFile={onOpenFile}
+                showHidden={showHidden}
+                onDropPathsToDirectory={onDropPathsToDirectory}
+              />
+            );
+          }
 
-        return (
-          <div
-            key={child.path}
-            className="flex items-center gap-1 px-2 py-1 cursor-pointer hover:bg-accent/50 rounded-md text-sm"
-            style={{ paddingLeft: `${(level + 1) * 12 + 8}px` }}
-            onClick={() => onOpenFile(child)}
-          >
-            <span className="w-[15px] shrink-0" />
-            {getFileIcon(child, 16)}
-            <span className="truncate">{child.name}</span>
-          </div>
-        );
-      })}
+          return (
+            <div
+              key={child.path}
+              className="flex items-center gap-1 px-2 py-1 cursor-pointer hover:bg-accent/50 rounded-md text-sm"
+              style={{ paddingLeft: `${(level + 1) * 12 + 8}px` }}
+              onClick={() => onOpenFile(child)}
+            >
+              <span className="w-[15px] shrink-0" />
+              {getFileIcon(child, 16)}
+              <span className="truncate">{child.name}</span>
+            </div>
+          );
+        })}
     </div>
   );
 }
@@ -365,18 +395,42 @@ interface FileGridItemProps {
   onSelect: (path: string, event: React.MouseEvent<HTMLDivElement>) => void;
   onOpen: (node: FileSystemNode) => void;
   onOpenInEditor: (node: FileSystemNode) => void;
-  onDragStartItem: (node: FileSystemNode, event: React.DragEvent<HTMLDivElement>) => void;
+  onDragStartItem: (
+    node: FileSystemNode,
+    event: React.DragEvent<HTMLDivElement>,
+  ) => void;
   onDragEndItem: () => void;
-  onDropOnDirectory: (directoryPath: string, event: React.DragEvent<HTMLDivElement>) => void;
+  onDropOnDirectory: (
+    directoryPath: string,
+    event: React.DragEvent<HTMLDivElement>,
+  ) => void;
   onRename: (node: FileSystemNode) => void;
   onDelete: (node: FileSystemNode) => void;
   onCopy: (node: FileSystemNode) => void;
   onCut: (node: FileSystemNode) => void;
-  onContextSelect: (path: string, event: React.MouseEvent<HTMLDivElement>) => void;
+  onContextSelect: (
+    path: string,
+    event: React.MouseEvent<HTMLDivElement>,
+  ) => void;
   onItemRef: (path: string, node: HTMLDivElement | null) => void;
 }
 
-function FileGridItem({ node, isSelected, onSelect, onOpen, onOpenInEditor, onDragStartItem, onDragEndItem, onDropOnDirectory, onRename, onDelete, onCopy, onCut, onContextSelect, onItemRef }: FileGridItemProps) {
+function FileGridItem({
+  node,
+  isSelected,
+  onSelect,
+  onOpen,
+  onOpenInEditor,
+  onDragStartItem,
+  onDragEndItem,
+  onDropOnDirectory,
+  onRename,
+  onDelete,
+  onCopy,
+  onCut,
+  onContextSelect,
+  onItemRef,
+}: FileGridItemProps) {
   const canOpenInEditor =
     node.type === "file" &&
     [
@@ -407,13 +461,17 @@ function FileGridItem({ node, isSelected, onSelect, onOpen, onOpenInEditor, onDr
           data-file-item="true"
           data-file-hit="true"
           data-file-drop-zone={node.type === "directory" ? "true" : undefined}
-          data-file-drop-kind={node.type === "directory" ? "directory" : undefined}
-          data-file-drop-path={node.type === "directory" ? node.path : undefined}
+          data-file-drop-kind={
+            node.type === "directory" ? "directory" : undefined
+          }
+          data-file-drop-path={
+            node.type === "directory" ? node.path : undefined
+          }
           draggable
           className={cn(
             "flex flex-col items-center gap-1 p-3 rounded-lg cursor-pointer transition-all",
             "hover:bg-primary/10 w-24",
-            isSelected && "bg-primary/10 ring-2 ring-primary/40"
+            isSelected && "bg-primary/10 ring-2 ring-primary/40",
           )}
           onDragStart={(event) => onDragStartItem(node, event)}
           onDragEnd={onDragEndItem}
@@ -433,23 +491,15 @@ function FileGridItem({ node, isSelected, onSelect, onOpen, onOpenInEditor, onDr
             e.stopPropagation();
             onSelect(node.path, e);
           }}
-          onClick={(e) => {
-            if (
-              node.type === "file" &&
-              node.name.endsWith(".shortcut") &&
-              !e.shiftKey &&
-              !e.ctrlKey &&
-              !e.metaKey
-            ) {
-              onOpen(node);
-            }
-          }}
           onContextMenu={(e) => {
             onContextSelect(node.path, e);
           }}
           onDoubleClick={() => onOpen(node)}
         >
-          <div data-file-icon="true" className="w-12 h-12 flex items-center justify-center">
+          <div
+            data-file-icon="true"
+            className="w-12 h-12 flex items-center justify-center"
+          >
             {getFileIcon(node, 40)}
           </div>
           <span
@@ -483,7 +533,10 @@ function FileGridItem({ node, isSelected, onSelect, onOpen, onOpenInEditor, onDr
           <ContextMenuShortcut>Ctrl+C</ContextMenuShortcut>
         </ContextMenuItem>
         <ContextMenuSeparator />
-        <ContextMenuItem onClick={() => onRename(node)} disabled={Boolean(node.readOnly)}>
+        <ContextMenuItem
+          onClick={() => onRename(node)}
+          disabled={Boolean(node.readOnly)}
+        >
           <Edit3 size={16} className="mr-2" />
           Rename
           <ContextMenuShortcut>F2</ContextMenuShortcut>
@@ -504,7 +557,22 @@ function FileGridItem({ node, isSelected, onSelect, onOpen, onOpenInEditor, onDr
 
 interface FileListItemProps extends FileGridItemProps {}
 
-function FileListItem({ node, isSelected, onSelect, onOpen, onOpenInEditor, onDragStartItem, onDragEndItem, onDropOnDirectory, onRename, onDelete, onCopy, onCut, onContextSelect, onItemRef }: FileListItemProps) {
+function FileListItem({
+  node,
+  isSelected,
+  onSelect,
+  onOpen,
+  onOpenInEditor,
+  onDragStartItem,
+  onDragEndItem,
+  onDropOnDirectory,
+  onRename,
+  onDelete,
+  onCopy,
+  onCut,
+  onContextSelect,
+  onItemRef,
+}: FileListItemProps) {
   const canOpenInEditor =
     node.type === "file" &&
     [
@@ -535,12 +603,16 @@ function FileListItem({ node, isSelected, onSelect, onOpen, onOpenInEditor, onDr
           data-file-item="true"
           data-file-hit="true"
           data-file-drop-zone={node.type === "directory" ? "true" : undefined}
-          data-file-drop-kind={node.type === "directory" ? "directory" : undefined}
-          data-file-drop-path={node.type === "directory" ? node.path : undefined}
+          data-file-drop-kind={
+            node.type === "directory" ? "directory" : undefined
+          }
+          data-file-drop-path={
+            node.type === "directory" ? node.path : undefined
+          }
           draggable
           className={cn(
             "flex items-center gap-3 px-3 py-2 hover:bg-primary/10 cursor-pointer transition-all border-b border-border/50",
-            isSelected && "bg-primary/10"
+            isSelected && "bg-primary/10",
           )}
           onDragStart={(event) => onDragStartItem(node, event)}
           onDragEnd={onDragEndItem}
@@ -560,23 +632,15 @@ function FileListItem({ node, isSelected, onSelect, onOpen, onOpenInEditor, onDr
             e.stopPropagation();
             onSelect(node.path, e);
           }}
-          onClick={(e) => {
-            if (
-              node.type === "file" &&
-              node.name.endsWith(".shortcut") &&
-              !e.shiftKey &&
-              !e.ctrlKey &&
-              !e.metaKey
-            ) {
-              onOpen(node);
-            }
-          }}
           onContextMenu={(e) => {
             onContextSelect(node.path, e);
           }}
           onDoubleClick={() => onOpen(node)}
         >
-          <div data-file-icon="true" className="w-5 flex items-center justify-center shrink-0">
+          <div
+            data-file-icon="true"
+            className="w-5 flex items-center justify-center shrink-0"
+          >
             {getFileIcon(node, 18)}
           </div>
           <div className="flex-1 min-w-0">
@@ -618,7 +682,10 @@ function FileListItem({ node, isSelected, onSelect, onOpen, onOpenInEditor, onDr
           <ContextMenuShortcut>Ctrl+C</ContextMenuShortcut>
         </ContextMenuItem>
         <ContextMenuSeparator />
-        <ContextMenuItem onClick={() => onRename(node)} disabled={Boolean(node.readOnly)}>
+        <ContextMenuItem
+          onClick={() => onRename(node)}
+          disabled={Boolean(node.readOnly)}
+        >
           <Edit3 size={16} className="mr-2" />
           Rename
           <ContextMenuShortcut>F2</ContextMenuShortcut>
@@ -637,9 +704,21 @@ function FileListItem({ node, isSelected, onSelect, onOpen, onOpenInEditor, onDr
   );
 }
 
-export default function FileExplorerApplication() {
+export default function FileExplorerApplication({
+  initialPath,
+}: {
+  initialPath?: string;
+}) {
   const fs = useFileSystem();
   const homePath = getHomePath();
+  const initialExplorerPath = useMemo(() => {
+    if (!initialPath) return homePath;
+    const normalized = fs.normalizePath(initialPath);
+    if (fs.exists(normalized) && fs.isDirectory(normalized)) {
+      return normalized;
+    }
+    return homePath;
+  }, [fs, homePath, initialPath]);
   const bookmarks: SidebarBookmark[] = useMemo(
     () => [
       { name: "Home", path: homePath, icon: Home },
@@ -648,24 +727,23 @@ export default function FileExplorerApplication() {
       { name: "Applications", path: "/applications", icon: Folder },
       { name: "Root", path: "/", icon: HardDrive },
     ],
-    [homePath]
+    [homePath],
   );
-  
-  const [currentPath, setCurrentPath] = useState(homePath);
-  const [history, setHistory] = useState<string[]>([homePath]);
+
+  const [currentPath, setCurrentPath] = useState(initialExplorerPath);
+  const [history, setHistory] = useState<string[]>([initialExplorerPath]);
   const [historyIndex, setHistoryIndex] = useState(0);
-  
+
   const [viewMode, setViewMode] = useState<ViewMode>("grid");
   const [sortBy, setSortBy] = useState<SortBy>("name");
   const [sortOrder, setSortOrder] = useState<SortOrder>("asc");
   const [showHidden, setShowHidden] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [isSearching, setIsSearching] = useState(false);
-  
+
   const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set());
   const [lastSelectedPath, setLastSelectedPath] = useState<string | null>(null);
   const selectedPathsRef = useRef<Set<string>>(new Set());
-  const isFileTransferDraggingRef = useRef(false);
   const [marquee, setMarquee] = useState<{
     x: number;
     y: number;
@@ -681,16 +759,18 @@ export default function FileExplorerApplication() {
   const rootRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const viewportRef = useRef<HTMLDivElement>(null);
-  const breadcrumbHoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const breadcrumbHoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
   const itemRefs = useRef<Map<string, HTMLDivElement>>(new Map());
   const isSelectingRef = useRef(false);
   const selectionOriginRef = useRef<{ x: number; y: number } | null>(null);
   const selectionBaseRef = useRef<Set<string>>(new Set());
-  
-  const [clipboard, setClipboard] = useState<{ nodes: FileSystemNode[]; mode: "copy" | "cut" } | null>(null);
-  
+
+  const [clipboard, setClipboard] = useState(getFileClipboard);
+
   const [childWindows, setChildWindows] = useState<ReactPortal[]>([]);
-  
+
   const [sidebarWidth, setSidebarWidth] = useState(200);
   const [, setIsResizing] = useState(false);
 
@@ -699,7 +779,7 @@ export default function FileExplorerApplication() {
   const contents = useMemo(() => {
     void refreshTrigger;
     let items: FileSystemNode[];
-    
+
     if (isSearching && searchQuery) {
       items = fs.searchFiles(searchQuery, currentPath);
     } else {
@@ -732,20 +812,31 @@ export default function FileExplorerApplication() {
     });
 
     return items;
-  }, [currentPath, showHidden, searchQuery, isSearching, sortBy, sortOrder, refreshTrigger]);
+  }, [
+    currentPath,
+    showHidden,
+    searchQuery,
+    isSearching,
+    sortBy,
+    sortOrder,
+    refreshTrigger,
+  ]);
 
-  const navigate = useCallback((path: string) => {
-    const normalized = fs.normalizePath(path);
-    if (fs.exists(normalized) && fs.isDirectory(normalized)) {
-      setCurrentPath(normalized);
-      setSelectedPaths(new Set());
-      
-      const newHistory = history.slice(0, historyIndex + 1);
-      newHistory.push(normalized);
-      setHistory(newHistory);
-      setHistoryIndex(newHistory.length - 1);
-    }
-  }, [history, historyIndex]);
+  const navigate = useCallback(
+    (path: string) => {
+      const normalized = fs.normalizePath(path);
+      if (fs.exists(normalized) && fs.isDirectory(normalized)) {
+        setCurrentPath(normalized);
+        setSelectedPaths(new Set());
+
+        const newHistory = history.slice(0, historyIndex + 1);
+        newHistory.push(normalized);
+        setHistory(newHistory);
+        setHistoryIndex(newHistory.length - 1);
+      }
+    },
+    [history, historyIndex],
+  );
 
   const goBack = useCallback(() => {
     if (historyIndex > 0) {
@@ -771,7 +862,7 @@ export default function FileExplorerApplication() {
   }, [currentPath, navigate]);
 
   const refresh = useCallback(() => {
-    setRefreshTrigger(prev => prev + 1);
+    setRefreshTrigger((prev) => prev + 1);
   }, []);
 
   const updateSelection = useCallback((next: Set<string>) => {
@@ -782,19 +873,26 @@ export default function FileExplorerApplication() {
     selectedPathsRef.current = new Set(selectedPaths);
   }, [selectedPaths]);
 
+  useEffect(() => {
+    return subscribeToFileClipboard((nextClipboard) => {
+      setClipboard(nextClipboard);
+    });
+  }, []);
+
   const selectRange = useCallback(
     (fromPath: string, toPath: string) => {
       const fromIndex = contents.findIndex((item) => item.path === fromPath);
       const toIndex = contents.findIndex((item) => item.path === toPath);
       if (fromIndex === -1 || toIndex === -1) return;
-      const [start, end] = fromIndex < toIndex ? [fromIndex, toIndex] : [toIndex, fromIndex];
+      const [start, end] =
+        fromIndex < toIndex ? [fromIndex, toIndex] : [toIndex, fromIndex];
       const next = new Set<string>();
       for (let i = start; i <= end; i += 1) {
         next.add(contents[i].path);
       }
       updateSelection(next);
     },
-    [contents, updateSelection]
+    [contents, updateSelection],
   );
 
   const handleSelect = useCallback(
@@ -802,7 +900,13 @@ export default function FileExplorerApplication() {
       if (event.button !== 0) return;
       rootRef.current?.focus();
 
-      if (selectedPaths.has(path) && selectedPaths.size > 1 && !event.ctrlKey && !event.metaKey && !event.shiftKey) {
+      if (
+        selectedPaths.has(path) &&
+        selectedPaths.size > 1 &&
+        !event.ctrlKey &&
+        !event.metaKey &&
+        !event.shiftKey
+      ) {
         setLastSelectedPath(path);
         return;
       }
@@ -828,7 +932,7 @@ export default function FileExplorerApplication() {
       updateSelection(new Set([path]));
       setLastSelectedPath(path);
     },
-    [lastSelectedPath, selectRange, selectedPaths, updateSelection]
+    [lastSelectedPath, selectRange, selectedPaths, updateSelection],
   );
 
   const handleContextSelect = useCallback(
@@ -839,16 +943,19 @@ export default function FileExplorerApplication() {
         setLastSelectedPath(path);
       }
     },
-    [selectedPaths, updateSelection]
+    [selectedPaths, updateSelection],
   );
 
-  const handleItemRef = useCallback((path: string, node: HTMLDivElement | null) => {
-    if (node) {
-      itemRefs.current.set(path, node);
-    } else {
-      itemRefs.current.delete(path);
-    }
-  }, []);
+  const handleItemRef = useCallback(
+    (path: string, node: HTMLDivElement | null) => {
+      if (node) {
+        itemRefs.current.set(path, node);
+      } else {
+        itemRefs.current.delete(path);
+      }
+    },
+    [],
+  );
 
   const startMarquee = useCallback(
     (event: React.MouseEvent<HTMLDivElement>) => {
@@ -860,16 +967,20 @@ export default function FileExplorerApplication() {
       if (!container) return;
 
       const rect = container.getBoundingClientRect();
-      const origin = { x: event.clientX - rect.left, y: event.clientY - rect.top };
+      const origin = {
+        x: event.clientX - rect.left,
+        y: event.clientY - rect.top,
+      };
       selectionOriginRef.current = origin;
       isSelectingRef.current = true;
-      selectionBaseRef.current = event.ctrlKey || event.metaKey ? new Set(selectedPaths) : new Set();
+      selectionBaseRef.current =
+        event.ctrlKey || event.metaKey ? new Set(selectedPaths) : new Set();
       setMarquee({ x: origin.x, y: origin.y, width: 0, height: 0 });
       if (!event.ctrlKey && !event.metaKey) {
         updateSelection(new Set());
       }
     },
-    [selectedPaths, updateSelection]
+    [selectedPaths, updateSelection],
   );
 
   const endSelection = useCallback(() => {
@@ -892,7 +1003,10 @@ export default function FileExplorerApplication() {
       if (!container) return;
 
       const rect = container.getBoundingClientRect();
-      const current = { x: event.clientX - rect.left, y: event.clientY - rect.top };
+      const current = {
+        x: event.clientX - rect.left,
+        y: event.clientY - rect.top,
+      };
       const origin = selectionOriginRef.current;
       const x = Math.min(origin.x, current.x);
       const y = Math.min(origin.y, current.y);
@@ -900,13 +1014,18 @@ export default function FileExplorerApplication() {
       const height = Math.abs(origin.y - current.y);
       setMarquee({ x, y, width, height });
 
-      const selectionRect = { left: x, top: y, right: x + width, bottom: y + height };
+      const selectionRect = {
+        left: x,
+        top: y,
+        right: x + width,
+        bottom: y + height,
+      };
       const nextSelection = new Set(selectionBaseRef.current);
       contents.forEach((item) => {
         const element = itemRefs.current.get(item.path);
         if (!element) return;
         const hitTarget = element.querySelector(
-          "[data-file-hit='true']"
+          "[data-file-hit='true']",
         ) as HTMLElement | null;
         const itemRect = (hitTarget ?? element).getBoundingClientRect();
         const relative = {
@@ -946,41 +1065,48 @@ export default function FileExplorerApplication() {
     };
   }, [contents, endSelection, updateSelection]);
 
-  const handleOpen = useCallback((node: FileSystemNode) => {
-    if (node.type === "directory") {
-      navigate(node.path);
-    } else {
-      if (isShortcutFile(node) || isExecutableFile(node)) {
-        executeFilePath(node.path, fs);
-        return;
-      }
-
-      const ext = node.name.split(".").pop()?.toLowerCase();
-      
-      if (ext === "pdf") {
-        const portal = createPortal(
-          <DocumentViewerApplicationWindow articleId={node.path} />,
-          document.getElementById("operating-system-container") as HTMLDivElement,
-          "document_viewer_" + v4()
-        );
-        setChildWindows((prev) => [...prev, portal]);
+  const handleOpen = useCallback(
+    (node: FileSystemNode) => {
+      if (node.type === "directory") {
+        navigate(node.path);
       } else {
-        const portal = createPortal(
-          <TextEditorApplicationWindow filePath={node.path} />,
-          document.getElementById("operating-system-container") as HTMLDivElement,
-          "text_editor_" + v4()
-        );
-        setChildWindows((prev) => [...prev, portal]);
+        if (isShortcutFile(node) || isExecutableFile(node)) {
+          executeFilePath(node.path, fs);
+          return;
+        }
+
+        const ext = node.name.split(".").pop()?.toLowerCase();
+
+        if (ext === "pdf") {
+          const portal = createPortal(
+            <DocumentViewerApplicationWindow articleId={node.path} />,
+            document.getElementById(
+              "operating-system-container",
+            ) as HTMLDivElement,
+            "document_viewer_" + v4(),
+          );
+          setChildWindows((prev) => [...prev, portal]);
+        } else {
+          const portal = createPortal(
+            <TextEditorApplicationWindow filePath={node.path} />,
+            document.getElementById(
+              "operating-system-container",
+            ) as HTMLDivElement,
+            "text_editor_" + v4(),
+          );
+          setChildWindows((prev) => [...prev, portal]);
+        }
       }
-    }
-  }, [fs, navigate]);
+    },
+    [fs, navigate],
+  );
 
   const handleOpenInEditor = useCallback((node: FileSystemNode) => {
     if (node.type !== "file") return;
     const portal = createPortal(
       <TextEditorApplicationWindow filePath={node.path} />,
       document.getElementById("operating-system-container") as HTMLDivElement,
-      "text_editor_" + v4()
+      "text_editor_" + v4(),
     );
     setChildWindows((prev) => [...prev, portal]);
   }, []);
@@ -1001,43 +1127,61 @@ export default function FileExplorerApplication() {
   }, []);
 
   const handleCopy = useCallback((node: FileSystemNode) => {
-    setClipboard({ nodes: [node], mode: "copy" });
+    setFileClipboard({
+      mode: "copy",
+      paths: [node.path],
+      updatedAt: Date.now(),
+    });
   }, []);
 
   const handleCut = useCallback((node: FileSystemNode) => {
-    setClipboard({ nodes: [node], mode: "cut" });
+    setFileClipboard({
+      mode: "cut",
+      paths: [node.path],
+      updatedAt: Date.now(),
+    });
   }, []);
 
   const handlePaste = useCallback(() => {
     if (!clipboard) return;
 
-    clipboard.nodes.forEach((node) => {
+    let movedAny = false;
+
+    clipboard.paths.forEach((path) => {
+      const node = fs.getNode(path);
+      if (!node || node.readOnly) return;
+
       if (clipboard.mode === "copy") {
         fs.copy(node.path, currentPath);
       } else {
-        fs.move(node.path, currentPath);
+        movedAny = fs.move(node.path, currentPath) || movedAny;
       }
     });
 
-    if (clipboard.mode === "cut") {
-      setClipboard(null);
+    if (clipboard.mode === "cut" && movedAny) {
+      setFileClipboard(null);
     }
-  }, [clipboard, currentPath]);
+  }, [clipboard, currentPath, fs]);
 
   const movePathsToDirectory = useCallback(
     (paths: string[], destinationDirectoryPath: string) => {
-      const uniquePaths = Array.from(new Set(paths.map((item) => fs.normalizePath(item))));
+      const uniquePaths = Array.from(
+        new Set(paths.map((item) => fs.normalizePath(item))),
+      );
 
       uniquePaths.forEach((sourcePath) => {
         const sourceNode = fs.getNode(sourcePath);
         if (!sourceNode || sourceNode.readOnly) return;
-        if (fs.normalizePath(sourceNode.parentPath) === fs.normalizePath(destinationDirectoryPath)) {
+        if (
+          fs.normalizePath(sourceNode.parentPath) ===
+          fs.normalizePath(destinationDirectoryPath)
+        ) {
           return;
         }
         fs.move(sourcePath, destinationDirectoryPath);
       });
     },
-    [fs]
+    [fs],
   );
 
   const handleDragStartItem = useCallback(
@@ -1048,8 +1192,12 @@ export default function FileExplorerApplication() {
           ? Array.from(selection)
           : [node.path];
 
-      isFileTransferDraggingRef.current = true;
-      event.dataTransfer.setData(FILE_DRAG_MIME, serializeFileDragPayload(draggedPaths));
+      setInternalFileDragActive(true);
+      setInternalDraggedPaths(draggedPaths);
+      event.dataTransfer.setData(
+        FILE_DRAG_MIME,
+        serializeFileDragPayload(draggedPaths),
+      );
       event.dataTransfer.setData("text/plain", draggedPaths.join("\n"));
       event.dataTransfer.setData("text/uri-list", draggedPaths.join("\n"));
       event.dataTransfer.effectAllowed = "move";
@@ -1058,25 +1206,50 @@ export default function FileExplorerApplication() {
         node.name,
         draggedPaths.length,
         node.type,
-        event.currentTarget
+        event.currentTarget,
       );
     },
-    []
+    [],
   );
 
   const handleDragEndItem = useCallback(() => {
-    isFileTransferDraggingRef.current = false;
+    setInternalFileDragActive(false);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      setInternalFileDragActive(false);
+    };
   }, []);
 
   const handleDropOnDirectory = useCallback(
     (directoryPath: string, event: React.DragEvent<HTMLDivElement>) => {
       event.preventDefault();
       event.stopPropagation();
-      const payload = readFileDragPayload(event.dataTransfer);
-      if (!payload?.paths?.length) return;
-      movePathsToDirectory(payload.paths, directoryPath);
+      const paths = readDroppedPathsFromDataTransfer(event.dataTransfer);
+      if (!paths.length) return;
+      movePathsToDirectory(paths, directoryPath);
     },
-    [movePathsToDirectory]
+    [movePathsToDirectory],
+  );
+
+  const handleDropInExplorerArea = useCallback(
+    (event: React.DragEvent<HTMLDivElement>) => {
+      event.preventDefault();
+      event.stopPropagation();
+
+      const paths = readDroppedPathsFromDataTransfer(event.dataTransfer);
+      if (!paths.length) return;
+
+      const target = event.target as HTMLElement | null;
+      const directoryDropZone = target?.closest(
+        "[data-file-drop-zone='true'][data-file-drop-kind='directory']",
+      ) as HTMLElement | null;
+      const destinationPath = directoryDropZone?.dataset.fileDropPath ?? currentPath;
+
+      movePathsToDirectory(paths, destinationPath);
+    },
+    [currentPath, movePathsToDirectory],
   );
 
   const clearBreadcrumbHoverTimer = useCallback(() => {
@@ -1094,7 +1267,7 @@ export default function FileExplorerApplication() {
         breadcrumbHoverTimerRef.current = null;
       }, 1000);
     },
-    [clearBreadcrumbHoverTimer, navigate]
+    [clearBreadcrumbHoverTimer, navigate],
   );
 
   useEffect(() => {
@@ -1126,7 +1299,9 @@ export default function FileExplorerApplication() {
       setRenameTarget(null);
       return;
     }
-    const targetPath = fs.normalizePath(`${renameTarget.parentPath}/${trimmed}`);
+    const targetPath = fs.normalizePath(
+      `${renameTarget.parentPath}/${trimmed}`,
+    );
     if (fs.exists(targetPath)) {
       setRenameError("An item with this name already exists.");
       return;
@@ -1186,7 +1361,7 @@ export default function FileExplorerApplication() {
 
         const nextIndex = Math.max(
           0,
-          Math.min(orderedPaths.length - 1, currentIndex + offset)
+          Math.min(orderedPaths.length - 1, currentIndex + offset),
         );
         const nextPath = orderedPaths[nextIndex];
         if (!nextPath) return;
@@ -1199,7 +1374,11 @@ export default function FileExplorerApplication() {
         setLastSelectedPath(nextPath);
         itemRefs.current
           .get(nextPath)
-          ?.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "nearest" });
+          ?.scrollIntoView({
+            behavior: "smooth",
+            block: "nearest",
+            inline: "nearest",
+          });
       };
 
       if (e.key === "ArrowLeft" || e.key === "ArrowUp") {
@@ -1224,7 +1403,10 @@ export default function FileExplorerApplication() {
         return;
       }
 
-      if ((e.key === "Delete" || e.key === "Backspace") && selectedPaths.size > 0) {
+      if (
+        (e.key === "Delete" || e.key === "Backspace") &&
+        selectedPaths.size > 0
+      ) {
         e.preventDefault();
         selectedPaths.forEach((path) => {
           fs.deleteNode(path);
@@ -1238,7 +1420,11 @@ export default function FileExplorerApplication() {
         const nodes = Array.from(selectedPaths)
           .map((p) => fs.getNode(p))
           .filter(Boolean) as FileSystemNode[];
-        setClipboard({ nodes, mode: "copy" });
+        setFileClipboard({
+          mode: "copy",
+          paths: nodes.map((node) => node.path),
+          updatedAt: Date.now(),
+        });
         return;
       }
 
@@ -1247,7 +1433,11 @@ export default function FileExplorerApplication() {
         const nodes = Array.from(selectedPaths)
           .map((p) => fs.getNode(p))
           .filter(Boolean) as FileSystemNode[];
-        setClipboard({ nodes, mode: "cut" });
+        setFileClipboard({
+          mode: "cut",
+          paths: nodes.map((node) => node.path),
+          updatedAt: Date.now(),
+        });
         return;
       }
 
@@ -1262,7 +1452,16 @@ export default function FileExplorerApplication() {
         setSelectedPaths(new Set(orderedPaths));
       }
     },
-    [clipboard, contents, fs, handleOpen, handlePaste, lastSelectedPath, selectRange, selectedPaths]
+    [
+      clipboard,
+      contents,
+      fs,
+      handleOpen,
+      handlePaste,
+      lastSelectedPath,
+      selectRange,
+      selectedPaths,
+    ],
   );
 
   useEffect(() => {
@@ -1283,7 +1482,9 @@ export default function FileExplorerApplication() {
 
   const rootDirs = useMemo(() => {
     void refreshTrigger;
-    return fs.getChildren("/", showHidden).filter(n => n.type === "directory");
+    return fs
+      .getChildren("/", showHidden)
+      .filter((n) => n.type === "directory");
   }, [showHidden, refreshTrigger]);
 
   const stats = useMemo(() => {
@@ -1311,12 +1512,15 @@ export default function FileExplorerApplication() {
       >
         {childWindows}
 
-        <Dialog open={Boolean(renameTarget)} onOpenChange={(open) => {
-          if (!open) {
-            setRenameTarget(null);
-            setRenameError("");
-          }
-        }}>
+        <Dialog
+          open={Boolean(renameTarget)}
+          onOpenChange={(open) => {
+            if (!open) {
+              setRenameTarget(null);
+              setRenameError("");
+            }
+          }}
+        >
           <DialogContent className="sm:max-w-md">
             <DialogHeader>
               <DialogTitle>Rename</DialogTitle>
@@ -1354,19 +1558,23 @@ export default function FileExplorerApplication() {
           </DialogContent>
         </Dialog>
 
-        <Dialog open={Boolean(createMode)} onOpenChange={(open) => {
-          if (!open) {
-            setCreateMode(null);
-            setCreateError("");
-          }
-        }}>
+        <Dialog
+          open={Boolean(createMode)}
+          onOpenChange={(open) => {
+            if (!open) {
+              setCreateMode(null);
+              setCreateError("");
+            }
+          }}
+        >
           <DialogContent className="sm:max-w-md">
             <DialogHeader>
               <DialogTitle>
                 {createMode === "folder" ? "New Folder" : "New File"}
               </DialogTitle>
               <DialogDescription>
-                Create a {createMode === "folder" ? "folder" : "file"} in {currentPath}.
+                Create a {createMode === "folder" ? "folder" : "file"} in{" "}
+                {currentPath}.
               </DialogDescription>
             </DialogHeader>
             <div className="grid gap-2">
@@ -1394,13 +1602,11 @@ export default function FileExplorerApplication() {
               <Button variant="outline" onClick={() => setCreateMode(null)}>
                 Cancel
               </Button>
-              <Button onClick={handleCreateSubmit}>
-                Create
-              </Button>
+              <Button onClick={handleCreateSubmit}>Create</Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
-        
+
         <div className="flex items-center gap-1 p-2 border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
           <div className="flex items-center gap-0.5">
             <Tooltip>
@@ -1458,63 +1664,64 @@ export default function FileExplorerApplication() {
             <button
               onClick={() => navigate("/")}
               className="hover:bg-accent rounded p-0.5 shrink-0"
-                    data-file-drop-zone="true"
-                    data-file-drop-kind="explorer-breadcrumb"
-                    data-file-drop-path="/"
-                    onDragOver={(event) => {
-                      if (!hasFileDragType(event.dataTransfer)) return;
-                      event.preventDefault();
-                      event.stopPropagation();
-                      event.dataTransfer.dropEffect = "move";
-                    }}
-                    onDragEnter={(event) => {
-                      if (!hasFileDragType(event.dataTransfer)) return;
-                      scheduleBreadcrumbAutoNavigate("/");
-                    }}
-                    onDragLeave={() => {
-                      clearBreadcrumbHoverTimer();
-                    }}
-                    onDrop={(event) => {
-                      event.preventDefault();
-                      event.stopPropagation();
-                      clearBreadcrumbHoverTimer();
-                      const payload = readFileDragPayload(event.dataTransfer);
-                      if (!payload?.paths?.length) return;
-                      movePathsToDirectory(payload.paths, "/");
-                    }}
+              data-file-drop-zone="true"
+              data-file-drop-kind="explorer-breadcrumb"
+              data-file-drop-path="/"
+              onDragOver={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                event.dataTransfer.dropEffect = "move";
+              }}
+              onDragEnter={(event) => {
+                event.preventDefault();
+                scheduleBreadcrumbAutoNavigate("/");
+              }}
+              onDragLeave={() => {
+                clearBreadcrumbHoverTimer();
+              }}
+              onDrop={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                clearBreadcrumbHoverTimer();
+                const paths = readDroppedPathsFromDataTransfer(event.dataTransfer);
+                if (!paths.length) return;
+                movePathsToDirectory(paths, "/");
+              }}
             >
               <HardDrive size={14} />
             </button>
             {pathParts.map((part) => (
               <div key={part.path} className="flex items-center shrink-0">
-                <ChevronRight size={12} className="text-muted-foreground mx-0.5" />
+                <ChevronRight
+                  size={12}
+                  className="text-muted-foreground mx-0.5"
+                />
                 <button
                   onClick={() => navigate(part.path)}
                   className="hover:bg-accent rounded px-1 py-0.5 text-sm truncate max-w-32"
-                        data-file-drop-zone="true"
-                        data-file-drop-kind="explorer-breadcrumb"
-                        data-file-drop-path={part.path}
-                        onDragOver={(event) => {
-                          if (!hasFileDragType(event.dataTransfer)) return;
-                          event.preventDefault();
-                          event.stopPropagation();
-                          event.dataTransfer.dropEffect = "move";
-                        }}
-                        onDragEnter={(event) => {
-                          if (!hasFileDragType(event.dataTransfer)) return;
-                          scheduleBreadcrumbAutoNavigate(part.path);
-                        }}
-                        onDragLeave={() => {
-                          clearBreadcrumbHoverTimer();
-                        }}
-                        onDrop={(event) => {
-                          event.preventDefault();
-                          event.stopPropagation();
-                          clearBreadcrumbHoverTimer();
-                          const payload = readFileDragPayload(event.dataTransfer);
-                          if (!payload?.paths?.length) return;
-                          movePathsToDirectory(payload.paths, part.path);
-                        }}
+                  data-file-drop-zone="true"
+                  data-file-drop-kind="explorer-breadcrumb"
+                  data-file-drop-path={part.path}
+                  onDragOver={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    event.dataTransfer.dropEffect = "move";
+                  }}
+                  onDragEnter={(event) => {
+                    event.preventDefault();
+                    scheduleBreadcrumbAutoNavigate(part.path);
+                  }}
+                  onDragLeave={() => {
+                    clearBreadcrumbHoverTimer();
+                  }}
+                  onDrop={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    clearBreadcrumbHoverTimer();
+                    const paths = readDroppedPathsFromDataTransfer(event.dataTransfer);
+                    if (!paths.length) return;
+                    movePathsToDirectory(paths, part.path);
+                  }}
                 >
                   {part.name}
                 </button>
@@ -1525,7 +1732,10 @@ export default function FileExplorerApplication() {
           <Separator orientation="vertical" className="h-6 mx-1" />
 
           <div className="relative w-48">
-            <Search size={14} className="absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground" />
+            <Search
+              size={14}
+              className="absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground"
+            />
             <Input
               value={searchQuery}
               onChange={(e) => {
@@ -1574,7 +1784,9 @@ export default function FileExplorerApplication() {
                   {showHidden ? <Eye size={16} /> : <EyeOff size={16} />}
                 </Button>
               </TooltipTrigger>
-              <TooltipContent>{showHidden ? "Hide hidden files" : "Show hidden files"}</TooltipContent>
+              <TooltipContent>
+                {showHidden ? "Hide hidden files" : "Show hidden files"}
+              </TooltipContent>
             </Tooltip>
           </div>
 
@@ -1593,10 +1805,15 @@ export default function FileExplorerApplication() {
                 <FilePlus size={16} className="mr-2" />
                 New File
               </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={handlePaste} disabled={!clipboard}>
-                Paste
-              </DropdownMenuItem>
+              {clipboard ? (
+                <>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onClick={handlePaste}>
+                    <ClipboardPaste size={16} className="mr-2" />
+                    Paste
+                  </DropdownMenuItem>
+                </>
+              ) : null}
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
@@ -1620,7 +1837,8 @@ export default function FileExplorerApplication() {
                         onClick={() => navigate(bookmark.path)}
                         className={cn(
                           "flex items-center gap-2 w-full px-2 py-1.5 rounded-md text-sm hover:bg-accent/50 transition-colors",
-                          currentPath === bookmark.path && "bg-accent text-accent-foreground"
+                          currentPath === bookmark.path &&
+                            "bg-accent text-accent-foreground",
                         )}
                       >
                         <Icon size={16} className="shrink-0" />
@@ -1640,7 +1858,7 @@ export default function FileExplorerApplication() {
                     onClick={() => navigate("/")}
                     className={cn(
                       "flex items-center gap-2 w-full px-2 py-1 rounded-md text-sm hover:bg-accent/50",
-                      currentPath === "/" && "bg-accent text-accent-foreground"
+                      currentPath === "/" && "bg-accent text-accent-foreground",
                     )}
                   >
                     <HardDrive size={16} className="text-muted-foreground" />
@@ -1672,7 +1890,9 @@ export default function FileExplorerApplication() {
 
               const handleMouseMove = (e: MouseEvent) => {
                 const diff = e.clientX - startX;
-                setSidebarWidth(Math.max(150, Math.min(400, startWidth + diff)));
+                setSidebarWidth(
+                  Math.max(150, Math.min(400, startWidth + diff)),
+                );
               };
 
               const handleMouseUp = () => {
@@ -1690,7 +1910,7 @@ export default function FileExplorerApplication() {
             {viewMode === "list" && (
               <div className="flex items-center gap-3 px-3 py-2 border-b border-border bg-muted/30 text-xs font-medium text-muted-foreground">
                 <div className="w-5" />
-                <div 
+                <div
                   className="flex-1 cursor-pointer hover:text-foreground"
                   onClick={() => {
                     if (sortBy === "name") {
@@ -1703,7 +1923,7 @@ export default function FileExplorerApplication() {
                 >
                   Name {sortBy === "name" && (sortOrder === "asc" ? "↑" : "↓")}
                 </div>
-                <div 
+                <div
                   className="w-20 text-right cursor-pointer hover:text-foreground"
                   onClick={() => {
                     if (sortBy === "size") {
@@ -1716,7 +1936,7 @@ export default function FileExplorerApplication() {
                 >
                   Size {sortBy === "size" && (sortOrder === "asc" ? "↑" : "↓")}
                 </div>
-                <div 
+                <div
                   className="w-24 text-right cursor-pointer hover:text-foreground"
                   onClick={() => {
                     if (sortBy === "modified") {
@@ -1727,7 +1947,8 @@ export default function FileExplorerApplication() {
                     }
                   }}
                 >
-                  Modified {sortBy === "modified" && (sortOrder === "asc" ? "↑" : "↓")}
+                  Modified{" "}
+                  {sortBy === "modified" && (sortOrder === "asc" ? "↑" : "↓")}
                 </div>
                 <div className="w-24">Permissions</div>
               </div>
@@ -1738,7 +1959,14 @@ export default function FileExplorerApplication() {
                 <ScrollArea
                   className="h-full"
                   viewportRef={viewportRef}
-                  viewportClassName="relative"
+                  viewportClassName="relative min-h-full"
+                  viewportProps={{
+                    onDragOverCapture: (event) => {
+                      event.preventDefault();
+                      event.dataTransfer.dropEffect = "move";
+                    },
+                    onDropCapture: handleDropInExplorerArea,
+                  }}
                   onMouseDownCapture={startMarquee}
                 >
                   <div
@@ -1746,17 +1974,13 @@ export default function FileExplorerApplication() {
                     data-file-drop-zone="true"
                     data-file-drop-kind="explorer-root"
                     data-file-drop-path={currentPath}
-                    className="relative min-h-full w-full select-none"
+                    className="relative h-full min-h-full w-full select-none"
                     onDragOver={(event) => {
-                      if (!hasFileDragType(event.dataTransfer)) return;
                       event.preventDefault();
                       event.dataTransfer.dropEffect = "move";
                     }}
                     onDrop={(event) => {
                       event.preventDefault();
-                      const payload = readFileDragPayload(event.dataTransfer);
-                      if (!payload?.paths?.length) return;
-                      movePathsToDirectory(payload.paths, currentPath);
                     }}
                     onContextMenu={(event) => {
                       const target = event.target as HTMLElement;
@@ -1843,14 +2067,23 @@ export default function FileExplorerApplication() {
                   <FilePlus size={16} className="mr-2" />
                   New File
                 </ContextMenuItem>
-                <ContextMenuSeparator />
-                <ContextMenuItem onClick={handlePaste} disabled={!clipboard}>
-                  Paste
-                  <ContextMenuShortcut>Ctrl+V</ContextMenuShortcut>
-                </ContextMenuItem>
+                {clipboard ? (
+                  <>
+                    <ContextMenuSeparator />
+                    <ContextMenuItem onClick={handlePaste}>
+                      <ClipboardPaste size={16} className="mr-2" />
+                      Paste
+                      <ContextMenuShortcut>Ctrl+V</ContextMenuShortcut>
+                    </ContextMenuItem>
+                  </>
+                ) : null}
                 <ContextMenuSeparator />
                 <ContextMenuItem onClick={() => setShowHidden(!showHidden)}>
-                  {showHidden ? <EyeOff size={16} className="mr-2" /> : <Eye size={16} className="mr-2" />}
+                  {showHidden ? (
+                    <EyeOff size={16} className="mr-2" />
+                  ) : (
+                    <Eye size={16} className="mr-2" />
+                  )}
                   {showHidden ? "Hide hidden files" : "Show hidden files"}
                 </ContextMenuItem>
                 <ContextMenuItem onClick={refresh}>
@@ -1868,10 +2101,12 @@ export default function FileExplorerApplication() {
             {stats.selected > 0 && <span>{stats.selected} selected</span>}
           </div>
           <div className="flex items-center gap-4">
-            <span>{stats.folders} folders, {stats.files} files</span>
+            <span>
+              {stats.folders} folders, {stats.files} files
+            </span>
             {clipboard && (
               <span className="text-primary">
-                {clipboard.nodes.length} item(s) in clipboard ({clipboard.mode})
+                {clipboard.paths.length} item(s) in clipboard ({clipboard.mode})
               </span>
             )}
           </div>

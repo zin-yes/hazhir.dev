@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { toast } from "sonner";
 
 import { Sky } from "three/addons/objects/Sky.js";
 
@@ -2355,13 +2356,13 @@ export default function Game() {
       hotbarSlots: normalizeHotbar(hotbarSlotsRef.current),
     };
     localStorage.setItem("hazhir-dev-save", JSON.stringify(saveData));
-    alert("World saved!");
+    toast.success("World saved!");
   }
 
   function loadWorld() {
     const saveString = localStorage.getItem("hazhir-dev-save");
     if (!saveString) {
-      alert("No save found!");
+      toast.info("No save found!");
       return;
     }
     try {
@@ -2392,10 +2393,10 @@ export default function Game() {
       }
 
       startWorldGeneration(seedRef.current);
-      alert("World loaded!");
+      toast.success("World loaded!");
     } catch (e) {
       console.error("Failed to load save:", e);
-      alert("Failed to load save!");
+      toast.error("Failed to load save!");
     }
   }
 

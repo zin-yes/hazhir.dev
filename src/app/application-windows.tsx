@@ -134,8 +134,10 @@ export function MockSettingsApplicationWindow() {
 
 export function FileExplorerApplicationWindow({
   addWindow,
+  initialPath,
 }: {
   addWindow: (node: ReactNode) => void;
+  initialPath?: string;
 }) {
   return (
     <ApplicationWindow
@@ -153,7 +155,7 @@ export function FileExplorerApplicationWindow({
         allow_overflow: false,
       }}
     >
-      <FileExplorerApplication />
+      <FileExplorerApplication initialPath={initialPath} />
     </ApplicationWindow>
   );
 }
