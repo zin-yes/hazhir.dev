@@ -36,6 +36,15 @@ export const SYSTEM_APPS: SystemAppDefinition[] = [
     menuDescription: "Browse and manage files.",
   },
   {
+    id: "meditation",
+    executableName: "meditation.app",
+    displayName: "Nadi Shuddhi",
+    icon: "Heart",
+    desktopIconText: "Meditation",
+    menuDescription: "Guided breathing meditation practice.",
+    includeDesktopShortcut: false,
+  },
+  {
     id: "voxel-game",
     executableName: "voxel-game.app",
     displayName: "Voxel Game",

@@ -92,35 +92,9 @@ export function useFileSystem() {
       );
     });
 
-    const missingDefaultDocuments = defaults.filter((node) => {
-      const normalizedPath = normalizePath(node.path);
-      const isDefaultDocument =
-        node.type === "file" &&
-        normalizedPath.startsWith(`${homePath}/Documents/`) &&
-        node.name.endsWith(".document");
-
-      return isDefaultDocument && !existingPaths.has(normalizedPath);
-    });
-
-    const missingDefaultDesktopShortcuts = defaults.filter((node) => {
-      const normalizedPath = normalizePath(node.path);
-      const isDefaultDesktopShortcut =
-        node.type === "file" &&
-        normalizedPath.startsWith(`${homePath}/Desktop/`) &&
-        node.name.endsWith(".shortcut");
-
-      return isDefaultDesktopShortcut && !existingPaths.has(normalizedPath);
-    });
-
-    const missingDefaultMenuShortcuts = defaults.filter((node) => {
-      const normalizedPath = normalizePath(node.path);
-      const isDefaultMenuShortcut =
-        node.type === "file" &&
-        normalizedPath.startsWith(`${homePath}/.menu/`) &&
-        node.name.endsWith(".shortcut");
-
-      return isDefaultMenuShortcut && !existingPaths.has(normalizedPath);
-    });
+    const missingDefaultDocuments: FileSystemNode[] = [];
+    const missingDefaultDesktopShortcuts: FileSystemNode[] = [];
+    const missingDefaultMenuShortcuts: FileSystemNode[] = [];
 
     const withDotHiddenFix = parsed.map((node) => {
       const shouldBeHidden = node.name.startsWith(".");
@@ -173,6 +147,7 @@ export function useFileSystem() {
     const deprecatedDefaultDesktopShortcutNames = new Set([
       "calculator.shortcut",
       "visual-novel.shortcut",
+      "meditation.shortcut",
     ]);
 
     const withoutDeprecatedDefaultDesktopShortcuts =

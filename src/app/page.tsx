@@ -11,6 +11,7 @@ import {
   FileSymlink,
   FolderClosed,
   Gamepad2,
+  Heart,
   LogOut,
   Search,
   Settings,
@@ -65,6 +66,7 @@ import {
   DocumentViewerApplicationWindow,
   FileExplorerApplicationWindow,
   GameApplicationWindow,
+  MeditationApplicationWindow,
   SettingsApplicationWindow,
   SingleDocumentApplicationWindow,
   TerminalApplicationWindow,
@@ -88,6 +90,8 @@ function renderShortcutIcon(iconName?: string) {
       return <TerminalSquare size={16} className="text-white/90" />;
     case "FolderClosed":
       return <FolderClosed size={16} className="text-white/90" />;
+    case "Heart":
+      return <Heart size={16} className="text-white/90" />;
     case "Gamepad2":
       return <Gamepad2 size={16} className="text-white/90" />;
     case "Calculator":
@@ -107,6 +111,7 @@ function renderShortcutIcon(iconName?: string) {
 export default function OperatingSystemPage() {
   const fs = useFileSystem();
   const fsRef = useRef(fs);
+  const [hasMounted, setHasMounted] = useState(false);
   const [windows, setWindows] = useState<React.ReactNode[]>([]);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -197,6 +202,10 @@ export default function OperatingSystemPage() {
   );
 
   useEffect(() => {
+    setHasMounted(true);
+  }, []);
+
+  useEffect(() => {
     const syncClockPreferences = () => {
       setClockFormatState(getClockFormat());
     };
@@ -222,8 +231,9 @@ export default function OperatingSystemPage() {
   const session = useSession();
   const { isSignInModalRequested, dismissSignInModal } = useAuthPillar();
   const showLoginScreen =
-    isSignInModalRequested ||
-    (session.status !== "loading" && session.status !== "authenticated");
+    hasMounted &&
+    (isSignInModalRequested ||
+      (session.status !== "loading" && session.status !== "authenticated"));
   const shouldShowOperatingSystem = !showLoginScreen;
   const [operatingSystemVisible, setOperatingSystemVisible] = useState(false);
 
@@ -274,6 +284,9 @@ export default function OperatingSystemPage() {
               initialPath={detail.args?.[0]}
             />,
           );
+          break;
+        case "meditation":
+          addWindow(<MeditationApplicationWindow />);
           break;
         case "voxel-game":
           addWindow(<GameApplicationWindow />);
