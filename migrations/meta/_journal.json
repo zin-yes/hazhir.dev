@@ -22,6 +22,13 @@
       "when": 1720162597143,
       "tag": "0002_common_nuke",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1760486400000,
+      "tag": "0003_meditation_sessions",
+      "breakpoints": true
     }
   ]
 }

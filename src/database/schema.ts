@@ -1,5 +1,6 @@
 import {
     integer,
+  index,
     primaryKey,
     sqliteTable,
     text,
@@ -83,5 +84,31 @@ export const authenticators = sqliteTable(
     compositePK: primaryKey({
       columns: [authenticator.userId, authenticator.credentialID],
     }),
+  }),
+);
+
+export const meditationSessions = sqliteTable(
+  "meditation_session",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    userId: text("userId")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    startedAt: integer("startedAt", { mode: "timestamp_ms" }).notNull(),
+    endedAt: integer("endedAt", { mode: "timestamp_ms" }).notNull(),
+    durationSeconds: integer("durationSeconds").notNull(),
+    preset: text("preset"),
+    inhaleSeconds: integer("inhaleSeconds"),
+    holdSeconds: integer("holdSeconds"),
+    exhaleSeconds: integer("exhaleSeconds"),
+    switchSeconds: integer("switchSeconds"),
+    targetMinutes: integer("targetMinutes"),
+    roundCount: integer("roundCount"),
+  },
+  (table) => ({
+    userIdIdx: index("meditation_session_user_id_idx").on(table.userId),
+    endedAtIdx: index("meditation_session_ended_at_idx").on(table.endedAt),
   }),
 );

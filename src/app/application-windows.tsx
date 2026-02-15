@@ -7,6 +7,7 @@ import {
   EditIcon,
   FolderClosed,
   Gamepad2,
+  Heart,
   Settings,
   TerminalSquare,
 } from "lucide-react";
@@ -18,6 +19,11 @@ import LoadingWindow from "@/operating-system/application/window/loading";
 import dynamic from "next/dynamic";
 import { ReactNode, useMemo } from "react";
 import { v4 } from "uuid";
+
+const MeditationApplication = dynamic(
+  () => import("@/applications/meditation"),
+  { loading: () => <LoadingWindow />, ssr: false },
+);
 
 const CalculatorApplication = dynamic(
   () => import("@/applications/calculator"),
@@ -304,6 +310,29 @@ export function VisualNovelApplicationWindow() {
       }}
     >
       <VisualNovelApplication />
+    </ApplicationWindow>
+  );
+}
+
+export function MeditationApplicationWindow() {
+  return (
+    <ApplicationWindow
+      action_bar={{
+        title: "Nadi Shuddhi Meditation",
+        icon: {
+          svg: <Heart />,
+        },
+      }}
+      type={"MEDITATION"}
+      settings={{
+        min_width: Math.min(400, window.innerWidth - 40),
+        min_height: Math.min(500, window.innerHeight - 40),
+        starting_width: Math.min(700, window.innerWidth - 40),
+        starting_height: Math.min(600, window.innerHeight - 40),
+        allow_overflow: true,
+      }}
+    >
+      <MeditationApplication />
     </ApplicationWindow>
   );
 }

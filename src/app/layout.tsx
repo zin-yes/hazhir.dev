@@ -1,5 +1,6 @@
 import { Toaster } from "@/components/ui/sonner";
 import { ThemeProvider } from "@/providers/theme-provider";
+import { TrpcProvider } from "@/providers/trpc-provider";
 
 import "./global.css";
 
@@ -37,16 +38,18 @@ export default function RootLayout({
       <body
         className={`${default_font.className} h-full overflow-hidden overscroll-none`}
       >
-        <ThemeProvider
-          enableSystem
-          storageKey="currentTheme"
-          attribute="class"
-          defaultTheme="dark"
-          forcedTheme="dark"
-        >
-          {children}
-          <Toaster richColors position="top-right" />
-        </ThemeProvider>
+        <TrpcProvider>
+          <ThemeProvider
+            enableSystem
+            storageKey="currentTheme"
+            attribute="class"
+            defaultTheme="dark"
+            forcedTheme="dark"
+          >
+            {children}
+            <Toaster richColors position="top-right" />
+          </ThemeProvider>
+        </TrpcProvider>
       </body>
     </html>
   );
