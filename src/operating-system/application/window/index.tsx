@@ -128,6 +128,9 @@ export default function ApplicationWindow({
       ref.current.addEventListener("mousedown", () => {
         focusPane();
       });
+      ref.current.addEventListener("pointerdown", () => {
+        focusPane();
+      });
     }
   }, [ref]);
 

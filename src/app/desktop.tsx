@@ -22,6 +22,7 @@ import {
   Gamepad2,
   RefreshCw,
   Scissors,
+  Settings,
   TerminalSquare,
   Trash2,
 } from "lucide-react";
@@ -66,7 +67,12 @@ import {
   readFileDragPayload,
 } from "@/lib/file-transfer-dnd";
 import { parseShortcut } from "@/lib/shortcut";
-import { getHomePath } from "@/lib/system-user";
+import {
+  DESKTOP_LAYOUT_RESET_EVENT,
+  DESKTOP_LAYOUT_STORAGE_KEY_BASE,
+  getDesktopLayoutStorageKey,
+} from "@/lib/system-preferences";
+import { getCurrentSystemUsername, getHomePath } from "@/lib/system-user";
 import { cn } from "@/lib/utils";
 
 import {
@@ -100,7 +106,6 @@ type DesktopGridPosition = {
 
 type DesktopSortMode = "name-asc" | "name-desc" | "size-asc" | "size-desc";
 
-const DESKTOP_LAYOUT_STORAGE_KEY = "desktop-icon-layout-v2";
 const DESKTOP_GRID_COL_WIDTH = 124;
 const DESKTOP_GRID_ROW_HEIGHT = 108;
 const DESKTOP_GRID_PADDING = 12;
@@ -115,6 +120,8 @@ export default function Desktop({
   const fs = useFileSystem();
   const fsRef = useRef(fs);
   const desktopRootPath = `${getHomePath()}/Desktop`;
+  const currentUsername = getCurrentSystemUsername();
+  const desktopLayoutStorageKey = getDesktopLayoutStorageKey(currentUsername);
   const containerRef = useRef<HTMLDivElement>(null);
   const gridLayerRef = useRef<HTMLDivElement>(null);
   const desktopContextPointRef = useRef<{ x: number; y: number } | null>(null);
@@ -129,6 +136,7 @@ export default function Desktop({
     sourcePositions: Record<string, DesktopGridPosition>;
     sourcePixels: Record<string, { left: number; top: number }>;
   } | null>(null);
+  const lastTapRef = useRef<{ id: string; at: number } | null>(null);
   const [desktopNodes, setDesktopNodes] = useState<FileSystemNode[]>([]);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [lastSelectedId, setLastSelectedId] = useState<string | null>(null);
@@ -175,25 +183,50 @@ export default function Desktop({
   useEffect(() => {
     if (typeof window === "undefined") return;
     try {
-      const raw = window.localStorage.getItem(DESKTOP_LAYOUT_STORAGE_KEY);
+      const raw =
+        window.localStorage.getItem(desktopLayoutStorageKey) ??
+        window.localStorage.getItem(DESKTOP_LAYOUT_STORAGE_KEY_BASE);
       if (raw) {
         const parsed = JSON.parse(raw) as Record<string, DesktopGridPosition>;
         setItemPositions(parsed);
+        window.localStorage.setItem(desktopLayoutStorageKey, raw);
       }
     } catch {
       setItemPositions({});
     } finally {
       setLayoutHydrated(true);
     }
-  }, []);
+  }, [desktopLayoutStorageKey]);
 
   useEffect(() => {
     if (!layoutHydrated || typeof window === "undefined") return;
     window.localStorage.setItem(
-      DESKTOP_LAYOUT_STORAGE_KEY,
+      desktopLayoutStorageKey,
       JSON.stringify(itemPositions),
     );
-  }, [itemPositions, layoutHydrated]);
+  }, [desktopLayoutStorageKey, itemPositions, layoutHydrated]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const handleDesktopLayoutReset = (event: Event) => {
+      const detail = (event as CustomEvent<{ username?: string }>).detail;
+      if (detail?.username && detail.username !== currentUsername) return;
+      setItemPositions({});
+    };
+
+    window.addEventListener(
+      DESKTOP_LAYOUT_RESET_EVENT,
+      handleDesktopLayoutReset,
+    );
+
+    return () => {
+      window.removeEventListener(
+        DESKTOP_LAYOUT_RESET_EVENT,
+        handleDesktopLayoutReset,
+      );
+    };
+  }, [currentUsername]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -253,6 +286,7 @@ export default function Desktop({
         Calculator: <Calculator size={30} className="text-white" />,
         BookText: <BookText size={30} className="text-white" />,
         BookOpen: <BookOpen size={30} className="text-white" />,
+        Settings: <Settings size={30} className="text-white" />,
       };
 
       return iconName && iconByName[iconName] ? (
@@ -736,9 +770,9 @@ export default function Desktop({
     [updateSelection, visualOrderedItemIds],
   );
 
-  const handleIconMouseDown = useCallback(
-    (event: React.MouseEvent<HTMLDivElement>, id: string) => {
-      if (event.button !== 0) return;
+  const handleIconPointerDown = useCallback(
+    (event: React.PointerEvent<HTMLDivElement>, id: string) => {
+      if (event.pointerType === "mouse" && event.button !== 0) return;
       event.stopPropagation();
 
       containerRef.current?.focus();
@@ -833,8 +867,8 @@ export default function Desktop({
   );
 
   const startMarquee = useCallback(
-    (event: React.MouseEvent<HTMLDivElement>) => {
-      if (event.button !== 0) return;
+    (event: React.PointerEvent<HTMLDivElement>) => {
+      if (event.pointerType === "mouse" && event.button !== 0) return;
       const target = event.target as HTMLElement;
       if (target.closest("[data-desktop-icon='true']")) return;
 
@@ -858,6 +892,34 @@ export default function Desktop({
     [selectedSet, updateSelection],
   );
 
+  const handleIconPointerUp = useCallback(
+    (event: React.PointerEvent<HTMLDivElement>, item: DesktopItem) => {
+      if (event.pointerType !== "touch" && event.pointerType !== "pen") {
+        return;
+      }
+
+      if (draggingIdsRef.current.length > 0) return;
+
+      const candidate = dragCandidateRef.current;
+      if (candidate && candidate.primaryId === item.id) {
+        const movedX = Math.abs(event.clientX - candidate.startX);
+        const movedY = Math.abs(event.clientY - candidate.startY);
+        if (movedX + movedY > 8) return;
+      }
+
+      const now = Date.now();
+      const previous = lastTapRef.current;
+      if (previous && previous.id === item.id && now - previous.at < 320) {
+        item.onOpen?.();
+        lastTapRef.current = null;
+        return;
+      }
+
+      lastTapRef.current = { id: item.id, at: now };
+    },
+    [],
+  );
+
   const endSelection = useCallback(() => {
     if (!isSelectingRef.current) return;
     isSelectingRef.current = false;
@@ -867,7 +929,7 @@ export default function Desktop({
   }, []);
 
   useEffect(() => {
-    const handleMouseMove = (event: MouseEvent) => {
+    const handlePointerMove = (event: PointerEvent) => {
       const dragCandidate = dragCandidateRef.current;
       if (dragCandidate) {
         const deltaX = Math.abs(event.clientX - dragCandidate.startX);
@@ -988,7 +1050,7 @@ export default function Desktop({
       updateSelection(nextSelection);
     };
 
-    const handleMouseUp = (event: MouseEvent) => {
+    const handlePointerUp = (event: PointerEvent) => {
       const dragCandidate = dragCandidateRef.current;
       const activeDraggingIds = draggingIdsRef.current;
       const activeDragDelta = dragDeltaRef.current;
@@ -1201,12 +1263,12 @@ export default function Desktop({
       endSelection();
     };
 
-    window.addEventListener("mousemove", handleMouseMove);
-    window.addEventListener("mouseup", handleMouseUp);
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", handlePointerUp);
     window.addEventListener("blur", handleBlur);
     return () => {
-      window.removeEventListener("mousemove", handleMouseMove);
-      window.removeEventListener("mouseup", handleMouseUp);
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerUp);
       window.removeEventListener("blur", handleBlur);
     };
   }, [desktopItems, endSelection, fs, gridCols, gridRows, updateSelection]);
@@ -1699,15 +1761,15 @@ export default function Desktop({
           tabIndex={0}
           data-file-drop-zone="true"
           data-file-drop-kind="desktop-root"
-          className="w-screen h-screen absolute top-0 bottom-0 left-0 right-0 overflow-hidden z-0 select-none outline-none focus:outline-none"
+          className="w-screen h-screen absolute top-0 bottom-0 left-0 right-0 overflow-hidden z-0 select-none touch-none outline-none focus:outline-none"
           onDragOver={(event) => {
             event.preventDefault();
           }}
           onDrop={handleDesktopDropToRoot}
-          onMouseDownCapture={() => {
+          onPointerDownCapture={() => {
             containerRef.current?.focus();
           }}
-          onMouseDown={startMarquee}
+          onPointerDown={startMarquee}
           onKeyDown={handleDesktopKeyDown}
           onContextMenu={handleDesktopContextMenu}
         >
@@ -1849,9 +1911,10 @@ export default function Desktop({
                           iconRefs.current.delete(item.id);
                         }
                       }}
-                      onMouseDown={(event) =>
-                        handleIconMouseDown(event, item.id)
+                      onPointerDown={(event) =>
+                        handleIconPointerDown(event, item.id)
                       }
+                      onPointerUp={(event) => handleIconPointerUp(event, item)}
                       onDoubleClick={() => item.onOpen?.()}
                       onContextMenu={(event) =>
                         handleIconContextMenu(event, item.id)
@@ -2179,7 +2242,7 @@ function DesktopIcon({
     <div
       data-desktop-hit="true"
       className={cn(
-        "w-24 rounded-2xl px-2 py-3 text-white cursor-pointer transition-all duration-200",
+        "w-24 rounded-2xl px-2 py-3 text-white cursor-pointer touch-none transition-all duration-200",
         "bg-white/15 backdrop-blur-xl hover:bg-white/25",
         selected && "bg-white/30 ring-2 ring-white/70",
       )}

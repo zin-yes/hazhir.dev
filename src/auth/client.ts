@@ -1,11 +1,11 @@
 "use client";
 
 import {
-    clearGuestSession,
-    createGuestSession,
-    dismissSignInModal,
-    requestSignInModal,
-    useAuthPillar,
+  clearGuestSession,
+  createGuestSession,
+  dismissSignInModal,
+  requestSignInModal,
+  useAuthPillar,
 } from "@/hooks/use-auth-pillar";
 import { authClient } from "@/lib/auth-client";
 
@@ -18,6 +18,13 @@ type SignInOptions = {
 type CredentialsSignInOptions = {
   email: string;
   password: string;
+  callbackUrl?: string;
+};
+
+type CredentialsSignUpOptions = {
+  email: string;
+  password: string;
+  name: string;
   callbackUrl?: string;
 };
 
@@ -95,6 +102,21 @@ export async function signInWithCredentials(options: CredentialsSignInOptions) {
   return result;
 }
 
+export async function signUpWithCredentials(options: CredentialsSignUpOptions) {
+  const result = await authClient.signUp.email({
+    email: options.email,
+    password: options.password,
+    name: options.name,
+    callbackURL: options.callbackUrl,
+  });
+
+  if (result.data && !result.error) {
+    dismissSignInModal();
+  }
+
+  return result;
+}
+
 export async function signOut(options?: SignOutOptions) {
   clearGuestSession();
   requestSignInModal();
@@ -119,4 +141,3 @@ export function signInAsGuest() {
 }
 
 export { dismissSignInModal, requestSignInModal };
-
