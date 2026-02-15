@@ -68,6 +68,7 @@
   align-items: center;
   gap: 0.55em;
   font-size: 16px;
+  touch-action: none;
 }
 
 .title > span {
@@ -146,6 +147,7 @@
   aspect-ratio: 1/1;
   transform: scale(2);
   z-index: 1;
+  touch-action: none;
 }
 
 .bottom_left_resize_handle {
@@ -267,6 +269,7 @@
 
   opacity: 0;
   transition-duration: 1s;
+  touch-action: none;
 }
 
 .left_resize_handle,
@@ -275,4 +278,5 @@
   width: 10px;
   opacity: 0;
   transition-duration: 1s;
+  touch-action: none;
 }

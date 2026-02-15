@@ -1,186 +1,200 @@
+function getPointerPagePosition(event: PointerEvent) {
+  return { x: event.pageX, y: event.pageY };
+}
+
 export function addRightResizeHandleEvent(
   resizeHandleElement: HTMLDivElement,
   parentElementRef: HTMLDivElement,
-  minWidth: number
+  minWidth: number,
 ) {
-  const mousedown = (event: any) => {
+  const pointerDown = (event: PointerEvent) => {
+    event.preventDefault();
     const paneX = parentElementRef.offsetLeft;
+    const { x } = getPointerPagePosition(event);
 
     const startingMouseX =
-      event.pageX -
-      (parentElementRef.offsetWidth - parentElementRef.offsetLeft);
+      x - (parentElementRef.offsetWidth - parentElementRef.offsetLeft);
 
-    const mouseMoveEvent = (event: MouseEvent) => {
+    const pointerMoveEvent = (event: PointerEvent) => {
       event.preventDefault();
+      const { x } = getPointerPagePosition(event);
 
       parentElementRef.style.width =
-        Math.max(paneX + (event.pageX - startingMouseX), minWidth) + "px";
+        Math.max(paneX + (x - startingMouseX), minWidth) + "px";
     };
 
-    const mouseUpEvent = (event: MouseEvent) => {
-      document.removeEventListener("mousemove", mouseMoveEvent);
-      document.removeEventListener("mouseup", mouseUpEvent);
+    const pointerUpEvent = () => {
+      document.removeEventListener("pointermove", pointerMoveEvent);
+      document.removeEventListener("pointerup", pointerUpEvent);
     };
 
-    document.addEventListener("mousemove", mouseMoveEvent);
-    document.addEventListener("mouseup", mouseUpEvent);
+    document.addEventListener("pointermove", pointerMoveEvent);
+    document.addEventListener("pointerup", pointerUpEvent);
   };
 
-  resizeHandleElement?.addEventListener("mousedown", mousedown);
+  resizeHandleElement?.addEventListener("pointerdown", pointerDown);
 
-  return mousedown;
+  return pointerDown;
 }
 
 export function addLeftResizeHandleEvent(
   resizeHandleElement: HTMLDivElement,
   parentElementRef: HTMLDivElement,
-  minWidth: number
+  minWidth: number,
 ) {
-  const mousedown = (event: any) => {
+  const pointerDown = (event: PointerEvent) => {
+    event.preventDefault();
     const paneX = parentElementRef.offsetLeft;
+    const { x } = getPointerPagePosition(event);
 
-    const startingMouseX = event.pageX;
+    const startingMouseX = x;
     const startingWidth = parentElementRef.offsetWidth;
     const startingRight =
       parentElementRef.offsetWidth + parentElementRef.offsetLeft;
 
-    const mouseMoveEvent = (event: MouseEvent) => {
+    const pointerMoveEvent = (event: PointerEvent) => {
       event.preventDefault();
+      const { x } = getPointerPagePosition(event);
 
-      if (startingWidth - (event.pageX - startingMouseX) < minWidth) {
+      if (startingWidth - (x - startingMouseX) < minWidth) {
         parentElementRef.style.left = startingRight - minWidth + "px";
       } else {
-        parentElementRef.style.left =
-          paneX + (event.pageX - startingMouseX) + "px";
+        parentElementRef.style.left = paneX + (x - startingMouseX) + "px";
       }
 
       parentElementRef.style.width =
-        Math.max(startingWidth - (event.pageX - startingMouseX), minWidth) +
-        "px";
+        Math.max(startingWidth - (x - startingMouseX), minWidth) + "px";
     };
 
-    const mouseUpEvent = (event: MouseEvent) => {
-      document.removeEventListener("mousemove", mouseMoveEvent);
-      document.removeEventListener("mouseup", mouseUpEvent);
+    const pointerUpEvent = () => {
+      document.removeEventListener("pointermove", pointerMoveEvent);
+      document.removeEventListener("pointerup", pointerUpEvent);
     };
 
-    document.addEventListener("mousemove", mouseMoveEvent);
-    document.addEventListener("mouseup", mouseUpEvent);
+    document.addEventListener("pointermove", pointerMoveEvent);
+    document.addEventListener("pointerup", pointerUpEvent);
   };
 
-  resizeHandleElement?.addEventListener("mousedown", mousedown);
+  resizeHandleElement?.addEventListener("pointerdown", pointerDown);
 
-  return mousedown;
+  return pointerDown;
 }
 
 export function addBottomResizeHandleEvent(
   resizeHandleElement: HTMLDivElement,
   parentElementRef: HTMLDivElement,
-  minHeight: number
+  minHeight: number,
 ) {
-  const mousedown = (event: any) => {
+  const pointerDown = (event: PointerEvent) => {
+    event.preventDefault();
     const startingPaneY = parentElementRef.offsetTop;
+    const { y } = getPointerPagePosition(event);
 
     const startingMouseY =
-      event.pageY -
-      (parentElementRef.offsetHeight - parentElementRef.offsetTop);
+      y - (parentElementRef.offsetHeight - parentElementRef.offsetTop);
 
-    const mouseMoveEvent = (event: MouseEvent) => {
+    const pointerMoveEvent = (event: PointerEvent) => {
       event.preventDefault();
+      const { y } = getPointerPagePosition(event);
 
       parentElementRef.style.height =
-        Math.max(startingPaneY + (event.pageY - startingMouseY), minHeight) +
-        "px";
+        Math.max(startingPaneY + (y - startingMouseY), minHeight) + "px";
     };
 
-    const mouseUpEvent = (event: MouseEvent) => {
-      document.removeEventListener("mousemove", mouseMoveEvent);
-      document.removeEventListener("mouseup", mouseUpEvent);
+    const pointerUpEvent = () => {
+      document.removeEventListener("pointermove", pointerMoveEvent);
+      document.removeEventListener("pointerup", pointerUpEvent);
     };
 
-    document.addEventListener("mousemove", mouseMoveEvent);
-    document.addEventListener("mouseup", mouseUpEvent);
+    document.addEventListener("pointermove", pointerMoveEvent);
+    document.addEventListener("pointerup", pointerUpEvent);
   };
 
-  resizeHandleElement?.addEventListener("mousedown", mousedown);
+  resizeHandleElement?.addEventListener("pointerdown", pointerDown);
 
-  return mousedown;
+  return pointerDown;
 }
 
 export function addTopResizeHandleEvent(
   resizeHandleElement: HTMLDivElement,
   parentElementRef: HTMLDivElement,
-  minHeight: number
+  minHeight: number,
 ) {
-  resizeHandleElement?.addEventListener("mousedown", (event: any) => {
-    const startingPaneY = parentElementRef.offsetTop;
-
-    const startingMouseY = event.pageY;
-    const startingHeight = parentElementRef.offsetHeight;
-
-    const startingBottom =
-      parentElementRef.offsetHeight + parentElementRef.offsetTop;
-
-    const mouseMoveEvent = (event: MouseEvent) => {
+  resizeHandleElement?.addEventListener(
+    "pointerdown",
+    (event: PointerEvent) => {
       event.preventDefault();
+      const startingPaneY = parentElementRef.offsetTop;
+      const { y } = getPointerPagePosition(event);
 
-      parentElementRef.style.top =
-        (startingHeight - (event.pageY - startingMouseY) < minHeight
-          ? startingPaneY
-          : startingPaneY + (event.pageY - startingMouseY)) + "px";
+      const startingMouseY = y;
+      const startingHeight = parentElementRef.offsetHeight;
 
-      if (startingHeight - (event.pageY - startingMouseY) < minHeight) {
-        parentElementRef.style.top = startingBottom - minHeight + "px";
-      } else {
+      const startingBottom =
+        parentElementRef.offsetHeight + parentElementRef.offsetTop;
+
+      const pointerMoveEvent = (event: PointerEvent) => {
+        event.preventDefault();
+        const { y } = getPointerPagePosition(event);
+
         parentElementRef.style.top =
-          startingPaneY + (event.pageY - startingMouseY) + "px";
-      }
+          (startingHeight - (y - startingMouseY) < minHeight
+            ? startingPaneY
+            : startingPaneY + (y - startingMouseY)) + "px";
 
-      parentElementRef.style.height =
-        Math.max(startingHeight - (event.pageY - startingMouseY), minHeight) +
-        "px";
-    };
+        if (startingHeight - (y - startingMouseY) < minHeight) {
+          parentElementRef.style.top = startingBottom - minHeight + "px";
+        } else {
+          parentElementRef.style.top =
+            startingPaneY + (y - startingMouseY) + "px";
+        }
 
-    const mouseUpEvent = (event: MouseEvent) => {
-      document.removeEventListener("mousemove", mouseMoveEvent);
-      document.removeEventListener("mouseup", mouseUpEvent);
-    };
+        parentElementRef.style.height =
+          Math.max(startingHeight - (y - startingMouseY), minHeight) + "px";
+      };
 
-    document.addEventListener("mousemove", mouseMoveEvent);
-    document.addEventListener("mouseup", mouseUpEvent);
-  });
+      const pointerUpEvent = () => {
+        document.removeEventListener("pointermove", pointerMoveEvent);
+        document.removeEventListener("pointerup", pointerUpEvent);
+      };
+
+      document.addEventListener("pointermove", pointerMoveEvent);
+      document.addEventListener("pointerup", pointerUpEvent);
+    },
+  );
 }
 
 export function addDraggingHandleEvent(
   draggingHandleElement: HTMLDivElement,
-  targetElementRef: HTMLDivElement
+  targetElementRef: HTMLDivElement,
 ) {
-  const mousedown = (event: any) => {
+  const pointerDown = (event: PointerEvent) => {
+    event.preventDefault();
     const paneX = targetElementRef.offsetLeft;
     const paneY = targetElementRef.offsetTop;
+    const { x, y } = getPointerPagePosition(event);
 
-    const startingMouseX = event.pageX;
-    const startingMouseY = event.pageY;
+    const startingMouseX = x;
+    const startingMouseY = y;
 
-    const mouseMoveEvent = (event: MouseEvent) => {
+    const pointerMoveEvent = (event: PointerEvent) => {
       event.preventDefault();
+      const { x, y } = getPointerPagePosition(event);
 
-      targetElementRef.style.left =
-        paneX + (event.pageX - startingMouseX) + "px";
-      targetElementRef.style.top =
-        paneY + (event.pageY - startingMouseY) + "px";
+      targetElementRef.style.left = paneX + (x - startingMouseX) + "px";
+      targetElementRef.style.top = paneY + (y - startingMouseY) + "px";
     };
 
-    const mouseUpEvent = (event: MouseEvent) => {
-      document.removeEventListener("mousemove", mouseMoveEvent);
-      document.removeEventListener("mouseup", mouseUpEvent);
+    const pointerUpEvent = () => {
+      document.removeEventListener("pointermove", pointerMoveEvent);
+      document.removeEventListener("pointerup", pointerUpEvent);
     };
 
-    document.addEventListener("mousemove", mouseMoveEvent);
-    document.addEventListener("mouseup", mouseUpEvent);
+    document.addEventListener("pointermove", pointerMoveEvent);
+    document.addEventListener("pointerup", pointerUpEvent);
   };
 
-  draggingHandleElement?.addEventListener("mousedown", mousedown);
+  draggingHandleElement?.addEventListener("pointerdown", pointerDown);
 
-  return mousedown;
+  return pointerDown;
 }

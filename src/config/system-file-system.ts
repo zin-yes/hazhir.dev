@@ -79,6 +79,15 @@ export const SYSTEM_APPS: SystemAppDefinition[] = [
     menuDescription: "Open and read .document files.",
     includeDesktopShortcut: false,
   },
+  {
+    id: "settings",
+    executableName: "settings.app",
+    displayName: "Settings",
+    icon: "Settings",
+    desktopIconText: "Settings",
+    menuDescription: "Adjust desktop, account, and terminal preferences.",
+    includeDesktopShortcut: false,
+  },
 ];
 
 export function buildDefaultFileSystem(username: string): FileSystemNode[] {

@@ -404,8 +404,17 @@ function DirectoryTreeItem({
 interface FileGridItemProps {
   node: FileSystemNode;
   isSelected: boolean;
-  onSelect: (path: string, event: React.MouseEvent<HTMLDivElement>) => void;
+  onSelect: (
+    path: string,
+    event:
+      | React.MouseEvent<HTMLDivElement>
+      | React.PointerEvent<HTMLDivElement>,
+  ) => void;
   onOpen: (node: FileSystemNode) => void;
+  onTouchPointerDown: (
+    node: FileSystemNode,
+    event: React.PointerEvent<HTMLDivElement>,
+  ) => void;
   onOpenInEditor: (node: FileSystemNode) => void;
   onDragStartItem: (
     node: FileSystemNode,
@@ -432,6 +441,7 @@ function FileGridItem({
   isSelected,
   onSelect,
   onOpen,
+  onTouchPointerDown,
   onOpenInEditor,
   onDragStartItem,
   onDragEndItem,
@@ -500,9 +510,10 @@ function FileGridItem({
               onDropOnDirectory(node.path, event);
             }
           }}
-          onMouseDown={(e) => {
+          onPointerDown={(e) => {
             e.stopPropagation();
             onSelect(node.path, e);
+            onTouchPointerDown(node, e);
           }}
           onContextMenu={(e) => {
             onContextSelect(node.path, e);
@@ -575,6 +586,7 @@ function FileListItem({
   isSelected,
   onSelect,
   onOpen,
+  onTouchPointerDown,
   onOpenInEditor,
   onDragStartItem,
   onDragEndItem,
@@ -642,9 +654,10 @@ function FileListItem({
               onDropOnDirectory(node.path, event);
             }
           }}
-          onMouseDown={(e) => {
+          onPointerDown={(e) => {
             e.stopPropagation();
             onSelect(node.path, e);
+            onTouchPointerDown(node, e);
           }}
           onContextMenu={(e) => {
             onContextSelect(node.path, e);
@@ -845,6 +858,14 @@ export default function FileExplorerApplication({
 
   const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set());
   const [lastSelectedPath, setLastSelectedPath] = useState<string | null>(null);
+  const lastTouchTapRef = useRef<{ path: string; at: number } | null>(null);
+  const touchDragRef = useRef<{
+    pointerId: number;
+    startX: number;
+    startY: number;
+    paths: string[];
+    active: boolean;
+  } | null>(null);
   const selectedPathsRef = useRef<Set<string>>(new Set());
   const [marquee, setMarquee] = useState<{
     x: number;
@@ -1018,7 +1039,12 @@ export default function FileExplorerApplication({
   );
 
   const handleSelect = useCallback(
-    (path: string, event: React.MouseEvent<HTMLDivElement>) => {
+    (
+      path: string,
+      event:
+        | React.MouseEvent<HTMLDivElement>
+        | React.PointerEvent<HTMLDivElement>,
+    ) => {
       if (event.button !== 0) return;
       rootRef.current?.focus();
 
@@ -1377,6 +1403,88 @@ export default function FileExplorerApplication({
     [],
   );
 
+  const handleTouchPointerDownItem = useCallback(
+    (node: FileSystemNode, event: React.PointerEvent<HTMLDivElement>) => {
+      if (event.pointerType !== "touch" && event.pointerType !== "pen") {
+        return;
+      }
+
+      const now = Date.now();
+      const previous = lastTouchTapRef.current;
+      if (previous && previous.path === node.path && now - previous.at < 500) {
+        lastTouchTapRef.current = null;
+        touchDragRef.current = null;
+        handleOpen(node);
+        return;
+      }
+
+      lastTouchTapRef.current = { path: node.path, at: now };
+
+      const selection = selectedPathsRef.current;
+      const draggedPaths =
+        selection.has(node.path) && selection.size > 0
+          ? Array.from(selection)
+          : [node.path];
+
+      touchDragRef.current = {
+        pointerId: event.pointerId,
+        startX: event.clientX,
+        startY: event.clientY,
+        paths: draggedPaths,
+        active: false,
+      };
+    },
+    [handleOpen],
+  );
+
+  const handleTouchPointerMove = useCallback(
+    (event: React.PointerEvent<HTMLDivElement>) => {
+      const drag = touchDragRef.current;
+      if (!drag) return;
+      if (drag.pointerId !== event.pointerId) return;
+
+      const movedDistance =
+        Math.abs(event.clientX - drag.startX) +
+        Math.abs(event.clientY - drag.startY);
+
+      if (!drag.active && movedDistance >= 10) {
+        drag.active = true;
+        lastTouchTapRef.current = null;
+      }
+
+      if (drag.active) {
+        event.preventDefault();
+      }
+    },
+    [],
+  );
+
+  const handleTouchPointerUp = useCallback(
+    (event: React.PointerEvent<HTMLDivElement>) => {
+      const drag = touchDragRef.current;
+      if (!drag) return;
+      if (drag.pointerId !== event.pointerId) return;
+
+      if (drag.active) {
+        const dropTarget = document.elementFromPoint(
+          event.clientX,
+          event.clientY,
+        ) as HTMLElement | null;
+        const dropZone = dropTarget?.closest(
+          "[data-file-drop-zone='true']",
+        ) as HTMLElement | null;
+        const destinationPath = dropZone?.dataset.fileDropPath;
+
+        if (destinationPath) {
+          movePathsToDirectory(drag.paths, destinationPath);
+        }
+      }
+
+      touchDragRef.current = null;
+    },
+    [movePathsToDirectory],
+  );
+
   const handleDragEndItem = useCallback(() => {
     setInternalFileDragActive(false);
   }, []);
@@ -1687,6 +1795,8 @@ export default function FileExplorerApplication({
         onMouseDownCapture={() => {
           rootRef.current?.focus();
         }}
+        onPointerMoveCapture={handleTouchPointerMove}
+        onPointerUpCapture={handleTouchPointerUp}
         onKeyDown={handleExplorerKeyDown}
       >
         {childWindows}
@@ -2187,6 +2297,7 @@ export default function FileExplorerApplication({
                               onContextSelect={handleContextSelect}
                               onItemRef={handleItemRef}
                               onOpen={handleOpen}
+                              onTouchPointerDown={handleTouchPointerDownItem}
                               onOpenInEditor={handleOpenInEditor}
                               onDragStartItem={handleDragStartItem}
                               onDragEndItem={handleDragEndItem}
@@ -2215,6 +2326,7 @@ export default function FileExplorerApplication({
                               onContextSelect={handleContextSelect}
                               onItemRef={handleItemRef}
                               onOpen={handleOpen}
+                              onTouchPointerDown={handleTouchPointerDownItem}
                               onOpenInEditor={handleOpenInEditor}
                               onDragStartItem={handleDragStartItem}
                               onDragEndItem={handleDragEndItem}

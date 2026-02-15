@@ -11,8 +11,11 @@ import {
   FileSymlink,
   FolderClosed,
   Gamepad2,
+  LogOut,
   Search,
+  Settings,
   TerminalSquare,
+  User2,
 } from "lucide-react";
 import React, {
   useCallback,
@@ -26,6 +29,8 @@ import {
   signInAsGuest,
   signInWithCredentials,
   signInWithGoogle,
+  signOut,
+  signUpWithCredentials,
   useSession,
 } from "@/auth/client";
 import { Calendar } from "@/components/ui/calendar";
@@ -33,6 +38,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
@@ -46,6 +52,11 @@ import {
   readDroppedPathsFromDataTransfer,
 } from "@/lib/file-transfer-dnd";
 import { type ShortcutDefinition, parseShortcut } from "@/lib/shortcut";
+import {
+  type ClockFormat,
+  getClockFormat,
+  subscribeSystemPreferenceChanges,
+} from "@/lib/system-preferences";
 import { getHomePath, setCurrentSystemUsername } from "@/lib/system-user";
 import Image from "next/image";
 import { v4 } from "uuid";
@@ -54,6 +65,7 @@ import {
   DocumentViewerApplicationWindow,
   FileExplorerApplicationWindow,
   GameApplicationWindow,
+  SettingsApplicationWindow,
   SingleDocumentApplicationWindow,
   TerminalApplicationWindow,
   TextEditorApplicationWindow,
@@ -84,6 +96,8 @@ function renderShortcutIcon(iconName?: string) {
       return <BookText size={16} className="text-white/90" />;
     case "BookOpen":
       return <BookOpen size={16} className="text-white/90" />;
+    case "Settings":
+      return <Settings size={16} className="text-white/90" />;
     case "FileSymlink":
       return <FileSymlink size={16} className="text-white/90" />;
     default:
@@ -96,8 +110,13 @@ export default function OperatingSystemPage() {
   const [windows, setWindows] = useState<React.ReactNode[]>([]);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [registerName, setRegisterName] = useState("");
+  const [registerEmail, setRegisterEmail] = useState("");
+  const [registerPassword, setRegisterPassword] = useState("");
+  const [registerPasswordConfirm, setRegisterPasswordConfirm] = useState("");
   const [authError, setAuthError] = useState<string>("");
   const [isAuthPending, setIsAuthPending] = useState(false);
+  const [authView, setAuthView] = useState<"sign-in" | "register">("sign-in");
   const [isSystemUserReady, setIsSystemUserReady] = useState(false);
   const [isFileTransferDragActive, setIsFileTransferDragActive] =
     useState(false);
@@ -111,6 +130,13 @@ export default function OperatingSystemPage() {
   const addWindow = useCallback((pane: React.ReactNode) => {
     setWindows((previous) => [...previous, pane]);
   }, []);
+
+  const openSettingsWindow = useCallback(
+    (initialTab?: string) => {
+      addWindow(<SettingsApplicationWindow initialTab={initialTab} />);
+    },
+    [addWindow],
+  );
 
   useEffect(() => {
     fsRef.current = fs;
@@ -165,13 +191,33 @@ export default function OperatingSystemPage() {
     });
   }, [menuItems, menuSearchValue]);
 
-  const [time, setTime] = useState<string>(new Date().toLocaleTimeString());
+  const [clockFormat, setClockFormatState] = useState<ClockFormat>("12h");
+  const [time, setTime] = useState<string>(() =>
+    new Date().toLocaleTimeString([], { hour12: true }),
+  );
 
   useEffect(() => {
-    setInterval(() => {
-      setTime(new Date().toLocaleTimeString());
-    }, 1000);
+    const syncClockPreferences = () => {
+      setClockFormatState(getClockFormat());
+    };
+
+    syncClockPreferences();
+    return subscribeSystemPreferenceChanges(syncClockPreferences);
   }, []);
+
+  useEffect(() => {
+    const updateTime = () => {
+      setTime(
+        new Date().toLocaleTimeString([], {
+          hour12: clockFormat === "12h",
+        }),
+      );
+    };
+
+    updateTime();
+    const timer = window.setInterval(updateTime, 1000);
+    return () => window.clearInterval(timer);
+  }, [clockFormat]);
 
   const session = useSession();
   const { isSignInModalRequested, dismissSignInModal } = useAuthPillar();
@@ -264,6 +310,10 @@ export default function OperatingSystemPage() {
           addWindow(<TextEditorApplicationWindow filePath={filePath} />);
           break;
         }
+        case "settings": {
+          openSettingsWindow(detail.args?.[0]);
+          break;
+        }
         default:
           break;
       }
@@ -272,7 +322,7 @@ export default function OperatingSystemPage() {
     window.addEventListener(OS_LAUNCH_APPLICATION_EVENT, handler);
     return () =>
       window.removeEventListener(OS_LAUNCH_APPLICATION_EVENT, handler);
-  }, [addWindow]);
+  }, [addWindow, openSettingsWindow]);
 
   useEffect(() => {
     const updateDropZoneState = (x: number, y: number) => {
@@ -458,29 +508,54 @@ export default function OperatingSystemPage() {
                 </DropdownMenuContent>
               </DropdownMenu>
               <CalendarDropdown time={time} />
-              <div className="h-fit flex flex-row gap-2">
-                <Button
-                  variant={"ghost"}
-                  className="h-7 rounded-[10px] px-4 text-base bg-black/20 hover:bg-white hover:text-primary"
-                  disabled
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    variant={"ghost"}
+                    size="icon"
+                    className="h-7 w-7 rounded-full bg-black/20 hover:bg-white/20"
+                    aria-label="Open profile menu"
+                  >
+                    {session.data?.user.image ? (
+                      <Image
+                        loader={({ src, width, quality }) =>
+                          `${src}?w=${width}&q=${quality || 75}`
+                        }
+                        width={28}
+                        height={28}
+                        src={session.data?.user.image}
+                        alt={"Profile picture."}
+                        className="rounded-full m-0 p-0"
+                      />
+                    ) : (
+                      <User2 className="size-4" />
+                    )}
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent
+                  align="end"
+                  sideOffset={8}
+                  className="w-52 rounded-xl border border-white/10 bg-background/85 p-1 backdrop-blur-2xl z-9999"
                 >
-                  Settings
-                </Button>
-                {session.data?.user.image && (
-                  <div>
-                    <Image
-                      loader={({ src, width, quality }) =>
-                        `${src}?w=${width}&q=${quality || 75}`
-                      }
-                      width={28}
-                      height={28}
-                      src={session.data?.user.image}
-                      alt={"Profile picture."}
-                      className="rounded-full m-0 p-0"
-                    />
-                  </div>
-                )}
-              </div>
+                  <DropdownMenuItem
+                    className="rounded-lg px-2.5 py-2 text-sm text-white data-[highlighted]:bg-white/15"
+                    onClick={() => openSettingsWindow("system")}
+                  >
+                    <Settings size={14} className="text-white/80" />
+                    Settings
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator className="bg-white/10" />
+                  <DropdownMenuItem
+                    className="rounded-lg px-2.5 py-2 text-sm text-white data-[highlighted]:bg-white/15"
+                    onClick={async () => {
+                      await signOut({ callbackUrl: "/" });
+                    }}
+                  >
+                    <LogOut size={14} className="text-white/80" />
+                    Sign out
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             </div>
 
             <div className="w-screen h-screen" id="operating-system-container">
@@ -514,40 +589,71 @@ export default function OperatingSystemPage() {
 
         {showLoginScreen && (
           <div className="absolute inset-0 z-[10000] bg-black/55 backdrop-blur-sm flex items-center justify-center p-4">
-            <div className="w-full max-w-md rounded-2xl border border-white/20 bg-background/80 shadow-2xl p-6">
-              <div className="mb-6 text-center text-white">
+            <div className="w-full max-w-md rounded-2xl border border-white/15 bg-background/85 p-5 shadow-2xl backdrop-blur-xl">
+              <div className="space-y-1 text-center text-white">
                 <h1 className="text-2xl font-semibold tracking-wide">
                   hazhir.dev
                 </h1>
-                <p className="text-sm text-white/70 mt-1">
-                  Sign in to unlock your desktop
-                </p>
+                <p className="text-sm text-white/70">Welcome to your desktop</p>
               </div>
 
-              <div className="space-y-3">
+              <div className="mt-4 grid grid-cols-2 gap-2 rounded-xl border border-white/10 bg-black/20 p-1">
                 <Button
-                  className="w-full"
+                  type="button"
+                  variant={authView === "sign-in" ? "secondary" : "ghost"}
+                  className="h-8"
                   disabled={isAuthPending}
-                  onClick={async () => {
+                  onClick={() => {
                     setAuthError("");
-                    setIsAuthPending(true);
-                    try {
-                      await signInWithGoogle({ callbackUrl: "/" });
-                      dismissSignInModal();
-                    } catch {
-                      setAuthError("Google sign-in failed. Please try again.");
-                    } finally {
-                      setIsAuthPending(false);
-                    }
+                    setAuthView("sign-in");
                   }}
                 >
-                  Sign in with Google
+                  Sign in
                 </Button>
+                <Button
+                  type="button"
+                  variant={authView === "register" ? "secondary" : "ghost"}
+                  className="h-8"
+                  disabled={isAuthPending}
+                  onClick={() => {
+                    setAuthError("");
+                    setAuthView("register");
+                  }}
+                >
+                  Register
+                </Button>
+              </div>
 
-                <div className="pt-2 border-t border-white/10">
-                  <p className="text-xs uppercase tracking-wide text-white/60 mb-2">
-                    Credentials
-                  </p>
+              {authView === "sign-in" ? (
+                <div className="mt-4 space-y-3">
+                  <Button
+                    className="w-full"
+                    disabled={isAuthPending}
+                    onClick={async () => {
+                      setAuthError("");
+                      setIsAuthPending(true);
+                      try {
+                        await signInWithGoogle({ callbackUrl: "/" });
+                        dismissSignInModal();
+                      } catch {
+                        setAuthError(
+                          "Google sign-in failed. Please try again.",
+                        );
+                      } finally {
+                        setIsAuthPending(false);
+                      }
+                    }}
+                  >
+                    Continue with Google
+                  </Button>
+
+                  <div className="relative py-1">
+                    <div className="absolute inset-x-0 top-1/2 h-px bg-white/10" />
+                    <p className="relative mx-auto w-fit bg-background/85 px-2 text-[11px] uppercase tracking-wide text-white/50">
+                      or use credentials
+                    </p>
+                  </div>
+
                   <div className="space-y-2">
                     <Input
                       type="email"
@@ -593,30 +699,108 @@ export default function OperatingSystemPage() {
                         }
                       }}
                     >
-                      Sign in with Email & Password
+                      Sign in
                     </Button>
                   </div>
+
+                  <Button
+                    variant="ghost"
+                    className="w-full text-white/80 hover:text-white"
+                    disabled={isAuthPending}
+                    onClick={() => {
+                      setAuthError("");
+                      signInAsGuest();
+                      dismissSignInModal();
+                    }}
+                  >
+                    Continue as Guest
+                  </Button>
                 </div>
+              ) : (
+                <div className="mt-4 space-y-2">
+                  <Input
+                    type="text"
+                    placeholder="Name"
+                    value={registerName}
+                    onChange={(event) => setRegisterName(event.target.value)}
+                    disabled={isAuthPending}
+                  />
+                  <Input
+                    type="email"
+                    placeholder="Email"
+                    value={registerEmail}
+                    onChange={(event) => setRegisterEmail(event.target.value)}
+                    disabled={isAuthPending}
+                  />
+                  <Input
+                    type="password"
+                    placeholder="Password"
+                    value={registerPassword}
+                    onChange={(event) =>
+                      setRegisterPassword(event.target.value)
+                    }
+                    disabled={isAuthPending}
+                  />
+                  <Input
+                    type="password"
+                    placeholder="Confirm password"
+                    value={registerPasswordConfirm}
+                    onChange={(event) =>
+                      setRegisterPasswordConfirm(event.target.value)
+                    }
+                    disabled={isAuthPending}
+                  />
 
-                <Button
-                  variant="ghost"
-                  className="w-full text-white/80 hover:text-white"
-                  disabled={isAuthPending}
-                  onClick={() => {
-                    setAuthError("");
-                    signInAsGuest();
-                    dismissSignInModal();
-                  }}
-                >
-                  Sign in as Guest
-                </Button>
+                  <Button
+                    className="w-full"
+                    disabled={
+                      isAuthPending ||
+                      !registerName ||
+                      !registerEmail ||
+                      !registerPassword ||
+                      !registerPasswordConfirm
+                    }
+                    onClick={async () => {
+                      setAuthError("");
 
-                {authError && (
-                  <p className="text-sm text-red-300 text-center">
-                    {authError}
-                  </p>
-                )}
-              </div>
+                      if (registerPassword !== registerPasswordConfirm) {
+                        setAuthError("Passwords do not match.");
+                        return;
+                      }
+
+                      setIsAuthPending(true);
+                      try {
+                        const result = await signUpWithCredentials({
+                          name: registerName,
+                          email: registerEmail,
+                          password: registerPassword,
+                          callbackUrl: "/",
+                        });
+
+                        if (result.error) {
+                          setAuthError(
+                            result.error.message || "Registration failed.",
+                          );
+                        } else {
+                          dismissSignInModal();
+                        }
+                      } catch {
+                        setAuthError("Registration failed. Please try again.");
+                      } finally {
+                        setIsAuthPending(false);
+                      }
+                    }}
+                  >
+                    Create account
+                  </Button>
+                </div>
+              )}
+
+              {authError && (
+                <p className="mt-3 text-sm text-red-300 text-center">
+                  {authError}
+                </p>
+              )}
             </div>
           </div>
         )}

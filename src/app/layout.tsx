@@ -29,7 +29,11 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" suppressHydrationWarning className="h-full overflow-hidden">
+    <html
+      lang="en"
+      suppressHydrationWarning
+      className="dark h-full overflow-hidden"
+    >
       <body
         className={`${default_font.className} h-full overflow-hidden overscroll-none`}
       >

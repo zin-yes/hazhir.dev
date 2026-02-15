@@ -102,17 +102,12 @@ export function useFileSystem() {
       return isDefaultDocument && !existingPaths.has(normalizedPath);
     });
 
-    const defaultDesktopShortcutNames = new Set([
-      "github.shortcut",
-      "linkedin.shortcut",
-    ]);
-
     const missingDefaultDesktopShortcuts = defaults.filter((node) => {
       const normalizedPath = normalizePath(node.path);
       const isDefaultDesktopShortcut =
         node.type === "file" &&
         normalizedPath.startsWith(`${homePath}/Desktop/`) &&
-        defaultDesktopShortcutNames.has(node.name);
+        node.name.endsWith(".shortcut");
 
       return isDefaultDesktopShortcut && !existingPaths.has(normalizedPath);
     });

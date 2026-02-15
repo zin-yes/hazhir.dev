@@ -24,10 +24,10 @@ const CalculatorApplication = dynamic(
   { loading: () => <LoadingWindow />, ssr: false },
 );
 
-const MockSettingsApplication = dynamic(
-  () => import("@/mock-applications/settings"),
-  { loading: () => <LoadingWindow />, ssr: false },
-);
+const SettingsApplication = dynamic(() => import("@/applications/settings"), {
+  loading: () => <LoadingWindow />,
+  ssr: false,
+});
 
 const TerminalApplication = dynamic(() => import("@/applications/terminal"), {
   loading: () => <LoadingWindow />,
@@ -110,7 +110,11 @@ export function CalculatorApplicationWindow() {
   );
 }
 
-export function MockSettingsApplicationWindow() {
+export function SettingsApplicationWindow({
+  initialTab,
+}: {
+  initialTab?: string;
+}) {
   return (
     <ApplicationWindow
       action_bar={{
@@ -127,7 +131,7 @@ export function MockSettingsApplicationWindow() {
         allow_overflow: false,
       }}
     >
-      <MockSettingsApplication />
+      <SettingsApplication initialTab={initialTab} />
     </ApplicationWindow>
   );
 }
