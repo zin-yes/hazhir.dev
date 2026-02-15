@@ -39,7 +39,7 @@ type MeditationSessionRecord = {
   startedAt: string;
   endedAt: string;
   durationSeconds: number;
-  preset: BreathingPreset | null;
+  preset: string | null;
   inhaleSeconds: number | null;
   holdSeconds: number | null;
   exhaleSeconds: number | null;
