@@ -24,23 +24,29 @@ import {
   ClockFormat,
   getClockFormat,
   getWallpaperIndex,
+  getWallpaperSlideshowEnabled,
+  getWallpaperSlideshowIntervalMs,
   resetDesktopLayout,
   setClockFormat,
   setWallpaperIndex,
+  setWallpaperSlideshowEnabled,
+  setWallpaperSlideshowIntervalMs,
 } from "@/lib/system-preferences";
 import { getCurrentSystemUsername, getHomePath } from "@/lib/system-user";
+import { WALLPAPERS } from "@/lib/wallpapers";
 import { HardDrive, Monitor, User, Wallpaper } from "lucide-react";
+import Image from "next/image";
 import { useEffect, useMemo, useState } from "react";
 
 type SettingsApplicationProps = {
   initialTab?: string;
 };
 
-const WALLPAPER_CHOICES = [
-  { label: "Mountain Lake", value: "0" },
-  { label: "Purple Horizon", value: "1" },
-  { label: "Golden Sunset", value: "2" },
-];
+const WALLPAPER_CHOICES = WALLPAPERS.map((wallpaper, index) => ({
+  label: wallpaper.label,
+  value: String(index),
+  previewUrl: wallpaper.url,
+}));
 
 function normalizeInitialTab(initialTab?: string) {
   if (!initialTab) return "appearance";
@@ -58,11 +64,15 @@ export default function SettingsApplication({
   const [tab, setTab] = useState(normalizeInitialTab(initialTab));
   const [clockFormat, setClockFormatState] = useState<ClockFormat>("12h");
   const [wallpaperIndex, setWallpaperIndexState] = useState(0);
+  const [slideshowEnabled, setSlideshowEnabledState] = useState(false);
+  const [slideshowIntervalMs, setSlideshowIntervalMsState] = useState(30000);
   const [statusMessage, setStatusMessage] = useState("");
 
   useEffect(() => {
     setClockFormatState(getClockFormat());
     setWallpaperIndexState(getWallpaperIndex(WALLPAPER_CHOICES.length));
+    setSlideshowEnabledState(getWallpaperSlideshowEnabled());
+    setSlideshowIntervalMsState(getWallpaperSlideshowIntervalMs());
   }, []);
 
   useEffect(() => {
@@ -171,6 +181,57 @@ export default function SettingsApplication({
                           ))}
                         </SelectContent>
                       </Select>
+
+                      <div className="relative h-40 w-full overflow-hidden rounded-md border bg-muted/30">
+                        <Image
+                          src={
+                            WALLPAPER_CHOICES[wallpaperIndex]?.previewUrl ??
+                            WALLPAPER_CHOICES[0].previewUrl
+                          }
+                          alt={
+                            WALLPAPER_CHOICES[wallpaperIndex]?.label ??
+                            "Wallpaper preview"
+                          }
+                          fill
+                          sizes="(max-width: 768px) 100vw, 600px"
+                          className="object-cover object-center"
+                        />
+                      </div>
+
+                      <div className="grid grid-cols-3 gap-2 pt-1">
+                        {WALLPAPER_CHOICES.map((choice) => {
+                          const isActive =
+                            Number(choice.value) === wallpaperIndex;
+
+                          return (
+                            <button
+                              key={choice.value}
+                              type="button"
+                              aria-label={`Set wallpaper to ${choice.label}`}
+                              onClick={() => {
+                                const nextIndex = Number(choice.value);
+                                setWallpaperIndex(nextIndex);
+                                setWallpaperIndexState(nextIndex);
+                                setStatusMessage("Wallpaper updated.");
+                              }}
+                              className={`relative h-14 w-full overflow-hidden rounded-md border bg-muted/30 transition-colors ${
+                                isActive
+                                  ? "border-primary"
+                                  : "border-border hover:border-primary/60"
+                              }`}
+                              title={choice.label}
+                            >
+                              <Image
+                                src={choice.previewUrl}
+                                alt={choice.label}
+                                fill
+                                sizes="(max-width: 640px) 30vw, 120px"
+                                className="object-cover object-center"
+                              />
+                            </button>
+                          );
+                        })}
+                      </div>
                     </div>
 
                     <div className="space-y-1.5">
@@ -192,6 +253,54 @@ export default function SettingsApplication({
                         <SelectContent>
                           <SelectItem value="12h">12-hour</SelectItem>
                           <SelectItem value="24h">24-hour</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">Slideshow mode</Label>
+                      <Select
+                        value={slideshowEnabled ? "on" : "off"}
+                        onValueChange={(value) => {
+                          const enabled = value === "on";
+                          setWallpaperSlideshowEnabled(enabled);
+                          setSlideshowEnabledState(enabled);
+                          setStatusMessage(
+                            enabled
+                              ? "Wallpaper slideshow enabled."
+                              : "Wallpaper slideshow disabled.",
+                          );
+                        }}
+                      >
+                        <SelectTrigger className="h-8 text-xs">
+                          <SelectValue placeholder="Select mode" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="off">Off</SelectItem>
+                          <SelectItem value="on">On</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">Slideshow interval</Label>
+                      <Select
+                        value={String(slideshowIntervalMs)}
+                        onValueChange={(value) => {
+                          const nextIntervalMs = Number(value);
+                          setWallpaperSlideshowIntervalMs(nextIntervalMs);
+                          setSlideshowIntervalMsState(nextIntervalMs);
+                          setStatusMessage("Slideshow interval updated.");
+                        }}
+                      >
+                        <SelectTrigger className="h-8 text-xs">
+                          <SelectValue placeholder="Select interval" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="15000">15 seconds</SelectItem>
+                          <SelectItem value="30000">30 seconds</SelectItem>
+                          <SelectItem value="60000">1 minute</SelectItem>
+                          <SelectItem value="300000">5 minutes</SelectItem>
                         </SelectContent>
                       </Select>
                     </div>
