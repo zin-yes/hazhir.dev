@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  ImageViewerApplicationWindow,
   SingleDocumentApplicationWindow,
   TextEditorApplicationWindow,
 } from "@/app/application-windows";
@@ -57,6 +58,7 @@ import {
   setInternalDraggedPaths,
   setInternalFileDragActive,
 } from "@/lib/file-transfer-dnd";
+import { isImageFileName } from "@/lib/image-files";
 import { getHomePath } from "@/lib/system-user";
 import { cn } from "@/lib/utils";
 import {
@@ -74,7 +76,6 @@ import {
   File,
   FileAudio,
   FileCode,
-  FileImage,
   FileJson,
   FilePlus,
   FileText,
@@ -104,6 +105,7 @@ import {
   useRef,
   useState,
 } from "react";
+import NextImage from "next/image";
 import { createPortal } from "react-dom";
 import { v4 } from "uuid";
 
@@ -191,6 +193,38 @@ function getFileIcon(node: FileSystemNode, size: number = 18) {
     return <TerminalSquare size={size} className="text-orange-400" />;
   }
 
+  if (isImageFileName(node.name)) {
+    const source = node.contents?.trim() ?? "";
+    if (source) {
+      const thumbnailSize = Math.max(16, size);
+      return (
+        <div
+          className="overflow-hidden rounded-sm border border-border/70 bg-muted"
+          style={{ width: thumbnailSize, height: thumbnailSize }}
+        >
+            <NextImage
+            src={source}
+            alt={node.name}
+            width={thumbnailSize}
+            height={thumbnailSize}
+            sizes={`${thumbnailSize}px`}
+            quality={45}
+              className="h-full w-full object-cover"
+            draggable={false}
+          />
+        </div>
+      );
+    }
+
+    const thumbnailSize = Math.max(16, size);
+    return (
+      <div
+        className="overflow-hidden rounded-sm border border-border/70 bg-muted"
+        style={{ width: thumbnailSize, height: thumbnailSize }}
+      />
+    );
+  }
+
   const ext = node.name.split(".").pop()?.toLowerCase();
   const iconConfig: { icon: typeof File; color: string } = (() => {
     switch (ext) {
@@ -221,14 +255,6 @@ function getFileIcon(node: FileSystemNode, size: number = 18) {
       case "xml":
       case "toml":
         return { icon: FileJson, color: "text-yellow-400" };
-      case "png":
-      case "jpg":
-      case "jpeg":
-      case "gif":
-      case "svg":
-      case "webp":
-      case "ico":
-        return { icon: FileImage, color: "text-pink-400" };
       case "mp3":
       case "wav":
       case "flac":
@@ -1235,6 +1261,27 @@ export default function FileExplorerApplication({
         }
 
         const ext = node.name.split(".").pop()?.toLowerCase();
+        const imageExtensions = new Set([
+          "png",
+          "jpg",
+          "jpeg",
+          "gif",
+          "svg",
+          "webp",
+          "ico",
+        ]);
+
+        if (imageExtensions.has(ext || "")) {
+          const portal = createPortal(
+            <ImageViewerApplicationWindow filePath={node.path} />,
+            document.getElementById(
+              "operating-system-container",
+            ) as HTMLDivElement,
+            "image_viewer_" + v4(),
+          );
+          setChildWindows((prev) => [...prev, portal]);
+          return;
+        }
 
         if (ext === "pdf" || ext === "document") {
           const portal = createPortal(

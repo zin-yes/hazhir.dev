@@ -3,6 +3,10 @@
 import { generateCVDocumentHtml } from "@/applications/document-viewer/articles/CV";
 import type { FileSystemNode } from "@/hooks/use-file-system";
 import {
+  getImagesDirectoryPath,
+  getWallpaperImageEntries,
+} from "@/lib/image-files";
+import {
   createAppExecutableContents,
   createLinkShortcutContents,
   createShortcutContents,
@@ -62,15 +66,6 @@ export const SYSTEM_APPS: SystemAppDefinition[] = [
     includeDesktopShortcut: false,
   },
   {
-    id: "visual-novel",
-    executableName: "visual-novel.app",
-    displayName: "Visual Novel",
-    icon: "BookText",
-    desktopIconText: "Visual Novel",
-    menuDescription: "Launch the visual novel app.",
-    includeDesktopShortcut: false,
-  },
-  {
     id: "text-editor",
     executableName: "text-editor.app",
     displayName: "Text Editor",
@@ -86,6 +81,15 @@ export const SYSTEM_APPS: SystemAppDefinition[] = [
     icon: "BookOpen",
     desktopIconText: "Document Viewer",
     menuDescription: "Open and read .document files.",
+    includeDesktopShortcut: false,
+  },
+  {
+    id: "image-viewer",
+    executableName: "image-viewer.app",
+    displayName: "Image Viewer",
+    icon: "Image",
+    desktopIconText: "Image Viewer",
+    menuDescription: "Open and inspect image files.",
     includeDesktopShortcut: false,
   },
   {
@@ -105,8 +109,10 @@ export function buildDefaultFileSystem(username: string): FileSystemNode[] {
   const desktopPath = `${homePath}/Desktop`;
   const menuPath = `${homePath}/.menu`;
   const documentsPath = `${homePath}/Documents`;
+  const imagesPath = getImagesDirectoryPath(homePath);
   const cvDocumentPath = `${documentsPath}/CV.document`;
   const defaultCvDocumentContents = generateCVDocumentHtml();
+  const wallpaperImageEntries = getWallpaperImageEntries(homePath);
 
   const baseNodes: FileSystemNode[] = [
     {
@@ -176,6 +182,20 @@ export function buildDefaultFileSystem(username: string): FileSystemNode[] {
       isHidden: false,
     },
     {
+      name: "Images",
+      type: "directory",
+      path: imagesPath,
+      parentPath: homePath,
+      permissions: "r-xr-xr-x",
+      owner: username,
+      group: username,
+      size: 4096,
+      createdAt: now,
+      modifiedAt: now,
+      isHidden: false,
+      readOnly: true,
+    },
+    {
       name: "applications",
       type: "directory",
       path: "/applications",
@@ -236,6 +256,22 @@ export function buildDefaultFileSystem(username: string): FileSystemNode[] {
       modifiedAt: now,
       isHidden: false,
     },
+    ...wallpaperImageEntries.map((entry) => ({
+      name: entry.name,
+      type: "file" as const,
+      path: entry.path,
+      parentPath: entry.parentPath,
+      contents: entry.url,
+      mimeType: "image/jpeg",
+      permissions: "r--r--r--",
+      owner: username,
+      group: username,
+      size: 0,
+      createdAt: now,
+      modifiedAt: now,
+      isHidden: false,
+      readOnly: true,
+    })),
   ];
 
   const executableNodes: FileSystemNode[] = SYSTEM_APPS.map((app) => {
@@ -290,10 +326,7 @@ export function buildDefaultFileSystem(username: string): FileSystemNode[] {
     (app) => app.id !== "link",
   ).map((app) => {
     const fileName = `${app.id}.shortcut`;
-    const menuLabel =
-      app.id === "visual-novel"
-        ? "Visual Novel (work in progress)"
-        : app.displayName;
+    const menuLabel = app.displayName;
     const contents = createShortcutContents(
       `/applications/${app.executableName}`,
       {

@@ -2,6 +2,7 @@
 
 import { generateCVDocumentHtml } from "@/applications/document-viewer/articles/CV";
 import { buildDefaultFileSystem } from "@/config/system-file-system";
+import { getImagesDirectoryPath } from "@/lib/image-files";
 import { getCurrentSystemUsername, getHomePath } from "@/lib/system-user";
 
 export type FileSystemNodeType = "file" | "directory";
@@ -72,6 +73,7 @@ export function useFileSystem() {
     const parsed = JSON.parse(stored) as FileSystemNode[];
     const username = getCurrentSystemUsername();
     const homePath = `/home/${username}`;
+    const imagesPath = getImagesDirectoryPath(homePath);
     const defaults = buildDefaultFileSystem(username);
     const existingPaths = new Set(
       parsed.map((node) => normalizePath(node.path)),
@@ -94,9 +96,34 @@ export function useFileSystem() {
 
     const missingDefaultDocuments: FileSystemNode[] = [];
     const missingDefaultDesktopShortcuts: FileSystemNode[] = [];
-    const missingDefaultMenuShortcuts: FileSystemNode[] = [];
+    const missingDefaultMenuShortcuts = defaults
+      .filter(
+        (node) =>
+          normalizePath(node.path) ===
+          normalizePath(`${homePath}/.menu/image-viewer.shortcut`),
+      )
+      .filter((node) => !existingPaths.has(normalizePath(node.path)));
+    const missingDefaultImages = defaults
+      .filter((node) =>
+        normalizePath(node.path).startsWith(`${normalizePath(imagesPath)}/`),
+      )
+      .filter((node) => !existingPaths.has(normalizePath(node.path)));
 
-    const withDotHiddenFix = parsed.map((node) => {
+    const dedupedParsed = (() => {
+      const seen = new Set<string>();
+      const deduped: FileSystemNode[] = [];
+
+      for (const node of parsed) {
+        const normalizedPath = normalizePath(node.path);
+        if (seen.has(normalizedPath)) continue;
+        seen.add(normalizedPath);
+        deduped.push(node);
+      }
+
+      return deduped;
+    })();
+
+    const withDotHiddenFix = dedupedParsed.map((node) => {
       const shouldBeHidden = node.name.startsWith(".");
       if (node.isHidden === shouldBeHidden) return node;
       return {
@@ -105,12 +132,16 @@ export function useFileSystem() {
       };
     });
 
-    const isApplicationsPath = (path: string) =>
-      path === "/applications" || path.startsWith("/applications/");
+    const isProtectedPath = (path: string) =>
+      path === "/applications" ||
+      path.startsWith("/applications/") ||
+      path === normalizePath(imagesPath) ||
+      path.startsWith(`${normalizePath(imagesPath)}/`);
 
     const withProtectionPolicyFix = withDotHiddenFix.map((node) => {
       const normalizedPath = normalizePath(node.path);
-      const shouldBeReadOnly = isApplicationsPath(normalizedPath);
+      const shouldBeReadOnly =
+        Boolean(node.readOnly) || isProtectedPath(normalizedPath);
       if (Boolean(node.readOnly) === shouldBeReadOnly) return node;
       return {
         ...node,
@@ -158,6 +189,20 @@ export function useFileSystem() {
           normalizedPath.startsWith(`${homePath}/Desktop/`) &&
           deprecatedDefaultDesktopShortcutNames.has(node.name);
         return !isDeprecatedDesktopShortcut;
+      });
+
+    const deprecatedDefaultMenuShortcutNames = new Set([
+      "visual-novel.shortcut",
+    ]);
+
+    const withoutDeprecatedDefaultMenuShortcuts =
+      withoutDeprecatedDefaultDesktopShortcuts.filter((node) => {
+        const normalizedPath = normalizePath(node.path);
+        const isDeprecatedMenuShortcut =
+          node.type === "file" &&
+          normalizedPath.startsWith(`${homePath}/.menu/`) &&
+          deprecatedDefaultMenuShortcutNames.has(node.name);
+        return !isDeprecatedMenuShortcut;
       });
 
     const now = Date.now();
@@ -219,6 +264,20 @@ export function useFileSystem() {
         readOnly: false,
       },
       {
+        name: "Images",
+        type: "directory",
+        path: imagesPath,
+        parentPath: homePath,
+        permissions: "r-xr-xr-x",
+        owner: username,
+        group: username,
+        size: 4096,
+        createdAt: now,
+        modifiedAt: now,
+        isHidden: false,
+        readOnly: true,
+      },
+      {
         name: ".menu",
         type: "directory",
         path: `${homePath}/.menu`,
@@ -234,9 +293,7 @@ export function useFileSystem() {
       },
     ];
 
-    const ensuredCoreDirectories = [
-      ...withoutDeprecatedDefaultDesktopShortcuts,
-    ];
+    const ensuredCoreDirectories = [...withoutDeprecatedDefaultMenuShortcuts];
     const ensuredPathSet = new Set(
       ensuredCoreDirectories.map((node) => normalizePath(node.path)),
     );
@@ -253,7 +310,8 @@ export function useFileSystem() {
       missingSystemExecutables.length === 0 &&
       missingDefaultDocuments.length === 0 &&
       missingDefaultDesktopShortcuts.length === 0 &&
-      missingDefaultMenuShortcuts.length === 0
+      missingDefaultMenuShortcuts.length === 0 &&
+      missingDefaultImages.length === 0
     ) {
       const changed =
         ensuredCoreDirectories.length !== parsed.length ||
@@ -273,6 +331,7 @@ export function useFileSystem() {
       ...missingDefaultDocuments,
       ...missingDefaultDesktopShortcuts,
       ...missingDefaultMenuShortcuts,
+      ...missingDefaultImages,
     ];
     window.localStorage.setItem(FILE_SYSTEM_STORAGE_KEY, JSON.stringify(next));
     return next;
@@ -285,18 +344,16 @@ export function useFileSystem() {
 
   function isNodeReadOnly(path: string): boolean {
     const normalized = normalizePath(path);
-    return (
-      normalized === "/applications" || normalized.startsWith("/applications/")
-    );
+    const node = getNode(normalized);
+    if (node?.readOnly) return true;
+    return false;
   }
 
   function hasReadOnlyDescendant(path: string): boolean {
     const normalized = normalizePath(path);
     return getFileSystem().some(
       (node) =>
-        node.path.startsWith(`${normalized}/`) &&
-        (normalizePath(node.path) === "/applications" ||
-          normalizePath(node.path).startsWith("/applications/")),
+        node.path.startsWith(`${normalized}/`) && Boolean(node.readOnly),
     );
   }
 
@@ -304,10 +361,7 @@ export function useFileSystem() {
     const normalized = normalizePath(path);
     const node = getNode(path);
     if (!node || node.type !== "directory") return false;
-    if (
-      normalized === "/applications" ||
-      normalized.startsWith("/applications/")
-    ) {
+    if (node.readOnly) {
       return false;
     }
     return true;
