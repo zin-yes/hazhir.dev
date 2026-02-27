@@ -78,6 +78,8 @@ import {
 import Desktop from "./desktop";
 import Wallpaper from "./wallpaper";
 
+const OS_WINDOW_CURSOR_CHANGE_EVENT = "os-window-cursor-change";
+
 type MenuShortcutItem = {
   path: string;
   shortcut: ShortcutDefinition;
@@ -141,6 +143,8 @@ export default function OperatingSystemPage() {
     x: 0,
     y: 0,
   });
+  const [isDesktopBackgroundBlurred, setIsDesktopBackgroundBlurred] =
+    useState(false);
   const fileDragDepthRef = useRef(0);
 
   const addWindow = useCallback((pane: React.ReactNode, id?: string) => {
@@ -463,6 +467,27 @@ export default function OperatingSystemPage() {
     };
   }, []);
 
+  useEffect(() => {
+    const handleWindowCursorChange = (event: Event) => {
+      const detail = (
+        event as CustomEvent<{ isCursorOnFocusedWindow?: boolean }>
+      ).detail;
+      setIsDesktopBackgroundBlurred(Boolean(detail?.isCursorOnFocusedWindow));
+    };
+
+    window.addEventListener(
+      OS_WINDOW_CURSOR_CHANGE_EVENT,
+      handleWindowCursorChange,
+    );
+
+    return () => {
+      window.removeEventListener(
+        OS_WINDOW_CURSOR_CHANGE_EVENT,
+        handleWindowCursorChange,
+      );
+    };
+  }, []);
+
   return (
     <>
       {/* <ContextMenu>
@@ -479,6 +504,14 @@ export default function OperatingSystemPage() {
             }`}
           >
             <Desktop addWindow={addWindow} />
+            <div
+              aria-hidden="true"
+              className={`pointer-events-none absolute inset-0 z-5 transition-all duration-300 ${
+                isDesktopBackgroundBlurred
+                  ? "backdrop-blur-[1px] bg-black/20"
+                  : "backdrop-blur-0 bg-black/0"
+              }`}
+            />
             <div
               className={
                 "absolute top-0 left-0 right-0 z-1 flex flex-row justify-between m-2 p-1 text-white rounded-xl shadow-md bg-primary"
@@ -612,7 +645,7 @@ export default function OperatingSystemPage() {
               </DropdownMenu>
             </div>
 
-            <div className="w-screen h-screen" id="operating-system-container">
+            <div className="relative z-10 w-screen h-screen" id="operating-system-container">
               {windows.map((window) => {
                 return (
                   <React.Fragment key={window.id}>{window.node}</React.Fragment>

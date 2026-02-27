@@ -25,6 +25,8 @@ import {
 import { AppWindowIcon, Maximize2, Minimize2, X } from "lucide-react";
 import { v4 } from "uuid";
 
+const OS_WINDOW_CURSOR_CHANGE_EVENT = "os-window-cursor-change";
+
 // TODO: Add a way to have "system" configs (e.g. desktop 'wallpaper', accent color, text size/scaling options).
 // TODO: Refactor this into a class and split the repeatable chunks of logic up into other files.
 // TODO: Clean up the code and make it more understandable and concise if possible.
@@ -107,12 +109,13 @@ export default function ApplicationWindow({
     allow_overflow?: boolean;
   };
 }) {
-  let maximized = false;
+  const [maximized, setMaximized] = useState(false);
   const isFirefox =
     typeof navigator !== "undefined" && /firefox/i.test(navigator.userAgent);
   const bodyId = useId();
   const titleId = useId();
   const _identifier = useMemo<string>(() => v4(), []);
+  const resolvedIdentifier = identifier ?? _identifier;
 
   const ref = useRef<HTMLDivElement>(null);
   const fileDropHoverDepthRef = useRef(0);
@@ -120,21 +123,68 @@ export default function ApplicationWindow({
   // Center the pane element.
   useEffect(() => {
     if (ref.current) {
+      const element = ref.current;
       focusPane();
-      ref.current.id = identifier ?? _identifier;
-      ref.current.setAttribute("applicationType", type ?? "UNDEFINED");
+      element.id = resolvedIdentifier;
+      element.setAttribute("applicationType", type ?? "UNDEFINED");
       setTimeout(() => {
         center();
       }, 300);
 
-      ref.current.addEventListener("mousedown", () => {
+      const handleMouseDown = () => {
         focusPane();
-      });
-      ref.current.addEventListener("pointerdown", () => {
-        focusPane();
-      });
+      };
+
+      const handlePointerEnter = () => {
+        const bodyElement = element.getElementsByClassName(
+          styles.body,
+        )[0] as HTMLDivElement;
+        const isFocusedWindow = bodyElement.classList.contains(
+          styles.pane_in_focus,
+        );
+
+        window.dispatchEvent(
+          new CustomEvent(OS_WINDOW_CURSOR_CHANGE_EVENT, {
+            detail: {
+              isCursorOnFocusedWindow: isFocusedWindow,
+            },
+          }),
+        );
+      };
+
+      const handlePointerLeave = () => {
+        window.dispatchEvent(
+          new CustomEvent(OS_WINDOW_CURSOR_CHANGE_EVENT, {
+            detail: {
+              isCursorOnFocusedWindow: false,
+            },
+          }),
+        );
+      };
+
+      element.addEventListener("mousedown", handleMouseDown);
+      element.addEventListener("pointerenter", handlePointerEnter);
+      element.addEventListener("pointerleave", handlePointerLeave);
+
+      return () => {
+        element.removeEventListener("mousedown", handleMouseDown);
+        element.removeEventListener("pointerenter", handlePointerEnter);
+        element.removeEventListener("pointerleave", handlePointerLeave);
+      };
     }
-  }, [ref]);
+  }, [ref, resolvedIdentifier, type]);
+
+  const handlePointerDown = () => {
+    focusPane();
+
+    window.dispatchEvent(
+      new CustomEvent(OS_WINDOW_CURSOR_CHANGE_EVENT, {
+        detail: {
+          isCursorOnFocusedWindow: true,
+        },
+      }),
+    );
+  };
 
   // Add resize and drag functionality to pane.
   useEffect(() => {
@@ -269,7 +319,7 @@ export default function ApplicationWindow({
       (
         ref.current.getElementsByClassName(styles.body)[0] as HTMLDivElement
       ).style.borderRadius = "0em";
-      maximized = true;
+      setMaximized(true);
 
       setTimeout(() => {
         if (ref.current) ref.current.style.transition = "";
@@ -309,7 +359,7 @@ export default function ApplicationWindow({
           titleElement.style.pointerEvents = "";
           addDraggingHandleEvent(titleElement, ref.current);
         }
-        maximized = false;
+        setMaximized(false);
       }
     }
   };
@@ -384,6 +434,7 @@ export default function ApplicationWindow({
 
       // Set current window to highest z-index (number of windows)
       ref.current.style.zIndex = String(windows.length);
+
     }
   };
 
@@ -391,29 +442,32 @@ export default function ApplicationWindow({
     if (ref.current) {
       ref.current.style.opacity = "0";
       ref.current.style.transform = "scale(0)";
-
-      if (onClose) {
-        setTimeout(() => {
-          onClose();
-        }, 600);
-        return;
-      }
+      const applicationWindowElements =
+        document.getElementsByClassName("applicationWindow");
 
       setTimeout(() => {
-        if (ref.current) {
+        if (onClose) {
+          onClose();
+        } else if (ref.current) {
           const parent = ref.current.parentElement;
           if (parent?.contains(ref.current)) {
             parent.removeChild(ref.current);
           }
         }
       }, 600);
-      const applicationWindowElements =
-        document.getElementsByClassName("applicationWindow");
+
+      window.dispatchEvent(
+        new CustomEvent(OS_WINDOW_CURSOR_CHANGE_EVENT, {
+          detail: {
+            isCursorOnFocusedWindow: false,
+          },
+        }),
+      );
 
       let topPane: HTMLDivElement | undefined;
       for (let i = 0; i < applicationWindowElements.length; i++) {
         const item = applicationWindowElements[i];
-        if (item.id === identifier) continue;
+        if (item.id === resolvedIdentifier) continue;
 
         if (!topPane) topPane = item as HTMLDivElement;
 
@@ -459,6 +513,7 @@ export default function ApplicationWindow({
         " applicationWindow " +
         (isFileDropHover ? styles.file_drop_hover : "")
       }
+      onPointerDown={handlePointerDown}
       onDragEnterCapture={(event) => {
         if (!hasFileDragType(event.dataTransfer)) return;
         fileDropHoverDepthRef.current += 1;
