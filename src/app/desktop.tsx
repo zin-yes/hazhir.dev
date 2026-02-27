@@ -66,6 +66,7 @@ import {
   FILE_PATH_DROP_EVENT,
   readFileDragPayload,
 } from "@/lib/file-transfer-dnd";
+import { isImageFileName } from "@/lib/image-files";
 import { parseShortcut } from "@/lib/shortcut";
 import {
   DESKTOP_LAYOUT_RESET_EVENT,
@@ -83,9 +84,11 @@ import {
   useRef,
   useState,
 } from "react";
+import Image from "next/image";
 import { createPortal } from "react-dom";
 import {
   FileExplorerApplicationWindow,
+  ImageViewerApplicationWindow,
   SingleDocumentApplicationWindow,
   TextEditorApplicationWindow,
 } from "./application-windows";
@@ -287,6 +290,7 @@ export default function Desktop({
         BookText: <BookText size={30} className="text-white" />,
         BookOpen: <BookOpen size={30} className="text-white" />,
         Settings: <Settings size={30} className="text-white" />,
+        Image: <FileImage size={30} className="text-white" />,
       };
 
       return iconName && iconByName[iconName] ? (
@@ -298,6 +302,30 @@ export default function Desktop({
 
     if (isExecutableFile(node)) {
       return <FileCode size={30} className="text-orange-200" />;
+    }
+
+    if (isImageFileName(node.name)) {
+      const source = node.contents?.trim() ?? "";
+      if (source) {
+        return (
+          <div className="size-[30px] overflow-hidden rounded-md border border-white/20 bg-black/20">
+            <Image
+              src={source}
+              alt={node.name}
+              width={30}
+              height={30}
+              sizes="30px"
+              quality={45}
+              className="size-[30px] object-cover"
+              draggable={false}
+            />
+          </div>
+        );
+      }
+
+      return (
+        <div className="size-[30px] overflow-hidden rounded-md border border-white/20 bg-black/20" />
+      );
     }
 
     const ext = node.name.split(".").pop()?.toLowerCase();
@@ -320,13 +348,6 @@ export default function Desktop({
         case "xml":
         case "toml":
           return { icon: FileCode, color: "text-emerald-200" };
-        case "png":
-        case "jpg":
-        case "jpeg":
-        case "gif":
-        case "svg":
-        case "webp":
-          return { icon: FileImage, color: "text-pink-200" };
         case "mp3":
         case "wav":
         case "flac":
@@ -359,6 +380,19 @@ export default function Desktop({
       }
 
       const ext = node.name.split(".").pop()?.toLowerCase();
+      const imageExtensions = new Set([
+        "png",
+        "jpg",
+        "jpeg",
+        "gif",
+        "svg",
+        "webp",
+        "ico",
+      ]);
+      if (imageExtensions.has(ext || "")) {
+        return () =>
+          addWindow(<ImageViewerApplicationWindow filePath={node.path} />);
+      }
       const textExtensions = new Set([
         "txt",
         "md",

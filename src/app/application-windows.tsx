@@ -8,6 +8,7 @@ import {
   FolderClosed,
   Gamepad2,
   Heart,
+  ImageIcon,
   Settings,
   TerminalSquare,
 } from "lucide-react";
@@ -62,6 +63,11 @@ const TextEditorApplication = dynamic(
 
 const VisualNovelApplication = dynamic(
   () => import("@/applications/visual-novel"),
+  { loading: () => <LoadingWindow />, ssr: false },
+);
+
+const ImageViewerApplication = dynamic(
+  () => import("@/applications/image-viewer"),
   { loading: () => <LoadingWindow />, ssr: false },
 );
 
@@ -236,6 +242,35 @@ export function SingleDocumentApplicationWindow({
       }}
     >
       <DocumentViewerApplication filePath={resolvedFilePath} mode="single" />
+    </ApplicationWindow>
+  );
+}
+
+export function ImageViewerApplicationWindow({
+  filePath,
+}: {
+  filePath?: string;
+}) {
+  const homePath = getHomePath();
+  const displayPath = filePath ? filePath.replace(homePath, "~") : "~/Images";
+  return (
+    <ApplicationWindow
+      action_bar={{
+        title: `Image Viewer - ${displayPath}`,
+        icon: {
+          svg: <ImageIcon />,
+        },
+      }}
+      type="IMAGE_VIEWER"
+      settings={{
+        min_width: 720,
+        min_height: 460,
+        starting_width: Math.min(1000, window.innerWidth - 40),
+        starting_height: Math.min(680, window.innerHeight - 40),
+        allow_overflow: true,
+      }}
+    >
+      <ImageViewerApplication initialFilePath={filePath} />
     </ApplicationWindow>
   );
 }

@@ -12,6 +12,7 @@ import {
   FolderClosed,
   Gamepad2,
   Heart,
+  ImageIcon,
   LogOut,
   Search,
   Settings,
@@ -66,12 +67,12 @@ import {
   DocumentViewerApplicationWindow,
   FileExplorerApplicationWindow,
   GameApplicationWindow,
+  ImageViewerApplicationWindow,
   MeditationApplicationWindow,
   SettingsApplicationWindow,
   SingleDocumentApplicationWindow,
   TerminalApplicationWindow,
   TextEditorApplicationWindow,
-  VisualNovelApplicationWindow,
 } from "./application-windows";
 import Desktop from "./desktop";
 import Wallpaper from "./wallpaper";
@@ -102,6 +103,8 @@ function renderShortcutIcon(iconName?: string) {
       return <BookOpen size={16} className="text-white/90" />;
     case "Settings":
       return <Settings size={16} className="text-white/90" />;
+    case "Image":
+      return <ImageIcon size={16} className="text-white/90" />;
     case "FileSymlink":
       return <FileSymlink size={16} className="text-white/90" />;
     default:
@@ -294,9 +297,6 @@ export default function OperatingSystemPage() {
         case "calculator":
           addWindow(<CalculatorApplicationWindow />);
           break;
-        case "visual-novel":
-          addWindow(<VisualNovelApplicationWindow />);
-          break;
         case "document-viewer": {
           const requested = detail.args?.[0];
           if (!requested) {
@@ -315,6 +315,12 @@ export default function OperatingSystemPage() {
               filePath={filePath}
               title={title}
             />,
+          );
+          break;
+        }
+        case "image-viewer": {
+          addWindow(
+            <ImageViewerApplicationWindow filePath={detail.args?.[0]} />,
           );
           break;
         }
