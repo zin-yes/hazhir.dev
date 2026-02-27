@@ -95,6 +95,7 @@ import {
   Search,
   TerminalSquare,
   Trash2,
+  User,
   Video,
 } from "lucide-react";
 import {
@@ -171,12 +172,22 @@ function formatDate(timestamp: number): string {
 
 function getFileIcon(node: FileSystemNode, size: number = 18) {
   if (node.type === "directory") {
+    if (node.path === "/home" || node.name === "home") {
+      return <Home size={size} className="text-blue-400" />;
+    }
+
+    if (node.parentPath === "/home") {
+      return <User size={size} className="text-blue-400" />;
+    }
+
     const iconMap: Record<string, typeof Folder> = {
       Documents: FileText,
-      applications: Folder,
-      Applications: Folder,
+      applications: Grid3X3,
+      Applications: Grid3X3,
       Downloads: Download,
       Pictures: Image,
+      images: Image,
+      Images: Image,
       Music: Music,
       Videos: Video,
       Desktop: HardDrive,
@@ -865,7 +876,8 @@ export default function FileExplorerApplication({
               path: `${homePath}/Documents`,
               icon: FileText,
             },
-            { name: "Applications", path: "/applications", icon: Folder },
+            { name: "Images", path: `${homePath}/Images`, icon: Image },
+            { name: "Applications", path: "/applications", icon: Grid3X3 },
             { name: "Root", path: "/", icon: HardDrive },
           ],
     [homePath, isPickerMode, pickerRootPath],
