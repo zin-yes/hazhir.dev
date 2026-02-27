@@ -66,6 +66,7 @@ import {
   CalculatorApplicationWindow,
   DocumentViewerApplicationWindow,
   FileExplorerApplicationWindow,
+  FilePropertiesApplicationWindow,
   GameApplicationWindow,
   ImageViewerApplicationWindow,
   MeditationApplicationWindow,
@@ -105,6 +106,8 @@ function renderShortcutIcon(iconName?: string) {
       return <Settings size={16} className="text-white/90" />;
     case "Image":
       return <ImageIcon size={16} className="text-white/90" />;
+    case "Info":
+      return <Circle size={16} className="text-white/90" />;
     case "FileSymlink":
       return <FileSymlink size={16} className="text-white/90" />;
     default:
@@ -278,7 +281,12 @@ export default function OperatingSystemPage() {
 
       switch (detail.appId) {
         case "terminal":
-          addWindow(<TerminalApplicationWindow identifier={v4()} />);
+          addWindow(
+            <TerminalApplicationWindow
+              identifier={v4()}
+              initialPath={detail.args?.[0]}
+            />,
+          );
           break;
         case "file-explorer":
           addWindow(
@@ -331,6 +339,12 @@ export default function OperatingSystemPage() {
         }
         case "settings": {
           openSettingsWindow(detail.args?.[0]);
+          break;
+        }
+        case "file-properties": {
+          addWindow(
+            <FilePropertiesApplicationWindow filePath={detail.args?.[0]} />,
+          );
           break;
         }
         default:
