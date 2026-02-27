@@ -78,11 +78,15 @@ const FilePropertiesApplication = dynamic(
 );
 
 export function TextEditorApplicationWindow({
+  identifier,
   filePath,
+  onClose,
 }: {
+  identifier?: string;
   filePath?: string;
+  onClose?: () => void;
 }) {
-  const identifier = useMemo(() => v4(), []);
+  const resolvedIdentifier = useMemo(() => identifier ?? v4(), [identifier]);
   const fileName = filePath?.split("/").pop() || "Text Editor";
   return (
     <ApplicationWindow
@@ -92,8 +96,9 @@ export function TextEditorApplicationWindow({
           svg: <EditIcon />,
         },
       }}
-      identifier={identifier}
+      identifier={resolvedIdentifier}
       type={"TEXT_EDITOR"}
+      onClose={onClose}
       settings={{
         min_width: Math.min(400, window.innerWidth - 40),
         min_height: Math.min(300, window.innerHeight - 40),
@@ -102,7 +107,11 @@ export function TextEditorApplicationWindow({
         allow_overflow: false,
       }}
     >
-      <TextEditorApplication filePath={filePath} identifier={identifier} />
+      <TextEditorApplication
+        filePath={filePath}
+        identifier={resolvedIdentifier}
+        onRequestClose={onClose}
+      />
     </ApplicationWindow>
   );
 }
