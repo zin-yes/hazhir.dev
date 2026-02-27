@@ -15,11 +15,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 interface TextEditorProps {
   filePath?: string;
   identifier: string;
+  onRequestClose?: () => void;
 }
 
 export default function TextEditorApplication({
   filePath,
   identifier,
+  onRequestClose,
 }: TextEditorProps) {
   const fs = useFileSystem();
   const operatingSystem = UseOperatingSystem();
@@ -47,13 +49,21 @@ export default function TextEditorApplication({
 
     windowElement.style.opacity = "0";
     windowElement.style.transform = "scale(0)";
+
+    if (onRequestClose) {
+      window.setTimeout(() => {
+        onRequestClose();
+      }, 600);
+      return;
+    }
+
     window.setTimeout(() => {
       const parent = windowElement.parentElement;
       if (parent?.contains(windowElement)) {
         parent.removeChild(windowElement);
       }
     }, 600);
-  }, []);
+  }, [onRequestClose]);
 
   // Initialize file contents
   useEffect(() => {

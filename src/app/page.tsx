@@ -86,6 +86,11 @@ type MenuShortcutItem = {
   iconName: string;
 };
 
+type WindowEntry = {
+  id: string;
+  node: React.ReactNode;
+};
+
 function renderShortcutIcon(iconName?: string) {
   switch (iconName) {
     case "TerminalSquare":
@@ -118,7 +123,7 @@ export default function OperatingSystemPage() {
   const fs = useFileSystem();
   const fsRef = useRef(fs);
   const [hasMounted, setHasMounted] = useState(false);
-  const [windows, setWindows] = useState<React.ReactNode[]>([]);
+  const [windows, setWindows] = useState<WindowEntry[]>([]);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [registerName, setRegisterName] = useState("");
@@ -138,8 +143,16 @@ export default function OperatingSystemPage() {
   });
   const fileDragDepthRef = useRef(0);
 
-  const addWindow = useCallback((pane: React.ReactNode) => {
-    setWindows((previous) => [...previous, pane]);
+  const addWindow = useCallback((pane: React.ReactNode, id?: string) => {
+    const windowId = id ?? v4();
+    setWindows((previous) => [...previous, { id: windowId, node: pane }]);
+    return windowId;
+  }, []);
+
+  const removeWindow = useCallback((windowId: string) => {
+    setWindows((previous) =>
+      previous.filter((window) => window.id !== windowId),
+    );
   }, []);
 
   const openSettingsWindow = useCallback(
@@ -334,7 +347,15 @@ export default function OperatingSystemPage() {
         }
         case "text-editor": {
           const filePath = detail.args?.[0];
-          addWindow(<TextEditorApplicationWindow filePath={filePath} />);
+          const windowId = v4();
+          addWindow(
+            <TextEditorApplicationWindow
+              identifier={windowId}
+              filePath={filePath}
+              onClose={() => removeWindow(windowId)}
+            />,
+            windowId,
+          );
           break;
         }
         case "settings": {
@@ -355,7 +376,7 @@ export default function OperatingSystemPage() {
     window.addEventListener(OS_LAUNCH_APPLICATION_EVENT, handler);
     return () =>
       window.removeEventListener(OS_LAUNCH_APPLICATION_EVENT, handler);
-  }, [addWindow, openSettingsWindow]);
+  }, [addWindow, openSettingsWindow, removeWindow]);
 
   useEffect(() => {
     const updateDropZoneState = (x: number, y: number) => {
@@ -592,8 +613,10 @@ export default function OperatingSystemPage() {
             </div>
 
             <div className="w-screen h-screen" id="operating-system-container">
-              {windows.map((item, index) => {
-                return <React.Fragment key={index}>{item}</React.Fragment>;
+              {windows.map((window) => {
+                return (
+                  <React.Fragment key={window.id}>{window.node}</React.Fragment>
+                );
               })}
             </div>
 

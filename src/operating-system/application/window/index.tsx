@@ -75,6 +75,7 @@ class ApplicationErrorBoundary extends React.Component<
 export default function ApplicationWindow({
   identifier,
   type,
+  onClose,
   children,
   className,
   action_bar = {},
@@ -88,6 +89,7 @@ export default function ApplicationWindow({
 }: {
   identifier?: string;
   type?: ApplicationWindowType;
+  onClose?: () => void;
   children?: React.ReactNode;
   className?: string;
   action_bar?: {
@@ -389,6 +391,14 @@ export default function ApplicationWindow({
     if (ref.current) {
       ref.current.style.opacity = "0";
       ref.current.style.transform = "scale(0)";
+
+      if (onClose) {
+        setTimeout(() => {
+          onClose();
+        }, 600);
+        return;
+      }
+
       setTimeout(() => {
         if (ref.current) {
           const parent = ref.current.parentElement;
