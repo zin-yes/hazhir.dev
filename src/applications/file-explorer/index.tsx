@@ -1,8 +1,10 @@
 "use client";
 
 import {
+  FilePropertiesApplicationWindow,
   ImageViewerApplicationWindow,
   SingleDocumentApplicationWindow,
+  TerminalApplicationWindow,
   TextEditorApplicationWindow,
 } from "@/app/application-windows";
 import { Button } from "@/components/ui/button";
@@ -453,6 +455,8 @@ interface FileGridItemProps {
     event: React.PointerEvent<HTMLDivElement>,
   ) => void;
   onOpenInEditor: (node: FileSystemNode) => void;
+  onViewProperties: (node: FileSystemNode) => void;
+  onOpenTerminalHere: (node: FileSystemNode) => void;
   onDragStartItem: (
     node: FileSystemNode,
     event: React.DragEvent<HTMLDivElement>,
@@ -480,6 +484,8 @@ function FileGridItem({
   onOpen,
   onTouchPointerDown,
   onOpenInEditor,
+  onViewProperties,
+  onOpenTerminalHere,
   onDragStartItem,
   onDragEndItem,
   onDropOnDirectory,
@@ -582,13 +588,23 @@ function FileGridItem({
             Open in Text Editor
           </ContextMenuItem>
         ) : null}
+        <ContextMenuItem onClick={() => onOpenTerminalHere(node)}>
+          <TerminalSquare size={16} className="mr-2" />
+          Open Terminal Here
+        </ContextMenuItem>
         <ContextMenuSeparator />
-        <ContextMenuItem onClick={() => onCut(node)}>
+        <ContextMenuItem
+          onClick={() => onCut(node)}
+          disabled={node.type === "file" && Boolean(node.readOnly)}
+        >
           <Scissors size={16} className="mr-2" />
           Cut
           <ContextMenuShortcut>Ctrl+X</ContextMenuShortcut>
         </ContextMenuItem>
-        <ContextMenuItem onClick={() => onCopy(node)}>
+        <ContextMenuItem
+          onClick={() => onCopy(node)}
+          disabled={node.type === "file" && Boolean(node.readOnly)}
+        >
           <Copy size={16} className="mr-2" />
           Copy
           <ContextMenuShortcut>Ctrl+C</ContextMenuShortcut>
@@ -611,6 +627,11 @@ function FileGridItem({
           Delete
           <ContextMenuShortcut>Del</ContextMenuShortcut>
         </ContextMenuItem>
+        <ContextMenuSeparator />
+        <ContextMenuItem onClick={() => onViewProperties(node)}>
+          <FileText size={16} className="mr-2" />
+          Properties
+        </ContextMenuItem>
       </ContextMenuContent>
     </ContextMenu>
   );
@@ -625,6 +646,8 @@ function FileListItem({
   onOpen,
   onTouchPointerDown,
   onOpenInEditor,
+  onViewProperties,
+  onOpenTerminalHere,
   onDragStartItem,
   onDragEndItem,
   onDropOnDirectory,
@@ -734,13 +757,23 @@ function FileListItem({
             Open in Text Editor
           </ContextMenuItem>
         ) : null}
+        <ContextMenuItem onClick={() => onOpenTerminalHere(node)}>
+          <TerminalSquare size={16} className="mr-2" />
+          Open Terminal Here
+        </ContextMenuItem>
         <ContextMenuSeparator />
-        <ContextMenuItem onClick={() => onCut(node)}>
+        <ContextMenuItem
+          onClick={() => onCut(node)}
+          disabled={node.type === "file" && Boolean(node.readOnly)}
+        >
           <Scissors size={16} className="mr-2" />
           Cut
           <ContextMenuShortcut>Ctrl+X</ContextMenuShortcut>
         </ContextMenuItem>
-        <ContextMenuItem onClick={() => onCopy(node)}>
+        <ContextMenuItem
+          onClick={() => onCopy(node)}
+          disabled={node.type === "file" && Boolean(node.readOnly)}
+        >
           <Copy size={16} className="mr-2" />
           Copy
           <ContextMenuShortcut>Ctrl+C</ContextMenuShortcut>
@@ -762,6 +795,11 @@ function FileListItem({
           <Trash2 size={16} className="mr-2" />
           Delete
           <ContextMenuShortcut>Del</ContextMenuShortcut>
+        </ContextMenuItem>
+        <ContextMenuSeparator />
+        <ContextMenuItem onClick={() => onViewProperties(node)}>
+          <FileText size={16} className="mr-2" />
+          Properties
         </ContextMenuItem>
       </ContextMenuContent>
     </ContextMenu>
@@ -1353,6 +1391,37 @@ export default function FileExplorerApplication({
     [isPickerMode],
   );
 
+  const handleViewProperties = useCallback(
+    (node: FileSystemNode) => {
+      if (isPickerMode) return;
+      const portal = createPortal(
+        <FilePropertiesApplicationWindow filePath={node.path} />,
+        document.getElementById("operating-system-container") as HTMLDivElement,
+        "file_properties_" + v4(),
+      );
+      setChildWindows((prev) => [...prev, portal]);
+    },
+    [isPickerMode],
+  );
+
+  const handleOpenTerminalHere = useCallback((path: string) => {
+    if (isPickerMode) return;
+
+    const targetDirectory = fs.isDirectory(path)
+      ? path
+      : fs.getParentPath(path);
+
+    const portal = createPortal(
+      <TerminalApplicationWindow
+        identifier={v4()}
+        initialPath={targetDirectory}
+      />,
+      document.getElementById("operating-system-container") as HTMLDivElement,
+      "terminal_" + v4(),
+    );
+    setChildWindows((prev) => [...prev, portal]);
+  }, [fs, isPickerMode]);
+
   const handleDelete = useCallback(
     (node: FileSystemNode) => {
       if (isPickerMode) return;
@@ -1369,6 +1438,7 @@ export default function FileExplorerApplication({
   const handleCopy = useCallback(
     (node: FileSystemNode) => {
       if (isPickerMode) return;
+      if (node.type === "file" && node.readOnly) return;
       setFileClipboard({
         mode: "copy",
         paths: [node.path],
@@ -1381,6 +1451,7 @@ export default function FileExplorerApplication({
   const handleCut = useCallback(
     (node: FileSystemNode) => {
       if (isPickerMode) return;
+      if (node.type === "file" && node.readOnly) return;
       setFileClipboard({
         mode: "cut",
         paths: [node.path],
@@ -2358,6 +2429,10 @@ export default function FileExplorerApplication({
                               onOpen={handleOpen}
                               onTouchPointerDown={handleTouchPointerDownItem}
                               onOpenInEditor={handleOpenInEditor}
+                              onViewProperties={handleViewProperties}
+                              onOpenTerminalHere={(node) =>
+                                handleOpenTerminalHere(node.path)
+                              }
                               onDragStartItem={handleDragStartItem}
                               onDragEndItem={handleDragEndItem}
                               onDropOnDirectory={handleDropOnDirectory}
@@ -2387,6 +2462,10 @@ export default function FileExplorerApplication({
                               onOpen={handleOpen}
                               onTouchPointerDown={handleTouchPointerDownItem}
                               onOpenInEditor={handleOpenInEditor}
+                              onViewProperties={handleViewProperties}
+                              onOpenTerminalHere={(node) =>
+                                handleOpenTerminalHere(node.path)
+                              }
                               onDragStartItem={handleDragStartItem}
                               onDragEndItem={handleDragEndItem}
                               onDropOnDirectory={handleDropOnDirectory}
@@ -2441,6 +2520,14 @@ export default function FileExplorerApplication({
                   </>
                 ) : null}
                 {!isPickerMode ? <ContextMenuSeparator /> : null}
+                {!isPickerMode ? (
+                  <ContextMenuItem
+                    onClick={() => handleOpenTerminalHere(currentPath)}
+                  >
+                    <TerminalSquare size={16} className="mr-2" />
+                    Open Terminal Here
+                  </ContextMenuItem>
+                ) : null}
                 <ContextMenuItem onClick={() => setShowHidden(!showHidden)}>
                   {showHidden ? (
                     <EyeOff size={16} className="mr-2" />

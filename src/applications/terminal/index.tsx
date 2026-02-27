@@ -22,14 +22,17 @@ import {
   insertTextIntoCommandBuffer,
   parseCommand,
 } from "./command-line-routine";
+import { setCwd } from "./command-callbacks/cd";
 
 import ansi from "ansi-escape-sequences";
 import figlet from "figlet";
 
 export default function TerminalApplication({
   windowIdentifier,
+  initialPath,
 }: {
   windowIdentifier: string;
+  initialPath?: string;
 }) {
   const [resizeMessage, setResizeMessage] = useState<string>("");
 
@@ -165,6 +168,9 @@ export default function TerminalApplication({
             }
 
             setActiveTerminalWindow(windowIdentifier);
+            if (initialPath) {
+              setCwd(initialPath, windowIdentifier);
+            }
             terminal.write(getCommandLinePrefix(username));
 
             terminal.onKey(async (event) => {
@@ -188,6 +194,7 @@ export default function TerminalApplication({
     fitAddon,
     terminalResizeObserver,
     session,
+    initialPath,
   ]);
 
   useEffect(() => {

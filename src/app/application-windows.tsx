@@ -5,6 +5,7 @@ import {
   BookText,
   Calculator,
   EditIcon,
+  FileText,
   FolderClosed,
   Gamepad2,
   Heart,
@@ -68,6 +69,11 @@ const VisualNovelApplication = dynamic(
 
 const ImageViewerApplication = dynamic(
   () => import("@/applications/image-viewer"),
+  { loading: () => <LoadingWindow />, ssr: false },
+);
+
+const FilePropertiesApplication = dynamic(
+  () => import("@/applications/file-properties"),
   { loading: () => <LoadingWindow />, ssr: false },
 );
 
@@ -275,10 +281,41 @@ export function ImageViewerApplicationWindow({
   );
 }
 
+export function FilePropertiesApplicationWindow({
+  filePath,
+}: {
+  filePath?: string;
+}) {
+  const homePath = getHomePath();
+  const displayPath = filePath ? filePath.replace(homePath, "~") : "No item";
+  return (
+    <ApplicationWindow
+      action_bar={{
+        title: `Properties - ${displayPath}`,
+        icon: {
+          svg: <FileText />,
+        },
+      }}
+      type="FILE_PROPERTIES"
+      settings={{
+        min_width: 300,
+        min_height: 500,
+        starting_width: Math.min(300, window.innerWidth - 40),
+        starting_height: Math.min(500, window.innerHeight - 40),
+        allow_overflow: false,
+      }}
+    >
+      <FilePropertiesApplication filePath={filePath} />
+    </ApplicationWindow>
+  );
+}
+
 export function TerminalApplicationWindow({
   identifier,
+  initialPath,
 }: {
   identifier: string;
+  initialPath?: string;
 }) {
   return (
     <ApplicationWindow
@@ -298,7 +335,10 @@ export function TerminalApplicationWindow({
       }}
       identifier={identifier}
     >
-      <TerminalApplication windowIdentifier={identifier} />
+      <TerminalApplication
+        windowIdentifier={identifier}
+        initialPath={initialPath}
+      />
     </ApplicationWindow>
   );
 }

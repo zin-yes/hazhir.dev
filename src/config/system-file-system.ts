@@ -93,6 +93,15 @@ export const SYSTEM_APPS: SystemAppDefinition[] = [
     includeDesktopShortcut: false,
   },
   {
+    id: "file-properties",
+    executableName: "file-properties.app",
+    displayName: "File Properties",
+    icon: "Info",
+    desktopIconText: "Properties",
+    menuDescription: "Inspect metadata, permissions, and storage usage.",
+    includeDesktopShortcut: false,
+  },
+  {
     id: "settings",
     executableName: "settings.app",
     displayName: "Settings",

@@ -72,9 +72,12 @@ import {
   DESKTOP_LAYOUT_RESET_EVENT,
   DESKTOP_LAYOUT_STORAGE_KEY_BASE,
   getDesktopLayoutStorageKey,
+  getWallpaperIndex,
+  setWallpaperIndex,
 } from "@/lib/system-preferences";
 import { getCurrentSystemUsername, getHomePath } from "@/lib/system-user";
 import { cn } from "@/lib/utils";
+import { WALLPAPERS } from "@/lib/wallpapers";
 
 import {
   ReactNode,
@@ -87,6 +90,7 @@ import {
 import Image from "next/image";
 import { createPortal } from "react-dom";
 import {
+  FilePropertiesApplicationWindow,
   FileExplorerApplicationWindow,
   ImageViewerApplicationWindow,
   SingleDocumentApplicationWindow,
@@ -291,6 +295,7 @@ export default function Desktop({
         BookOpen: <BookOpen size={30} className="text-white" />,
         Settings: <Settings size={30} className="text-white" />,
         Image: <FileImage size={30} className="text-white" />,
+        Info: <FileText size={30} className="text-white" />,
       };
 
       return iconName && iconByName[iconName] ? (
@@ -1450,6 +1455,9 @@ export default function Desktop({
   const handleCopyByContext = useCallback(
     (itemId: string) => {
       const targets = getClipboardTargetsForItem(itemId)
+        .filter(
+          (item) => !(item.fileNode?.type === "file" && item.fileNode.readOnly),
+        )
         .map((item) => item.fileNode?.path)
         .filter((path): path is string => Boolean(path));
       if (targets.length === 0) return;
@@ -1461,6 +1469,9 @@ export default function Desktop({
   const handleCutByContext = useCallback(
     (itemId: string) => {
       const targets = getClipboardTargetsForItem(itemId)
+        .filter(
+          (item) => !(item.fileNode?.type === "file" && item.fileNode.readOnly),
+        )
         .map((item) => item.fileNode?.path)
         .filter((path): path is string => Boolean(path));
       if (targets.length === 0) return;
@@ -1472,6 +1483,9 @@ export default function Desktop({
   const copySelectionToClipboard = useCallback(() => {
     const targets = desktopItems
       .filter((item) => selectedSet.has(item.id))
+      .filter(
+        (item) => !(item.fileNode?.type === "file" && item.fileNode.readOnly),
+      )
       .map((item) => item.fileNode?.path)
       .filter((path): path is string => Boolean(path));
 
@@ -1482,6 +1496,9 @@ export default function Desktop({
   const cutSelectionToClipboard = useCallback(() => {
     const targets = desktopItems
       .filter((item) => selectedSet.has(item.id))
+      .filter(
+        (item) => !(item.fileNode?.type === "file" && item.fileNode.readOnly),
+      )
       .map((item) => item.fileNode?.path)
       .filter((path): path is string => Boolean(path));
 
@@ -1785,6 +1802,19 @@ export default function Desktop({
       pasteClipboardToDirectory,
       selectedIds.length,
     ],
+  );
+
+  const handleNextWallpaper = useCallback(() => {
+    const currentIndex = getWallpaperIndex(WALLPAPERS.length);
+    const nextIndex = (currentIndex + 1) % WALLPAPERS.length;
+    setWallpaperIndex(nextIndex);
+  }, []);
+
+  const handleOpenProperties = useCallback(
+    (path: string) => {
+      addWindow(<FilePropertiesApplicationWindow filePath={path} />);
+    },
+    [addWindow],
   );
 
   return (
@@ -2093,6 +2123,10 @@ export default function Desktop({
                         <ContextMenuSeparator />
                         <ContextMenuItem
                           onClick={() => handleCutByContext(item.id)}
+                          disabled={
+                            item.fileNode.type === "file" &&
+                            Boolean(item.fileNode.readOnly)
+                          }
                         >
                           <Scissors size={16} className="mr-2" />
                           Cut
@@ -2100,6 +2134,10 @@ export default function Desktop({
                         </ContextMenuItem>
                         <ContextMenuItem
                           onClick={() => handleCopyByContext(item.id)}
+                          disabled={
+                            item.fileNode.type === "file" &&
+                            Boolean(item.fileNode.readOnly)
+                          }
                         >
                           <Copy size={16} className="mr-2" />
                           Copy
@@ -2132,6 +2170,15 @@ export default function Desktop({
                           <Trash2 size={16} className="mr-2" />
                           Delete
                           <ContextMenuShortcut>Del</ContextMenuShortcut>
+                        </ContextMenuItem>
+                        <ContextMenuSeparator />
+                        <ContextMenuItem
+                          onClick={() =>
+                            handleOpenProperties(item.fileNode!.path)
+                          }
+                        >
+                          <FileText size={16} className="mr-2" />
+                          Properties
                         </ContextMenuItem>
                       </>
                     ) : null}
@@ -2254,6 +2301,10 @@ export default function Desktop({
           </ContextMenuSubContent>
         </ContextMenuSub>
         <ContextMenuSeparator />
+        <ContextMenuItem onClick={handleNextWallpaper}>
+          <FileImage size={16} className="mr-2" />
+          Next Wallpaper
+        </ContextMenuItem>
         <ContextMenuItem onClick={loadDesktopNodes}>
           <RefreshCw size={16} className="mr-2" />
           Refresh
