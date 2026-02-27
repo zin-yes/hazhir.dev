@@ -513,7 +513,7 @@ export default function ApplicationWindow({
         " applicationWindow " +
         (isFileDropHover ? styles.file_drop_hover : "")
       }
-      onPointerDown={handlePointerDown}
+      onPointerDownCapture={handlePointerDown}
       onDragEnterCapture={(event) => {
         if (!hasFileDragType(event.dataTransfer)) return;
         fileDropHoverDepthRef.current += 1;

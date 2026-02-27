@@ -651,9 +651,7 @@ export default function OperatingSystemPage() {
             >
               {windows.map((window) => {
                 return (
-                  <div key={window.id} className="pointer-events-auto">
-                    {window.node}
-                  </div>
+                  <React.Fragment key={window.id}>{window.node}</React.Fragment>
                 );
               })}
             </div>
