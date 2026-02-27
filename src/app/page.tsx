@@ -645,10 +645,15 @@ export default function OperatingSystemPage() {
               </DropdownMenu>
             </div>
 
-            <div className="relative z-10 w-screen h-screen" id="operating-system-container">
+            <div
+              className="relative z-10 w-screen h-screen pointer-events-none"
+              id="operating-system-container"
+            >
               {windows.map((window) => {
                 return (
-                  <React.Fragment key={window.id}>{window.node}</React.Fragment>
+                  <div key={window.id} className="pointer-events-auto">
+                    {window.node}
+                  </div>
                 );
               })}
             </div>
