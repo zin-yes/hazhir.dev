@@ -2,12 +2,12 @@
 
 import FileExplorerApplication from "@/applications/file-explorer";
 import ApplicationEmptyState from "@/components/system/application-empty-state";
+import ScrollMoreButton from "@/components/system/scroll-more-button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { useFileSystem, type FileSystemNode } from "@/hooks/use-file-system";
 import { OS_LAUNCH_APPLICATION_EVENT } from "@/lib/application-launcher";
 import { getHomePath } from "@/lib/system-user";
-import { cn } from "@/lib/utils";
-import { ChevronDown, FileSearch } from "lucide-react";
+import { FileSearch } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 const LIGHT_DOCUMENT_THEME = {
@@ -277,8 +277,6 @@ export default function DocumentViewerApplication({
     filePath,
   );
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
-  const [showSinglePageDownHint, setShowSinglePageDownHint] = useState(false);
-  const [showFullPageDownHint, setShowFullPageDownHint] = useState(false);
   const [isPickerOpen, setIsPickerOpen] = useState(false);
 
   const documentFiles = useMemo(() => {
@@ -400,67 +398,6 @@ export default function DocumentViewerApplication({
     );
   };
 
-  const updatePageDownHint = (
-    element: HTMLDivElement | null,
-    setVisible: (visible: boolean) => void,
-  ) => {
-    if (!element) {
-      setVisible(false);
-      return;
-    }
-
-    const hasOverflow = element.scrollHeight - element.clientHeight > 8;
-    const isAtTop = element.scrollTop <= 2;
-    setVisible(hasOverflow && isAtTop);
-  };
-
-  useEffect(() => {
-    const element = singleScrollRef.current;
-    if (!element || mode !== "single") return;
-
-    const sync = () => updatePageDownHint(element, setShowSinglePageDownHint);
-    sync();
-
-    element.addEventListener("scroll", sync, { passive: true });
-    window.addEventListener("resize", sync);
-    const resizeObserver = new ResizeObserver(sync);
-    resizeObserver.observe(element);
-
-    return () => {
-      element.removeEventListener("scroll", sync);
-      window.removeEventListener("resize", sync);
-      resizeObserver.disconnect();
-    };
-  }, [mode, selected?.path, selectedContents]);
-
-  useEffect(() => {
-    const element = fullScrollRef.current;
-    if (!element || mode === "single") return;
-
-    const sync = () => updatePageDownHint(element, setShowFullPageDownHint);
-    sync();
-
-    element.addEventListener("scroll", sync, { passive: true });
-    window.addEventListener("resize", sync);
-    const resizeObserver = new ResizeObserver(sync);
-    resizeObserver.observe(element);
-
-    return () => {
-      element.removeEventListener("scroll", sync);
-      window.removeEventListener("resize", sync);
-      resizeObserver.disconnect();
-    };
-  }, [mode, selected?.path, selectedContents]);
-
-  const pageDown = (element: HTMLDivElement | null) => {
-    if (!element) return;
-
-    element.scrollBy({
-      top: Math.max(element.clientHeight - 48, 160),
-      behavior: "smooth",
-    });
-  };
-
   const emptyStateView = (
     <div className="h-full w-full bg-background">
       <ApplicationEmptyState
@@ -517,20 +454,7 @@ export default function DocumentViewerApplication({
             />
           </div>
         </div>
-        <button
-          type="button"
-          onClick={() => pageDown(singleScrollRef.current)}
-          aria-label="Scroll down one page"
-          title="Page down"
-          className={cn(
-            "absolute bottom-4 left-1/2 z-20 -translate-x-1/2 rounded-full border border-border bg-background/90 p-2 shadow-md backdrop-blur transition-opacity duration-150 ease-out hover:bg-accent hover:text-accent-foreground",
-            showSinglePageDownHint
-              ? "pointer-events-auto opacity-100"
-              : "pointer-events-none opacity-0",
-          )}
-        >
-          <ChevronDown className="size-4" />
-        </button>
+        <ScrollMoreButton scrollElementRef={singleScrollRef} />
       </div>
     );
   }
@@ -558,21 +482,7 @@ export default function DocumentViewerApplication({
               )}
             </div>
           </div>
-
-          <button
-            type="button"
-            onClick={() => pageDown(fullScrollRef.current)}
-            aria-label="Scroll down one page"
-            title="Page down"
-            className={cn(
-              "absolute bottom-4 left-1/2 z-20 -translate-x-1/2 rounded-full border border-border bg-background/90 p-2 shadow-md backdrop-blur transition-opacity duration-150 ease-out hover:bg-accent hover:text-accent-foreground",
-              showFullPageDownHint
-                ? "pointer-events-auto opacity-100"
-                : "pointer-events-none opacity-0",
-            )}
-          >
-            <ChevronDown className="size-4" />
-          </button>
+          <ScrollMoreButton scrollElementRef={fullScrollRef} />
         </div>
       )}
     </div>

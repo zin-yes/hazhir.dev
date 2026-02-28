@@ -42,6 +42,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { FileSystemNode, useFileSystem } from "@/hooks/use-file-system";
+import { useDragVisualHandoff } from "@/hooks/use-drag-visual-handoff";
 import {
   getFileClipboard,
   setFileClipboard,
@@ -443,6 +444,7 @@ function DirectoryTreeItem({
 interface FileGridItemProps {
   node: FileSystemNode;
   isSelected: boolean;
+  isDragHidden?: boolean;
   onSelect: (
     path: string,
     event:
@@ -480,6 +482,7 @@ interface FileGridItemProps {
 function FileGridItem({
   node,
   isSelected,
+  isDragHidden = false,
   onSelect,
   onOpen,
   onTouchPointerDown,
@@ -539,6 +542,7 @@ function FileGridItem({
             "hover:bg-primary/10 w-24",
             isSelected && "bg-primary/10 ring-2 ring-primary/40",
           )}
+          style={{ visibility: isDragHidden ? "hidden" : "visible" }}
           onDragStart={(event) => onDragStartItem(node, event)}
           onDragEnd={onDragEndItem}
           onDragOver={(event) => {
@@ -642,6 +646,7 @@ interface FileListItemProps extends FileGridItemProps {}
 function FileListItem({
   node,
   isSelected,
+  isDragHidden = false,
   onSelect,
   onOpen,
   onTouchPointerDown,
@@ -700,6 +705,7 @@ function FileListItem({
             "flex items-center gap-3 px-3 py-2 hover:bg-primary/10 cursor-pointer transition-all border-b border-border/50",
             isSelected && "bg-primary/10",
           )}
+          style={{ visibility: isDragHidden ? "hidden" : "visible" }}
           onDragStart={(event) => onDragStartItem(node, event)}
           onDragEnd={onDragEndItem}
           onDragOver={(event) => {
@@ -941,6 +947,7 @@ export default function FileExplorerApplication({
     startY: number;
     paths: string[];
     active: boolean;
+    sourcePixels: Record<string, { left: number; top: number }>;
   } | null>(null);
   const selectedPathsRef = useRef<Set<string>>(new Set());
   const [marquee, setMarquee] = useState<{
@@ -965,6 +972,13 @@ export default function FileExplorerApplication({
   const isSelectingRef = useRef(false);
   const selectionOriginRef = useRef<{ x: number; y: number } | null>(null);
   const selectionBaseRef = useRef<Set<string>>(new Set());
+  const touchDragVisual = useDragVisualHandoff({
+    durationMs: 160,
+    easing: "ease-out",
+  });
+  const clearTouchDragVisual = touchDragVisual.clear;
+  const startTouchDragVisual = touchDragVisual.startDrag;
+  const updateTouchDragVisualDelta = touchDragVisual.updateDelta;
 
   const [clipboard, setClipboard] = useState(getFileClipboard);
 
@@ -1555,6 +1569,23 @@ export default function FileExplorerApplication({
         selection.has(node.path) && selection.size > 0
           ? Array.from(selection)
           : [node.path];
+      const containerRect = rootRef.current?.getBoundingClientRect();
+      if (!containerRect) return;
+
+      const sourcePixels = draggedPaths.reduce<
+        Record<string, { left: number; top: number }>
+      >((accumulator, path) => {
+        const element = itemRefs.current.get(path);
+        if (!element) return accumulator;
+        const elementRect = element.getBoundingClientRect();
+        accumulator[path] = {
+          left: elementRect.left - containerRect.left,
+          top: elementRect.top - containerRect.top,
+        };
+        return accumulator;
+      }, {});
+
+      clearTouchDragVisual();
 
       touchDragRef.current = {
         pointerId: event.pointerId,
@@ -1562,9 +1593,10 @@ export default function FileExplorerApplication({
         startY: event.clientY,
         paths: draggedPaths,
         active: false,
+        sourcePixels,
       };
     },
-    [handleOpen],
+    [clearTouchDragVisual, handleOpen],
   );
 
   const handleTouchPointerMove = useCallback(
@@ -1580,13 +1612,18 @@ export default function FileExplorerApplication({
       if (!drag.active && movedDistance >= 10) {
         drag.active = true;
         lastTouchTapRef.current = null;
+        startTouchDragVisual(drag.paths, drag.sourcePixels);
       }
 
       if (drag.active) {
+        updateTouchDragVisualDelta({
+          x: event.clientX - drag.startX,
+          y: event.clientY - drag.startY,
+        });
         event.preventDefault();
       }
     },
-    [],
+    [startTouchDragVisual, updateTouchDragVisualDelta],
   );
 
   const handleTouchPointerUp = useCallback(
@@ -1610,9 +1647,10 @@ export default function FileExplorerApplication({
         }
       }
 
+      clearTouchDragVisual();
       touchDragRef.current = null;
     },
-    [movePathsToDirectory],
+    [clearTouchDragVisual, movePathsToDirectory],
   );
 
   const handleDragEndItem = useCallback(() => {
@@ -2423,6 +2461,9 @@ export default function FileExplorerApplication({
                               key={node.path}
                               node={node}
                               isSelected={selectedPaths.has(node.path)}
+                              isDragHidden={touchDragVisual.isBaseHidden(
+                                node.path,
+                              )}
                               onSelect={handleSelect}
                               onContextSelect={handleContextSelect}
                               onItemRef={handleItemRef}
@@ -2456,6 +2497,9 @@ export default function FileExplorerApplication({
                               key={node.path}
                               node={node}
                               isSelected={selectedPaths.has(node.path)}
+                              isDragHidden={touchDragVisual.isBaseHidden(
+                                node.path,
+                              )}
                               onSelect={handleSelect}
                               onContextSelect={handleContextSelect}
                               onItemRef={handleItemRef}
@@ -2493,6 +2537,58 @@ export default function FileExplorerApplication({
                         }}
                       />
                     ) : null}
+
+                    {typeof window !== "undefined" &&
+                    touchDragVisual.isOverlayVisible &&
+                    rootRef.current
+                      ? createPortal(
+                          <div className="pointer-events-none fixed inset-0 z-[8000]">
+                            {touchDragVisual.overlayIds.map((dragPath) => {
+                              const node =
+                                contents.find((item) => item.path === dragPath) ??
+                                fs.getNode(dragPath);
+                              if (!node) return null;
+
+                              const overlayStyle =
+                                touchDragVisual.getOverlayItemStyle(dragPath);
+                              if (!overlayStyle) return null;
+
+                              const containerRect =
+                                rootRef.current?.getBoundingClientRect();
+
+                              return (
+                                <div
+                                  key={`explorer-touch-overlay-${dragPath}`}
+                                  className="absolute"
+                                  style={{
+                                    left:
+                                      (containerRect?.left ?? 0) +
+                                      overlayStyle.left,
+                                    top:
+                                      (containerRect?.top ?? 0) +
+                                      overlayStyle.top,
+                                    transition: overlayStyle.transition,
+                                    transform: overlayStyle.transform,
+                                  }}
+                                >
+                                  <div className="flex flex-col items-center gap-1 p-3 rounded-lg bg-primary/10 ring-2 ring-primary/40 w-24">
+                                    <div className="w-12 h-12 flex items-center justify-center">
+                                      {getFileIcon(node, 40)}
+                                    </div>
+                                    <span
+                                      className="text-xs text-center w-full leading-4 overflow-hidden break-words [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2]"
+                                      title={node.name}
+                                    >
+                                      {node.name}
+                                    </span>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>,
+                          document.body,
+                        )
+                      : null}
                   </div>
                 </ScrollArea>
               </ContextMenuTrigger>

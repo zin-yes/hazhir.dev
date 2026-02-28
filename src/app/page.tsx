@@ -36,6 +36,7 @@ import {
   useSession,
 } from "@/auth/client";
 import { Calendar } from "@/components/ui/calendar";
+import ScrollMoreButton from "@/components/system/scroll-more-button";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -173,6 +174,7 @@ export default function OperatingSystemPage() {
   const [menuSearchValue, setMenuSearchValue] = useState("");
   const [menuItems, setMenuItems] = useState<MenuShortcutItem[]>([]);
   const [menuHoveredDescription, setMenuHoveredDescription] = useState("");
+  const menuAppsScrollRef = useRef<HTMLDivElement | null>(null);
 
   const loadMenuItems = useCallback(() => {
     const menuPath = `${getHomePath()}/.menu`;
@@ -550,42 +552,51 @@ export default function OperatingSystemPage() {
                     Apps
                   </div>
 
-                  <div className="mt-2 max-h-72 overflow-y-auto rounded-xl border border-white/10 bg-black/15 p-1">
-                    {filteredMenuItems.length > 0 ? (
-                      filteredMenuItems.map((item) => (
-                        <DropdownMenuItem
-                          key={item.path}
-                          title={item.description}
-                          className="rounded-lg px-2.5 py-2 text-sm text-white data-[highlighted]:bg-white/15"
-                          onMouseEnter={() =>
-                            setMenuHoveredDescription(item.description)
-                          }
-                          onClick={() => {
-                            const result = executeFilePath(
-                              item.path,
-                              fsRef.current,
-                            );
-                            if (!result.ok) {
-                              console.warn(result.message);
+                  <div className="relative mt-2">
+                    <div
+                      ref={menuAppsScrollRef}
+                      className="max-h-72 overflow-y-auto rounded-xl border border-white/10 bg-black/15 p-1"
+                    >
+                      {filteredMenuItems.length > 0 ? (
+                        filteredMenuItems.map((item) => (
+                          <DropdownMenuItem
+                            key={item.path}
+                            title={item.description}
+                            className="rounded-lg px-2.5 py-2 text-sm text-white data-[highlighted]:bg-white/15"
+                            onMouseEnter={() =>
+                              setMenuHoveredDescription(item.description)
                             }
-                            setMenuSearchValue("");
-                          }}
-                        >
-                          {renderShortcutIcon(item.iconName)}
-                          <span className="truncate">{item.label}</span>
-                          {item.shortcut.type === "link" ? (
-                            <ExternalLink
-                              size={14}
-                              className="ml-auto text-white/70"
-                            />
-                          ) : null}
-                        </DropdownMenuItem>
-                      ))
-                    ) : (
-                      <div className="px-3 py-4 text-sm text-white/60">
-                        No matching apps.
-                      </div>
-                    )}
+                            onClick={() => {
+                              const result = executeFilePath(
+                                item.path,
+                                fsRef.current,
+                              );
+                              if (!result.ok) {
+                                console.warn(result.message);
+                              }
+                              setMenuSearchValue("");
+                            }}
+                          >
+                            {renderShortcutIcon(item.iconName)}
+                            <span className="truncate">{item.label}</span>
+                            {item.shortcut.type === "link" ? (
+                              <ExternalLink
+                                size={14}
+                                className="ml-auto text-white/70"
+                              />
+                            ) : null}
+                          </DropdownMenuItem>
+                        ))
+                      ) : (
+                        <div className="px-3 py-4 text-sm text-white/60">
+                          No matching apps.
+                        </div>
+                      )}
+                    </div>
+                    <ScrollMoreButton
+                      scrollElementRef={menuAppsScrollRef}
+                      className="bottom-3 border-white/20 bg-black/75 text-white hover:bg-white/20 hover:text-white"
+                    />
                   </div>
 
                   <div className="mt-2 rounded-lg border border-white/10 bg-black/10 px-2.5 py-2 text-xs text-white/70 min-h-8">
