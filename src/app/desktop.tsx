@@ -52,6 +52,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useFileSystem, type FileSystemNode } from "@/hooks/use-file-system";
+import { useDragVisualHandoff } from "@/hooks/use-drag-visual-handoff";
 import {
   getFileClipboard,
   setFileClipboard,
@@ -162,11 +163,16 @@ export default function Desktop({
     Record<string, DesktopGridPosition>
   >({});
   const [draggingIds, setDraggingIds] = useState<string[]>([]);
-  const [dragDelta, setDragDelta] = useState<{ x: number; y: number } | null>(
-    null,
-  );
   const draggingIdsRef = useRef<string[]>([]);
   const dragDeltaRef = useRef<{ x: number; y: number } | null>(null);
+  const dragVisual = useDragVisualHandoff({
+    durationMs: 180,
+    easing: "ease-out",
+  });
+  const clearDragVisual = dragVisual.clear;
+  const startDragVisual = dragVisual.startDrag;
+  const updateDragVisualDelta = dragVisual.updateDelta;
+  const startDragHandoff = dragVisual.startHandoff;
   const [marquee, setMarquee] = useState<{
     x: number;
     y: number;
@@ -813,6 +819,7 @@ export default function Desktop({
     (event: React.PointerEvent<HTMLDivElement>, id: string) => {
       if (event.pointerType === "mouse" && event.button !== 0) return;
       event.stopPropagation();
+      clearDragVisual();
 
       containerRef.current?.focus();
 
@@ -885,6 +892,7 @@ export default function Desktop({
       setLastSelectedId(id);
     },
     [
+      clearDragVisual,
       itemPositions,
       lastSelectedId,
       selectRange,
@@ -980,6 +988,7 @@ export default function Desktop({
         if (draggingIdsRef.current.length === 0) {
           draggingIdsRef.current = dragCandidate.dragIds;
           setDraggingIds(dragCandidate.dragIds);
+          startDragVisual(dragCandidate.dragIds, dragCandidate.sourcePixels);
         }
 
         const container = containerRef.current;
@@ -1031,7 +1040,7 @@ export default function Desktop({
           y: Math.min(Math.max(rawDeltaY, minDeltaYAllowed), maxDeltaYAllowed),
         };
         dragDeltaRef.current = nextDelta;
-        setDragDelta(nextDelta);
+        updateDragVisualDelta(nextDelta);
         return;
       }
 
@@ -1188,6 +1197,9 @@ export default function Desktop({
           container &&
           activeDragDelta
         ) {
+          const releaseTargets: Record<string, { left: number; top: number }> =
+            {};
+
           const primarySource =
             dragCandidate.sourcePositions[dragCandidate.primaryId];
           if (primarySource) {
@@ -1269,11 +1281,19 @@ export default function Desktop({
 
                 next[id] = placement;
                 occupied.add(`${placement.col}:${placement.row}`);
+                releaseTargets[id] = {
+                  left: DESKTOP_GRID_PADDING + placement.col * DESKTOP_GRID_COL_WIDTH,
+                  top: DESKTOP_GRID_PADDING + placement.row * DESKTOP_GRID_ROW_HEIGHT,
+                };
               });
 
               return next;
             });
+
+            startDragHandoff(releaseTargets);
           }
+        } else {
+          clearDragVisual();
         }
 
         if (didExternalTransfer || didFolderDropTransfer) {
@@ -1289,16 +1309,15 @@ export default function Desktop({
       draggingIdsRef.current = [];
       dragDeltaRef.current = null;
       setDraggingIds([]);
-      setDragDelta(null);
       endSelection();
     };
 
     const handleBlur = () => {
+      clearDragVisual();
       dragCandidateRef.current = null;
       draggingIdsRef.current = [];
       dragDeltaRef.current = null;
       setDraggingIds([]);
-      setDragDelta(null);
       endSelection();
     };
 
@@ -1310,7 +1329,18 @@ export default function Desktop({
       window.removeEventListener("pointerup", handlePointerUp);
       window.removeEventListener("blur", handleBlur);
     };
-  }, [desktopItems, endSelection, fs, gridCols, gridRows, updateSelection]);
+  }, [
+    clearDragVisual,
+    desktopItems,
+    endSelection,
+    fs,
+    gridCols,
+    gridRows,
+    startDragHandoff,
+    startDragVisual,
+    updateDragVisualDelta,
+    updateSelection,
+  ]);
 
   const handleDesktopContextMenu = useCallback(
     (event: React.MouseEvent<HTMLDivElement>) => {
@@ -1997,52 +2027,30 @@ export default function Desktop({
                       }}
                       className="absolute"
                       style={(() => {
-                        const activeDelta = dragDelta ?? { x: 0, y: 0 };
                         const position = itemPositions[item.id] ?? {
                           col: 0,
                           row: 0,
                         };
-                        const isDragging =
-                          draggingIds.includes(item.id) &&
-                          Boolean(dragCandidateRef.current);
-                        const source =
-                          dragCandidateRef.current?.sourcePositions[item.id] ??
-                          position;
-                        const sourcePixel =
-                          dragCandidateRef.current?.sourcePixels[item.id];
-                        const left = isDragging
-                          ? (sourcePixel?.left ??
-                              DESKTOP_GRID_PADDING +
-                                source.col * DESKTOP_GRID_COL_WIDTH) +
-                            activeDelta.x
-                          : DESKTOP_GRID_PADDING +
-                            position.col * DESKTOP_GRID_COL_WIDTH;
-                        const top = isDragging
-                          ? (sourcePixel?.top ??
-                              DESKTOP_GRID_PADDING +
-                                source.row * DESKTOP_GRID_ROW_HEIGHT) +
-                            activeDelta.y
-                          : DESKTOP_GRID_PADDING +
-                            position.row * DESKTOP_GRID_ROW_HEIGHT;
                         return {
-                          left,
-                          top,
-                          zIndex: isDragging ? 40 : 30,
-                          transition: isDragging
-                            ? "none"
-                            : "left 180ms ease-out, top 180ms ease-out",
-                          visibility: isDragging ? "hidden" : "visible",
+                          left:
+                            DESKTOP_GRID_PADDING +
+                            position.col * DESKTOP_GRID_COL_WIDTH,
+                          top:
+                            DESKTOP_GRID_PADDING +
+                            position.row * DESKTOP_GRID_ROW_HEIGHT,
+                          zIndex: 30,
+                          transition: "left 180ms ease-out, top 180ms ease-out",
+                          visibility: dragVisual.isBaseHidden(item.id)
+                            ? "hidden"
+                            : "visible",
                         };
                       })()}
                     >
-                      {draggingIds.includes(item.id) &&
-                      dragCandidateRef.current ? null : (
-                        <DesktopIcon
-                          icon={item.icon}
-                          title={item.title}
-                          selected={selectedSet.has(item.id)}
-                        />
-                      )}
+                      <DesktopIcon
+                        icon={item.icon}
+                        title={item.title}
+                        selected={selectedSet.has(item.id)}
+                      />
                     </div>
                   </ContextMenuTrigger>
                   <ContextMenuContent className="w-52">
@@ -2189,40 +2197,27 @@ export default function Desktop({
           </div>
 
           {typeof window !== "undefined" &&
-            draggingIds.length > 0 &&
-            dragCandidateRef.current &&
+            dragVisual.isOverlayVisible &&
             containerRef.current &&
             createPortal(
               <div className="pointer-events-none fixed inset-0 z-[8000]">
-                {draggingIds.map((dragId) => {
-                  const activeDelta = dragDelta ?? { x: 0, y: 0 };
+                {dragVisual.overlayIds.map((dragId) => {
                   const item = desktopItemById[dragId];
                   if (!item) return null;
-
-                  const source =
-                    dragCandidateRef.current?.sourcePositions[dragId];
-                  if (!source) return null;
-
-                  const sourcePixel =
-                    dragCandidateRef.current?.sourcePixels[dragId];
+                  const overlayStyle = dragVisual.getOverlayItemStyle(dragId);
+                  if (!overlayStyle) return null;
                   const containerRect =
                     containerRef.current?.getBoundingClientRect();
-                  const leftRelative =
-                    (sourcePixel?.left ??
-                      DESKTOP_GRID_PADDING +
-                        source.col * DESKTOP_GRID_COL_WIDTH) + activeDelta.x;
-                  const topRelative =
-                    (sourcePixel?.top ??
-                      DESKTOP_GRID_PADDING +
-                        source.row * DESKTOP_GRID_ROW_HEIGHT) + activeDelta.y;
 
                   return (
                     <div
                       key={`desktop-drag-overlay-${dragId}`}
                       className="absolute"
                       style={{
-                        left: (containerRect?.left ?? 0) + leftRelative,
-                        top: (containerRect?.top ?? 0) + topRelative,
+                        left: (containerRect?.left ?? 0) + overlayStyle.left,
+                        top: (containerRect?.top ?? 0) + overlayStyle.top,
+                        transition: overlayStyle.transition,
+                        transform: overlayStyle.transform,
                       }}
                     >
                       <DesktopIcon
@@ -2327,7 +2322,7 @@ function DesktopIcon({
     <div
       data-desktop-hit="true"
       className={cn(
-        "w-24 rounded-2xl px-2 py-3 text-white cursor-pointer touch-none transition-all duration-200",
+        "w-24 rounded-2xl px-2 py-3 text-white cursor-pointer touch-none transition-colors duration-200",
         "bg-white/15 backdrop-blur-xl hover:bg-white/25",
         selected && "bg-white/30 ring-2 ring-white/70",
       )}

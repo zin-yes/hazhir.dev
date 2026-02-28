@@ -1,12 +1,13 @@
 "use client";
 
+import ScrollMoreButton from "@/components/system/scroll-more-button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { type FileSystemNode, useFileSystem } from "@/hooks/use-file-system";
 import { isImageFileName } from "@/lib/image-files";
 import { cn } from "@/lib/utils";
 import { FileImage, FileText, Folder, HardDrive, Lock, User } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 const FILE_SYSTEM_STORAGE_KEY = "filesystem_v6";
 
@@ -83,6 +84,7 @@ export default function FilePropertiesApplication({ filePath }: { filePath?: str
   const fs = useFileSystem();
   const [storageVersion, setStorageVersion] = useState(0);
   const [imageResolution, setImageResolution] = useState<{ width: number; height: number } | null>(null);
+  const scrollViewportRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     const handleStorage = () => setStorageVersion((current) => current + 1);
@@ -191,8 +193,11 @@ export default function FilePropertiesApplication({ filePath }: { filePath?: str
   const directoryCount = descendants.filter((entry) => entry.type === "directory").length;
 
   return (
-    <div className="h-full w-full bg-background p-2">
-      <ScrollArea className="h-full rounded-lg border border-border bg-card">
+    <div className="relative h-full w-full bg-background p-2">
+      <ScrollArea
+        viewportRef={scrollViewportRef}
+        className="h-full rounded-lg border border-border bg-card"
+      >
         <div className="p-3 space-y-3">
           <div>
             <div className="text-base font-semibold text-foreground truncate">{node.name}</div>
@@ -284,6 +289,7 @@ export default function FilePropertiesApplication({ filePath }: { filePath?: str
           </section>
         </div>
       </ScrollArea>
+      <ScrollMoreButton scrollElementRef={scrollViewportRef} />
     </div>
   );
 }
