@@ -27,11 +27,10 @@ type LanguageEntry = {
 };
 const cvData = {
   name: "HAZHIR TAHER",
-  location: "Norrköping, Sweden",
+  location: "Norrköping",
   phone: "+46 72 84-311 37",
   email: "hey@hazhir.dev",
   links: [
-    { label: "Portfolio", href: "https://hazhir.dev" },
     { label: "GitHub", href: "https://github.com/zin-yes" },
     { label: "LinkedIn", href: "https://www.linkedin.com/in/hazhir-taher/" },
   ],
@@ -172,9 +171,9 @@ export function generateCVDocumentHtml(): string {
   const links = cvData.links
     .map(
       (link) =>
-        `<a class="underline" href="${escapeHtml(link.href)}">${escapeHtml(link.label)}</a>`,
+        `<span><a class="underline" href="${escapeHtml(link.href)}">${escapeHtml(link.label)}</a></span>`,
     )
-    .join(" · ");
+    .join("<span class="meta-dot" aria-hidden="true">●</span>");
 
   const headerMetaParts = [
     escapeHtml(cvData.location),
