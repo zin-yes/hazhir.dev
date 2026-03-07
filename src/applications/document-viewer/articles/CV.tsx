@@ -25,57 +25,63 @@ type LanguageEntry = {
   name: string;
   level: string;
 };
-
 const cvData = {
   name: "HAZHIR TAHER",
   location: "Norrköping, Sweden",
   phone: "+46 72 84-311 37",
   email: "hey@hazhir.dev",
   links: [
+    { label: "Portfolio", href: "https://hazhir.dev" },
     { label: "GitHub", href: "https://github.com/zin-yes" },
     { label: "LinkedIn", href: "https://www.linkedin.com/in/hazhir-taher/" },
   ],
+
   summary:
-    "Self-taught and passionate programmer; programming since age 10. Confident and proactive in both collaborative and independent projects, with strong communication and problem-solving skills. More than five years of experience in real world full-stack projects using Next.js (TypeScript). Alongside an equivalent level of competence and passion in computer graphics and game programming.",
+    "Full-stack software developer with 5+ years of experience building production web applications using TypeScript and Next.js. Technical co-founder of a SaaS platform that reached ~30k SEK monthly recurring revenue while part of the Antler residency program. Strong interest in systems programming, graphics rendering, and game engine development.",
+
   experience: [
     {
-      title: "Technical co-founder | Atlas",
-      meta: "Jun 2025 - Dec 2025",
+      title: "Technical Co-Founder | Atlas",
+      meta: "Jun 2025 – Dec 2025",
       links: [{ label: "Website", href: "https://useatlas.io" }],
       bullets: [
-        "I together with my co-founder made it into the Antler residency program & worked on expanding the product rapidly.",
-        "Working as part of a small founding team to design, build, and maintain a SaaS platform currently serving paying customers (30k SEK MRR).",
-        "Full-stack development & system design with a focus on rapid feature delivery and bug fixes based on user feedback.",
-        "Collaborating closely with early users to iterate fit and deliver a polished, reliable user experience.",
-        "Experience in taking initiative, working independently, and maintaining motivation in a fast-moving startup environment.",
+        "Co-founded and built a SaaS platform as part of the Antler residency program, reaching paying customers and ~30k SEK monthly recurring revenue.",
+        "Designed and implemented full-stack architecture using Next.js, TypeScript, and AWS.",
+        "Rapidly shipped product features and bug fixes based on feedback from early users.",
+        "Worked directly with customers to iterate product features and improve user experience.",
       ],
     },
     {
-      title: "Technical co-founder | Valufy",
-      meta: "2023 - 2024",
+      title: "Technical Co-Founder | Valufy",
+      meta: "2023 – 2024",
       bullets: [
-        "In a period of 6 months I alone designed, coded, and iterated the infrastructure (SST/AWS) and developed a web & mobile product with my two other co-founders for our start up using feedback from beta testers.",
-        "Eventually we presented our product at VentureCup - Regional Final East.",
+        "Designed and implemented backend infrastructure using SST and AWS.",
+        "Developed a web and mobile product prototype with two co-founders.",
+        "Iterated product features using feedback from early beta testers.",
+        "Presented the product at VentureCup Regional Final East.",
       ],
     },
     {
-      title: "Game developer | YouTube game show - Mithzan",
-      meta: "2020 - 2022",
+      title: "Game Developer | Minecraft Game Show (Mithzan)",
+      meta: "2020 – 2022",
       links: [
         {
-          label: "YouTube playlist",
+          label: "YouTube Playlist",
           href: "https://www.youtube.com/playlist?list=PLywSVrtzaGBxRotOjompZieQbUG2vtM9Y",
         },
       ],
       bullets: [
-        "Developed Minecraft game show from the ground up using Spigot A.P.I. in Java - with a tight feedback loop with the client - for a large group (~10) of YouTube creators. The result of which was a game show highly loved by their large audiences - 5k+ avg. likes, 40k+ avg. viewers, and 500k highest (in group) YouTube channel subscriber count.",
-        "You can view the results on this YouTube playlist here.",
+        "Developed a custom Minecraft game show platform using the Spigot API in Java.",
+        "Implemented multiplayer gameplay systems and server-side logic for competitive challenges.",
+        "Worked closely with ~10 YouTube creators to iterate gameplay features.",
+        "Content produced using the system reached ~40k average viewers across participating channels.",
       ],
     },
   ],
+
   projects: [
     {
-      title: "hazhir.dev | Web dev. portfolio",
+      title: "hazhir.dev | Interactive Developer Portfolio",
       links: [
         { label: "Live Website", href: "https://hazhir.dev" },
         {
@@ -84,25 +90,27 @@ const cvData = {
         },
       ],
       paragraphs: [
-        "A operating system themed project containing two sub projects - a virtual web terminal - with a command line routine written from scratch, and a voxel game with infinite and advanced world generation using Three.js (WebGL) for rendering. You can see and use both by visiting the website linked on the top right.",
-        "The project is coded using Next.js & TailwindCSS, in TypeScript and has auth (Auth.js), a database (Drizzle ORM) set up. It also uses Vercel as a CI/CD back-end.",
+        "OS-themed interactive portfolio featuring a custom browser-based terminal and voxel game.",
+        "Implemented infinite procedural terrain generation using Three.js and WebGL.",
+        "Full-stack implementation using Next.js, TypeScript, TailwindCSS, Auth.js, and Drizzle ORM.",
+        "Automated deployment and CI/CD using Vercel.",
       ],
     },
     {
-      title: "Gamma engine | High-performance Java 3D game engine",
+      title: "Gamma Engine | Java 3D Game Engine",
       links: [
         { label: "GitHub Repository", href: "#" },
-        { label: "Devlogs (YouTube)", href: "#" },
+        { label: "Devlogs", href: "#" },
       ],
       paragraphs: [
-        "Since creating a game engine from scratch is one of the biggest undertakings you can do as a solo programmer it has been my longest running project yet, and the one that has taught me the most.",
-        "100+ fps avg. on my mid-tier computer, at a high polygon count (~150k polygons) and high resolution textures.",
-        "Contains a range of industry standard graphics rendering features (e.g. physically-based rendering).",
-        "I have used this game engine to successfully create games for my friends and I with minimal hassle.",
+        "Developed a custom 3D game engine in Java as a long-term personal project.",
+        "Implemented modern rendering techniques including physically-based rendering.",
+        "Achieves 100+ FPS on mid-range hardware with ~150k polygons and high-resolution textures.",
+        "Used the engine to develop several small games and technical experiments.",
       ],
     },
     {
-      title: "metricjournal.com | Personal journaling app",
+      title: "MetricJournal | Personal Productivity SaaS",
       links: [
         { label: "Live Website", href: "https://metricjournal.com" },
         {
@@ -111,37 +119,43 @@ const cvData = {
         },
       ],
       paragraphs: [
-        "A SaaS that I was working on to help me journal in real-time to keep note of what things I do for how long. Currently it’s on pause.",
-        "Uses the same underlying tech stack as is mentioned under the hazhir.dev project.",
+        "Built a journaling and time-tracking web application for logging daily activities.",
+        "Full-stack implementation using Next.js, TypeScript, and Drizzle ORM.",
+        "Project currently paused while focusing on other work.",
       ],
     },
   ],
+
   education: [
     {
-      school: "JENSEN Yrkeshögskola (2025-2027)",
-      program: "IoT- och embeddedutveckling",
+      school: "JENSEN Yrkeshögskola (2025–2027)",
+      program: "IoT & Embedded Development",
     },
     {
-      school: "Berzeliusskolans gymnasium (2019-2023)",
-      program: "Naturvetenskapsprogrammet",
+      school: "Berzeliusskolans Gymnasium (2019–2023)",
+      program: "Natural Science Programme",
     },
   ],
+
   languages: [
-    { name: "English", level: "fluent" },
-    { name: "Swedish", level: "fluent" },
+    { name: "English", level: "Fluent" },
+    { name: "Swedish", level: "Fluent" },
+    { name: "Kurdish", level: "Fluent" },
   ],
+
   favorites: [
     "JavaScript/TypeScript",
-    "NextJS/ReactJS",
+    "Next.js",
+    "React",
     "TailwindCSS",
     "Java",
     "C++",
     "Python",
     "Git",
     "Vercel",
-    "UI/UX Design",
-    "Graphics Rendering",
-    "Game Development",
+    "Three.js",
+    "Graphics Programming",
+    "Game Engines",
   ],
 } as const;
 
@@ -639,7 +653,7 @@ function EducationItem({ entry }: { entry: EducationEntry }) {
 function LanguageItem({ entry }: { entry: LanguageEntry }) {
   return (
     <p className="text-sm text-foreground sm:text-base">
-      <span className="font-semibold">{entry.name} — </span>
+      <span className="font-semibold">{entry.name} - </span>
       <span className="font-medium text-muted-foreground">{entry.level}</span>
     </p>
   );
@@ -701,7 +715,7 @@ export default function CVDocument() {
         </div>
       </div>
 
-      <SectionHeader title="Favorites" />
+      <SectionHeader title="Technologies" />
       <div className="flex flex-wrap gap-2">
         {cvData.favorites.map((favorite) => (
           <FavoriteTag key={favorite} label={favorite} />
