@@ -173,7 +173,7 @@ export function generateCVDocumentHtml(): string {
       (link) =>
         `<span><a class="underline" href="${escapeHtml(link.href)}">${escapeHtml(link.label)}</a></span>`,
     )
-    .join("<span class="meta-dot" aria-hidden="true">●</span>");
+    .join(`<span class="meta-dot" aria-hidden="true">●</span>`);
 
   const headerMetaParts = [
     escapeHtml(cvData.location),
