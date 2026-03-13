@@ -678,7 +678,22 @@ async function onCommand(
       });
 
       if (!executablePath) return null;
-      return executeFilePath(executablePath, fs, tokens.slice(1));
+
+      const resolvedArgs = tokens.slice(1).map((token) => {
+        if (
+          token.startsWith("~") ||
+          token.startsWith("./") ||
+          token.startsWith("../")
+        ) {
+          const expanded = token.startsWith("~")
+            ? token.replace(/^~/, getHomePath())
+            : `${getCwd()}/${token}`;
+          return fs.normalizePath(expanded);
+        }
+        return token;
+      });
+
+      return executeFilePath(executablePath, fs, resolvedArgs);
     })();
 
     if (executableResult?.ok) {
@@ -1045,10 +1060,32 @@ export async function parseCommand(
           (value) =>
             value.name === commandName || hasAlias(value.aliases, commandName),
         );
-        const matchedAutocompleteKey = matched
-          ? commandAutoCompletes[matched.callbackFunctionName]
-            ? matched.callbackFunctionName
-            : matched.name
+
+        // Resolve path-based commands like /applications/document-viewer(.app)
+        const resolvedMatch = (() => {
+          if (matched) return matched;
+          const isPath =
+            commandName.startsWith("/") || commandName.startsWith(".");
+          if (!isPath) return undefined;
+
+          const normalized = commandName.startsWith("/")
+            ? commandName
+            : `${getCwd()}/${commandName}`;
+          const baseName = normalized.split("/").pop() ?? "";
+          const appId = baseName.endsWith(".app")
+            ? baseName.slice(0, -4)
+            : baseName;
+
+          return commands.find(
+            (value) =>
+              value.name === appId || hasAlias(value.aliases, appId),
+          );
+        })();
+
+        const matchedAutocompleteKey = resolvedMatch
+          ? commandAutoCompletes[resolvedMatch.callbackFunctionName]
+            ? resolvedMatch.callbackFunctionName
+            : resolvedMatch.name
           : commandName;
         const autocomplete = commandAutoCompletes[matchedAutocompleteKey];
 
@@ -1062,7 +1099,7 @@ export async function parseCommand(
             : Math.max(argsWithoutCommand.length - 1, 0);
 
           const completions = autocomplete({
-            commandName: matched?.name ?? commandName,
+            commandName: resolvedMatch?.name ?? commandName,
             args: argsWithoutCommand,
             currentIndex,
             currentToken,

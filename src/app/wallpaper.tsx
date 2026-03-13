@@ -21,6 +21,7 @@ export default function Wallpaper() {
   const [activeIndex, setActiveIndex] = useState(0);
   const [previousIndex, setPreviousIndex] = useState<number | null>(null);
   const [showActive, setShowActive] = useState(true);
+  const selectedIndexRef = useRef(0);
   const fadeTimeoutRef = useRef<number | null>(null);
   const frameRef = useRef<number | null>(null);
 
@@ -36,14 +37,16 @@ export default function Wallpaper() {
   }, [imageURL.length]);
 
   useEffect(() => {
+    selectedIndexRef.current = selectedIndex;
+  }, [selectedIndex]);
+
+  useEffect(() => {
     if (!slideshowEnabled || imageURL.length < 2) return;
 
     const timer = window.setInterval(() => {
-      setSelectedIndex((current) => {
-        const next = (current + 1) % imageURL.length;
-        setWallpaperIndex(next);
-        return next;
-      });
+      const next = (selectedIndexRef.current + 1) % imageURL.length;
+      setSelectedIndex(next);
+      setWallpaperIndex(next);
     }, slideshowIntervalMs);
 
     return () => {

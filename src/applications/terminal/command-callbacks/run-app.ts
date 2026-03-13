@@ -73,6 +73,24 @@ async function runApp(
     }
 
     normalizedLaunchArgs.push(initialPath);
+  } else if (app.id === "image-viewer" && launchArgs[0]) {
+    const initialPath = resolvePath(fs, launchArgs[0]);
+    if (!fs.exists(initialPath)) {
+      terminal.writeln(
+        `\x1b[31mimage-viewer: ${launchArgs[0]}: No such file or directory\x1b[0m`,
+      );
+      return;
+    }
+    normalizedLaunchArgs.push(initialPath);
+  } else if (app.id === "file-properties" && launchArgs[0]) {
+    const initialPath = resolvePath(fs, launchArgs[0]);
+    if (!fs.exists(initialPath)) {
+      terminal.writeln(
+        `\x1b[31mfile-properties: ${launchArgs[0]}: No such file or directory\x1b[0m`,
+      );
+      return;
+    }
+    normalizedLaunchArgs.push(initialPath);
   } else {
     normalizedLaunchArgs.push(...launchArgs);
   }
@@ -102,6 +120,26 @@ const autocomplete: CommandAutocomplete = ({
   if (invokedByAppCommand && commandName === "file-explorer") {
     return getPathCompletions(currentToken, {
       includeFiles: false,
+      includeDirs: true,
+      includeHidden: true,
+      appendDirSlash: true,
+      includeDotDirs: true,
+    });
+  }
+
+  if (invokedByAppCommand && commandName === "image-viewer") {
+    return getPathCompletions(currentToken, {
+      includeFiles: true,
+      includeDirs: true,
+      includeHidden: false,
+      appendDirSlash: true,
+      includeDotDirs: true,
+    });
+  }
+
+  if (invokedByAppCommand && commandName === "file-properties") {
+    return getPathCompletions(currentToken, {
+      includeFiles: true,
       includeDirs: true,
       includeHidden: true,
       appendDirSlash: true,

@@ -16,13 +16,12 @@ import {
   hasFileDragType,
   readDroppedPathsFromDataTransfer,
 } from "@/lib/file-transfer-dnd";
-import { setActiveTerminalWindow } from "./command-callbacks/cd";
+import { setActiveTerminalWindow, setCwd } from "./command-callbacks/cd";
 import {
   getCommandLinePrefix,
   insertTextIntoCommandBuffer,
   parseCommand,
 } from "./command-line-routine";
-import { setCwd } from "./command-callbacks/cd";
 
 import ansi from "ansi-escape-sequences";
 import figlet from "figlet";

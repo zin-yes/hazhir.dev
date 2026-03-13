@@ -35,8 +35,8 @@ import {
   signUpWithCredentials,
   useSession,
 } from "@/auth/client";
-import { Calendar } from "@/components/ui/calendar";
 import ScrollMoreButton from "@/components/system/scroll-more-button";
+import { Calendar } from "@/components/ui/calendar";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -54,7 +54,12 @@ import {
   hasFileDragType,
   readDroppedPathsFromDataTransfer,
 } from "@/lib/file-transfer-dnd";
-import { type ShortcutDefinition, parseShortcut } from "@/lib/shortcut";
+import {
+  type ShortcutDefinition,
+  getShortcutIconName,
+  getShortcutIconUrl,
+  parseShortcut,
+} from "@/lib/shortcut";
 import {
   type ClockFormat,
   getClockFormat,
@@ -75,6 +80,7 @@ import {
   SingleDocumentApplicationWindow,
   TerminalApplicationWindow,
   TextEditorApplicationWindow,
+  VisualNovelApplicationWindow,
 } from "./application-windows";
 import Desktop from "./desktop";
 import Wallpaper from "./wallpaper";
@@ -87,6 +93,7 @@ type MenuShortcutItem = {
   label: string;
   description: string;
   iconName: string;
+  iconUrl?: string;
 };
 
 type WindowEntry = {
@@ -188,16 +195,16 @@ export default function OperatingSystemPage() {
         );
         if (!parsed) return null;
         const label =
-          parsed.name ??
-          parsed.iconDisplayText ??
+          parsed.meta.display_name ??
           node.name.replace(/\.shortcut$/i, "");
 
         return {
           path: node.path,
           shortcut: parsed,
           label,
-          description: parsed.description ?? "",
-          iconName: parsed.icon ?? "",
+          description: parsed.meta.description ?? "",
+          iconName: getShortcutIconName(parsed) ?? "",
+          iconUrl: getShortcutIconUrl(parsed),
         } satisfies MenuShortcutItem;
       })
       .filter(Boolean) as MenuShortcutItem[];
@@ -274,23 +281,25 @@ export default function OperatingSystemPage() {
     setOperatingSystemVisible(false);
   }, [shouldShowOperatingSystem]);
 
+  const sessionUser = session.data?.user as {
+    username?: string;
+    name?: string;
+    id?: string;
+  } | undefined;
+  const sessionStatus = session.status;
+  const sessionUsername = sessionUser?.username ?? sessionUser?.name ?? sessionUser?.id;
+
   useEffect(() => {
-    if (session.status === "authenticated" && session.data?.user) {
-      const user = session.data.user as {
-        username?: string;
-        name?: string;
-        id?: string;
-      };
-      const username = user.username ?? user.name ?? user.id ?? "guest";
-      setCurrentSystemUsername(String(username));
+    if (sessionStatus === "authenticated" && sessionUsername) {
+      setCurrentSystemUsername(String(sessionUsername));
       setIsSystemUserReady(true);
       return;
     }
 
-    if (session.status !== "loading") {
+    if (sessionStatus !== "loading") {
       setIsSystemUserReady(true);
     }
-  }, [session]);
+  }, [sessionStatus, sessionUsername]);
 
   useEffect(() => {
     const handler = (event: Event) => {
@@ -323,6 +332,9 @@ export default function OperatingSystemPage() {
           break;
         case "calculator":
           addWindow(<CalculatorApplicationWindow />);
+          break;
+        case "visual-novel":
+          addWindow(<VisualNovelApplicationWindow />);
           break;
         case "document-viewer": {
           const requested = detail.args?.[0];

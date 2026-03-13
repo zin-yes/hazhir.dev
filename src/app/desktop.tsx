@@ -4,6 +4,7 @@ import {
   ArrowUpDown,
   BookOpen,
   BookText,
+  Box,
   Calculator,
   ClipboardPaste,
   Copy,
@@ -68,7 +69,11 @@ import {
   readFileDragPayload,
 } from "@/lib/file-transfer-dnd";
 import { isImageFileName } from "@/lib/image-files";
-import { parseShortcut } from "@/lib/shortcut";
+import {
+  getShortcutIconName,
+  getShortcutIconUrl,
+  parseShortcut,
+} from "@/lib/shortcut";
 import {
   DESKTOP_LAYOUT_RESET_EVENT,
   DESKTOP_LAYOUT_STORAGE_KEY_BASE,
@@ -95,6 +100,7 @@ import {
   FileExplorerApplicationWindow,
   ImageViewerApplicationWindow,
   SingleDocumentApplicationWindow,
+  TerminalApplicationWindow,
   TextEditorApplicationWindow,
 } from "./application-windows";
 
@@ -290,7 +296,25 @@ export default function Desktop({
 
     if (isShortcutFile(node)) {
       const shortcut = parseShortcut(node.contents ?? "");
-      const iconName = shortcut?.icon;
+      const iconUrl = shortcut ? getShortcutIconUrl(shortcut) : undefined;
+      const iconName = shortcut ? getShortcutIconName(shortcut) : undefined;
+
+      if (iconUrl) {
+        return (
+          <div className="size-[30px] overflow-hidden rounded-md border border-white/20 bg-black/20">
+            <Image
+              src={iconUrl}
+              alt="icon"
+              width={30}
+              height={30}
+              sizes="30px"
+              quality={45}
+              className="size-[30px] object-cover"
+              draggable={false}
+            />
+          </div>
+        );
+      }
 
       const iconByName: Record<string, ReactNode> = {
         TerminalSquare: <TerminalSquare size={30} className="text-white" />,
@@ -299,6 +323,7 @@ export default function Desktop({
         Calculator: <Calculator size={30} className="text-white" />,
         BookText: <BookText size={30} className="text-white" />,
         BookOpen: <BookOpen size={30} className="text-white" />,
+        Box: <Box size={30} className="text-white" />,
         Settings: <Settings size={30} className="text-white" />,
         Image: <FileImage size={30} className="text-white" />,
         Info: <FileText size={30} className="text-white" />,
@@ -457,7 +482,7 @@ export default function Desktop({
 
       return {
         id: node.path,
-        title: shortcutMeta?.iconDisplayText ?? shortcutMeta?.name ?? node.name,
+        title: shortcutMeta?.meta.display_name ?? node.name,
         icon: getFileIcon(node),
         kind:
           node.type === "directory" ? ("folder" as const) : ("file" as const),
@@ -673,14 +698,11 @@ export default function Desktop({
       if (name === "file-explorer.shortcut") return { col: 0, row: 0 };
       if (name === "terminal.shortcut") return { col: 1, row: 0 };
       if (name === "voxel-game.shortcut") return { col: 2, row: 0 };
-      if (name === "cv.shortcut") {
+      if (name === "projects") {
         return { col: Math.max(0, gridCols - 1), row: 0 };
       }
-      if (name === "github.shortcut") {
+      if (name === "cv.shortcut") {
         return { col: Math.max(0, gridCols - 1), row: 1 };
-      }
-      if (name === "linkedin.shortcut") {
-        return { col: Math.max(0, gridCols - 1), row: 2 };
       }
 
       return null;
@@ -2126,6 +2148,23 @@ export default function Desktop({
                         Open in File Explorer
                       </ContextMenuItem>
                     )}
+                    <ContextMenuItem
+                      onClick={() =>
+                        addWindow(
+                          <TerminalApplicationWindow
+                            identifier={crypto.randomUUID()}
+                            initialPath={
+                              item.fileNode?.type === "directory"
+                                ? item.fileNode.path
+                                : desktopRootPath
+                            }
+                          />,
+                        )
+                      }
+                    >
+                      <TerminalSquare size={16} className="mr-2" />
+                      Open Terminal Here
+                    </ContextMenuItem>
                     {item.fileNode ? (
                       <>
                         <ContextMenuSeparator />
@@ -2295,6 +2334,19 @@ export default function Desktop({
             </ContextMenuRadioGroup>
           </ContextMenuSubContent>
         </ContextMenuSub>
+        <ContextMenuItem
+          onClick={() =>
+            addWindow(
+              <TerminalApplicationWindow
+                identifier={crypto.randomUUID()}
+                initialPath={desktopRootPath}
+              />,
+            )
+          }
+        >
+          <TerminalSquare size={16} className="mr-2" />
+          Open Terminal Here
+        </ContextMenuItem>
         <ContextMenuSeparator />
         <ContextMenuItem onClick={handleNextWallpaper}>
           <FileImage size={16} className="mr-2" />

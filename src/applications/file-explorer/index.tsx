@@ -41,8 +41,8 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { FileSystemNode, useFileSystem } from "@/hooks/use-file-system";
 import { useDragVisualHandoff } from "@/hooks/use-drag-visual-handoff";
+import { FileSystemNode, useFileSystem } from "@/hooks/use-file-system";
 import {
   getFileClipboard,
   setFileClipboard,
@@ -62,12 +62,21 @@ import {
   setInternalFileDragActive,
 } from "@/lib/file-transfer-dnd";
 import { isImageFileName } from "@/lib/image-files";
+import {
+  getShortcutIconName,
+  getShortcutIconUrl,
+  parseShortcut,
+} from "@/lib/shortcut";
 import { getHomePath } from "@/lib/system-user";
 import { cn } from "@/lib/utils";
 import {
   ArrowLeft,
   ArrowRight,
   ArrowUp,
+  BookOpen,
+  BookText,
+  Box,
+  Calculator,
   ChevronDown,
   ChevronRight,
   ClipboardPaste,
@@ -79,13 +88,17 @@ import {
   File,
   FileAudio,
   FileCode,
+  FileImage,
   FileJson,
   FilePlus,
+  FileSymlink,
   FileText,
   FileVideo,
   Folder,
+  FolderClosed,
   FolderOpen,
   FolderPlus,
+  Gamepad2,
   Grid3X3,
   HardDrive,
   Home,
@@ -96,12 +109,15 @@ import {
   RefreshCw,
   Scissors,
   Search,
+  Settings,
   TerminalSquare,
   Trash2,
   User,
   Video,
 } from "lucide-react";
+import NextImage from "next/image";
 import {
+  memo,
   ReactPortal,
   useCallback,
   useEffect,
@@ -109,7 +125,6 @@ import {
   useRef,
   useState,
 } from "react";
-import NextImage from "next/image";
 import { createPortal } from "react-dom";
 import { v4 } from "uuid";
 
@@ -200,6 +215,49 @@ function getFileIcon(node: FileSystemNode, size: number = 18) {
   }
 
   if (isShortcutFile(node)) {
+    const shortcut = parseShortcut(node.contents ?? "");
+    const iconUrl = shortcut ? getShortcutIconUrl(shortcut) : undefined;
+    const iconName = shortcut ? getShortcutIconName(shortcut) : undefined;
+
+    if (iconUrl) {
+      const thumbnailSize = Math.max(16, size);
+      return (
+        <div
+          className="overflow-hidden rounded-sm border border-border/70 bg-muted"
+          style={{ width: thumbnailSize, height: thumbnailSize }}
+        >
+          <NextImage
+            src={iconUrl}
+            alt="icon"
+            width={thumbnailSize}
+            height={thumbnailSize}
+            sizes={`${thumbnailSize}px`}
+            quality={45}
+            className="h-full w-full object-cover"
+            draggable={false}
+          />
+        </div>
+      );
+    }
+
+    const iconByName: Record<string, ReturnType<typeof File>> = {
+      TerminalSquare: <TerminalSquare size={size} className="text-cyan-400" />,
+      FolderClosed: <FolderClosed size={size} className="text-cyan-400" />,
+      Gamepad2: <Gamepad2 size={size} className="text-cyan-400" />,
+      Calculator: <Calculator size={size} className="text-cyan-400" />,
+      BookText: <BookText size={size} className="text-cyan-400" />,
+      BookOpen: <BookOpen size={size} className="text-cyan-400" />,
+      Box: <Box size={size} className="text-cyan-400" />,
+      Settings: <Settings size={size} className="text-cyan-400" />,
+      Image: <FileImage size={size} className="text-cyan-400" />,
+      Info: <FileText size={size} className="text-cyan-400" />,
+      FileSymlink: <FileSymlink size={size} className="text-cyan-400" />,
+    };
+
+    if (iconName && iconByName[iconName]) {
+      return iconByName[iconName];
+    }
+
     return <File size={size} className="text-cyan-400" />;
   }
 
@@ -216,14 +274,14 @@ function getFileIcon(node: FileSystemNode, size: number = 18) {
           className="overflow-hidden rounded-sm border border-border/70 bg-muted"
           style={{ width: thumbnailSize, height: thumbnailSize }}
         >
-            <NextImage
+          <NextImage
             src={source}
             alt={node.name}
             width={thumbnailSize}
             height={thumbnailSize}
             sizes={`${thumbnailSize}px`}
             quality={45}
-              className="h-full w-full object-cover"
+            className="h-full w-full object-cover"
             draggable={false}
           />
         </div>
@@ -288,6 +346,14 @@ function getFileIcon(node: FileSystemNode, size: number = 18) {
 
   const IconComponent = iconConfig.icon;
   return <IconComponent size={size} className={iconConfig.color} />;
+}
+
+function getDisplayName(node: FileSystemNode): string {
+  if (node.type === "file" && node.name.endsWith(".shortcut")) {
+    const shortcut = parseShortcut(node.contents ?? "");
+    return shortcut?.meta.display_name ?? node.name;
+  }
+  return node.name;
 }
 
 interface SidebarBookmark {
@@ -405,7 +471,7 @@ function DirectoryTreeItem({
         ) : (
           getFileIcon(node, 16)
         )}
-        <span className="truncate">{node.name}</span>
+        <span className="truncate">{getDisplayName(node)}</span>
       </div>
       {isExpanded &&
         children.map((child) => {
@@ -433,7 +499,7 @@ function DirectoryTreeItem({
             >
               <span className="w-[15px] shrink-0" />
               {getFileIcon(child, 16)}
-              <span className="truncate">{child.name}</span>
+              <span className="truncate">{getDisplayName(child)}</span>
             </div>
           );
         })}
@@ -479,7 +545,7 @@ interface FileGridItemProps {
   onItemRef: (path: string, node: HTMLDivElement | null) => void;
 }
 
-function FileGridItem({
+const FileGridItem = memo(function FileGridItem({
   node,
   isSelected,
   isDragHidden = false,
@@ -575,9 +641,9 @@ function FileGridItem({
           </div>
           <span
             className="text-xs text-center w-full leading-4 overflow-hidden break-words [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2]"
-            title={node.name}
+            title={getDisplayName(node)}
           >
-            {node.name}
+            {getDisplayName(node)}
           </span>
         </div>
       </ContextMenuTrigger>
@@ -639,11 +705,11 @@ function FileGridItem({
       </ContextMenuContent>
     </ContextMenu>
   );
-}
+});
 
 interface FileListItemProps extends FileGridItemProps {}
 
-function FileListItem({
+const FileListItem = memo(function FileListItem({
   node,
   isSelected,
   isDragHidden = false,
@@ -737,8 +803,11 @@ function FileListItem({
             {getFileIcon(node, 18)}
           </div>
           <div className="flex-1 min-w-0">
-            <span className="text-sm truncate block" title={node.name}>
-              {node.name}
+            <span
+              className="text-sm truncate block"
+              title={getDisplayName(node)}
+            >
+              {getDisplayName(node)}
             </span>
           </div>
           <div className="w-20 text-xs text-muted-foreground text-right shrink-0">
@@ -810,7 +879,7 @@ function FileListItem({
       </ContextMenuContent>
     </ContextMenu>
   );
-}
+});
 
 export default function FileExplorerApplication({
   initialPath,
@@ -940,6 +1009,7 @@ export default function FileExplorerApplication({
 
   const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set());
   const [lastSelectedPath, setLastSelectedPath] = useState<string | null>(null);
+  const lastSelectedPathRef = useRef<string | null>(null);
   const lastTouchTapRef = useRef<{ path: string; at: number } | null>(null);
   const touchDragRef = useRef<{
     pointerId: number;
@@ -950,7 +1020,8 @@ export default function FileExplorerApplication({
     sourcePixels: Record<string, { left: number; top: number }>;
   } | null>(null);
   const selectedPathsRef = useRef<Set<string>>(new Set());
-  const [marquee, setMarquee] = useState<{
+  const marqueeRef = useRef<HTMLDivElement>(null);
+  const marqueeRectRef = useRef<{
     x: number;
     y: number;
     width: number;
@@ -972,6 +1043,7 @@ export default function FileExplorerApplication({
   const isSelectingRef = useRef(false);
   const selectionOriginRef = useRef<{ x: number; y: number } | null>(null);
   const selectionBaseRef = useRef<Set<string>>(new Set());
+  const marqueeRafRef = useRef<number>(0);
   const touchDragVisual = useDragVisualHandoff({
     durationMs: 160,
     easing: "ease-out",
@@ -1138,25 +1210,29 @@ export default function FileExplorerApplication({
       if (event.button !== 0) return;
       rootRef.current?.focus();
 
+      const sel = selectedPathsRef.current;
       if (
-        selectedPaths.has(path) &&
-        selectedPaths.size > 1 &&
+        sel.has(path) &&
+        sel.size > 1 &&
         !event.ctrlKey &&
         !event.metaKey &&
         !event.shiftKey
       ) {
         setLastSelectedPath(path);
+        lastSelectedPathRef.current = path;
         return;
       }
 
-      if (event.shiftKey && lastSelectedPath) {
-        selectRange(lastSelectedPath, path);
+      const lastSel = lastSelectedPathRef.current;
+      if (event.shiftKey && lastSel) {
+        selectRange(lastSel, path);
         setLastSelectedPath(path);
+        lastSelectedPathRef.current = path;
         return;
       }
 
       if (event.ctrlKey || event.metaKey) {
-        const next = new Set(selectedPaths);
+        const next = new Set(sel);
         if (next.has(path)) {
           next.delete(path);
         } else {
@@ -1164,24 +1240,27 @@ export default function FileExplorerApplication({
         }
         updateSelection(next);
         setLastSelectedPath(path);
+        lastSelectedPathRef.current = path;
         return;
       }
 
       updateSelection(new Set([path]));
       setLastSelectedPath(path);
+      lastSelectedPathRef.current = path;
     },
-    [lastSelectedPath, selectRange, selectedPaths, updateSelection],
+    [selectRange, updateSelection],
   );
 
   const handleContextSelect = useCallback(
     (path: string, event: React.MouseEvent<HTMLDivElement>) => {
       event.stopPropagation();
-      if (!selectedPaths.has(path)) {
+      if (!selectedPathsRef.current.has(path)) {
         updateSelection(new Set([path]));
         setLastSelectedPath(path);
+        lastSelectedPathRef.current = path;
       }
     },
-    [selectedPaths, updateSelection],
+    [updateSelection],
   );
 
   const handleItemRef = useCallback(
@@ -1213,7 +1292,20 @@ export default function FileExplorerApplication({
       isSelectingRef.current = true;
       selectionBaseRef.current =
         event.ctrlKey || event.metaKey ? new Set(selectedPaths) : new Set();
-      setMarquee({ x: origin.x, y: origin.y, width: 0, height: 0 });
+      marqueeRectRef.current = {
+        x: origin.x,
+        y: origin.y,
+        width: 0,
+        height: 0,
+      };
+      const el = marqueeRef.current;
+      if (el) {
+        el.style.display = "block";
+        el.style.left = `${origin.x}px`;
+        el.style.top = `${origin.y}px`;
+        el.style.width = "0px";
+        el.style.height = "0px";
+      }
       if (!event.ctrlKey && !event.metaKey) {
         updateSelection(new Set());
       }
@@ -1226,7 +1318,9 @@ export default function FileExplorerApplication({
     isSelectingRef.current = false;
     selectionOriginRef.current = null;
     selectionBaseRef.current = new Set();
-    setMarquee(null);
+    marqueeRectRef.current = null;
+    const el = marqueeRef.current;
+    if (el) el.style.display = "none";
   }, []);
 
   useEffect(() => {
@@ -1250,39 +1344,64 @@ export default function FileExplorerApplication({
       const y = Math.min(origin.y, current.y);
       const width = Math.abs(origin.x - current.x);
       const height = Math.abs(origin.y - current.y);
-      setMarquee({ x, y, width, height });
+      marqueeRectRef.current = { x, y, width, height };
+      const el = marqueeRef.current;
+      if (el) {
+        el.style.left = `${x}px`;
+        el.style.top = `${y}px`;
+        el.style.width = `${width}px`;
+        el.style.height = `${height}px`;
+      }
 
-      const selectionRect = {
-        left: x,
-        top: y,
-        right: x + width,
-        bottom: y + height,
-      };
-      const nextSelection = new Set(selectionBaseRef.current);
-      contents.forEach((item) => {
-        const element = itemRefs.current.get(item.path);
-        if (!element) return;
-        const hitTarget = element.querySelector(
-          "[data-file-hit='true']",
-        ) as HTMLElement | null;
-        const itemRect = (hitTarget ?? element).getBoundingClientRect();
-        const relative = {
-          left: itemRect.left - rect.left,
-          top: itemRect.top - rect.top,
-          right: itemRect.right - rect.left,
-          bottom: itemRect.bottom - rect.top,
+      if (marqueeRafRef.current) return;
+      marqueeRafRef.current = requestAnimationFrame(() => {
+        marqueeRafRef.current = 0;
+        if (!isSelectingRef.current) return;
+        const m = marqueeRectRef.current;
+        if (!m) return;
+
+        const c = viewportRef.current ?? contentRef.current;
+        if (!c) return;
+        const r = c.getBoundingClientRect();
+
+        const selectionRect = {
+          left: m.x,
+          top: m.y,
+          right: m.x + m.width,
+          bottom: m.y + m.height,
         };
-        const intersects =
-          selectionRect.left <= relative.right &&
-          selectionRect.right >= relative.left &&
-          selectionRect.top <= relative.bottom &&
-          selectionRect.bottom >= relative.top;
-        if (intersects) {
-          nextSelection.add(item.path);
+        const nextSelection = new Set(selectionBaseRef.current);
+        contents.forEach((item) => {
+          const element = itemRefs.current.get(item.path);
+          if (!element) return;
+          const hitTarget = element.querySelector(
+            "[data-file-hit='true']",
+          ) as HTMLElement | null;
+          const itemRect = (hitTarget ?? element).getBoundingClientRect();
+          const relative = {
+            left: itemRect.left - r.left,
+            top: itemRect.top - r.top,
+            right: itemRect.right - r.left,
+            bottom: itemRect.bottom - r.top,
+          };
+          const intersects =
+            selectionRect.left <= relative.right &&
+            selectionRect.right >= relative.left &&
+            selectionRect.top <= relative.bottom &&
+            selectionRect.bottom >= relative.top;
+          if (intersects) {
+            nextSelection.add(item.path);
+          }
+        });
+
+        const prev = selectedPathsRef.current;
+        if (
+          nextSelection.size !== prev.size ||
+          [...nextSelection].some((p) => !prev.has(p))
+        ) {
+          updateSelection(nextSelection);
         }
       });
-
-      updateSelection(nextSelection);
     };
 
     const handleMouseUp = () => {
@@ -1300,6 +1419,10 @@ export default function FileExplorerApplication({
       window.removeEventListener("mousemove", handleMouseMove);
       window.removeEventListener("mouseup", handleMouseUp);
       window.removeEventListener("blur", handleBlur);
+      if (marqueeRafRef.current) {
+        cancelAnimationFrame(marqueeRafRef.current);
+        marqueeRafRef.current = 0;
+      }
     };
   }, [contents, endSelection, updateSelection]);
 
@@ -1418,23 +1541,26 @@ export default function FileExplorerApplication({
     [isPickerMode],
   );
 
-  const handleOpenTerminalHere = useCallback((path: string) => {
-    if (isPickerMode) return;
+  const handleOpenTerminalHere = useCallback(
+    (path: string) => {
+      if (isPickerMode) return;
 
-    const targetDirectory = fs.isDirectory(path)
-      ? path
-      : fs.getParentPath(path);
+      const targetDirectory = fs.isDirectory(path)
+        ? path
+        : fs.getParentPath(path);
 
-    const portal = createPortal(
-      <TerminalApplicationWindow
-        identifier={v4()}
-        initialPath={targetDirectory}
-      />,
-      document.getElementById("operating-system-container") as HTMLDivElement,
-      "terminal_" + v4(),
-    );
-    setChildWindows((prev) => [...prev, portal]);
-  }, [fs, isPickerMode]);
+      const portal = createPortal(
+        <TerminalApplicationWindow
+          identifier={v4()}
+          initialPath={targetDirectory}
+        />,
+        document.getElementById("operating-system-container") as HTMLDivElement,
+        "terminal_" + v4(),
+      );
+      setChildWindows((prev) => [...prev, portal]);
+    },
+    [fs, isPickerMode],
+  );
 
   const handleDelete = useCallback(
     (node: FileSystemNode) => {
@@ -2117,7 +2243,7 @@ export default function FileExplorerApplication({
 
           <Separator orientation="vertical" className="h-6 mx-1" />
 
-          <div className="flex-1 flex items-center gap-1 bg-muted/50 rounded-md px-2 py-1 min-w-0">
+          <div className="flex-1 flex items-center gap-1 bg-muted/50 rounded-md px-2 py-1 min-w-0 overflow-hidden">
             <button
               onClick={() => navigate("/")}
               className="hover:bg-accent rounded p-0.5 shrink-0"
@@ -2421,7 +2547,7 @@ export default function FileExplorerApplication({
             )}
 
             <ContextMenu>
-              <ContextMenuTrigger className="flex-1">
+              <ContextMenuTrigger className="flex-1 min-h-0 overflow-hidden">
                 <ScrollArea
                   className="h-full"
                   viewportRef={viewportRef}
@@ -2526,17 +2652,11 @@ export default function FileExplorerApplication({
                         )}
                       </div>
                     )}
-                    {marquee ? (
-                      <div
-                        className="absolute border border-primary/60 bg-primary/10 pointer-events-none rounded-sm"
-                        style={{
-                          left: `${marquee.x}px`,
-                          top: `${marquee.y}px`,
-                          width: `${marquee.width}px`,
-                          height: `${marquee.height}px`,
-                        }}
-                      />
-                    ) : null}
+                    <div
+                      ref={marqueeRef}
+                      className="absolute border border-primary/60 bg-primary/10 pointer-events-none rounded-sm"
+                      style={{ display: "none" }}
+                    />
 
                     {typeof window !== "undefined" &&
                     touchDragVisual.isOverlayVisible &&
@@ -2545,8 +2665,9 @@ export default function FileExplorerApplication({
                           <div className="pointer-events-none fixed inset-0 z-[8000]">
                             {touchDragVisual.overlayIds.map((dragPath) => {
                               const node =
-                                contents.find((item) => item.path === dragPath) ??
-                                fs.getNode(dragPath);
+                                contents.find(
+                                  (item) => item.path === dragPath,
+                                ) ?? fs.getNode(dragPath);
                               if (!node) return null;
 
                               const overlayStyle =
@@ -2577,9 +2698,9 @@ export default function FileExplorerApplication({
                                     </div>
                                     <span
                                       className="text-xs text-center w-full leading-4 overflow-hidden break-words [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2]"
-                                      title={node.name}
+                                      title={getDisplayName(node)}
                                     >
-                                      {node.name}
+                                      {getDisplayName(node)}
                                     </span>
                                   </div>
                                 </div>

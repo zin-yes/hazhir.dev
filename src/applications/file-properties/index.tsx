@@ -6,7 +6,14 @@ import { Separator } from "@/components/ui/separator";
 import { type FileSystemNode, useFileSystem } from "@/hooks/use-file-system";
 import { isImageFileName } from "@/lib/image-files";
 import { cn } from "@/lib/utils";
-import { FileImage, FileText, Folder, HardDrive, Lock, User } from "lucide-react";
+import {
+  FileImage,
+  FileText,
+  Folder,
+  HardDrive,
+  Lock,
+  User,
+} from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 const FILE_SYSTEM_STORAGE_KEY = "filesystem_v6";
@@ -60,7 +67,10 @@ function countLines(text: string): number {
   return text.split(/\r\n|\r|\n/).length;
 }
 
-function collectDescendants(path: string, fs: ReturnType<typeof useFileSystem>): FileSystemNode[] {
+function collectDescendants(
+  path: string,
+  fs: ReturnType<typeof useFileSystem>,
+): FileSystemNode[] {
   const all: FileSystemNode[] = [];
   const queue: string[] = [path];
 
@@ -80,10 +90,17 @@ function collectDescendants(path: string, fs: ReturnType<typeof useFileSystem>):
   return all;
 }
 
-export default function FilePropertiesApplication({ filePath }: { filePath?: string }) {
+export default function FilePropertiesApplication({
+  filePath,
+}: {
+  filePath?: string;
+}) {
   const fs = useFileSystem();
   const [storageVersion, setStorageVersion] = useState(0);
-  const [imageResolution, setImageResolution] = useState<{ width: number; height: number } | null>(null);
+  const [imageResolution, setImageResolution] = useState<{
+    width: number;
+    height: number;
+  } | null>(null);
   const scrollViewportRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -114,7 +131,8 @@ export default function FilePropertiesApplication({ filePath }: { filePath?: str
     const directChildren =
       node.type === "directory" ? fs.getChildren(node.path, true) : [];
 
-    const localStorageValue = window.localStorage.getItem(FILE_SYSTEM_STORAGE_KEY) ?? "[]";
+    const localStorageValue =
+      window.localStorage.getItem(FILE_SYSTEM_STORAGE_KEY) ?? "[]";
     const totalStorageBytes = getUtf16StorageBytes(localStorageValue);
 
     let subtreeNodes: FileSystemNode[] = [node];
@@ -122,7 +140,9 @@ export default function FilePropertiesApplication({ filePath }: { filePath?: str
       const parsed = JSON.parse(localStorageValue) as FileSystemNode[];
       subtreeNodes = parsed.filter((entry) => {
         if (entry.path === node.path) return true;
-        return node.type === "directory" && entry.path.startsWith(`${node.path}/`);
+        return (
+          node.type === "directory" && entry.path.startsWith(`${node.path}/`)
+        );
       });
       if (subtreeNodes.length === 0) {
         subtreeNodes = [node];
@@ -134,8 +154,12 @@ export default function FilePropertiesApplication({ filePath }: { filePath?: str
     const subtreeSerialized = JSON.stringify(subtreeNodes);
     const subtreeStorageBytes = getUtf16StorageBytes(subtreeSerialized);
 
-    const extension = node.type === "file" ? node.name.split(".").pop()?.toLowerCase() ?? "" : "";
-    const textContent = node.type === "file" ? fs.getFileContents(node.path) ?? "" : "";
+    const extension =
+      node.type === "file"
+        ? (node.name.split(".").pop()?.toLowerCase() ?? "")
+        : "";
+    const textContent =
+      node.type === "file" ? (fs.getFileContents(node.path) ?? "") : "";
     const isTextFile = node.type === "file" && TEXT_EXTENSIONS.has(extension);
 
     return {
@@ -160,7 +184,10 @@ export default function FilePropertiesApplication({ filePath }: { filePath?: str
 
     const image = new window.Image();
     image.onload = () => {
-      setImageResolution({ width: image.naturalWidth, height: image.naturalHeight });
+      setImageResolution({
+        width: image.naturalWidth,
+        height: image.naturalHeight,
+      });
     };
     image.onerror = () => {
       setImageResolution(null);
@@ -188,9 +215,12 @@ export default function FilePropertiesApplication({ filePath }: { filePath?: str
     );
   }
 
-  const { node, directChildren, descendants, textContent, isTextFile } = metadata;
+  const { node, directChildren, descendants, textContent, isTextFile } =
+    metadata;
   const fileCount = descendants.filter((entry) => entry.type === "file").length;
-  const directoryCount = descendants.filter((entry) => entry.type === "directory").length;
+  const directoryCount = descendants.filter(
+    (entry) => entry.type === "directory",
+  ).length;
 
   return (
     <div className="relative h-full w-full bg-background p-2">
@@ -200,19 +230,44 @@ export default function FilePropertiesApplication({ filePath }: { filePath?: str
       >
         <div className="p-3 space-y-3">
           <div>
-            <div className="text-base font-semibold text-foreground truncate">{node.name}</div>
-            <div className="text-[11px] text-muted-foreground mt-0.5">{node.type === "directory" ? "Folder" : "File"}</div>
+            <div className="text-base font-semibold text-foreground truncate">
+              {node.name}
+            </div>
+            <div className="text-[11px] text-muted-foreground mt-0.5">
+              {node.type === "directory" ? "Folder" : "File"}
+            </div>
           </div>
 
           <Separator />
 
           <section className="space-y-3">
-            <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Details</div>
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+              Details
+            </div>
             <div className="grid grid-cols-1 gap-2 text-xs">
-              <InfoRow icon={<Folder size={14} />} label="Type" value={node.type === "directory" ? "Directory" : "File"} />
-              <InfoRow icon={<HardDrive size={14} />} label="Path" value={node.path} mono />
-              <InfoRow icon={<Lock size={14} />} label="Permissions" value={node.permissions} mono />
-              <InfoRow icon={<User size={14} />} label="Owner / Group" value={`${node.owner}:${node.group}`} mono />
+              <InfoRow
+                icon={<Folder size={14} />}
+                label="Type"
+                value={node.type === "directory" ? "Directory" : "File"}
+              />
+              <InfoRow
+                icon={<HardDrive size={14} />}
+                label="Path"
+                value={node.path}
+                mono
+              />
+              <InfoRow
+                icon={<Lock size={14} />}
+                label="Permissions"
+                value={node.permissions}
+                mono
+              />
+              <InfoRow
+                icon={<User size={14} />}
+                label="Owner / Group"
+                value={`${node.owner}:${node.group}`}
+                mono
+              />
               <InfoRow label="Created" value={formatDate(node.createdAt)} />
               <InfoRow label="Modified" value={formatDate(node.modifiedAt)} />
               <InfoRow label="Filesystem size" value={formatBytes(node.size)} />
@@ -227,12 +282,23 @@ export default function FilePropertiesApplication({ filePath }: { filePath?: str
             <>
               <Separator />
               <section className="space-y-3">
-                <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Folder Stats</div>
+                <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                  Folder Stats
+                </div>
                 <div className="grid grid-cols-1 gap-2 text-xs">
-                  <InfoRow label="Items in this folder" value={`${directChildren.length}`} />
-                  <InfoRow label="Items in subtree" value={`${descendants.length}`} />
+                  <InfoRow
+                    label="Items in this folder"
+                    value={`${directChildren.length}`}
+                  />
+                  <InfoRow
+                    label="Items in subtree"
+                    value={`${descendants.length}`}
+                  />
                   <InfoRow label="Files in subtree" value={`${fileCount}`} />
-                  <InfoRow label="Folders in subtree" value={`${directoryCount}`} />
+                  <InfoRow
+                    label="Folders in subtree"
+                    value={`${directoryCount}`}
+                  />
                 </div>
               </section>
             </>
@@ -242,7 +308,9 @@ export default function FilePropertiesApplication({ filePath }: { filePath?: str
             <>
               <Separator />
               <section className="space-y-3">
-                <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Image</div>
+                <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                  Image
+                </div>
                 <div className="grid grid-cols-1 gap-2 text-xs">
                   <InfoRow
                     icon={<FileImage size={14} />}
@@ -253,7 +321,11 @@ export default function FilePropertiesApplication({ filePath }: { filePath?: str
                         : "Unavailable"
                     }
                   />
-                  <InfoRow label="Extension" value={metadata.extension || "None"} mono />
+                  <InfoRow
+                    label="Extension"
+                    value={metadata.extension || "None"}
+                    mono
+                  />
                 </div>
               </section>
             </>
@@ -263,10 +335,19 @@ export default function FilePropertiesApplication({ filePath }: { filePath?: str
             <>
               <Separator />
               <section className="space-y-3">
-                <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Text</div>
+                <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                  Text
+                </div>
                 <div className="grid grid-cols-1 gap-2 text-xs">
-                  <InfoRow icon={<FileText size={14} />} label="Characters" value={textContent.length.toLocaleString()} />
-                  <InfoRow label="Lines" value={countLines(textContent).toLocaleString()} />
+                  <InfoRow
+                    icon={<FileText size={14} />}
+                    label="Characters"
+                    value={textContent.length.toLocaleString()}
+                  />
+                  <InfoRow
+                    label="Lines"
+                    value={countLines(textContent).toLocaleString()}
+                  />
                 </div>
               </section>
             </>
@@ -275,16 +356,15 @@ export default function FilePropertiesApplication({ filePath }: { filePath?: str
           <Separator />
 
           <section className="space-y-3">
-            <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Storage Context</div>
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+              Storage Context
+            </div>
             <div className="grid grid-cols-1 gap-2 text-xs">
               <InfoRow
                 label="Total filesystem localStorage"
                 value={`${formatBytes(metadata.totalStorageBytes)} (${metadata.totalStorageBytes.toLocaleString()} bytes)`}
               />
-              <InfoRow
-                label="Read-only"
-                value={node.readOnly ? "Yes" : "No"}
-              />
+              <InfoRow label="Read-only" value={node.readOnly ? "Yes" : "No"} />
             </div>
           </section>
         </div>
@@ -311,7 +391,14 @@ function InfoRow({
         {icon ? <span className="inline-flex">{icon}</span> : null}
         <span>{label}</span>
       </div>
-      <div className={cn("mt-0.5 text-xs text-foreground break-words", mono && "font-mono text-[11px]")}>{value}</div>
+      <div
+        className={cn(
+          "mt-0.5 text-xs text-foreground break-words",
+          mono && "font-mono text-[11px]",
+        )}
+      >
+        {value}
+      </div>
     </div>
   );
 }

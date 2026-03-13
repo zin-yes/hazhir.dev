@@ -1,6 +1,10 @@
 "use client";
 
 import { generateCVDocumentHtml } from "@/applications/document-viewer/articles/CV";
+import AtlasDocument from "@/applications/document-viewer/articles/Portfolio/Atlas";
+import GammaEngineDocument from "@/applications/document-viewer/articles/Portfolio/gamma-engine";
+import HazhirDevDocument from "@/applications/document-viewer/articles/Portfolio/hazhir.dev";
+import MetricJournalDocument from "@/applications/document-viewer/articles/Portfolio/metricjournal";
 import type { FileSystemNode } from "@/hooks/use-file-system";
 import {
   getImagesDirectoryPath,
@@ -8,7 +12,6 @@ import {
 } from "@/lib/image-files";
 import {
   createAppExecutableContents,
-  createLinkShortcutContents,
   createShortcutContents,
 } from "@/lib/shortcut";
 
@@ -110,6 +113,15 @@ export const SYSTEM_APPS: SystemAppDefinition[] = [
     menuDescription: "Adjust desktop, account, and terminal preferences.",
     includeDesktopShortcut: false,
   },
+  {
+    id: "visual-novel",
+    executableName: "visual-novel.app",
+    displayName: "Visual Novel",
+    icon: "BookText",
+    desktopIconText: "Visual Novel",
+    menuDescription: "Play the built-in visual novel.",
+    includeDesktopShortcut: false,
+  },
 ];
 
 export function buildDefaultFileSystem(username: string): FileSystemNode[] {
@@ -121,6 +133,17 @@ export function buildDefaultFileSystem(username: string): FileSystemNode[] {
   const imagesPath = getImagesDirectoryPath(homePath);
   const cvDocumentPath = `${documentsPath}/CV.document`;
   const defaultCvDocumentContents = generateCVDocumentHtml();
+
+  const atlasDocumentPath = `${documentsPath}/Atlas.document`;
+  const atlasDocumentContents = AtlasDocument();
+  const gammaEngineDocumentPath = `${documentsPath}/Gamma-Engine.document`;
+  const gammaEngineDocumentContents = GammaEngineDocument();
+  const hazhirDevDocumentPath = `${documentsPath}/hazhir.dev.document`;
+  const hazhirDevDocumentContents = HazhirDevDocument();
+  const metricJournalDocumentPath = `${documentsPath}/MetricJournal.document`;
+  const metricJournalDocumentContents = MetricJournalDocument();
+
+  const projectsPath = `${desktopPath}/Projects`;
   const wallpaperImageEntries = getWallpaperImageEntries(homePath);
 
   const baseNodes: FileSystemNode[] = [
@@ -257,13 +280,74 @@ export function buildDefaultFileSystem(username: string): FileSystemNode[] {
       path: cvDocumentPath,
       parentPath: documentsPath,
       contents: defaultCvDocumentContents,
-      permissions: "rw-r--r--",
+      permissions: "r--r--r--",
       owner: username,
       group: username,
       size: new Blob([defaultCvDocumentContents]).size,
       createdAt: now,
       modifiedAt: now,
       isHidden: false,
+      readOnly: true,
+    },
+    {
+      name: "Atlas.document",
+      type: "file",
+      path: atlasDocumentPath,
+      parentPath: documentsPath,
+      contents: atlasDocumentContents,
+      permissions: "r--r--r--",
+      owner: username,
+      group: username,
+      size: new Blob([atlasDocumentContents]).size,
+      createdAt: now,
+      modifiedAt: now,
+      isHidden: false,
+      readOnly: true,
+    },
+    {
+      name: "Gamma-Engine.document",
+      type: "file",
+      path: gammaEngineDocumentPath,
+      parentPath: documentsPath,
+      contents: gammaEngineDocumentContents,
+      permissions: "r--r--r--",
+      owner: username,
+      group: username,
+      size: new Blob([gammaEngineDocumentContents]).size,
+      createdAt: now,
+      modifiedAt: now,
+      isHidden: false,
+      readOnly: true,
+    },
+    {
+      name: "hazhir.dev.document",
+      type: "file",
+      path: hazhirDevDocumentPath,
+      parentPath: documentsPath,
+      contents: hazhirDevDocumentContents,
+      permissions: "r--r--r--",
+      owner: username,
+      group: username,
+      size: new Blob([hazhirDevDocumentContents]).size,
+      createdAt: now,
+      modifiedAt: now,
+      isHidden: false,
+      readOnly: true,
+    },
+    {
+      name: "MetricJournal.document",
+      type: "file",
+      path: metricJournalDocumentPath,
+      parentPath: documentsPath,
+      contents: metricJournalDocumentContents,
+      permissions: "r--r--r--",
+      owner: username,
+      group: username,
+      size: new Blob([metricJournalDocumentContents]).size,
+      createdAt: now,
+      modifiedAt: now,
+      isHidden: false,
+      readOnly: true,
     },
     ...wallpaperImageEntries.map((entry) => ({
       name: entry.name,
@@ -307,14 +391,11 @@ export function buildDefaultFileSystem(username: string): FileSystemNode[] {
     (app) => app.includeDesktopShortcut !== false,
   ).map((app) => {
     const fileName = `${app.id}.shortcut`;
-    const contents = createShortcutContents(
-      `/applications/${app.executableName}`,
-      {
-        name: app.desktopIconText,
-        icon: app.icon,
-        iconDisplayText: app.desktopIconText,
-      },
-    );
+    const contents = createShortcutContents({
+      application: { target: `/applications/${app.executableName}` },
+      meta: { display_name: app.desktopIconText },
+      icon: { source: "lucide", url: app.icon },
+    });
     return {
       name: fileName,
       type: "file",
@@ -336,15 +417,14 @@ export function buildDefaultFileSystem(username: string): FileSystemNode[] {
   ).map((app) => {
     const fileName = `${app.id}.shortcut`;
     const menuLabel = app.displayName;
-    const contents = createShortcutContents(
-      `/applications/${app.executableName}`,
-      {
-        name: menuLabel,
-        icon: app.icon,
-        iconDisplayText: menuLabel,
+    const contents = createShortcutContents({
+      application: { target: `/applications/${app.executableName}` },
+      meta: {
+        display_name: menuLabel,
         description: app.menuDescription ?? `Open ${app.displayName}`,
       },
-    );
+      icon: { source: "lucide", url: app.icon },
+    });
     return {
       name: fileName,
       type: "file",
@@ -361,15 +441,14 @@ export function buildDefaultFileSystem(username: string): FileSystemNode[] {
     };
   });
 
-  const cvShortcutContents = createShortcutContents(
-    "/applications/document-viewer.app",
-    {
-      name: "CV",
-      icon: "BookOpen",
-      iconDisplayText: "CV",
-      args: [cvDocumentPath, "CV.document"],
+  const cvShortcutContents = createShortcutContents({
+    application: {
+      target: "/applications/document-viewer.app",
+      arguments: [cvDocumentPath, "CV.document"],
     },
-  );
+    meta: { display_name: "CV" },
+    icon: { source: "lucide", url: "BookOpen" },
+  });
 
   const cvShortcutNode: FileSystemNode = {
     name: "cv.shortcut",
@@ -386,49 +465,113 @@ export function buildDefaultFileSystem(username: string): FileSystemNode[] {
     isHidden: false,
   };
 
-  const githubShortcutContents = createLinkShortcutContents(
-    "https://github.com/zin-yes/",
-    {
-      name: "GitHub",
-      icon: "FileSymlink",
-      iconDisplayText: "GitHub",
-    },
-  );
+  // --- Projects folder and shortcuts ---
 
-  const githubShortcutNode: FileSystemNode = {
-    name: "github.shortcut",
-    type: "file",
-    path: `${desktopPath}/github.shortcut`,
+  const projectsFolderNode: FileSystemNode = {
+    name: "Projects",
+    type: "directory",
+    path: projectsPath,
     parentPath: desktopPath,
-    contents: githubShortcutContents,
-    permissions: "rw-r--r--",
+    permissions: "rwxr-xr-x",
     owner: username,
     group: username,
-    size: new Blob([githubShortcutContents]).size,
+    size: 4096,
     createdAt: now,
     modifiedAt: now,
     isHidden: false,
   };
 
-  const linkedinShortcutContents = createLinkShortcutContents(
-    "https://linkedin.com/in/hazhir-taher",
-    {
-      name: "LinkedIn",
-      icon: "FileSymlink",
-      iconDisplayText: "LinkedIn",
+  const metricJournalShortcutContents = createShortcutContents({
+    application: {
+      target: "/applications/document-viewer.app",
+      arguments: [metricJournalDocumentPath, "MetricJournal.document"],
     },
-  );
+    meta: { display_name: "MetricJournal" },
+    icon: { source: "url", url: "/articles/mj_logo.png" },
+  });
 
-  const linkedinShortcutNode: FileSystemNode = {
-    name: "linkedin.shortcut",
+  const metricJournalShortcutNode: FileSystemNode = {
+    name: "metricjournal.shortcut",
     type: "file",
-    path: `${desktopPath}/linkedin.shortcut`,
-    parentPath: desktopPath,
-    contents: linkedinShortcutContents,
+    path: `${projectsPath}/metricjournal.shortcut`,
+    parentPath: projectsPath,
+    contents: metricJournalShortcutContents,
     permissions: "rw-r--r--",
     owner: username,
     group: username,
-    size: new Blob([linkedinShortcutContents]).size,
+    size: new Blob([metricJournalShortcutContents]).size,
+    createdAt: now,
+    modifiedAt: now,
+    isHidden: false,
+  };
+
+  const hazhirDevShortcutContents = createShortcutContents({
+    application: {
+      target: "/applications/document-viewer.app",
+      arguments: [hazhirDevDocumentPath, "hazhir.dev.document"],
+    },
+    meta: { display_name: "hazhir.dev" },
+    icon: { source: "url", url: "/articles/hd_logo.png" },
+  });
+
+  const hazhirDevShortcutNode: FileSystemNode = {
+    name: "hazhir.dev.shortcut",
+    type: "file",
+    path: `${projectsPath}/hazhir.dev.shortcut`,
+    parentPath: projectsPath,
+    contents: hazhirDevShortcutContents,
+    permissions: "rw-r--r--",
+    owner: username,
+    group: username,
+    size: new Blob([hazhirDevShortcutContents]).size,
+    createdAt: now,
+    modifiedAt: now,
+    isHidden: false,
+  };
+
+  const gammaEngineShortcutContents = createShortcutContents({
+    application: {
+      target: "/applications/document-viewer.app",
+      arguments: [gammaEngineDocumentPath, "Gamma-Engine.document"],
+    },
+    meta: { display_name: "Gamma Engine" },
+    icon: { source: "lucide", url: "Box" },
+  });
+
+  const gammaEngineShortcutNode: FileSystemNode = {
+    name: "gamma-engine.shortcut",
+    type: "file",
+    path: `${projectsPath}/gamma-engine.shortcut`,
+    parentPath: projectsPath,
+    contents: gammaEngineShortcutContents,
+    permissions: "rw-r--r--",
+    owner: username,
+    group: username,
+    size: new Blob([gammaEngineShortcutContents]).size,
+    createdAt: now,
+    modifiedAt: now,
+    isHidden: false,
+  };
+
+  const atlasShortcutContents = createShortcutContents({
+    application: {
+      target: "/applications/document-viewer.app",
+      arguments: [atlasDocumentPath],
+    },
+    meta: { display_name: "Atlas" },
+    icon: { source: "url", url: "/articles/atlas_logo.png" },
+  });
+
+  const atlasShortcutNode: FileSystemNode = {
+    name: "atlas.shortcut",
+    type: "file",
+    path: `${projectsPath}/atlas.shortcut`,
+    parentPath: projectsPath,
+    contents: atlasShortcutContents,
+    permissions: "rw-r--r--",
+    owner: username,
+    group: username,
+    size: new Blob([atlasShortcutContents]).size,
     createdAt: now,
     modifiedAt: now,
     isHidden: false,
@@ -440,8 +583,11 @@ export function buildDefaultFileSystem(username: string): FileSystemNode[] {
     ...shortcutNodes,
     ...menuShortcutNodes,
     cvShortcutNode,
-    githubShortcutNode,
-    linkedinShortcutNode,
+    projectsFolderNode,
+    metricJournalShortcutNode,
+    hazhirDevShortcutNode,
+    gammaEngineShortcutNode,
+    atlasShortcutNode,
   ].map((node) => {
     if (node.type !== "file") return node;
     return { ...node, size: new Blob([node.contents ?? ""]).size };
