@@ -56,6 +56,14 @@
     "callbackFunctionName": "export"
   },
   {
+    "name": "exec",
+    "usage": ["exec <command>"],
+    "examples": ["exec ls -la", "exec cat ~/.terminal_rc"],
+    "aliases": [],
+    "description": "Executes the given arguments as a shell command.",
+    "callbackFunctionName": "exec"
+  },
+  {
     "name": "source",
     "usage": ["source [path]"],
     "examples": ["source ~/.terminal_rc", "source /home/guest/.terminal_rc"],
@@ -210,6 +218,17 @@
     "callbackFunctionName": "textEditor"
   },
   {
+    "name": "document-viewer",
+    "usage": ["document-viewer [file]"],
+    "examples": [
+      "document-viewer",
+      "document-viewer ~/Documents/CV.document"
+    ],
+    "aliases": ["doc"],
+    "description": "Opens a .document file in the Document Viewer.",
+    "callbackFunctionName": "documentViewer"
+  },
+  {
     "name": "terminal",
     "usage": ["terminal"],
     "examples": ["terminal"],
@@ -252,6 +271,46 @@
     "callbackFunctionName": "runApp",
     "icon": "Calculator",
     "iconDisplayText": "Calculator"
+  },
+  {
+    "name": "meditation",
+    "usage": ["meditation"],
+    "examples": ["meditation"],
+    "aliases": [],
+    "description": "Launches the Nadi Shuddhi meditation application.",
+    "callbackFunctionName": "runApp",
+    "icon": "Heart",
+    "iconDisplayText": "Meditation"
+  },
+  {
+    "name": "image-viewer",
+    "usage": ["image-viewer [file]"],
+    "examples": ["image-viewer", "image-viewer ~/Images/wallpaper.jpg"],
+    "aliases": [],
+    "description": "Opens an image file in the Image Viewer.",
+    "callbackFunctionName": "runApp",
+    "icon": "Image",
+    "iconDisplayText": "Image Viewer"
+  },
+  {
+    "name": "settings",
+    "usage": ["settings [tab]"],
+    "examples": ["settings", "settings general"],
+    "aliases": [],
+    "description": "Opens the Settings application.",
+    "callbackFunctionName": "runApp",
+    "icon": "Settings",
+    "iconDisplayText": "Settings"
+  },
+  {
+    "name": "file-properties",
+    "usage": ["file-properties [file]"],
+    "examples": ["file-properties", "file-properties ~/Documents/CV.document"],
+    "aliases": [],
+    "description": "Inspects metadata, permissions, and storage usage of a file.",
+    "callbackFunctionName": "runApp",
+    "icon": "Info",
+    "iconDisplayText": "Properties"
   },
   {
     "name": "visual-novel",

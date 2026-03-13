@@ -434,7 +434,6 @@ export default function ApplicationWindow({
 
       // Set current window to highest z-index (number of windows)
       ref.current.style.zIndex = String(windows.length);
-
     }
   };
 

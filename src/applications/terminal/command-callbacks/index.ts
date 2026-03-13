@@ -7,8 +7,12 @@ import application, {
 } from "./application";
 import cat, { autocomplete as catAutocomplete } from "./cat";
 import cd, { autocomplete as cdAutocomplete } from "./cd";
+import documentViewer, {
+  autocomplete as documentViewerAutocomplete,
+} from "./document-viewer";
 import clear, { autocomplete as clearAutocomplete } from "./clear";
 import cp, { autocomplete as cpAutocomplete } from "./cp";
+import exec, { autocomplete as execAutocomplete } from "./exec";
 import exit, { autocomplete as exitAutocomplete } from "./exit";
 import exportCommand, { autocomplete as exportAutocomplete } from "./export";
 import help, { autocomplete as helpAutocomplete } from "./help";
@@ -51,6 +55,7 @@ const commandCallbacks: Record<string, CommandCallback> = {
   link: link,
   signin: signin,
   signout: signout,
+  exec: exec,
   exit: exit,
   alias: alias,
   export: exportCommand,
@@ -70,6 +75,7 @@ const commandCallbacks: Record<string, CommandCallback> = {
   source: source,
   runApp: runApp,
   textEditor: textEditor,
+  documentViewer: documentViewer,
 };
 
 export const commandAutoCompletes: Record<string, CommandAutocomplete> = {
@@ -79,6 +85,7 @@ export const commandAutoCompletes: Record<string, CommandAutocomplete> = {
   cat: catAutocomplete,
   cd: cdAutocomplete,
   clear: clearAutocomplete,
+  exec: execAutocomplete,
   exit: exitAutocomplete,
   help: helpAutocomplete,
   link: linkAutocomplete,
@@ -98,6 +105,8 @@ export const commandAutoCompletes: Record<string, CommandAutocomplete> = {
   runApp: runAppAutocomplete,
   textEditor: textEditorAutocomplete,
   edit: textEditorAutocomplete,
+  documentViewer: documentViewerAutocomplete,
+  doc: documentViewerAutocomplete,
 };
 
 export default commandCallbacks;

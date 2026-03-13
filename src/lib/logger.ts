@@ -3,11 +3,11 @@ export default class Logger {
 
   public debug(message: string) {
     if (process.env.NODE_ENV !== "production") {
-      console.debug(`[${this.scope}] ${message}`)
+      console.debug(`[${this.scope}] ${message}`);
     }
   }
 
   public error(message: string) {
-    console.error(`[${this.scope}] ${message}`)
+    console.error(`[${this.scope}] ${message}`);
   }
 }

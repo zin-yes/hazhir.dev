@@ -183,7 +183,10 @@ export default function SettingsApplication({
                           </SelectTrigger>
                           <SelectContent>
                             {WALLPAPER_CHOICES.map((choice) => (
-                              <SelectItem key={choice.value} value={choice.value}>
+                              <SelectItem
+                                key={choice.value}
+                                value={choice.value}
+                              >
                                 {choice.label}
                               </SelectItem>
                             ))}
@@ -357,7 +360,9 @@ export default function SettingsApplication({
                 >
                   <Card className="w-full">
                     <CardHeader className="p-4 pb-2">
-                      <CardTitle className="text-sm">User information</CardTitle>
+                      <CardTitle className="text-sm">
+                        User information
+                      </CardTitle>
                       <CardDescription className="text-xs">
                         Active session details.
                       </CardDescription>
@@ -427,7 +432,9 @@ export default function SettingsApplication({
                       </div>
                       <Separator />
                       <div className="flex justify-between gap-3">
-                        <span className="text-muted-foreground">CPU threads</span>
+                        <span className="text-muted-foreground">
+                          CPU threads
+                        </span>
                         <span>{systemInfo.cpuThreads}</span>
                       </div>
                       <Separator />
@@ -437,7 +444,9 @@ export default function SettingsApplication({
                       </div>
                       <Separator />
                       <div className="flex justify-between gap-3">
-                        <span className="text-muted-foreground">Resolution</span>
+                        <span className="text-muted-foreground">
+                          Resolution
+                        </span>
                         <span>{systemInfo.resolution}</span>
                       </div>
                       <Separator />

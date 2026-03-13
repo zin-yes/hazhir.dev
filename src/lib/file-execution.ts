@@ -65,25 +65,25 @@ export function executeFilePath(
     }
 
     if (shortcut.type === "application") {
-      const targetNode = fs.getNode(shortcut.target);
+      const targetNode = fs.getNode(shortcut.application.target);
       if (!targetNode || targetNode.type !== "file") {
         return {
           ok: false,
-          message: `Shortcut target not found: ${shortcut.target}`,
+          message: `Shortcut target not found: ${shortcut.application.target}`,
         };
       }
       return executeApplicationNode(targetNode, fs, [
-        ...shortcut.args,
+        ...shortcut.application.arguments,
         ...launchArgs,
       ]);
     }
 
     if (shortcut.type === "link") {
-      const normalized = normalizeExternalUrl(shortcut.url);
+      const normalized = normalizeExternalUrl(shortcut.link.url);
       if (!normalized) {
         return {
           ok: false,
-          message: `Invalid link shortcut URL: ${shortcut.url}`,
+          message: `Invalid link shortcut URL: ${shortcut.link.url}`,
         };
       }
 

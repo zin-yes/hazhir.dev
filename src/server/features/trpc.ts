@@ -1,5 +1,5 @@
 export {
   router as createTRPCRouter,
-  publicProcedure,
   protectedProcedure,
+  publicProcedure,
 } from "@/server/api/trpc";

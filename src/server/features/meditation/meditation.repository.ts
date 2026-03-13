@@ -47,15 +47,15 @@ export class MeditationRepository {
       return result;
     } catch (error) {
       const errorMessage =
-        error instanceof Error
-          ? error.message
-          : "Unknown error in listByUser.";
+        error instanceof Error ? error.message : "Unknown error in listByUser.";
       this.logger.error(`listByUser(${jts(params)}): ${errorMessage}`);
       throw error;
     }
   }
 
-  public async create(params: SaveMeditationSessionParams): Promise<{ ok: true }> {
+  public async create(
+    params: SaveMeditationSessionParams,
+  ): Promise<{ ok: true }> {
     try {
       if (!this.db) {
         throw new Error("Database is not available.");

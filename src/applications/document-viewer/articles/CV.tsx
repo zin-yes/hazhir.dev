@@ -28,7 +28,7 @@ type LanguageEntry = {
 const cvData = {
   name: "HAZHIR TAHER",
   location: "Norrköping",
-  phone: "+46 72 84-311 37",
+  phone: "072 84-311 37",
   email: "hey@hazhir.dev",
   links: [
     { label: "GitHub", href: "https://github.com/zin-yes" },
@@ -36,33 +36,33 @@ const cvData = {
   ],
 
   summary:
-    "Full-stack software developer with 5+ years of experience building production web applications using TypeScript and Next.js. Technical co-founder of a SaaS platform that reached ~30k SEK monthly recurring revenue while part of the Antler residency program. Strong interest in systems programming, graphics rendering, and game engine development.",
+    'Self-taught developer, programming since age 10. Built and launched real products using Next.js and TypeScript, including a SaaS platform that reached <strong>~30k SEK monthly recurring revenue</strong> and closed companies like <a href="https://www.scrive.com/">Scrive</a> as part of the <a href="https://antler.co/">Antler residency program</a>. Equally passionate about computer graphics and game engine development.',
 
   experience: [
     {
       title: "Technical Co-Founder | Atlas",
-      meta: "Jun 2025 – Dec 2025",
+      meta: "Jun 2025 - Dec 2025",
       links: [{ label: "Website", href: "https://useatlas.io" }],
       bullets: [
-        "Co-founded and built a SaaS platform as part of the Antler residency program, reaching paying customers and ~30k SEK monthly recurring revenue.",
-        "Designed and implemented full-stack architecture using Next.js, TypeScript, and AWS.",
+        'Co-founded and built a SaaS platform as part of the <a href="https://antler.co/">Antler</a> residency program, reaching <strong>~30k SEK monthly recurring revenue</strong> and closing customers like <a href="https://www.scrive.com/">Scrive</a>.',
+        "Designed and implemented full-stack architecture using Next.js, TypeScript, and Vercel.",
         "Rapidly shipped product features and bug fixes based on feedback from early users.",
         "Worked directly with customers to iterate product features and improve user experience.",
       ],
     },
     {
       title: "Technical Co-Founder | Valufy",
-      meta: "2023 – 2024",
+      meta: "2023 - 2024",
       bullets: [
         "Designed and implemented backend infrastructure using SST and AWS.",
         "Developed a web and mobile product prototype with two co-founders.",
         "Iterated product features using feedback from early beta testers.",
-        "Presented the product at VentureCup Regional Final East.",
+        'Presented the product at <a href="https://www.venturecup.se/">VentureCup Regional Final East</a>.',
       ],
     },
     {
       title: "Game Developer | Minecraft Game Show (Mithzan)",
-      meta: "2020 – 2022",
+      meta: "2020 - 2022",
       links: [
         {
           label: "YouTube Playlist",
@@ -73,7 +73,7 @@ const cvData = {
         "Developed a custom Minecraft game show platform using the Spigot API in Java.",
         "Implemented multiplayer gameplay systems and server-side logic for competitive challenges.",
         "Worked closely with ~10 YouTube creators to iterate gameplay features.",
-        "Content produced using the system reached ~40k average viewers across participating channels.",
+        "Content produced using the system reached <strong>~40k average viewers</strong> across participating channels.",
       ],
     },
   ],
@@ -84,54 +84,54 @@ const cvData = {
       links: [
         { label: "Live Website", href: "https://hazhir.dev" },
         {
-          label: "GitHub Repository",
+          label: "Repository",
           href: "https://github.com/zin-yes/hazhir.dev",
         },
       ],
       paragraphs: [
-        "OS-themed interactive portfolio featuring a custom browser-based terminal and voxel game.",
-        "Implemented infinite procedural terrain generation using Three.js and WebGL.",
-        "Full-stack implementation using Next.js, TypeScript, TailwindCSS, Auth.js, and Drizzle ORM.",
+        "OS-themed interactive portfolio featuring a <>custom browser-based terminal and voxel game</strong>.",
+        "Implemented <strong>infinite procedural terrain generation</strong> using Three.js and WebGL.",
+        "Full-stack implementation using Next.js, TypeScript, TailwindCSS, Better-Auth, and Drizzle ORM.",
         "Automated deployment and CI/CD using Vercel.",
       ],
     },
     {
       title: "Gamma Engine | Java 3D Game Engine",
       links: [
-        { label: "GitHub Repository", href: "#" },
-        { label: "Devlogs", href: "#" },
+        {
+          label: "Repository",
+          href: "https://github.com/zin-yes/gamma-engine",
+        },
+        {
+          label: "Devlogs",
+          href: "https://www.youtube.com/playlist?list=PLX4lr9FAXutj6FOBKhatsV7Cn2M1iyogU",
+        },
       ],
       paragraphs: [
         "Developed a custom 3D game engine in Java as a long-term personal project.",
-        "Implemented modern rendering techniques including physically-based rendering.",
-        "Achieves 100+ FPS on mid-range hardware with ~150k polygons and high-resolution textures.",
+        "Implemented physically-based rendering, 3D audio with OpenAL, and physics using JBullet.",
+        "Achieves <strong>100+ FPS</strong> on mid-range hardware with ~150k polygons and high-resolution textures.",
         "Used the engine to develop several small games and technical experiments.",
       ],
     },
     {
       title: "MetricJournal | Personal Productivity SaaS",
-      links: [
-        { label: "Live Website", href: "https://metricjournal.com" },
-        {
-          label: "GitHub Repository",
-          href: "https://github.com/zin-yes/metricjournal",
-        },
-      ],
+      links: [{ label: "Live Website", href: "https://metricjournal.com" }],
       paragraphs: [
-        "Built a journaling and time-tracking web application for logging daily activities.",
-        "Full-stack implementation using Next.js, TypeScript, and Drizzle ORM.",
-        "Project currently paused while focusing on other work.",
+        "Built and launched a <strong>personal productivity web app</strong> used for daily journaling, task management, and habit tracking.",
+        "Added social features so users can share activity and receive reactions and comments from others.",
+        "Handled the full product lifecycle: design, development, deployment, and payments.",
       ],
     },
   ],
 
   education: [
     {
-      school: "JENSEN Yrkeshögskola (2025–2027)",
+      school: "JENSEN Yrkeshögskola (2025-2027)",
       program: "IoT & Embedded Development",
     },
     {
-      school: "Berzeliusskolans Gymnasium (2019–2023)",
+      school: "Berzeliusskolans Gymnasium (2019-2023)",
       program: "Natural Science Programme",
     },
   ],
@@ -153,8 +153,7 @@ const cvData = {
     "Git",
     "Vercel",
     "Three.js",
-    "Graphics Programming",
-    "Game Engines",
+    "OpenGL",
   ],
 } as const;
 
@@ -212,7 +211,7 @@ export function generateCVDocumentHtml(): string {
     ${entryMeta}
   </div>
   <ul class="bullets">
-    ${entry.bullets.map((bullet) => `<li>${escapeHtml(bullet)}</li>`).join("")}
+    ${entry.bullets.map((bullet) => `<li>${bullet}</li>`).join("")}
   </ul>
 </li>`;
     })
@@ -236,9 +235,7 @@ export function generateCVDocumentHtml(): string {
     ${entryLinks}
   </div>
   <ul class="bullets">
-    ${entry.paragraphs
-      .map((paragraph) => `<li>${escapeHtml(paragraph)}</li>`)
-      .join("")}
+    ${entry.paragraphs.map((paragraph) => `<li>${paragraph}</li>`).join("")}
   </ul>
 </li>`;
     })
@@ -273,7 +270,7 @@ export function generateCVDocumentHtml(): string {
       }
       .name {
         margin: 0;
-        font-size: 28px;
+        font-size: 20px;
         font-weight: 800;
         letter-spacing: 0.01em;
       }
@@ -369,6 +366,8 @@ export function generateCVDocumentHtml(): string {
       }
       .entry-links a,
       .meta a { color: inherit; text-decoration: underline; }
+      .bullets a,
+      .summary a { color: var(--fg); text-decoration: underline; }
       .bullets {
         margin: 6px 0 0;
         color: var(--muted);
@@ -455,7 +454,7 @@ export function generateCVDocumentHtml(): string {
       <div class="section-divider"></div>
 
       <section class="section intro-section">
-        <p class="summary">${escapeHtml(cvData.summary)}</p>
+        <p class="summary">${cvData.summary}</p>
       </section>
 
       <section class="section">
@@ -492,7 +491,7 @@ export function generateCVDocumentHtml(): string {
             ${cvData.languages
               .map(
                 (entry) =>
-                  `<li><strong>${escapeHtml(entry.name)}</strong> — ${escapeHtml(entry.level)}</li>`,
+                  `<li><strong>${escapeHtml(entry.name)}</strong> - ${escapeHtml(entry.level)}</li>`,
               )
               .join("")}
           </ul>
@@ -682,14 +681,14 @@ export default function CVDocument() {
       </p>
 
       <SectionHeader title="Experience" />
-      <div className="flex flex-col gap-3">
+      <div className="flex flex-col">
         {cvData.experience.map((entry) => (
           <ExperienceItem key={entry.title} entry={entry} />
         ))}
       </div>
 
       <SectionHeader title="Projects" />
-      <div className="flex flex-col gap-3">
+      <div className="flex flex-col">
         {cvData.projects.map((entry) => (
           <ProjectItem key={entry.title} entry={entry} />
         ))}
