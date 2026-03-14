@@ -89,7 +89,7 @@ const cvData = {
         },
       ],
       paragraphs: [
-        "OS-themed interactive portfolio featuring a <>custom browser-based terminal and voxel game</strong>.",
+        "OS-themed interactive portfolio featuring a <strong>custom browser-based terminal and voxel game</strong>.",
         "Implemented <strong>infinite procedural terrain generation</strong> using Three.js and WebGL.",
         "Full-stack implementation using Next.js, TypeScript, TailwindCSS, Better-Auth, and Drizzle ORM.",
         "Automated deployment and CI/CD using Vercel.",

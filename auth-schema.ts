@@ -1,5 +1,5 @@
 import { relations, sql } from "drizzle-orm";
-import { index, integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import { sqliteTable, text, integer, index } from "drizzle-orm/sqlite-core";
 
 export const user = sqliteTable("user", {
   id: text("id").primaryKey(),
@@ -105,29 +105,3 @@ export const accountRelations = relations(account, ({ one }) => ({
     references: [user.id],
   }),
 }));
-
-export const meditationSessions = sqliteTable(
-  "meditation_session",
-  {
-    id: text("id")
-      .primaryKey()
-      .$defaultFn(() => crypto.randomUUID()),
-    userId: text("userId")
-      .notNull()
-      .references(() => user.id, { onDelete: "cascade" }),
-    startedAt: integer("startedAt", { mode: "timestamp_ms" }).notNull(),
-    endedAt: integer("endedAt", { mode: "timestamp_ms" }).notNull(),
-    durationSeconds: integer("durationSeconds").notNull(),
-    preset: text("preset"),
-    inhaleSeconds: integer("inhaleSeconds"),
-    holdSeconds: integer("holdSeconds"),
-    exhaleSeconds: integer("exhaleSeconds"),
-    switchSeconds: integer("switchSeconds"),
-    targetMinutes: integer("targetMinutes"),
-    roundCount: integer("roundCount"),
-  },
-  (table) => ({
-    userIdIdx: index("meditation_session_user_id_idx").on(table.userId),
-    endedAtIdx: index("meditation_session_ended_at_idx").on(table.endedAt),
-  }),
-);
