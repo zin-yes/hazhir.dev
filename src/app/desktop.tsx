@@ -19,6 +19,7 @@ import {
   FileText,
   FileVideo,
   FolderClosed,
+  FolderOpen,
   FolderPlus,
   Gamepad2,
   RefreshCw,
@@ -52,8 +53,8 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { useFileSystem, type FileSystemNode } from "@/hooks/use-file-system";
 import { useDragVisualHandoff } from "@/hooks/use-drag-visual-handoff";
+import { useFileSystem, type FileSystemNode } from "@/hooks/use-file-system";
 import {
   getFileClipboard,
   setFileClipboard,
@@ -85,6 +86,7 @@ import { getCurrentSystemUsername, getHomePath } from "@/lib/system-user";
 import { cn } from "@/lib/utils";
 import { WALLPAPERS } from "@/lib/wallpapers";
 
+import Image from "next/image";
 import {
   ReactNode,
   useCallback,
@@ -93,11 +95,10 @@ import {
   useRef,
   useState,
 } from "react";
-import Image from "next/image";
 import { createPortal } from "react-dom";
 import {
-  FilePropertiesApplicationWindow,
   FileExplorerApplicationWindow,
+  FilePropertiesApplicationWindow,
   ImageViewerApplicationWindow,
   SingleDocumentApplicationWindow,
   TerminalApplicationWindow,
@@ -163,6 +164,8 @@ export default function Desktop({
   const [createError, setCreateError] = useState("");
   const [clipboard, setClipboard] = useState(getFileClipboard);
   const [sortMode, setSortMode] = useState<DesktopSortMode>("name-asc");
+  const [contextTarget, setContextTarget] = useState<DesktopItem | null>(null);
+  const [isContextMenuOpen, setIsContextMenuOpen] = useState(false);
   const [gridRows, setGridRows] = useState(6);
   const [gridCols, setGridCols] = useState(8);
   const [itemPositions, setItemPositions] = useState<
@@ -198,6 +201,16 @@ export default function Desktop({
       setClipboard(nextClipboard);
     });
   }, []);
+
+  useEffect(() => {
+    if (!isContextMenuOpen) return;
+    const block = (event: MouseEvent) => {
+      event.preventDefault();
+      event.stopPropagation();
+    };
+    window.addEventListener("contextmenu", block, true);
+    return () => window.removeEventListener("contextmenu", block, true);
+  }, [isContextMenuOpen]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -926,7 +939,6 @@ export default function Desktop({
 
   const handleIconContextMenu = useCallback(
     (event: React.MouseEvent<HTMLDivElement>, id: string) => {
-      event.stopPropagation();
       if (!selectedSet.has(id)) {
         updateSelection(new Set([id]));
         setLastSelectedId(id);
@@ -1304,8 +1316,12 @@ export default function Desktop({
                 next[id] = placement;
                 occupied.add(`${placement.col}:${placement.row}`);
                 releaseTargets[id] = {
-                  left: DESKTOP_GRID_PADDING + placement.col * DESKTOP_GRID_COL_WIDTH,
-                  top: DESKTOP_GRID_PADDING + placement.row * DESKTOP_GRID_ROW_HEIGHT,
+                  left:
+                    DESKTOP_GRID_PADDING +
+                    placement.col * DESKTOP_GRID_COL_WIDTH,
+                  top:
+                    DESKTOP_GRID_PADDING +
+                    placement.row * DESKTOP_GRID_ROW_HEIGHT,
                 };
               });
 
@@ -1372,8 +1388,26 @@ export default function Desktop({
           y: event.clientY,
         };
       }
+      const iconElement = (event.target as HTMLElement).closest(
+        "[data-desktop-icon]",
+      ) as HTMLElement | null;
+      if (iconElement) {
+        const itemId = iconElement.getAttribute("data-item-id");
+        if (itemId) {
+          const item = desktopItemById[itemId];
+          if (item) {
+            setContextTarget(item);
+            if (!selectedSet.has(itemId)) {
+              updateSelection(new Set([itemId]));
+              setLastSelectedId(itemId);
+            }
+            return;
+          }
+        }
+      }
+      setContextTarget(null);
     },
-    [],
+    [desktopItemById, selectedSet, updateSelection],
   );
 
   const createUniqueName = useCallback(
@@ -1507,9 +1541,6 @@ export default function Desktop({
   const handleCopyByContext = useCallback(
     (itemId: string) => {
       const targets = getClipboardTargetsForItem(itemId)
-        .filter(
-          (item) => !(item.fileNode?.type === "file" && item.fileNode.readOnly),
-        )
         .map((item) => item.fileNode?.path)
         .filter((path): path is string => Boolean(path));
       if (targets.length === 0) return;
@@ -1535,9 +1566,6 @@ export default function Desktop({
   const copySelectionToClipboard = useCallback(() => {
     const targets = desktopItems
       .filter((item) => selectedSet.has(item.id))
-      .filter(
-        (item) => !(item.fileNode?.type === "file" && item.fileNode.readOnly),
-      )
       .map((item) => item.fileNode?.path)
       .filter((path): path is string => Boolean(path));
 
@@ -1835,6 +1863,12 @@ export default function Desktop({
         return;
       }
 
+      if (event.key === "F2" && selectedIds.length === 1) {
+        event.preventDefault();
+        handleRename(selectedIds[0]);
+        return;
+      }
+
       if (
         (event.key === "Delete" || event.key === "Backspace") &&
         selectedIds.length > 0
@@ -1846,13 +1880,14 @@ export default function Desktop({
     [
       handleDeleteSelected,
       handleOpenSelected,
+      handleRename,
       copySelectionToClipboard,
       cutSelectionToClipboard,
       clipboard,
       desktopRootPath,
       moveSelectionByOffset,
       pasteClipboardToDirectory,
-      selectedIds.length,
+      selectedIds,
     ],
   );
 
@@ -1870,7 +1905,7 @@ export default function Desktop({
   );
 
   return (
-    <ContextMenu>
+    <ContextMenu onOpenChange={setIsContextMenuOpen}>
       <ContextMenuTrigger asChild>
         <div
           ref={containerRef}
@@ -2003,234 +2038,77 @@ export default function Desktop({
           <div className="h-[calc(100vh-52px)] w-full bottom-0 left-0 right-0 absolute p-4">
             <div ref={gridLayerRef} className="relative w-full h-full">
               {desktopItems.map((item) => (
-                <ContextMenu key={item.id}>
-                  <ContextMenuTrigger asChild>
-                    <div
-                      data-desktop-icon="true"
-                      data-file-drop-zone={
-                        item.fileNode?.type === "directory" ? "true" : undefined
-                      }
-                      data-file-drop-kind={
-                        item.fileNode?.type === "directory"
-                          ? "directory"
-                          : undefined
-                      }
-                      data-file-drop-path={
-                        item.fileNode?.type === "directory"
-                          ? item.fileNode.path
-                          : undefined
-                      }
-                      ref={(node) => {
-                        if (node) {
-                          iconRefs.current.set(item.id, node);
-                        } else {
-                          iconRefs.current.delete(item.id);
-                        }
-                      }}
-                      onPointerDown={(event) =>
-                        handleIconPointerDown(event, item.id)
-                      }
-                      onPointerUp={(event) => handleIconPointerUp(event, item)}
-                      onDoubleClick={() => item.onOpen?.()}
-                      onContextMenu={(event) =>
-                        handleIconContextMenu(event, item.id)
-                      }
-                      onDragOver={(event) => {
-                        if (item.fileNode?.type === "directory") {
-                          event.preventDefault();
-                          event.stopPropagation();
-                          event.dataTransfer.dropEffect = "move";
-                        }
-                      }}
-                      onDrop={(event) => {
-                        if (item.fileNode?.type === "directory") {
-                          handleDesktopDropToFolder(event, item.fileNode.path);
-                        }
-                      }}
-                      className="absolute"
-                      style={(() => {
-                        const position = itemPositions[item.id] ?? {
-                          col: 0,
-                          row: 0,
-                        };
-                        return {
-                          left:
-                            DESKTOP_GRID_PADDING +
-                            position.col * DESKTOP_GRID_COL_WIDTH,
-                          top:
-                            DESKTOP_GRID_PADDING +
-                            position.row * DESKTOP_GRID_ROW_HEIGHT,
-                          zIndex: 30,
-                          transition: "left 180ms ease-out, top 180ms ease-out",
-                          visibility: dragVisual.isBaseHidden(item.id)
-                            ? "hidden"
-                            : "visible",
-                        };
-                      })()}
-                    >
-                      <DesktopIcon
-                        icon={item.icon}
-                        title={item.title}
-                        selected={selectedSet.has(item.id)}
-                      />
-                    </div>
-                  </ContextMenuTrigger>
-                  <ContextMenuContent className="w-52">
-                    <ContextMenuItem
-                      onClick={() => item.onOpen?.()}
-                      disabled={!item.onOpen}
-                    >
-                      <Eye size={16} className="mr-2" />
-                      Open
-                    </ContextMenuItem>
-                    {item.kind === "file" && item.fileNode && (
-                      <>
-                        {(() => {
-                          const ext = item
-                            .fileNode!.name.split(".")
-                            .pop()
-                            ?.toLowerCase();
-                          const textExtensions = new Set([
-                            "txt",
-                            "md",
-                            "js",
-                            "ts",
-                            "jsx",
-                            "tsx",
-                            "json",
-                            "css",
-                            "html",
-                            "yml",
-                            "yaml",
-                            "xml",
-                            "toml",
-                            "document",
-                            "shortcut",
-                            "app",
-                          ]);
-                          return textExtensions.has(ext || "");
-                        })() ? (
-                          <ContextMenuItem
-                            onClick={() =>
-                              addWindow(
-                                <TextEditorApplicationWindow
-                                  filePath={item.fileNode!.path}
-                                />,
-                              )
-                            }
-                          >
-                            <Edit3 size={16} className="mr-2" />
-                            Open in Text Editor
-                          </ContextMenuItem>
-                        ) : null}
-                        {item.fileNode.name
-                          .toLowerCase()
-                          .match(/\.(pdf|document)$/) ? (
-                          <ContextMenuItem
-                            onClick={() =>
-                              addWindow(
-                                <SingleDocumentApplicationWindow
-                                  filePath={item.fileNode!.path}
-                                  title={item.fileNode!.name}
-                                />,
-                              )
-                            }
-                          >
-                            <Eye size={16} className="mr-2" />
-                            Open in Document Viewer
-                          </ContextMenuItem>
-                        ) : null}
-                      </>
-                    )}
-                    {item.kind === "folder" && (
-                      <ContextMenuItem onClick={() => item.onOpen?.()}>
-                        <Eye size={16} className="mr-2" />
-                        Open in File Explorer
-                      </ContextMenuItem>
-                    )}
-                    <ContextMenuItem
-                      onClick={() =>
-                        addWindow(
-                          <TerminalApplicationWindow
-                            identifier={crypto.randomUUID()}
-                            initialPath={
-                              item.fileNode?.type === "directory"
-                                ? item.fileNode.path
-                                : desktopRootPath
-                            }
-                          />,
-                        )
-                      }
-                    >
-                      <TerminalSquare size={16} className="mr-2" />
-                      Open Terminal Here
-                    </ContextMenuItem>
-                    {item.fileNode ? (
-                      <>
-                        <ContextMenuSeparator />
-                        <ContextMenuItem
-                          onClick={() => handleCutByContext(item.id)}
-                          disabled={
-                            item.fileNode.type === "file" &&
-                            Boolean(item.fileNode.readOnly)
-                          }
-                        >
-                          <Scissors size={16} className="mr-2" />
-                          Cut
-                          <ContextMenuShortcut>Ctrl+X</ContextMenuShortcut>
-                        </ContextMenuItem>
-                        <ContextMenuItem
-                          onClick={() => handleCopyByContext(item.id)}
-                          disabled={
-                            item.fileNode.type === "file" &&
-                            Boolean(item.fileNode.readOnly)
-                          }
-                        >
-                          <Copy size={16} className="mr-2" />
-                          Copy
-                          <ContextMenuShortcut>Ctrl+C</ContextMenuShortcut>
-                        </ContextMenuItem>
-                        {clipboard && item.fileNode.type === "directory" ? (
-                          <ContextMenuItem
-                            onClick={() =>
-                              pasteClipboardToDirectory(item.fileNode!.path)
-                            }
-                            disabled={Boolean(item.fileNode.readOnly)}
-                          >
-                            <ClipboardPaste size={16} className="mr-2" />
-                            Paste
-                            <ContextMenuShortcut>Ctrl+V</ContextMenuShortcut>
-                          </ContextMenuItem>
-                        ) : null}
-                        <ContextMenuSeparator />
-                        <ContextMenuItem
-                          onClick={() => handleRename(item.id)}
-                          disabled={Boolean(item.fileNode.readOnly)}
-                        >
-                          <Edit3 size={16} className="mr-2" />
-                          Rename
-                        </ContextMenuItem>
-                        <ContextMenuItem
-                          onClick={() => handleDeleteByContext(item.id)}
-                          disabled={Boolean(item.fileNode.readOnly)}
-                        >
-                          <Trash2 size={16} className="mr-2" />
-                          Delete
-                          <ContextMenuShortcut>Del</ContextMenuShortcut>
-                        </ContextMenuItem>
-                        <ContextMenuSeparator />
-                        <ContextMenuItem
-                          onClick={() =>
-                            handleOpenProperties(item.fileNode!.path)
-                          }
-                        >
-                          <FileText size={16} className="mr-2" />
-                          Properties
-                        </ContextMenuItem>
-                      </>
-                    ) : null}
-                  </ContextMenuContent>
-                </ContextMenu>
+                <div
+                  key={item.id}
+                  data-desktop-icon="true"
+                  data-item-id={item.id}
+                  data-file-drop-zone={
+                    item.fileNode?.type === "directory" ? "true" : undefined
+                  }
+                  data-file-drop-kind={
+                    item.fileNode?.type === "directory"
+                      ? "directory"
+                      : undefined
+                  }
+                  data-file-drop-path={
+                    item.fileNode?.type === "directory"
+                      ? item.fileNode.path
+                      : undefined
+                  }
+                  ref={(node) => {
+                    if (node) {
+                      iconRefs.current.set(item.id, node);
+                    } else {
+                      iconRefs.current.delete(item.id);
+                    }
+                  }}
+                  onPointerDown={(event) =>
+                    handleIconPointerDown(event, item.id)
+                  }
+                  onPointerUp={(event) => handleIconPointerUp(event, item)}
+                  onDoubleClick={() => item.onOpen?.()}
+                  onContextMenu={(event) =>
+                    handleIconContextMenu(event, item.id)
+                  }
+                  onDragOver={(event) => {
+                    if (item.fileNode?.type === "directory") {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      event.dataTransfer.dropEffect = "move";
+                    }
+                  }}
+                  onDrop={(event) => {
+                    if (item.fileNode?.type === "directory") {
+                      handleDesktopDropToFolder(event, item.fileNode.path);
+                    }
+                  }}
+                  className="absolute"
+                  style={(() => {
+                    const position = itemPositions[item.id] ?? {
+                      col: 0,
+                      row: 0,
+                    };
+                    return {
+                      left:
+                        DESKTOP_GRID_PADDING +
+                        position.col * DESKTOP_GRID_COL_WIDTH,
+                      top:
+                        DESKTOP_GRID_PADDING +
+                        position.row * DESKTOP_GRID_ROW_HEIGHT,
+                      zIndex: 30,
+                      transition: "left 180ms ease-out, top 180ms ease-out",
+                      visibility: dragVisual.isBaseHidden(item.id)
+                        ? "hidden"
+                        : "visible",
+                    };
+                  })()}
+                >
+                  <DesktopIcon
+                    icon={item.icon}
+                    title={item.title}
+                    selected={selectedSet.has(item.id)}
+                  />
+                </div>
               ))}
             </div>
           </div>
@@ -2284,78 +2162,241 @@ export default function Desktop({
           ) : null}
         </div>
       </ContextMenuTrigger>
-      <ContextMenuContent className="w-52">
-        <ContextMenuItem onClick={handleCreateFolder}>
-          <FolderPlus size={16} className="mr-2" />
-          New Folder
-        </ContextMenuItem>
-        <ContextMenuItem onClick={handleCreateTextFile}>
-          <FilePlus size={16} className="mr-2" />
-          New Text Document
-        </ContextMenuItem>
-        {clipboard ? (
-          <ContextMenuItem
-            onClick={() =>
-              pasteClipboardToDirectory(
-                desktopRootPath,
-                desktopContextPointRef.current,
-              )
-            }
-          >
-            <ClipboardPaste size={16} className="mr-2" />
-            Paste
-            <ContextMenuShortcut>Ctrl+V</ContextMenuShortcut>
-          </ContextMenuItem>
-        ) : null}
-        <ContextMenuSub>
-          <ContextMenuSubTrigger>
-            <ArrowUpDown size={16} className="mr-2" />
-            Sort by
-          </ContextMenuSubTrigger>
-          <ContextMenuSubContent className="w-56">
-            <ContextMenuRadioGroup
-              value={sortMode}
-              onValueChange={(value) =>
-                applySortedLayout(value as DesktopSortMode)
+      <ContextMenuContent className="w-56">
+        {contextTarget ? (
+          (() => {
+            const item = contextTarget;
+            const node = item.fileNode;
+            const isReadOnly = Boolean(node?.readOnly);
+            const isFolder = item.kind === "folder";
+            const isFile = item.kind === "file";
+            const ext = node?.name.split(".").pop()?.toLowerCase() ?? "";
+            const isApp = ext === "app";
+            const isImage = node ? isImageFileName(node.name) : false;
+            const canWrite = !isReadOnly;
+
+            return (
+              <>
+                {/* Group 1: Default open action */}
+                <ContextMenuItem
+                  onClick={() => item.onOpen?.()}
+                  disabled={!item.onOpen}
+                >
+                  <Eye size={16} className="mr-2" />
+                  Open
+                  <ContextMenuShortcut>Enter</ContextMenuShortcut>
+                </ContextMenuItem>
+
+                {/* Group 2: Open in other programs */}
+                {(isFolder || (isFile && !isApp)) && (
+                  <ContextMenuSeparator />
+                )}
+                {isFolder && (
+                  <>
+                    <ContextMenuItem
+                      onClick={() =>
+                        addWindow(
+                          <FileExplorerApplicationWindow
+                            addWindow={addWindow}
+                            initialPath={node!.path}
+                          />,
+                        )
+                      }
+                    >
+                      <FolderOpen size={16} className="mr-2" />
+                      Open in File Explorer
+                    </ContextMenuItem>
+                    <ContextMenuItem
+                      onClick={() =>
+                        addWindow(
+                          <TerminalApplicationWindow
+                            identifier={crypto.randomUUID()}
+                            initialPath={node!.path}
+                          />,
+                        )
+                      }
+                    >
+                      <TerminalSquare size={16} className="mr-2" />
+                      Open Terminal Here
+                    </ContextMenuItem>
+                  </>
+                )}
+                {isFile && !isApp && !isImage && (
+                  <ContextMenuItem
+                    onClick={() =>
+                      addWindow(
+                        <TextEditorApplicationWindow filePath={node!.path} />,
+                      )
+                    }
+                  >
+                    <Edit3 size={16} className="mr-2" />
+                    Open in Text Editor
+                  </ContextMenuItem>
+                )}
+                {isFile && isImage && (
+                  <ContextMenuItem
+                    onClick={() =>
+                      addWindow(
+                        <ImageViewerApplicationWindow filePath={node!.path} />,
+                      )
+                    }
+                  >
+                    <FileImage size={16} className="mr-2" />
+                    Open in Image Viewer
+                  </ContextMenuItem>
+                )}
+
+                {/* Group 3: File actions */}
+                {node && (
+                  <>
+                    <ContextMenuSeparator />
+                    {canWrite && (
+                      <ContextMenuItem
+                        onClick={() => handleCutByContext(item.id)}
+                      >
+                        <Scissors size={16} className="mr-2" />
+                        Cut
+                        <ContextMenuShortcut>Ctrl+X</ContextMenuShortcut>
+                      </ContextMenuItem>
+                    )}
+                    <ContextMenuItem
+                      onClick={() => handleCopyByContext(item.id)}
+                    >
+                      <Copy size={16} className="mr-2" />
+                      Copy
+                      <ContextMenuShortcut>Ctrl+C</ContextMenuShortcut>
+                    </ContextMenuItem>
+                    {canWrite && (
+                      <>
+                        <ContextMenuItem onClick={() => handleRename(item.id)}>
+                          <Edit3 size={16} className="mr-2" />
+                          Rename
+                          <ContextMenuShortcut>F2</ContextMenuShortcut>
+                        </ContextMenuItem>
+                        <ContextMenuItem
+                          onClick={() => handleDeleteByContext(item.id)}
+                        >
+                          <Trash2 size={16} className="mr-2" />
+                          Delete
+                          <ContextMenuShortcut>Del</ContextMenuShortcut>
+                        </ContextMenuItem>
+                      </>
+                    )}
+                  </>
+                )}
+
+                {/* Group 4: Properties */}
+                {node && (
+                  <>
+                    <ContextMenuSeparator />
+                    <ContextMenuItem
+                      onClick={() => handleOpenProperties(node!.path)}
+                    >
+                      <FileText size={16} className="mr-2" />
+                      Properties
+                    </ContextMenuItem>
+                  </>
+                )}
+              </>
+            );
+          })()
+        ) : (
+          <>
+            {/* Group 1: Create new items */}
+            <ContextMenuItem onClick={handleCreateFolder}>
+              <FolderPlus size={16} className="mr-2" />
+              New Folder
+            </ContextMenuItem>
+            <ContextMenuItem onClick={handleCreateTextFile}>
+              <FilePlus size={16} className="mr-2" />
+              New Text Document
+            </ContextMenuItem>
+            {clipboard ? (
+              <ContextMenuItem
+                onClick={() =>
+                  pasteClipboardToDirectory(
+                    desktopRootPath,
+                    desktopContextPointRef.current,
+                  )
+                }
+              >
+                <ClipboardPaste size={16} className="mr-2" />
+                Paste
+                <ContextMenuShortcut>Ctrl+V</ContextMenuShortcut>
+              </ContextMenuItem>
+            ) : null}
+
+            {/* Group 2: Open programs */}
+            <ContextMenuSeparator />
+            <ContextMenuItem
+              onClick={() =>
+                addWindow(
+                  <TerminalApplicationWindow
+                    identifier={crypto.randomUUID()}
+                    initialPath={desktopRootPath}
+                  />,
+                )
               }
             >
-              <ContextMenuRadioItem value="name-asc">
-                Alphabetical (A → Z)
-              </ContextMenuRadioItem>
-              <ContextMenuRadioItem value="name-desc">
-                Alphabetical (Z → A)
-              </ContextMenuRadioItem>
-              <ContextMenuRadioItem value="size-asc">
-                Size (Small → Large)
-              </ContextMenuRadioItem>
-              <ContextMenuRadioItem value="size-desc">
-                Size (Large → Small)
-              </ContextMenuRadioItem>
-            </ContextMenuRadioGroup>
-          </ContextMenuSubContent>
-        </ContextMenuSub>
-        <ContextMenuItem
-          onClick={() =>
-            addWindow(
-              <TerminalApplicationWindow
-                identifier={crypto.randomUUID()}
-                initialPath={desktopRootPath}
-              />,
-            )
-          }
-        >
-          <TerminalSquare size={16} className="mr-2" />
-          Open Terminal Here
-        </ContextMenuItem>
-        <ContextMenuSeparator />
-        <ContextMenuItem onClick={handleNextWallpaper}>
-          <FileImage size={16} className="mr-2" />
-          Next Wallpaper
-        </ContextMenuItem>
-        <ContextMenuItem onClick={loadDesktopNodes}>
-          <RefreshCw size={16} className="mr-2" />
-          Refresh
-        </ContextMenuItem>
+              <TerminalSquare size={16} className="mr-2" />
+              Open Terminal Here
+            </ContextMenuItem>
+            <ContextMenuItem
+              onClick={() =>
+                addWindow(
+                  <FileExplorerApplicationWindow
+                    addWindow={addWindow}
+                    initialPath={desktopRootPath}
+                  />,
+                )
+              }
+            >
+              <FolderOpen size={16} className="mr-2" />
+              Open File Explorer Here
+            </ContextMenuItem>
+
+            {/* Group 3: Sort & Refresh */}
+            <ContextMenuSeparator />
+            <ContextMenuSub>
+              <ContextMenuSubTrigger>
+                <ArrowUpDown size={16} className="mr-2" />
+                Sort by
+              </ContextMenuSubTrigger>
+              <ContextMenuSubContent className="w-56">
+                <ContextMenuRadioGroup
+                  value={sortMode}
+                  onValueChange={(value) =>
+                    applySortedLayout(value as DesktopSortMode)
+                  }
+                >
+                  <ContextMenuRadioItem value="name-asc">
+                    Alphabetical (A → Z)
+                  </ContextMenuRadioItem>
+                  <ContextMenuRadioItem value="name-desc">
+                    Alphabetical (Z → A)
+                  </ContextMenuRadioItem>
+                  <ContextMenuRadioItem value="size-asc">
+                    Size (Small → Large)
+                  </ContextMenuRadioItem>
+                  <ContextMenuRadioItem value="size-desc">
+                    Size (Large → Small)
+                  </ContextMenuRadioItem>
+                </ContextMenuRadioGroup>
+              </ContextMenuSubContent>
+            </ContextMenuSub>
+            <ContextMenuItem onClick={loadDesktopNodes}>
+              <RefreshCw size={16} className="mr-2" />
+              Refresh
+            </ContextMenuItem>
+
+            {/* Group 4: Appearance */}
+            <ContextMenuSeparator />
+            <ContextMenuItem onClick={handleNextWallpaper}>
+              <FileImage size={16} className="mr-2" />
+              Next Wallpaper
+            </ContextMenuItem>
+          </>
+        )}
       </ContextMenuContent>
     </ContextMenu>
   );

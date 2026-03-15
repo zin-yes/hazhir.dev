@@ -3,10 +3,13 @@
 import ScrollMoreButton from "@/components/system/scroll-more-button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
-import { type FileSystemNode, getFileSystemStorageKey, useFileSystem } from "@/hooks/use-file-system";
+import {
+  type FileSystemNode,
+  getFileSystemStorageKey,
+  useFileSystem,
+} from "@/hooks/use-file-system";
 import { isImageFileName } from "@/lib/image-files";
 import { getCurrentSystemUsername } from "@/lib/system-user";
-import { cn } from "@/lib/utils";
 import {
   FileImage,
   FileText,
@@ -16,91 +19,28 @@ import {
   User,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-
-const TEXT_EXTENSIONS = new Set([
-  "txt",
-  "md",
-  "document",
-  "doc",
-  "docx",
-  "pdf",
-  "js",
-  "ts",
-  "jsx",
-  "tsx",
-  "json",
-  "css",
-  "html",
-  "xml",
-  "yml",
-  "yaml",
-  "toml",
-  "sh",
-  "bash",
-  "shortcut",
-  "app",
-]);
-
-function getUtf16StorageBytes(value: string): number {
-  return value.length * 2;
-}
-
-function formatBytes(bytes: number): string {
-  if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
-  const units = ["B", "KB", "MB", "GB"];
-  let value = bytes;
-  let unitIndex = 0;
-  while (value >= 1024 && unitIndex < units.length - 1) {
-    value /= 1024;
-    unitIndex += 1;
-  }
-  return `${value.toFixed(unitIndex === 0 ? 0 : 2)} ${units[unitIndex]}`;
-}
-
-function formatDate(timestamp: number): string {
-  return new Date(timestamp).toLocaleString();
-}
-
-function countLines(text: string): number {
-  if (!text) return 0;
-  return text.split(/\r\n|\r|\n/).length;
-}
-
-function collectDescendants(
-  path: string,
-  fs: ReturnType<typeof useFileSystem>,
-): FileSystemNode[] {
-  const all: FileSystemNode[] = [];
-  const queue: string[] = [path];
-
-  while (queue.length > 0) {
-    const currentPath = queue.shift();
-    if (!currentPath) continue;
-
-    const children = fs.getChildren(currentPath, true);
-    children.forEach((child) => {
-      all.push(child);
-      if (child.type === "directory") {
-        queue.push(child.path);
-      }
-    });
-  }
-
-  return all;
-}
+import InfoRow from "./components/info-row";
+import {
+  TEXT_EXTENSIONS,
+  collectDescendants,
+  countLines,
+  formatBytes,
+  formatDate,
+  getUtf16StorageBytes,
+} from "./lib/file-properties-utils";
 
 export default function FilePropertiesApplication({
   filePath,
 }: {
   filePath?: string;
 }) {
-  const fs = useFileSystem();
+  const fileSystem = useFileSystem();
   const [storageVersion, setStorageVersion] = useState(0);
   const [imageResolution, setImageResolution] = useState<{
     width: number;
     height: number;
   } | null>(null);
-  const scrollViewportRef = useRef<HTMLDivElement | null>(null);
+  const scrollViewportReference = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     const handleStorage = () => setStorageVersion((current) => current + 1);
@@ -110,8 +50,8 @@ export default function FilePropertiesApplication({
 
   const normalizedPath = useMemo(() => {
     if (!filePath) return "";
-    return fs.normalizePath(filePath);
-  }, [filePath, fs]);
+    return fileSystem.normalizePath(filePath);
+  }, [filePath, fileSystem]);
 
   const metadata = useMemo(() => {
     void storageVersion;
@@ -120,18 +60,22 @@ export default function FilePropertiesApplication({
       return null;
     }
 
-    const node = fs.getNode(normalizedPath);
+    const node = fileSystem.getNode(normalizedPath);
     if (!node) {
       return null;
     }
 
     const descendants =
-      node.type === "directory" ? collectDescendants(node.path, fs) : [];
+      node.type === "directory"
+        ? collectDescendants(node.path, fileSystem)
+        : [];
     const directChildren =
-      node.type === "directory" ? fs.getChildren(node.path, true) : [];
+      node.type === "directory" ? fileSystem.getChildren(node.path, true) : [];
 
     const localStorageValue =
-      window.localStorage.getItem(getFileSystemStorageKey(getCurrentSystemUsername())) ?? "[]";
+      window.localStorage.getItem(
+        getFileSystemStorageKey(getCurrentSystemUsername()),
+      ) ?? "[]";
     const totalStorageBytes = getUtf16StorageBytes(localStorageValue);
 
     let subtreeNodes: FileSystemNode[] = [node];
@@ -158,7 +102,7 @@ export default function FilePropertiesApplication({
         ? (node.name.split(".").pop()?.toLowerCase() ?? "")
         : "";
     const textContent =
-      node.type === "file" ? (fs.getFileContents(node.path) ?? "") : "";
+      node.type === "file" ? (fileSystem.getFileContents(node.path) ?? "") : "";
     const isTextFile = node.type === "file" && TEXT_EXTENSIONS.has(extension);
 
     return {
@@ -171,7 +115,7 @@ export default function FilePropertiesApplication({
       subtreeStorageBytes,
       totalStorageBytes,
     };
-  }, [fs, normalizedPath, storageVersion]);
+  }, [fileSystem, normalizedPath, storageVersion]);
 
   useEffect(() => {
     setImageResolution(null);
@@ -224,7 +168,7 @@ export default function FilePropertiesApplication({
   return (
     <div className="relative h-full w-full bg-background p-2">
       <ScrollArea
-        viewportRef={scrollViewportRef}
+        viewportRef={scrollViewportReference}
         className="h-full rounded-lg border border-border bg-card"
       >
         <div className="p-3 space-y-3">
@@ -368,36 +312,7 @@ export default function FilePropertiesApplication({
           </section>
         </div>
       </ScrollArea>
-      <ScrollMoreButton scrollElementRef={scrollViewportRef} />
-    </div>
-  );
-}
-
-function InfoRow({
-  label,
-  value,
-  icon,
-  mono,
-}: {
-  label: string;
-  value: string;
-  icon?: React.ReactNode;
-  mono?: boolean;
-}) {
-  return (
-    <div className="rounded-md border border-border/70 bg-background/50 px-2.5 py-2">
-      <div className="text-[11px] text-muted-foreground flex items-center gap-1.5">
-        {icon ? <span className="inline-flex">{icon}</span> : null}
-        <span>{label}</span>
-      </div>
-      <div
-        className={cn(
-          "mt-0.5 text-xs text-foreground break-words",
-          mono && "font-mono text-[11px]",
-        )}
-      >
-        {value}
-      </div>
+      <ScrollMoreButton scrollElementRef={scrollViewportReference} />
     </div>
   );
 }
