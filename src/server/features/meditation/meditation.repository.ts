@@ -6,7 +6,7 @@ import { database } from "@/database";
 import Logger from "@/lib/logger";
 import { jts } from "@/lib/utils";
 
-import { meditationSessionSchema } from "./meditation.schema";
+import { session } from "./meditation.schema";
 import type {
   MeditationListResult,
   SaveMeditationSessionParams,
@@ -30,9 +30,9 @@ export class MeditationRepository {
       const limit = params.limit ?? 50;
       const rows = await this.db
         .select()
-        .from(meditationSessionSchema)
-        .where(eq(meditationSessionSchema.userId, params.userId))
-        .orderBy(desc(meditationSessionSchema.endedAt))
+        .from(session)
+        .where(eq(session.userId, params.userId))
+        .orderBy(desc(session.endedAt))
         .limit(limit);
 
       const result: MeditationListResult = {
@@ -61,7 +61,7 @@ export class MeditationRepository {
         throw new Error("Database is not available.");
       }
 
-      await this.db.insert(meditationSessionSchema).values({
+      await this.db.insert(session).values({
         userId: params.userId,
         startedAt: new Date(params.startedAt),
         endedAt: new Date(params.endedAt),

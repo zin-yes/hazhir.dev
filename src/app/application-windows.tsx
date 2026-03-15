@@ -10,6 +10,7 @@ import {
   Gamepad2,
   Heart,
   ImageIcon,
+  MessageSquare,
   Settings,
   TerminalSquare,
 } from "lucide-react";
@@ -74,6 +75,11 @@ const ImageViewerApplication = dynamic(
 
 const FilePropertiesApplication = dynamic(
   () => import("@/applications/file-properties"),
+  { loading: () => <LoadingWindow />, ssr: false },
+);
+
+const ChatApplication = dynamic(
+  () => import("@/applications/chat"),
   { loading: () => <LoadingWindow />, ssr: false },
 );
 
@@ -417,6 +423,29 @@ export function MeditationApplicationWindow() {
       }}
     >
       <MeditationApplication />
+    </ApplicationWindow>
+  );
+}
+
+export function ChatApplicationWindow() {
+  return (
+    <ApplicationWindow
+      action_bar={{
+        title: "Chat",
+        icon: {
+          svg: <MessageSquare />,
+        },
+      }}
+      type={"CHAT"}
+      settings={{
+        min_width: Math.min(500, window.innerWidth - 40),
+        min_height: Math.min(400, window.innerHeight - 40),
+        starting_width: Math.min(800, window.innerWidth - 40),
+        starting_height: Math.min(550, window.innerHeight - 40),
+        allow_overflow: false,
+      }}
+    >
+      <ChatApplication />
     </ApplicationWindow>
   );
 }
