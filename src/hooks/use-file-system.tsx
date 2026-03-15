@@ -94,13 +94,25 @@ export function useFileSystem() {
       );
     });
 
-    const missingDefaultDocuments: FileSystemNode[] = [];
-    const missingDefaultDesktopShortcuts: FileSystemNode[] = [];
+    const documentsPath = `${homePath}/Documents`;
+    const desktopPath = `${homePath}/Desktop`;
+    const menuPath = `${homePath}/.menu`;
+
+    const missingDefaultDocuments = defaults
+      .filter((node) =>
+        normalizePath(node.path).startsWith(`${normalizePath(documentsPath)}/`),
+      )
+      .filter((node) => !existingPaths.has(normalizePath(node.path)));
+
+    const missingDefaultDesktopShortcuts = defaults
+      .filter((node) =>
+        normalizePath(node.path).startsWith(`${normalizePath(desktopPath)}/`),
+      )
+      .filter((node) => !existingPaths.has(normalizePath(node.path)));
+
     const missingDefaultMenuShortcuts = defaults
-      .filter(
-        (node) =>
-          normalizePath(node.path) ===
-          normalizePath(`${homePath}/.menu/image-viewer.shortcut`),
+      .filter((node) =>
+        normalizePath(node.path).startsWith(`${normalizePath(menuPath)}/`),
       )
       .filter((node) => !existingPaths.has(normalizePath(node.path)));
     const missingDefaultImages = defaults
@@ -140,8 +152,7 @@ export function useFileSystem() {
 
     const withProtectionPolicyFix = withDotHiddenFix.map((node) => {
       const normalizedPath = normalizePath(node.path);
-      const shouldBeReadOnly =
-        Boolean(node.readOnly) || isProtectedPath(normalizedPath);
+      const shouldBeReadOnly = isProtectedPath(normalizedPath);
       if (Boolean(node.readOnly) === shouldBeReadOnly) return node;
       return {
         ...node,

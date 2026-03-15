@@ -14,6 +14,7 @@ import {
   Heart,
   ImageIcon,
   LogOut,
+  MessageSquare,
   Search,
   Settings,
   TerminalSquare,
@@ -70,6 +71,7 @@ import Image from "next/image";
 import { v4 } from "uuid";
 import {
   CalculatorApplicationWindow,
+  ChatApplicationWindow,
   DocumentViewerApplicationWindow,
   FileExplorerApplicationWindow,
   FilePropertiesApplicationWindow,
@@ -123,6 +125,8 @@ function renderShortcutIcon(iconName?: string) {
       return <ImageIcon size={16} className="text-white/90" />;
     case "Info":
       return <Circle size={16} className="text-white/90" />;
+    case "MessageSquare":
+      return <MessageSquare size={16} className="text-white/90" />;
     case "FileSymlink":
       return <FileSymlink size={16} className="text-white/90" />;
     default:
@@ -384,6 +388,10 @@ export default function OperatingSystemPage() {
           addWindow(
             <FilePropertiesApplicationWindow filePath={detail.args?.[0]} />,
           );
+          break;
+        }
+        case "chat": {
+          addWindow(<ChatApplicationWindow />);
           break;
         }
         default:

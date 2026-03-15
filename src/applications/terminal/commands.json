@@ -321,5 +321,15 @@
     "callbackFunctionName": "runApp",
     "icon": "BookText",
     "iconDisplayText": "Visual Novel"
+  },
+  {
+    "name": "chat",
+    "usage": ["chat"],
+    "examples": ["chat"],
+    "aliases": [],
+    "description": "Launches the Chat application.",
+    "callbackFunctionName": "runApp",
+    "icon": "MessageSquare",
+    "iconDisplayText": "Chat"
   }
 ]
