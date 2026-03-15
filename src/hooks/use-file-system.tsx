@@ -1,6 +1,5 @@
 "use client";
 
-import { generateCVDocumentHtml } from "@/applications/document-viewer/articles/CV";
 import { buildDefaultFileSystem } from "@/config/system-file-system";
 import { getImagesDirectoryPath } from "@/lib/image-files";
 import { getCurrentSystemUsername, getHomePath } from "@/lib/system-user";
@@ -10,15 +9,15 @@ export type FileSystemNodeType = "file" | "directory";
 export interface FileSystemNode {
   name: string;
   type: FileSystemNodeType;
-  path: string; // Full path like /home/guest/Documents
-  parentPath: string; // Parent directory path
-  contents?: string; // Only for files
-  permissions: string; // Unix-like permissions e.g., "rwxr-xr-x"
+  path: string;
+  parentPath: string;
+  contents?: string;
+  permissions: string;
   owner: string;
   group: string;
-  size: number; // In bytes
-  createdAt: number; // Unix timestamp
-  modifiedAt: number; // Unix timestamp
+  size: number;
+  createdAt: number;
+  modifiedAt: number;
   isHidden: boolean;
   readOnly?: boolean;
   executable?: boolean;
@@ -34,13 +33,22 @@ export interface FileSystemFile extends FileSystemNode {
   contents: string;
   mimeType?: string;
 }
-const FILE_SYSTEM_STORAGE_KEY = "filesystem_v6";
+
+const STORAGE_KEY_PREFIX = "filesystem_v6";
+
+/**
+ * Returns the per-user localStorage key for filesystem data.
+ * Each user (including "guest") gets an isolated filesystem.
+ */
+export function getFileSystemStorageKey(username: string): string {
+  return `${STORAGE_KEY_PREFIX}_${username}`;
+}
 
 export function useFileSystem() {
   function normalizePath(path: string): string {
     const raw = (path || "").replace(/\/+/g, "/");
-    const forcedAbsolute = raw.startsWith("/") ? raw : `/${raw}`;
-    const segments = forcedAbsolute.split("/");
+    const absolute = raw.startsWith("/") ? raw : `/${raw}`;
+    const segments = absolute.split("/");
     const resolved: string[] = [];
 
     for (const segment of segments) {
@@ -55,301 +63,82 @@ export function useFileSystem() {
     return resolved.length === 0 ? "/" : `/${resolved.join("/")}`;
   }
 
+  /**
+   * Ensures only truly system-protected files exist in the filesystem.
+   * Protected files are: /applications/*.app executables and ~/Images/* wallpapers.
+   * User-editable files (shortcuts, documents, etc.) are NEVER re-added here.
+   */
+  function ensureSystemFilesExist(
+    nodes: FileSystemNode[],
+    username: string,
+  ): FileSystemNode[] {
+    const defaults = buildDefaultFileSystem(username);
+    const existingPaths = new Set(nodes.map((n) => normalizePath(n.path)));
+    const imagesPath = normalizePath(
+      getImagesDirectoryPath(`/home/${username}`),
+    );
+
+    const missingSystemFiles = defaults.filter((defaultNode) => {
+      const path = normalizePath(defaultNode.path);
+      if (existingPaths.has(path)) return false;
+
+      // Always ensure /applications directory and its .app executables
+      if (path === "/applications") return true;
+      if (
+        path.startsWith("/applications/") &&
+        defaultNode.type === "file" &&
+        Boolean(defaultNode.executable)
+      )
+        return true;
+
+      // Always ensure ~/Images directory and its wallpaper images
+      if (path === imagesPath) return true;
+      if (
+        path.startsWith(`${imagesPath}/`) &&
+        defaultNode.type === "file" &&
+        Boolean(defaultNode.readOnly)
+      )
+        return true;
+
+      return false;
+    });
+
+    if (missingSystemFiles.length === 0) return nodes;
+    return [...nodes, ...missingSystemFiles];
+  }
+
   function getFileSystem(): FileSystemNode[] {
     if (typeof window === "undefined") {
       return buildDefaultFileSystem("guest");
     }
 
-    const stored = window.localStorage.getItem(FILE_SYSTEM_STORAGE_KEY);
+    const username = getCurrentSystemUsername();
+    const storageKey = getFileSystemStorageKey(username);
+    const stored = window.localStorage.getItem(storageKey);
+
+    // First time for this user — initialize with full default filesystem
     if (!stored) {
-      const defaults = buildDefaultFileSystem(getCurrentSystemUsername());
-      window.localStorage.setItem(
-        FILE_SYSTEM_STORAGE_KEY,
-        JSON.stringify(defaults),
-      );
+      const defaults = buildDefaultFileSystem(username);
+      window.localStorage.setItem(storageKey, JSON.stringify(defaults));
       return defaults;
     }
 
-    const parsed = JSON.parse(stored) as FileSystemNode[];
-    const username = getCurrentSystemUsername();
-    const homePath = `/home/${username}`;
-    const imagesPath = getImagesDirectoryPath(homePath);
-    const defaults = buildDefaultFileSystem(username);
-    const existingPaths = new Set(
-      parsed.map((node) => normalizePath(node.path)),
-    );
+    const nodes = JSON.parse(stored) as FileSystemNode[];
 
-    const missingSystemExecutables = defaults.filter((node) => {
-      if (node.path === "/applications") {
-        return !existingPaths.has("/applications");
-      }
-
-      const isApplicationsExecutable =
-        node.path.startsWith("/applications/") &&
-        node.type === "file" &&
-        Boolean(node.executable);
-
-      return (
-        isApplicationsExecutable && !existingPaths.has(normalizePath(node.path))
-      );
-    });
-
-    const documentsPath = `${homePath}/Documents`;
-    const desktopPath = `${homePath}/Desktop`;
-    const menuPath = `${homePath}/.menu`;
-
-    const missingDefaultDocuments = defaults
-      .filter((node) =>
-        normalizePath(node.path).startsWith(`${normalizePath(documentsPath)}/`),
-      )
-      .filter((node) => !existingPaths.has(normalizePath(node.path)));
-
-    const missingDefaultDesktopShortcuts = defaults
-      .filter((node) =>
-        normalizePath(node.path).startsWith(`${normalizePath(desktopPath)}/`),
-      )
-      .filter((node) => !existingPaths.has(normalizePath(node.path)));
-
-    const missingDefaultMenuShortcuts = defaults
-      .filter((node) =>
-        normalizePath(node.path).startsWith(`${normalizePath(menuPath)}/`),
-      )
-      .filter((node) => !existingPaths.has(normalizePath(node.path)));
-    const missingDefaultImages = defaults
-      .filter((node) =>
-        normalizePath(node.path).startsWith(`${normalizePath(imagesPath)}/`),
-      )
-      .filter((node) => !existingPaths.has(normalizePath(node.path)));
-
-    const dedupedParsed = (() => {
-      const seen = new Set<string>();
-      const deduped: FileSystemNode[] = [];
-
-      for (const node of parsed) {
-        const normalizedPath = normalizePath(node.path);
-        if (seen.has(normalizedPath)) continue;
-        seen.add(normalizedPath);
-        deduped.push(node);
-      }
-
-      return deduped;
-    })();
-
-    const withDotHiddenFix = dedupedParsed.map((node) => {
-      const shouldBeHidden = node.name.startsWith(".");
-      if (node.isHidden === shouldBeHidden) return node;
-      return {
-        ...node,
-        isHidden: shouldBeHidden,
-      };
-    });
-
-    const isProtectedPath = (path: string) =>
-      path === "/applications" ||
-      path.startsWith("/applications/") ||
-      path === normalizePath(imagesPath) ||
-      path.startsWith(`${normalizePath(imagesPath)}/`);
-
-    const withProtectionPolicyFix = withDotHiddenFix.map((node) => {
-      const normalizedPath = normalizePath(node.path);
-      const shouldBeReadOnly = isProtectedPath(normalizedPath);
-      if (Boolean(node.readOnly) === shouldBeReadOnly) return node;
-      return {
-        ...node,
-        readOnly: shouldBeReadOnly,
-      };
-    });
-
-    const cvDocumentPath = `${homePath}/Documents/CV.document`;
-    const nextGeneratedCvDocument = generateCVDocumentHtml();
-    const withLegacyCvTemplateUpgrade = withProtectionPolicyFix.map((node) => {
-      if (normalizePath(node.path) !== normalizePath(cvDocumentPath)) {
-        return node;
-      }
-
-      if (node.type !== "file") return node;
-      const currentContents = node.contents ?? "";
-      const isLegacyCvTemplate =
-        currentContents.includes('<main class="page">') &&
-        currentContents.includes("<style>") &&
-        currentContents.includes("section-title");
-
-      if (!isLegacyCvTemplate) {
-        return node;
-      }
-
-      return {
-        ...node,
-        contents: nextGeneratedCvDocument,
-        size: new Blob([nextGeneratedCvDocument]).size,
-        modifiedAt: Date.now(),
-      };
-    });
-
-    const deprecatedDefaultDesktopShortcutNames = new Set([
-      "calculator.shortcut",
-      "visual-novel.shortcut",
-      "meditation.shortcut",
-    ]);
-
-    const withoutDeprecatedDefaultDesktopShortcuts =
-      withLegacyCvTemplateUpgrade.filter((node) => {
-        const normalizedPath = normalizePath(node.path);
-        const isDeprecatedDesktopShortcut =
-          node.type === "file" &&
-          normalizedPath.startsWith(`${homePath}/Desktop/`) &&
-          deprecatedDefaultDesktopShortcutNames.has(node.name);
-        return !isDeprecatedDesktopShortcut;
-      });
-
-    const deprecatedDefaultMenuShortcutNames = new Set([
-      "visual-novel.shortcut",
-    ]);
-
-    const withoutDeprecatedDefaultMenuShortcuts =
-      withoutDeprecatedDefaultDesktopShortcuts.filter((node) => {
-        const normalizedPath = normalizePath(node.path);
-        const isDeprecatedMenuShortcut =
-          node.type === "file" &&
-          normalizedPath.startsWith(`${homePath}/.menu/`) &&
-          deprecatedDefaultMenuShortcutNames.has(node.name);
-        return !isDeprecatedMenuShortcut;
-      });
-
-    const now = Date.now();
-    const requiredDirectories: FileSystemNode[] = [
-      {
-        name: "home",
-        type: "directory",
-        path: "/home",
-        parentPath: "/",
-        permissions: "rwxr-xr-x",
-        owner: "root",
-        group: "root",
-        size: 4096,
-        createdAt: now,
-        modifiedAt: now,
-        isHidden: false,
-        readOnly: false,
-      },
-      {
-        name: username,
-        type: "directory",
-        path: homePath,
-        parentPath: "/home",
-        permissions: "rwxr-xr-x",
-        owner: username,
-        group: username,
-        size: 4096,
-        createdAt: now,
-        modifiedAt: now,
-        isHidden: false,
-        readOnly: false,
-      },
-      {
-        name: "Desktop",
-        type: "directory",
-        path: `${homePath}/Desktop`,
-        parentPath: homePath,
-        permissions: "rwxr-xr-x",
-        owner: username,
-        group: username,
-        size: 4096,
-        createdAt: now,
-        modifiedAt: now,
-        isHidden: false,
-        readOnly: false,
-      },
-      {
-        name: "Documents",
-        type: "directory",
-        path: `${homePath}/Documents`,
-        parentPath: homePath,
-        permissions: "rwxr-xr-x",
-        owner: username,
-        group: username,
-        size: 4096,
-        createdAt: now,
-        modifiedAt: now,
-        isHidden: false,
-        readOnly: false,
-      },
-      {
-        name: "Images",
-        type: "directory",
-        path: imagesPath,
-        parentPath: homePath,
-        permissions: "r-xr-xr-x",
-        owner: username,
-        group: username,
-        size: 4096,
-        createdAt: now,
-        modifiedAt: now,
-        isHidden: false,
-        readOnly: true,
-      },
-      {
-        name: ".menu",
-        type: "directory",
-        path: `${homePath}/.menu`,
-        parentPath: homePath,
-        permissions: "rwxr-xr-x",
-        owner: username,
-        group: username,
-        size: 4096,
-        createdAt: now,
-        modifiedAt: now,
-        isHidden: true,
-        readOnly: false,
-      },
-    ];
-
-    const ensuredCoreDirectories = [...withoutDeprecatedDefaultMenuShortcuts];
-    const ensuredPathSet = new Set(
-      ensuredCoreDirectories.map((node) => normalizePath(node.path)),
-    );
-
-    requiredDirectories.forEach((directoryNode) => {
-      const path = normalizePath(directoryNode.path);
-      if (!ensuredPathSet.has(path)) {
-        ensuredCoreDirectories.push(directoryNode);
-        ensuredPathSet.add(path);
-      }
-    });
-
-    if (
-      missingSystemExecutables.length === 0 &&
-      missingDefaultDocuments.length === 0 &&
-      missingDefaultDesktopShortcuts.length === 0 &&
-      missingDefaultMenuShortcuts.length === 0 &&
-      missingDefaultImages.length === 0
-    ) {
-      const changed =
-        ensuredCoreDirectories.length !== parsed.length ||
-        ensuredCoreDirectories.some((node, index) => node !== parsed[index]);
-      if (changed) {
-        window.localStorage.setItem(
-          FILE_SYSTEM_STORAGE_KEY,
-          JSON.stringify(ensuredCoreDirectories),
-        );
-      }
-      return ensuredCoreDirectories;
+    // Only ensure system-protected files (app executables + wallpapers) exist.
+    // User-editable files are never auto-regenerated.
+    const patched = ensureSystemFilesExist(nodes, username);
+    if (patched !== nodes) {
+      window.localStorage.setItem(storageKey, JSON.stringify(patched));
     }
 
-    const next = [
-      ...ensuredCoreDirectories,
-      ...missingSystemExecutables,
-      ...missingDefaultDocuments,
-      ...missingDefaultDesktopShortcuts,
-      ...missingDefaultMenuShortcuts,
-      ...missingDefaultImages,
-    ];
-    window.localStorage.setItem(FILE_SYSTEM_STORAGE_KEY, JSON.stringify(next));
-    return next;
+    return patched;
   }
 
   function saveFileSystem(nodes: FileSystemNode[]) {
-    window.localStorage.setItem(FILE_SYSTEM_STORAGE_KEY, JSON.stringify(nodes));
+    const username = getCurrentSystemUsername();
+    const storageKey = getFileSystemStorageKey(username);
+    window.localStorage.setItem(storageKey, JSON.stringify(nodes));
     window.dispatchEvent(new Event("storage"));
   }
 

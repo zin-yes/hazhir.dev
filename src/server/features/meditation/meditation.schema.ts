@@ -2,7 +2,7 @@ import { integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
 
 import { user } from "@/database/schema";
 
-export const session = sqliteTable("meditation_session", {
+export const meditationSession = sqliteTable("meditation_session", {
   id: text("id")
     .primaryKey()
     .$defaultFn(() => crypto.randomUUID()),

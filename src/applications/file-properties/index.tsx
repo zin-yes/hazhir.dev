@@ -3,8 +3,9 @@
 import ScrollMoreButton from "@/components/system/scroll-more-button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
-import { type FileSystemNode, useFileSystem } from "@/hooks/use-file-system";
+import { type FileSystemNode, getFileSystemStorageKey, useFileSystem } from "@/hooks/use-file-system";
 import { isImageFileName } from "@/lib/image-files";
+import { getCurrentSystemUsername } from "@/lib/system-user";
 import { cn } from "@/lib/utils";
 import {
   FileImage,
@@ -15,8 +16,6 @@ import {
   User,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-
-const FILE_SYSTEM_STORAGE_KEY = "filesystem_v6";
 
 const TEXT_EXTENSIONS = new Set([
   "txt",
@@ -132,7 +131,7 @@ export default function FilePropertiesApplication({
       node.type === "directory" ? fs.getChildren(node.path, true) : [];
 
     const localStorageValue =
-      window.localStorage.getItem(FILE_SYSTEM_STORAGE_KEY) ?? "[]";
+      window.localStorage.getItem(getFileSystemStorageKey(getCurrentSystemUsername())) ?? "[]";
     const totalStorageBytes = getUtf16StorageBytes(localStorageValue);
 
     let subtreeNodes: FileSystemNode[] = [node];
