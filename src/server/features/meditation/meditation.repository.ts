@@ -6,7 +6,7 @@ import { database } from "@/database";
 import Logger from "@/lib/logger";
 import { jts } from "@/lib/utils";
 
-import { session } from "./meditation.schema";
+import { meditationSession as session } from "./meditation.schema";
 import type {
   MeditationListResult,
   SaveMeditationSessionParams,
