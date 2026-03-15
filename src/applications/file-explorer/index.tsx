@@ -7,7 +7,6 @@ import {
   TerminalApplicationWindow,
   TextEditorApplicationWindow,
 } from "@/app/application-windows";
-import { Button } from "@/components/ui/button";
 import {
   ContextMenu,
   ContextMenuContent,
@@ -16,31 +15,8 @@ import {
   ContextMenuShortcut,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Separator } from "@/components/ui/separator";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import { useDragVisualHandoff } from "@/hooks/use-drag-visual-handoff";
 import { FileSystemNode, useFileSystem } from "@/hooks/use-file-system";
 import {
@@ -61,63 +37,23 @@ import {
   setInternalDraggedPaths,
   setInternalFileDragActive,
 } from "@/lib/file-transfer-dnd";
-import { isImageFileName } from "@/lib/image-files";
-import {
-  getShortcutIconName,
-  getShortcutIconUrl,
-  parseShortcut,
-} from "@/lib/shortcut";
 import { getHomePath } from "@/lib/system-user";
-import { cn } from "@/lib/utils";
 import {
-  ArrowLeft,
-  ArrowRight,
-  ArrowUp,
-  BookOpen,
-  BookText,
-  Box,
-  Calculator,
-  ChevronDown,
-  ChevronRight,
   ClipboardPaste,
-  Copy,
-  Download,
-  Edit3,
   Eye,
   EyeOff,
-  File,
-  FileAudio,
-  FileCode,
-  FileImage,
-  FileJson,
   FilePlus,
-  FileSymlink,
   FileText,
-  FileVideo,
   Folder,
-  FolderClosed,
-  FolderOpen,
   FolderPlus,
-  Gamepad2,
   Grid3X3,
   HardDrive,
   Home,
   Image,
-  LayoutList,
-  MoreVertical,
-  Music,
   RefreshCw,
-  Scissors,
-  Search,
-  Settings,
   TerminalSquare,
-  Trash2,
-  User,
-  Video,
 } from "lucide-react";
-import NextImage from "next/image";
 import {
-  memo,
   ReactPortal,
   useCallback,
   useEffect,
@@ -128,9 +64,31 @@ import {
 import { createPortal } from "react-dom";
 import { v4 } from "uuid";
 
-type ViewMode = "grid" | "list";
-type SortBy = "name" | "size" | "modified" | "type";
-type SortOrder = "asc" | "desc";
+/* Sub-component imports */
+import {
+  CreateItemDialog,
+  RenameDialog,
+} from "@/applications/file-explorer/components/file-explorer-dialogs";
+import FileExplorerSidebar, {
+  SidebarBookmark,
+} from "@/applications/file-explorer/components/file-explorer-sidebar";
+import type { BreadcrumbSegment } from "@/applications/file-explorer/components/file-explorer-toolbar";
+import FileExplorerToolbar from "@/applications/file-explorer/components/file-explorer-toolbar";
+import {
+  FileGridItem,
+  FileListItem,
+} from "@/applications/file-explorer/components/file-item";
+import {
+  getDisplayName,
+  getFileIcon,
+} from "@/applications/file-explorer/lib/file-explorer-utils";
+import { Button } from "@/components/ui/button";
+
+/* ------------------------------------------------------------------ */
+/*  Re-exported types & utilities (for backward compatibility)         */
+/* ------------------------------------------------------------------ */
+
+export { humanFileSize } from "@/applications/file-explorer/lib/file-explorer-utils";
 
 export type FileExplorerSelectionMode = "file" | "directory";
 
@@ -143,743 +101,17 @@ export type FileExplorerPickerOptions = {
   onCancel?: () => void;
 };
 
-export function humanFileSize(bytes: number, si = false, dp = 1) {
-  const thresh = si ? 1000 : 1024;
+/* ------------------------------------------------------------------ */
+/*  Sort / view types                                                 */
+/* ------------------------------------------------------------------ */
 
-  if (Math.abs(bytes) < thresh) {
-    return bytes + " B";
-  }
+type ViewMode = "grid" | "list";
+type SortByField = "name" | "size" | "modified" | "type";
+type SortOrder = "asc" | "desc";
 
-  const units = si
-    ? ["kB", "MB", "GB", "TB", "PB", "EB", "ZB", "YB"]
-    : ["KiB", "MiB", "GiB", "TiB", "PiB", "EiB", "ZiB", "YiB"];
-  let u = -1;
-  const r = 10 ** dp;
-
-  do {
-    bytes /= thresh;
-    ++u;
-  } while (
-    Math.round(Math.abs(bytes) * r) / r >= thresh &&
-    u < units.length - 1
-  );
-
-  return bytes.toFixed(dp) + " " + units[u];
-}
-
-function formatDate(timestamp: number): string {
-  const date = new Date(timestamp);
-  const now = new Date();
-  const diff = now.getTime() - date.getTime();
-  const days = Math.floor(diff / (1000 * 60 * 60 * 24));
-
-  if (days === 0) {
-    return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-  } else if (days === 1) {
-    return "Yesterday";
-  } else if (days < 7) {
-    return date.toLocaleDateString([], { weekday: "short" });
-  } else {
-    return date.toLocaleDateString([], {
-      month: "short",
-      day: "numeric",
-      year: date.getFullYear() !== now.getFullYear() ? "numeric" : undefined,
-    });
-  }
-}
-
-function getFileIcon(node: FileSystemNode, size: number = 18) {
-  if (node.type === "directory") {
-    if (node.path === "/home" || node.name === "home") {
-      return <Home size={size} className="text-blue-400" />;
-    }
-
-    if (node.parentPath === "/home") {
-      return <User size={size} className="text-blue-400" />;
-    }
-
-    const iconMap: Record<string, typeof Folder> = {
-      Documents: FileText,
-      applications: Grid3X3,
-      Applications: Grid3X3,
-      Downloads: Download,
-      Pictures: Image,
-      images: Image,
-      Images: Image,
-      Music: Music,
-      Videos: Video,
-      Desktop: HardDrive,
-    };
-    const IconComponent = iconMap[node.name] || Folder;
-    return <IconComponent size={size} className="text-blue-400" />;
-  }
-
-  if (isShortcutFile(node)) {
-    const shortcut = parseShortcut(node.contents ?? "");
-    const iconUrl = shortcut ? getShortcutIconUrl(shortcut) : undefined;
-    const iconName = shortcut ? getShortcutIconName(shortcut) : undefined;
-
-    if (iconUrl) {
-      const thumbnailSize = Math.max(16, size);
-      return (
-        <div
-          className="overflow-hidden rounded-sm border border-border/70 bg-muted"
-          style={{ width: thumbnailSize, height: thumbnailSize }}
-        >
-          <NextImage
-            src={iconUrl}
-            alt="icon"
-            width={thumbnailSize}
-            height={thumbnailSize}
-            sizes={`${thumbnailSize}px`}
-            quality={45}
-            className="h-full w-full object-cover"
-            draggable={false}
-          />
-        </div>
-      );
-    }
-
-    const iconByName: Record<string, ReturnType<typeof File>> = {
-      TerminalSquare: <TerminalSquare size={size} className="text-cyan-400" />,
-      FolderClosed: <FolderClosed size={size} className="text-cyan-400" />,
-      Gamepad2: <Gamepad2 size={size} className="text-cyan-400" />,
-      Calculator: <Calculator size={size} className="text-cyan-400" />,
-      BookText: <BookText size={size} className="text-cyan-400" />,
-      BookOpen: <BookOpen size={size} className="text-cyan-400" />,
-      Box: <Box size={size} className="text-cyan-400" />,
-      Settings: <Settings size={size} className="text-cyan-400" />,
-      Image: <FileImage size={size} className="text-cyan-400" />,
-      Info: <FileText size={size} className="text-cyan-400" />,
-      FileSymlink: <FileSymlink size={size} className="text-cyan-400" />,
-    };
-
-    if (iconName && iconByName[iconName]) {
-      return iconByName[iconName];
-    }
-
-    return <File size={size} className="text-cyan-400" />;
-  }
-
-  if (isExecutableFile(node)) {
-    return <TerminalSquare size={size} className="text-orange-400" />;
-  }
-
-  if (isImageFileName(node.name)) {
-    const source = node.contents?.trim() ?? "";
-    if (source) {
-      const thumbnailSize = Math.max(16, size);
-      return (
-        <div
-          className="overflow-hidden rounded-sm border border-border/70 bg-muted"
-          style={{ width: thumbnailSize, height: thumbnailSize }}
-        >
-          <NextImage
-            src={source}
-            alt={node.name}
-            width={thumbnailSize}
-            height={thumbnailSize}
-            sizes={`${thumbnailSize}px`}
-            quality={45}
-            className="h-full w-full object-cover"
-            draggable={false}
-          />
-        </div>
-      );
-    }
-
-    const thumbnailSize = Math.max(16, size);
-    return (
-      <div
-        className="overflow-hidden rounded-sm border border-border/70 bg-muted"
-        style={{ width: thumbnailSize, height: thumbnailSize }}
-      />
-    );
-  }
-
-  const ext = node.name.split(".").pop()?.toLowerCase();
-  const iconConfig: { icon: typeof File; color: string } = (() => {
-    switch (ext) {
-      case "txt":
-      case "md":
-      case "document":
-      case "doc":
-      case "docx":
-      case "pdf":
-        return { icon: FileText, color: "text-gray-400" };
-      case "js":
-      case "ts":
-      case "jsx":
-      case "tsx":
-      case "py":
-      case "java":
-      case "cpp":
-      case "c":
-      case "h":
-      case "css":
-      case "html":
-      case "sh":
-      case "bash":
-        return { icon: FileCode, color: "text-green-400" };
-      case "json":
-      case "yaml":
-      case "yml":
-      case "xml":
-      case "toml":
-        return { icon: FileJson, color: "text-yellow-400" };
-      case "mp3":
-      case "wav":
-      case "flac":
-      case "ogg":
-      case "m4a":
-        return { icon: FileAudio, color: "text-purple-400" };
-      case "mp4":
-      case "mkv":
-      case "avi":
-      case "mov":
-      case "webm":
-        return { icon: FileVideo, color: "text-red-400" };
-      default:
-        return { icon: File, color: "text-gray-400" };
-    }
-  })();
-
-  const IconComponent = iconConfig.icon;
-  return <IconComponent size={size} className={iconConfig.color} />;
-}
-
-function getDisplayName(node: FileSystemNode): string {
-  if (node.type === "file" && node.name.endsWith(".shortcut")) {
-    const shortcut = parseShortcut(node.contents ?? "");
-    return shortcut?.meta.display_name ?? node.name;
-  }
-  return node.name;
-}
-
-interface SidebarBookmark {
-  name: string;
-  path: string;
-  icon: typeof Home;
-}
-
-interface DirectoryTreeItemProps {
-  node: FileSystemNode;
-  level: number;
-  currentPath: string;
-  onNavigate: (path: string) => void;
-  onOpenFile: (node: FileSystemNode) => void;
-  showHidden: boolean;
-  onDropPathsToDirectory: (
-    paths: string[],
-    destinationDirectoryPath: string,
-  ) => void;
-}
-
-function DirectoryTreeItem({
-  node,
-  level,
-  currentPath,
-  onNavigate,
-  onOpenFile,
-  showHidden,
-  onDropPathsToDirectory,
-}: DirectoryTreeItemProps) {
-  const [isExpanded, setIsExpanded] = useState(false);
-  const fs = useFileSystem();
-  const autoExpandTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const children = useMemo(() => {
-    if (!isExpanded) return [];
-    return fs.getChildren(node.path, showHidden);
-  }, [isExpanded, node.path, showHidden]);
-
-  const isActive = currentPath === node.path;
-
-  useEffect(() => {
-    return () => {
-      if (autoExpandTimerRef.current) {
-        clearTimeout(autoExpandTimerRef.current);
-        autoExpandTimerRef.current = null;
-      }
-    };
-  }, []);
-
-  const clearAutoExpandTimer = useCallback(() => {
-    if (autoExpandTimerRef.current) {
-      clearTimeout(autoExpandTimerRef.current);
-      autoExpandTimerRef.current = null;
-    }
-  }, []);
-
-  const scheduleAutoExpand = useCallback(() => {
-    if (isExpanded || autoExpandTimerRef.current) return;
-    autoExpandTimerRef.current = setTimeout(() => {
-      setIsExpanded(true);
-      autoExpandTimerRef.current = null;
-    }, 1000);
-  }, [isExpanded]);
-
-  return (
-    <div>
-      <div
-        className={cn(
-          "flex items-center gap-1 px-2 py-1 cursor-pointer hover:bg-accent/50 rounded-md text-sm",
-          isActive && "bg-accent text-accent-foreground",
-        )}
-        data-file-drop-zone="true"
-        data-file-drop-kind="directory"
-        data-file-drop-path={node.path}
-        style={{ paddingLeft: `${level * 12 + 8}px` }}
-        onClick={() => onNavigate(node.path)}
-        onDragEnter={(event) => {
-          event.preventDefault();
-          scheduleAutoExpand();
-        }}
-        onDragOver={(event) => {
-          event.preventDefault();
-          event.stopPropagation();
-          event.dataTransfer.dropEffect = "move";
-          scheduleAutoExpand();
-        }}
-        onDragLeave={() => {
-          clearAutoExpandTimer();
-        }}
-        onDrop={(event) => {
-          event.preventDefault();
-          event.stopPropagation();
-          clearAutoExpandTimer();
-          const paths = readDroppedPathsFromDataTransfer(event.dataTransfer);
-          if (!paths.length) return;
-          onDropPathsToDirectory(paths, node.path);
-        }}
-      >
-        <button
-          className="p-0.5 hover:bg-accent rounded"
-          onClick={(e) => {
-            e.stopPropagation();
-            setIsExpanded(!isExpanded);
-          }}
-        >
-          {isExpanded ? (
-            <ChevronDown size={14} className="text-muted-foreground" />
-          ) : (
-            <ChevronRight size={14} className="text-muted-foreground" />
-          )}
-        </button>
-        {isExpanded ? (
-          <FolderOpen size={16} className="text-blue-400 shrink-0" />
-        ) : (
-          getFileIcon(node, 16)
-        )}
-        <span className="truncate">{getDisplayName(node)}</span>
-      </div>
-      {isExpanded &&
-        children.map((child) => {
-          if (child.type === "directory") {
-            return (
-              <DirectoryTreeItem
-                key={child.path}
-                node={child}
-                level={level + 1}
-                currentPath={currentPath}
-                onNavigate={onNavigate}
-                onOpenFile={onOpenFile}
-                showHidden={showHidden}
-                onDropPathsToDirectory={onDropPathsToDirectory}
-              />
-            );
-          }
-
-          return (
-            <div
-              key={child.path}
-              className="flex items-center gap-1 px-2 py-1 cursor-pointer hover:bg-accent/50 rounded-md text-sm"
-              style={{ paddingLeft: `${(level + 1) * 12 + 8}px` }}
-              onClick={() => onOpenFile(child)}
-            >
-              <span className="w-[15px] shrink-0" />
-              {getFileIcon(child, 16)}
-              <span className="truncate">{getDisplayName(child)}</span>
-            </div>
-          );
-        })}
-    </div>
-  );
-}
-
-interface FileGridItemProps {
-  node: FileSystemNode;
-  isSelected: boolean;
-  isDragHidden?: boolean;
-  onSelect: (
-    path: string,
-    event:
-      | React.MouseEvent<HTMLDivElement>
-      | React.PointerEvent<HTMLDivElement>,
-  ) => void;
-  onOpen: (node: FileSystemNode) => void;
-  onTouchPointerDown: (
-    node: FileSystemNode,
-    event: React.PointerEvent<HTMLDivElement>,
-  ) => void;
-  onOpenInEditor: (node: FileSystemNode) => void;
-  onViewProperties: (node: FileSystemNode) => void;
-  onOpenTerminalHere: (node: FileSystemNode) => void;
-  onDragStartItem: (
-    node: FileSystemNode,
-    event: React.DragEvent<HTMLDivElement>,
-  ) => void;
-  onDragEndItem: () => void;
-  onDropOnDirectory: (
-    directoryPath: string,
-    event: React.DragEvent<HTMLDivElement>,
-  ) => void;
-  onRename: (node: FileSystemNode) => void;
-  onDelete: (node: FileSystemNode) => void;
-  onCopy: (node: FileSystemNode) => void;
-  onCut: (node: FileSystemNode) => void;
-  onContextSelect: (
-    path: string,
-    event: React.MouseEvent<HTMLDivElement>,
-  ) => void;
-  onItemRef: (path: string, node: HTMLDivElement | null) => void;
-}
-
-const FileGridItem = memo(function FileGridItem({
-  node,
-  isSelected,
-  isDragHidden = false,
-  onSelect,
-  onOpen,
-  onTouchPointerDown,
-  onOpenInEditor,
-  onViewProperties,
-  onOpenTerminalHere,
-  onDragStartItem,
-  onDragEndItem,
-  onDropOnDirectory,
-  onRename,
-  onDelete,
-  onCopy,
-  onCut,
-  onContextSelect,
-  onItemRef,
-}: FileGridItemProps) {
-  const canOpenInEditor =
-    node.type === "file" &&
-    [
-      "txt",
-      "md",
-      "document",
-      "js",
-      "ts",
-      "jsx",
-      "tsx",
-      "json",
-      "css",
-      "html",
-      "yml",
-      "yaml",
-      "xml",
-      "toml",
-      "shortcut",
-      "app",
-      "sh",
-      "bash",
-    ].includes(node.name.split(".").pop()?.toLowerCase() ?? "");
-
-  return (
-    <ContextMenu>
-      <ContextMenuTrigger asChild>
-        <div
-          ref={(nodeRef) => onItemRef(node.path, nodeRef)}
-          data-file-item="true"
-          data-file-hit="true"
-          data-file-drop-zone={node.type === "directory" ? "true" : undefined}
-          data-file-drop-kind={
-            node.type === "directory" ? "directory" : undefined
-          }
-          data-file-drop-path={
-            node.type === "directory" ? node.path : undefined
-          }
-          draggable
-          className={cn(
-            "flex flex-col items-center gap-1 p-3 rounded-lg cursor-pointer transition-all",
-            "hover:bg-primary/10 w-24",
-            isSelected && "bg-primary/10 ring-2 ring-primary/40",
-          )}
-          style={{ visibility: isDragHidden ? "hidden" : "visible" }}
-          onDragStart={(event) => onDragStartItem(node, event)}
-          onDragEnd={onDragEndItem}
-          onDragOver={(event) => {
-            if (node.type === "directory") {
-              event.preventDefault();
-              event.stopPropagation();
-              event.dataTransfer.dropEffect = "move";
-            }
-          }}
-          onDrop={(event) => {
-            if (node.type === "directory") {
-              onDropOnDirectory(node.path, event);
-            }
-          }}
-          onPointerDown={(e) => {
-            e.stopPropagation();
-            onSelect(node.path, e);
-            onTouchPointerDown(node, e);
-          }}
-          onContextMenu={(e) => {
-            onContextSelect(node.path, e);
-          }}
-          onDoubleClick={() => onOpen(node)}
-        >
-          <div
-            data-file-icon="true"
-            className="w-12 h-12 flex items-center justify-center"
-          >
-            {getFileIcon(node, 40)}
-          </div>
-          <span
-            className="text-xs text-center w-full leading-4 overflow-hidden break-words [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2]"
-            title={getDisplayName(node)}
-          >
-            {getDisplayName(node)}
-          </span>
-        </div>
-      </ContextMenuTrigger>
-      <ContextMenuContent className="w-48">
-        <ContextMenuItem onClick={() => onOpen(node)}>
-          <Eye size={16} className="mr-2" />
-          Open
-        </ContextMenuItem>
-        {canOpenInEditor ? (
-          <ContextMenuItem onClick={() => onOpenInEditor(node)}>
-            <Edit3 size={16} className="mr-2" />
-            Open in Text Editor
-          </ContextMenuItem>
-        ) : null}
-        <ContextMenuItem onClick={() => onOpenTerminalHere(node)}>
-          <TerminalSquare size={16} className="mr-2" />
-          Open Terminal Here
-        </ContextMenuItem>
-        <ContextMenuSeparator />
-        <ContextMenuItem
-          onClick={() => onCut(node)}
-          disabled={node.type === "file" && Boolean(node.readOnly)}
-        >
-          <Scissors size={16} className="mr-2" />
-          Cut
-          <ContextMenuShortcut>Ctrl+X</ContextMenuShortcut>
-        </ContextMenuItem>
-        <ContextMenuItem
-          onClick={() => onCopy(node)}
-          disabled={node.type === "file" && Boolean(node.readOnly)}
-        >
-          <Copy size={16} className="mr-2" />
-          Copy
-          <ContextMenuShortcut>Ctrl+C</ContextMenuShortcut>
-        </ContextMenuItem>
-        <ContextMenuSeparator />
-        <ContextMenuItem
-          onClick={() => onRename(node)}
-          disabled={Boolean(node.readOnly)}
-        >
-          <Edit3 size={16} className="mr-2" />
-          Rename
-          <ContextMenuShortcut>F2</ContextMenuShortcut>
-        </ContextMenuItem>
-        <ContextMenuItem
-          onClick={() => onDelete(node)}
-          disabled={Boolean(node.readOnly)}
-          className="text-destructive"
-        >
-          <Trash2 size={16} className="mr-2" />
-          Delete
-          <ContextMenuShortcut>Del</ContextMenuShortcut>
-        </ContextMenuItem>
-        <ContextMenuSeparator />
-        <ContextMenuItem onClick={() => onViewProperties(node)}>
-          <FileText size={16} className="mr-2" />
-          Properties
-        </ContextMenuItem>
-      </ContextMenuContent>
-    </ContextMenu>
-  );
-});
-
-interface FileListItemProps extends FileGridItemProps {}
-
-const FileListItem = memo(function FileListItem({
-  node,
-  isSelected,
-  isDragHidden = false,
-  onSelect,
-  onOpen,
-  onTouchPointerDown,
-  onOpenInEditor,
-  onViewProperties,
-  onOpenTerminalHere,
-  onDragStartItem,
-  onDragEndItem,
-  onDropOnDirectory,
-  onRename,
-  onDelete,
-  onCopy,
-  onCut,
-  onContextSelect,
-  onItemRef,
-}: FileListItemProps) {
-  const canOpenInEditor =
-    node.type === "file" &&
-    [
-      "txt",
-      "md",
-      "document",
-      "js",
-      "ts",
-      "jsx",
-      "tsx",
-      "json",
-      "css",
-      "html",
-      "yml",
-      "yaml",
-      "xml",
-      "toml",
-      "shortcut",
-      "app",
-      "sh",
-      "bash",
-    ].includes(node.name.split(".").pop()?.toLowerCase() ?? "");
-
-  return (
-    <ContextMenu>
-      <ContextMenuTrigger asChild>
-        <div
-          ref={(nodeRef) => onItemRef(node.path, nodeRef)}
-          data-file-item="true"
-          data-file-hit="true"
-          data-file-drop-zone={node.type === "directory" ? "true" : undefined}
-          data-file-drop-kind={
-            node.type === "directory" ? "directory" : undefined
-          }
-          data-file-drop-path={
-            node.type === "directory" ? node.path : undefined
-          }
-          draggable
-          className={cn(
-            "flex items-center gap-3 px-3 py-2 hover:bg-primary/10 cursor-pointer transition-all border-b border-border/50",
-            isSelected && "bg-primary/10",
-          )}
-          style={{ visibility: isDragHidden ? "hidden" : "visible" }}
-          onDragStart={(event) => onDragStartItem(node, event)}
-          onDragEnd={onDragEndItem}
-          onDragOver={(event) => {
-            if (node.type === "directory") {
-              event.preventDefault();
-              event.stopPropagation();
-              event.dataTransfer.dropEffect = "move";
-            }
-          }}
-          onDrop={(event) => {
-            if (node.type === "directory") {
-              onDropOnDirectory(node.path, event);
-            }
-          }}
-          onPointerDown={(e) => {
-            e.stopPropagation();
-            onSelect(node.path, e);
-            onTouchPointerDown(node, e);
-          }}
-          onContextMenu={(e) => {
-            onContextSelect(node.path, e);
-          }}
-          onDoubleClick={() => onOpen(node)}
-        >
-          <div
-            data-file-icon="true"
-            className="w-5 flex items-center justify-center shrink-0"
-          >
-            {getFileIcon(node, 18)}
-          </div>
-          <div className="flex-1 min-w-0">
-            <span
-              className="text-sm truncate block"
-              title={getDisplayName(node)}
-            >
-              {getDisplayName(node)}
-            </span>
-          </div>
-          <div className="w-20 text-xs text-muted-foreground text-right shrink-0">
-            {node.type === "file" ? humanFileSize(node.size) : "--"}
-          </div>
-          <div className="w-24 text-xs text-muted-foreground text-right shrink-0">
-            {formatDate(node.modifiedAt)}
-          </div>
-          <div className="w-24 text-xs text-muted-foreground font-mono shrink-0">
-            {node.permissions}
-          </div>
-        </div>
-      </ContextMenuTrigger>
-      <ContextMenuContent className="w-48">
-        <ContextMenuItem onClick={() => onOpen(node)}>
-          <Eye size={16} className="mr-2" />
-          Open
-        </ContextMenuItem>
-        {canOpenInEditor ? (
-          <ContextMenuItem onClick={() => onOpenInEditor(node)}>
-            <Edit3 size={16} className="mr-2" />
-            Open in Text Editor
-          </ContextMenuItem>
-        ) : null}
-        <ContextMenuItem onClick={() => onOpenTerminalHere(node)}>
-          <TerminalSquare size={16} className="mr-2" />
-          Open Terminal Here
-        </ContextMenuItem>
-        <ContextMenuSeparator />
-        <ContextMenuItem
-          onClick={() => onCut(node)}
-          disabled={node.type === "file" && Boolean(node.readOnly)}
-        >
-          <Scissors size={16} className="mr-2" />
-          Cut
-          <ContextMenuShortcut>Ctrl+X</ContextMenuShortcut>
-        </ContextMenuItem>
-        <ContextMenuItem
-          onClick={() => onCopy(node)}
-          disabled={node.type === "file" && Boolean(node.readOnly)}
-        >
-          <Copy size={16} className="mr-2" />
-          Copy
-          <ContextMenuShortcut>Ctrl+C</ContextMenuShortcut>
-        </ContextMenuItem>
-        <ContextMenuSeparator />
-        <ContextMenuItem
-          onClick={() => onRename(node)}
-          disabled={Boolean(node.readOnly)}
-        >
-          <Edit3 size={16} className="mr-2" />
-          Rename
-          <ContextMenuShortcut>F2</ContextMenuShortcut>
-        </ContextMenuItem>
-        <ContextMenuItem
-          onClick={() => onDelete(node)}
-          disabled={Boolean(node.readOnly)}
-          className="text-destructive"
-        >
-          <Trash2 size={16} className="mr-2" />
-          Delete
-          <ContextMenuShortcut>Del</ContextMenuShortcut>
-        </ContextMenuItem>
-        <ContextMenuSeparator />
-        <ContextMenuItem onClick={() => onViewProperties(node)}>
-          <FileText size={16} className="mr-2" />
-          Properties
-        </ContextMenuItem>
-      </ContextMenuContent>
-    </ContextMenu>
-  );
-});
+/* ------------------------------------------------------------------ */
+/*  Main File Explorer Application                                    */
+/* ------------------------------------------------------------------ */
 
 export default function FileExplorerApplication({
   initialPath,
@@ -888,17 +120,20 @@ export default function FileExplorerApplication({
   initialPath?: string;
   picker?: FileExplorerPickerOptions;
 }) {
-  const fs = useFileSystem();
+  const fileSystem = useFileSystem();
   const homePath = getHomePath();
   const isPickerMode = Boolean(picker?.enabled);
   const pickerSelectionMode = picker?.selectionMode ?? "file";
+
   const pickerRootPath = useMemo(() => {
     const requested = picker?.rootPath
-      ? fs.normalizePath(picker.rootPath)
+      ? fileSystem.normalizePath(picker.rootPath)
       : homePath;
-    if (fs.exists(requested) && fs.isDirectory(requested)) return requested;
+    if (fileSystem.exists(requested) && fileSystem.isDirectory(requested))
+      return requested;
     return homePath;
-  }, [picker?.rootPath, fs, homePath]);
+  }, [picker?.rootPath, fileSystem, homePath]);
+
   const pickerExtensionSet = useMemo(
     () =>
       new Set(
@@ -909,16 +144,18 @@ export default function FileExplorerApplication({
     [picker?.allowedFileExtensions],
   );
 
+  /* ---- Picker boundary helpers ---- */
+
   const isWithinPickerRoot = useCallback(
     (path: string) => {
       if (!isPickerMode) return true;
-      const normalized = fs.normalizePath(path);
+      const normalized = fileSystem.normalizePath(path);
       return (
         normalized === pickerRootPath ||
         normalized.startsWith(`${pickerRootPath}/`)
       );
     },
-    [fs, isPickerMode, pickerRootPath],
+    [fileSystem, isPickerMode, pickerRootPath],
   );
 
   const isAllowedPickerFile = useCallback(
@@ -926,8 +163,8 @@ export default function FileExplorerApplication({
       if (node.type !== "file") return false;
       if (pickerSelectionMode === "directory") return false;
       if (pickerExtensionSet.size === 0) return true;
-      const ext = node.name.split(".").pop()?.toLowerCase() ?? "";
-      return pickerExtensionSet.has(ext);
+      const extension = node.name.split(".").pop()?.toLowerCase() ?? "";
+      return pickerExtensionSet.has(extension);
     },
     [pickerExtensionSet, pickerSelectionMode],
   );
@@ -949,13 +186,15 @@ export default function FileExplorerApplication({
     ],
   );
 
+  /* ---- Compute initial path ---- */
+
   const initialExplorerPath = useMemo(() => {
     if (isPickerMode) {
       if (!initialPath) return pickerRootPath;
-      const normalized = fs.normalizePath(initialPath);
+      const normalized = fileSystem.normalizePath(initialPath);
       if (
-        fs.exists(normalized) &&
-        fs.isDirectory(normalized) &&
+        fileSystem.exists(normalized) &&
+        fileSystem.isDirectory(normalized) &&
         isWithinPickerRoot(normalized)
       ) {
         return normalized;
@@ -964,20 +203,23 @@ export default function FileExplorerApplication({
     }
 
     if (!initialPath) return homePath;
-    const normalized = fs.normalizePath(initialPath);
-    if (fs.exists(normalized) && fs.isDirectory(normalized)) {
+    const normalized = fileSystem.normalizePath(initialPath);
+    if (fileSystem.exists(normalized) && fileSystem.isDirectory(normalized)) {
       return normalized;
     }
     return homePath;
   }, [
-    fs,
+    fileSystem,
     homePath,
     initialPath,
     isPickerMode,
     isWithinPickerRoot,
     pickerRootPath,
   ]);
-  const bookmarks: SidebarBookmark[] = useMemo(
+
+  /* ---- Sidebar bookmarks ---- */
+
+  const sidebarBookmarks: SidebarBookmark[] = useMemo(
     () =>
       isPickerMode
         ? [{ name: "Browse", path: pickerRootPath, icon: Folder }]
@@ -996,22 +238,29 @@ export default function FileExplorerApplication({
     [homePath, isPickerMode, pickerRootPath],
   );
 
-  const [currentPath, setCurrentPath] = useState(initialExplorerPath);
-  const [history, setHistory] = useState<string[]>([initialExplorerPath]);
-  const [historyIndex, setHistoryIndex] = useState(0);
+  /* ---- Core state ---- */
+
+  const [currentDirectoryPath, setCurrentDirectoryPath] =
+    useState(initialExplorerPath);
+  const [navigationHistory, setNavigationHistory] = useState<string[]>([
+    initialExplorerPath,
+  ]);
+  const [navigationHistoryIndex, setNavigationHistoryIndex] = useState(0);
 
   const [viewMode, setViewMode] = useState<ViewMode>("grid");
-  const [sortBy, setSortBy] = useState<SortBy>("name");
+  const [sortByField, setSortByField] = useState<SortByField>("name");
   const [sortOrder, setSortOrder] = useState<SortOrder>("asc");
-  const [showHidden, setShowHidden] = useState(false);
+  const [shouldShowHiddenFiles, setShouldShowHiddenFiles] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
-  const [isSearching, setIsSearching] = useState(false);
+  const [isSearchActive, setIsSearchActive] = useState(false);
 
   const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set());
   const [lastSelectedPath, setLastSelectedPath] = useState<string | null>(null);
-  const lastSelectedPathRef = useRef<string | null>(null);
-  const lastTouchTapRef = useRef<{ path: string; at: number } | null>(null);
-  const touchDragRef = useRef<{
+  const lastSelectedPathReference = useRef<string | null>(null);
+  const lastTouchTapReference = useRef<{ path: string; at: number } | null>(
+    null,
+  );
+  const touchDragReference = useRef<{
     pointerId: number;
     startX: number;
     startY: number;
@@ -1019,31 +268,36 @@ export default function FileExplorerApplication({
     active: boolean;
     sourcePixels: Record<string, { left: number; top: number }>;
   } | null>(null);
-  const selectedPathsRef = useRef<Set<string>>(new Set());
-  const marqueeRef = useRef<HTMLDivElement>(null);
-  const marqueeRectRef = useRef<{
+  const selectedPathsReference = useRef<Set<string>>(new Set());
+  const marqueeElementReference = useRef<HTMLDivElement>(null);
+  const marqueeRectReference = useRef<{
     x: number;
     y: number;
     width: number;
     height: number;
   } | null>(null);
+
   const [renameTarget, setRenameTarget] = useState<FileSystemNode | null>(null);
   const [renameValue, setRenameValue] = useState("");
-  const [renameError, setRenameError] = useState("");
+  const [renameErrorMessage, setRenameErrorMessage] = useState("");
   const [createMode, setCreateMode] = useState<"file" | "folder" | null>(null);
   const [createValue, setCreateValue] = useState("");
-  const [createError, setCreateError] = useState("");
-  const rootRef = useRef<HTMLDivElement>(null);
-  const contentRef = useRef<HTMLDivElement>(null);
-  const viewportRef = useRef<HTMLDivElement>(null);
-  const breadcrumbHoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+  const [createErrorMessage, setCreateErrorMessage] = useState("");
+
+  const rootContainerReference = useRef<HTMLDivElement>(null);
+  const contentContainerReference = useRef<HTMLDivElement>(null);
+  const viewportReference = useRef<HTMLDivElement>(null);
+  const breadcrumbHoverTimerReference = useRef<ReturnType<
+    typeof setTimeout
+  > | null>(null);
+  const itemElementReferences = useRef<Map<string, HTMLDivElement>>(new Map());
+  const isMarqueeSelectingReference = useRef(false);
+  const selectionOriginReference = useRef<{ x: number; y: number } | null>(
     null,
   );
-  const itemRefs = useRef<Map<string, HTMLDivElement>>(new Map());
-  const isSelectingRef = useRef(false);
-  const selectionOriginRef = useRef<{ x: number; y: number } | null>(null);
-  const selectionBaseRef = useRef<Set<string>>(new Set());
-  const marqueeRafRef = useRef<number>(0);
+  const selectionBaseReference = useRef<Set<string>>(new Set());
+  const marqueeAnimationFrameReference = useRef<number>(0);
+
   const touchDragVisual = useDragVisualHandoff({
     durationMs: 160,
     easing: "ease-out",
@@ -1053,22 +307,24 @@ export default function FileExplorerApplication({
   const updateTouchDragVisualDelta = touchDragVisual.updateDelta;
 
   const [clipboard, setClipboard] = useState(getFileClipboard);
-
   const [childWindows, setChildWindows] = useState<ReactPortal[]>([]);
-
   const [sidebarWidth, setSidebarWidth] = useState(200);
   const [, setIsResizing] = useState(false);
-
   const [refreshTrigger, setRefreshTrigger] = useState(0);
 
-  const contents = useMemo(() => {
+  /* ---- Compute displayed contents ---- */
+
+  const directoryContents = useMemo(() => {
     void refreshTrigger;
     let items: FileSystemNode[];
 
-    if (isSearching && searchQuery) {
-      items = fs.searchFiles(searchQuery, currentPath);
+    if (isSearchActive && searchQuery) {
+      items = fileSystem.searchFiles(searchQuery, currentDirectoryPath);
     } else {
-      items = fs.getChildren(currentPath, showHidden);
+      items = fileSystem.getChildren(
+        currentDirectoryPath,
+        shouldShowHiddenFiles,
+      );
     }
 
     if (isPickerMode) {
@@ -1079,103 +335,115 @@ export default function FileExplorerApplication({
       });
     }
 
-    items.sort((a, b) => {
-      if (a.type !== b.type) {
-        return a.type === "directory" ? -1 : 1;
+    items.sort((firstItem, secondItem) => {
+      /* Directories always come before files */
+      if (firstItem.type !== secondItem.type) {
+        return firstItem.type === "directory" ? -1 : 1;
       }
 
       let comparison = 0;
-      switch (sortBy) {
+      switch (sortByField) {
         case "name":
-          comparison = a.name.localeCompare(b.name);
+          comparison = firstItem.name.localeCompare(secondItem.name);
           break;
         case "size":
-          comparison = a.size - b.size;
+          comparison = firstItem.size - secondItem.size;
           break;
         case "modified":
-          comparison = a.modifiedAt - b.modifiedAt;
+          comparison = firstItem.modifiedAt - secondItem.modifiedAt;
           break;
-        case "type":
-          const extA = a.name.split(".").pop() || "";
-          const extB = b.name.split(".").pop() || "";
-          comparison = extA.localeCompare(extB);
+        case "type": {
+          const extensionA = firstItem.name.split(".").pop() || "";
+          const extensionB = secondItem.name.split(".").pop() || "";
+          comparison = extensionA.localeCompare(extensionB);
           break;
+        }
       }
       return sortOrder === "asc" ? comparison : -comparison;
     });
 
     return items;
   }, [
-    currentPath,
+    currentDirectoryPath,
     isAllowedPickerFile,
     isPickerMode,
     isWithinPickerRoot,
-    showHidden,
+    shouldShowHiddenFiles,
     searchQuery,
-    isSearching,
-    sortBy,
+    isSearchActive,
+    sortByField,
     sortOrder,
     refreshTrigger,
   ]);
 
-  const navigate = useCallback(
+  /* ---- Navigation ---- */
+
+  const navigateToDirectory = useCallback(
     (path: string) => {
-      const normalized = fs.normalizePath(path);
-      if (!isWithinPickerRoot(normalized)) return;
-      if (fs.exists(normalized) && fs.isDirectory(normalized)) {
-        setCurrentPath(normalized);
+      const normalizedPath = fileSystem.normalizePath(path);
+      if (!isWithinPickerRoot(normalizedPath)) return;
+      if (
+        fileSystem.exists(normalizedPath) &&
+        fileSystem.isDirectory(normalizedPath)
+      ) {
+        setCurrentDirectoryPath(normalizedPath);
         setSelectedPaths(new Set());
 
-        const newHistory = history.slice(0, historyIndex + 1);
-        newHistory.push(normalized);
-        setHistory(newHistory);
-        setHistoryIndex(newHistory.length - 1);
+        const trimmedHistory = navigationHistory.slice(
+          0,
+          navigationHistoryIndex + 1,
+        );
+        trimmedHistory.push(normalizedPath);
+        setNavigationHistory(trimmedHistory);
+        setNavigationHistoryIndex(trimmedHistory.length - 1);
       }
     },
-    [fs, history, historyIndex, isWithinPickerRoot],
+    [fileSystem, navigationHistory, navigationHistoryIndex, isWithinPickerRoot],
   );
 
-  const goBack = useCallback(() => {
-    if (historyIndex > 0) {
-      setHistoryIndex(historyIndex - 1);
-      setCurrentPath(history[historyIndex - 1]);
+  const navigateBack = useCallback(() => {
+    if (navigationHistoryIndex > 0) {
+      setNavigationHistoryIndex(navigationHistoryIndex - 1);
+      setCurrentDirectoryPath(navigationHistory[navigationHistoryIndex - 1]);
       setSelectedPaths(new Set());
     }
-  }, [history, historyIndex]);
+  }, [navigationHistory, navigationHistoryIndex]);
 
-  const goForward = useCallback(() => {
-    if (historyIndex < history.length - 1) {
-      setHistoryIndex(historyIndex + 1);
-      setCurrentPath(history[historyIndex + 1]);
+  const navigateForward = useCallback(() => {
+    if (navigationHistoryIndex < navigationHistory.length - 1) {
+      setNavigationHistoryIndex(navigationHistoryIndex + 1);
+      setCurrentDirectoryPath(navigationHistory[navigationHistoryIndex + 1]);
       setSelectedPaths(new Set());
     }
-  }, [history, historyIndex]);
+  }, [navigationHistory, navigationHistoryIndex]);
 
-  const goUp = useCallback(() => {
-    if (isPickerMode && currentPath === pickerRootPath) return;
-    const parent = fs.getParentPath(currentPath);
-    if (parent !== currentPath && isWithinPickerRoot(parent)) {
-      navigate(parent);
+  const navigateUp = useCallback(() => {
+    if (isPickerMode && currentDirectoryPath === pickerRootPath) return;
+    const parentPath = fileSystem.getParentPath(currentDirectoryPath);
+    if (parentPath !== currentDirectoryPath && isWithinPickerRoot(parentPath)) {
+      navigateToDirectory(parentPath);
     }
   }, [
-    currentPath,
-    fs,
+    currentDirectoryPath,
+    fileSystem,
     isPickerMode,
     isWithinPickerRoot,
-    navigate,
+    navigateToDirectory,
     pickerRootPath,
   ]);
 
-  const refresh = useCallback(() => {
-    setRefreshTrigger((prev) => prev + 1);
+  const refreshContents = useCallback(() => {
+    setRefreshTrigger((previous) => previous + 1);
   }, []);
 
-  const updateSelection = useCallback((next: Set<string>) => {
-    setSelectedPaths(new Set(next));
+  /* ---- Selection ---- */
+
+  const updateSelection = useCallback((nextSelection: Set<string>) => {
+    setSelectedPaths(new Set(nextSelection));
   }, []);
 
   useEffect(() => {
-    selectedPathsRef.current = new Set(selectedPaths);
+    selectedPathsReference.current = new Set(selectedPaths);
   }, [selectedPaths]);
 
   useEffect(() => {
@@ -1186,18 +454,22 @@ export default function FileExplorerApplication({
 
   const selectRange = useCallback(
     (fromPath: string, toPath: string) => {
-      const fromIndex = contents.findIndex((item) => item.path === fromPath);
-      const toIndex = contents.findIndex((item) => item.path === toPath);
+      const fromIndex = directoryContents.findIndex(
+        (item) => item.path === fromPath,
+      );
+      const toIndex = directoryContents.findIndex(
+        (item) => item.path === toPath,
+      );
       if (fromIndex === -1 || toIndex === -1) return;
-      const [start, end] =
+      const [startIndex, endIndex] =
         fromIndex < toIndex ? [fromIndex, toIndex] : [toIndex, fromIndex];
-      const next = new Set<string>();
-      for (let i = start; i <= end; i += 1) {
-        next.add(contents[i].path);
+      const nextSelection = new Set<string>();
+      for (let index = startIndex; index <= endIndex; index += 1) {
+        nextSelection.add(directoryContents[index].path);
       }
-      updateSelection(next);
+      updateSelection(nextSelection);
     },
-    [contents, updateSelection],
+    [directoryContents, updateSelection],
   );
 
   const handleSelect = useCallback(
@@ -1208,45 +480,52 @@ export default function FileExplorerApplication({
         | React.PointerEvent<HTMLDivElement>,
     ) => {
       if (event.button !== 0) return;
-      rootRef.current?.focus();
+      rootContainerReference.current?.focus();
 
-      const sel = selectedPathsRef.current;
+      const currentSelection = selectedPathsReference.current;
+
+      /* When clicking a selected item in a multi-selection without modifier keys,
+         just update the anchor — deselection happens on pointer-up (browser default). */
       if (
-        sel.has(path) &&
-        sel.size > 1 &&
+        currentSelection.has(path) &&
+        currentSelection.size > 1 &&
         !event.ctrlKey &&
         !event.metaKey &&
         !event.shiftKey
       ) {
         setLastSelectedPath(path);
-        lastSelectedPathRef.current = path;
+        lastSelectedPathReference.current = path;
         return;
       }
 
-      const lastSel = lastSelectedPathRef.current;
-      if (event.shiftKey && lastSel) {
-        selectRange(lastSel, path);
+      const lastAnchorPath = lastSelectedPathReference.current;
+
+      /* Shift-click extends the selection range */
+      if (event.shiftKey && lastAnchorPath) {
+        selectRange(lastAnchorPath, path);
         setLastSelectedPath(path);
-        lastSelectedPathRef.current = path;
+        lastSelectedPathReference.current = path;
         return;
       }
 
+      /* Ctrl/Meta-click toggles individual paths */
       if (event.ctrlKey || event.metaKey) {
-        const next = new Set(sel);
-        if (next.has(path)) {
-          next.delete(path);
+        const nextSelection = new Set(currentSelection);
+        if (nextSelection.has(path)) {
+          nextSelection.delete(path);
         } else {
-          next.add(path);
+          nextSelection.add(path);
         }
-        updateSelection(next);
+        updateSelection(nextSelection);
         setLastSelectedPath(path);
-        lastSelectedPathRef.current = path;
+        lastSelectedPathReference.current = path;
         return;
       }
 
+      /* Normal click – select only this path */
       updateSelection(new Set([path]));
       setLastSelectedPath(path);
-      lastSelectedPathRef.current = path;
+      lastSelectedPathReference.current = path;
     },
     [selectRange, updateSelection],
   );
@@ -1254,57 +533,60 @@ export default function FileExplorerApplication({
   const handleContextSelect = useCallback(
     (path: string, event: React.MouseEvent<HTMLDivElement>) => {
       event.stopPropagation();
-      if (!selectedPathsRef.current.has(path)) {
+      if (!selectedPathsReference.current.has(path)) {
         updateSelection(new Set([path]));
         setLastSelectedPath(path);
-        lastSelectedPathRef.current = path;
+        lastSelectedPathReference.current = path;
       }
     },
     [updateSelection],
   );
 
   const handleItemRef = useCallback(
-    (path: string, node: HTMLDivElement | null) => {
-      if (node) {
-        itemRefs.current.set(path, node);
+    (path: string, element: HTMLDivElement | null) => {
+      if (element) {
+        itemElementReferences.current.set(path, element);
       } else {
-        itemRefs.current.delete(path);
+        itemElementReferences.current.delete(path);
       }
     },
     [],
   );
 
-  const startMarquee = useCallback(
+  /* ---- Marquee (rubber-band) selection ---- */
+
+  const startMarqueeSelection = useCallback(
     (event: React.MouseEvent<HTMLDivElement>) => {
       if (event.button !== 0) return;
       const target = event.target as HTMLElement;
       if (target.closest("[data-file-item='true']")) return;
 
-      const container = viewportRef.current ?? contentRef.current;
+      const container =
+        viewportReference.current ?? contentContainerReference.current;
       if (!container) return;
 
-      const rect = container.getBoundingClientRect();
+      const containerRect = container.getBoundingClientRect();
       const origin = {
-        x: event.clientX - rect.left,
-        y: event.clientY - rect.top,
+        x: event.clientX - containerRect.left,
+        y: event.clientY - containerRect.top,
       };
-      selectionOriginRef.current = origin;
-      isSelectingRef.current = true;
-      selectionBaseRef.current =
+      selectionOriginReference.current = origin;
+      isMarqueeSelectingReference.current = true;
+      selectionBaseReference.current =
         event.ctrlKey || event.metaKey ? new Set(selectedPaths) : new Set();
-      marqueeRectRef.current = {
+      marqueeRectReference.current = {
         x: origin.x,
         y: origin.y,
         width: 0,
         height: 0,
       };
-      const el = marqueeRef.current;
-      if (el) {
-        el.style.display = "block";
-        el.style.left = `${origin.x}px`;
-        el.style.top = `${origin.y}px`;
-        el.style.width = "0px";
-        el.style.height = "0px";
+      const marqueeElement = marqueeElementReference.current;
+      if (marqueeElement) {
+        marqueeElement.style.display = "block";
+        marqueeElement.style.left = `${origin.x}px`;
+        marqueeElement.style.top = `${origin.y}px`;
+        marqueeElement.style.width = "0px";
+        marqueeElement.style.height = "0px";
       }
       if (!event.ctrlKey && !event.metaKey) {
         updateSelection(new Set());
@@ -1313,91 +595,102 @@ export default function FileExplorerApplication({
     [selectedPaths, updateSelection],
   );
 
-  const endSelection = useCallback(() => {
-    if (!isSelectingRef.current) return;
-    isSelectingRef.current = false;
-    selectionOriginRef.current = null;
-    selectionBaseRef.current = new Set();
-    marqueeRectRef.current = null;
-    const el = marqueeRef.current;
-    if (el) el.style.display = "none";
+  const endMarqueeSelection = useCallback(() => {
+    if (!isMarqueeSelectingReference.current) return;
+    isMarqueeSelectingReference.current = false;
+    selectionOriginReference.current = null;
+    selectionBaseReference.current = new Set();
+    marqueeRectReference.current = null;
+    const marqueeElement = marqueeElementReference.current;
+    if (marqueeElement) marqueeElement.style.display = "none";
   }, []);
 
   useEffect(() => {
     const handleMouseMove = (event: MouseEvent) => {
-      if (!isSelectingRef.current || !selectionOriginRef.current) return;
+      if (
+        !isMarqueeSelectingReference.current ||
+        !selectionOriginReference.current
+      )
+        return;
       if (event.buttons === 0) {
-        endSelection();
+        endMarqueeSelection();
         return;
       }
 
-      const container = viewportRef.current ?? contentRef.current;
+      const container =
+        viewportReference.current ?? contentContainerReference.current;
       if (!container) return;
 
-      const rect = container.getBoundingClientRect();
-      const current = {
-        x: event.clientX - rect.left,
-        y: event.clientY - rect.top,
+      const containerRect = container.getBoundingClientRect();
+      const currentPosition = {
+        x: event.clientX - containerRect.left,
+        y: event.clientY - containerRect.top,
       };
-      const origin = selectionOriginRef.current;
-      const x = Math.min(origin.x, current.x);
-      const y = Math.min(origin.y, current.y);
-      const width = Math.abs(origin.x - current.x);
-      const height = Math.abs(origin.y - current.y);
-      marqueeRectRef.current = { x, y, width, height };
-      const el = marqueeRef.current;
-      if (el) {
-        el.style.left = `${x}px`;
-        el.style.top = `${y}px`;
-        el.style.width = `${width}px`;
-        el.style.height = `${height}px`;
+      const origin = selectionOriginReference.current;
+      const marqueeX = Math.min(origin.x, currentPosition.x);
+      const marqueeY = Math.min(origin.y, currentPosition.y);
+      const marqueeWidth = Math.abs(origin.x - currentPosition.x);
+      const marqueeHeight = Math.abs(origin.y - currentPosition.y);
+      marqueeRectReference.current = {
+        x: marqueeX,
+        y: marqueeY,
+        width: marqueeWidth,
+        height: marqueeHeight,
+      };
+      const marqueeElement = marqueeElementReference.current;
+      if (marqueeElement) {
+        marqueeElement.style.left = `${marqueeX}px`;
+        marqueeElement.style.top = `${marqueeY}px`;
+        marqueeElement.style.width = `${marqueeWidth}px`;
+        marqueeElement.style.height = `${marqueeHeight}px`;
       }
 
-      if (marqueeRafRef.current) return;
-      marqueeRafRef.current = requestAnimationFrame(() => {
-        marqueeRafRef.current = 0;
-        if (!isSelectingRef.current) return;
-        const m = marqueeRectRef.current;
-        if (!m) return;
+      if (marqueeAnimationFrameReference.current) return;
+      marqueeAnimationFrameReference.current = requestAnimationFrame(() => {
+        marqueeAnimationFrameReference.current = 0;
+        if (!isMarqueeSelectingReference.current) return;
+        const marqueeRect = marqueeRectReference.current;
+        if (!marqueeRect) return;
 
-        const c = viewportRef.current ?? contentRef.current;
-        if (!c) return;
-        const r = c.getBoundingClientRect();
+        const scrollContainer =
+          viewportReference.current ?? contentContainerReference.current;
+        if (!scrollContainer) return;
+        const scrollContainerRect = scrollContainer.getBoundingClientRect();
 
         const selectionRect = {
-          left: m.x,
-          top: m.y,
-          right: m.x + m.width,
-          bottom: m.y + m.height,
+          left: marqueeRect.x,
+          top: marqueeRect.y,
+          right: marqueeRect.x + marqueeRect.width,
+          bottom: marqueeRect.y + marqueeRect.height,
         };
-        const nextSelection = new Set(selectionBaseRef.current);
-        contents.forEach((item) => {
-          const element = itemRefs.current.get(item.path);
+        const nextSelection = new Set(selectionBaseReference.current);
+        directoryContents.forEach((item) => {
+          const element = itemElementReferences.current.get(item.path);
           if (!element) return;
           const hitTarget = element.querySelector(
             "[data-file-hit='true']",
           ) as HTMLElement | null;
           const itemRect = (hitTarget ?? element).getBoundingClientRect();
-          const relative = {
-            left: itemRect.left - r.left,
-            top: itemRect.top - r.top,
-            right: itemRect.right - r.left,
-            bottom: itemRect.bottom - r.top,
+          const relativeItemRect = {
+            left: itemRect.left - scrollContainerRect.left,
+            top: itemRect.top - scrollContainerRect.top,
+            right: itemRect.right - scrollContainerRect.left,
+            bottom: itemRect.bottom - scrollContainerRect.top,
           };
-          const intersects =
-            selectionRect.left <= relative.right &&
-            selectionRect.right >= relative.left &&
-            selectionRect.top <= relative.bottom &&
-            selectionRect.bottom >= relative.top;
-          if (intersects) {
+          const doesIntersect =
+            selectionRect.left <= relativeItemRect.right &&
+            selectionRect.right >= relativeItemRect.left &&
+            selectionRect.top <= relativeItemRect.bottom &&
+            selectionRect.bottom >= relativeItemRect.top;
+          if (doesIntersect) {
             nextSelection.add(item.path);
           }
         });
 
-        const prev = selectedPathsRef.current;
+        const previousSelection = selectedPathsReference.current;
         if (
-          nextSelection.size !== prev.size ||
-          [...nextSelection].some((p) => !prev.has(p))
+          nextSelection.size !== previousSelection.size ||
+          [...nextSelection].some((path) => !previousSelection.has(path))
         ) {
           updateSelection(nextSelection);
         }
@@ -1405,11 +698,11 @@ export default function FileExplorerApplication({
     };
 
     const handleMouseUp = () => {
-      endSelection();
+      endMarqueeSelection();
     };
 
     const handleBlur = () => {
-      endSelection();
+      endMarqueeSelection();
     };
 
     window.addEventListener("mousemove", handleMouseMove);
@@ -1419,17 +712,19 @@ export default function FileExplorerApplication({
       window.removeEventListener("mousemove", handleMouseMove);
       window.removeEventListener("mouseup", handleMouseUp);
       window.removeEventListener("blur", handleBlur);
-      if (marqueeRafRef.current) {
-        cancelAnimationFrame(marqueeRafRef.current);
-        marqueeRafRef.current = 0;
+      if (marqueeAnimationFrameReference.current) {
+        cancelAnimationFrame(marqueeAnimationFrameReference.current);
+        marqueeAnimationFrameReference.current = 0;
       }
     };
-  }, [contents, endSelection, updateSelection]);
+  }, [directoryContents, endMarqueeSelection, updateSelection]);
+
+  /* ---- File operations ---- */
 
   const handleOpen = useCallback(
     (node: FileSystemNode) => {
       if (node.type === "directory") {
-        navigate(node.path);
+        navigateToDirectory(node.path);
         if (isPickerMode && pickerSelectionMode === "directory") {
           setSelectedPaths(new Set([node.path]));
           setLastSelectedPath(node.path);
@@ -1443,11 +738,11 @@ export default function FileExplorerApplication({
         }
 
         if (isShortcutFile(node) || isExecutableFile(node)) {
-          executeFilePath(node.path, fs);
+          executeFilePath(node.path, fileSystem);
           return;
         }
 
-        const ext = node.name.split(".").pop()?.toLowerCase();
+        const extension = node.name.split(".").pop()?.toLowerCase();
         const imageExtensions = new Set([
           "png",
           "jpg",
@@ -1458,20 +753,20 @@ export default function FileExplorerApplication({
           "ico",
         ]);
 
-        if (imageExtensions.has(ext || "")) {
-          const portal = createPortal(
+        if (imageExtensions.has(extension || "")) {
+          const imageViewerPortal = createPortal(
             <ImageViewerApplicationWindow filePath={node.path} />,
             document.getElementById(
               "operating-system-container",
             ) as HTMLDivElement,
             "image_viewer_" + v4(),
           );
-          setChildWindows((prev) => [...prev, portal]);
+          setChildWindows((previous) => [...previous, imageViewerPortal]);
           return;
         }
 
-        if (ext === "pdf" || ext === "document") {
-          const portal = createPortal(
+        if (extension === "pdf" || extension === "document") {
+          const documentViewerPortal = createPortal(
             <SingleDocumentApplicationWindow
               filePath={node.path}
               title={node.name}
@@ -1481,24 +776,24 @@ export default function FileExplorerApplication({
             ) as HTMLDivElement,
             "document_viewer_" + v4(),
           );
-          setChildWindows((prev) => [...prev, portal]);
+          setChildWindows((previous) => [...previous, documentViewerPortal]);
         } else {
-          const portal = createPortal(
+          const textEditorPortal = createPortal(
             <TextEditorApplicationWindow filePath={node.path} />,
             document.getElementById(
               "operating-system-container",
             ) as HTMLDivElement,
             "text_editor_" + v4(),
           );
-          setChildWindows((prev) => [...prev, portal]);
+          setChildWindows((previous) => [...previous, textEditorPortal]);
         }
       }
     },
     [
-      fs,
+      fileSystem,
       isPickerMode,
       isPickerSelectable,
-      navigate,
+      navigateToDirectory,
       picker,
       pickerSelectionMode,
     ],
@@ -1508,12 +803,12 @@ export default function FileExplorerApplication({
     (node: FileSystemNode) => {
       if (isPickerMode) return;
       if (node.type !== "file") return;
-      const portal = createPortal(
+      const textEditorPortal = createPortal(
         <TextEditorApplicationWindow filePath={node.path} />,
         document.getElementById("operating-system-container") as HTMLDivElement,
         "text_editor_" + v4(),
       );
-      setChildWindows((prev) => [...prev, portal]);
+      setChildWindows((previous) => [...previous, textEditorPortal]);
     },
     [isPickerMode],
   );
@@ -1523,7 +818,7 @@ export default function FileExplorerApplication({
       if (isPickerMode) return;
       setRenameTarget(node);
       setRenameValue(node.name);
-      setRenameError("");
+      setRenameErrorMessage("");
     },
     [isPickerMode],
   );
@@ -1531,12 +826,12 @@ export default function FileExplorerApplication({
   const handleViewProperties = useCallback(
     (node: FileSystemNode) => {
       if (isPickerMode) return;
-      const portal = createPortal(
+      const propertiesPortal = createPortal(
         <FilePropertiesApplicationWindow filePath={node.path} />,
         document.getElementById("operating-system-container") as HTMLDivElement,
         "file_properties_" + v4(),
       );
-      setChildWindows((prev) => [...prev, portal]);
+      setChildWindows((previous) => [...previous, propertiesPortal]);
     },
     [isPickerMode],
   );
@@ -1544,12 +839,10 @@ export default function FileExplorerApplication({
   const handleOpenTerminalHere = useCallback(
     (path: string) => {
       if (isPickerMode) return;
-
-      const targetDirectory = fs.isDirectory(path)
+      const targetDirectory = fileSystem.isDirectory(path)
         ? path
-        : fs.getParentPath(path);
-
-      const portal = createPortal(
+        : fileSystem.getParentPath(path);
+      const terminalPortal = createPortal(
         <TerminalApplicationWindow
           identifier={v4()}
           initialPath={targetDirectory}
@@ -1557,22 +850,22 @@ export default function FileExplorerApplication({
         document.getElementById("operating-system-container") as HTMLDivElement,
         "terminal_" + v4(),
       );
-      setChildWindows((prev) => [...prev, portal]);
+      setChildWindows((previous) => [...previous, terminalPortal]);
     },
-    [fs, isPickerMode],
+    [fileSystem, isPickerMode],
   );
 
   const handleDelete = useCallback(
     (node: FileSystemNode) => {
       if (isPickerMode) return;
-      fs.deleteNode(node.path);
-      setSelectedPaths((prev) => {
-        const newSet = new Set(prev);
-        newSet.delete(node.path);
-        return newSet;
+      fileSystem.deleteNode(node.path);
+      setSelectedPaths((previousSelection) => {
+        const nextSelection = new Set(previousSelection);
+        nextSelection.delete(node.path);
+        return nextSelection;
       });
     },
-    [fs, isPickerMode],
+    [fileSystem, isPickerMode],
   );
 
   const handleCopy = useCallback(
@@ -1606,51 +899,52 @@ export default function FileExplorerApplication({
     if (!clipboard) return;
 
     let movedAny = false;
-
     clipboard.paths.forEach((path) => {
-      const node = fs.getNode(path);
+      const node = fileSystem.getNode(path);
       if (!node || node.readOnly) return;
 
       if (clipboard.mode === "copy") {
-        fs.copy(node.path, currentPath);
+        fileSystem.copy(node.path, currentDirectoryPath);
       } else {
-        movedAny = fs.move(node.path, currentPath) || movedAny;
+        movedAny = fileSystem.move(node.path, currentDirectoryPath) || movedAny;
       }
     });
 
     if (clipboard.mode === "cut" && movedAny) {
       setFileClipboard(null);
     }
-  }, [clipboard, currentPath, fs, isPickerMode]);
+  }, [clipboard, currentDirectoryPath, fileSystem, isPickerMode]);
 
   const movePathsToDirectory = useCallback(
     (paths: string[], destinationDirectoryPath: string) => {
       if (isPickerMode) return;
       const uniquePaths = Array.from(
-        new Set(paths.map((item) => fs.normalizePath(item))),
+        new Set(paths.map((item) => fileSystem.normalizePath(item))),
       );
 
       uniquePaths.forEach((sourcePath) => {
-        const sourceNode = fs.getNode(sourcePath);
+        const sourceNode = fileSystem.getNode(sourcePath);
         if (!sourceNode || sourceNode.readOnly) return;
         if (
-          fs.normalizePath(sourceNode.parentPath) ===
-          fs.normalizePath(destinationDirectoryPath)
+          fileSystem.normalizePath(sourceNode.parentPath) ===
+          fileSystem.normalizePath(destinationDirectoryPath)
         ) {
           return;
         }
-        fs.move(sourcePath, destinationDirectoryPath);
+        fileSystem.move(sourcePath, destinationDirectoryPath);
       });
     },
-    [fs, isPickerMode],
+    [fileSystem, isPickerMode],
   );
+
+  /* ---- Drag and drop ---- */
 
   const handleDragStartItem = useCallback(
     (node: FileSystemNode, event: React.DragEvent<HTMLDivElement>) => {
-      const selection = selectedPathsRef.current;
+      const currentSelection = selectedPathsReference.current;
       const draggedPaths =
-        selection.has(node.path) && selection.size > 0
-          ? Array.from(selection)
+        currentSelection.has(node.path) && currentSelection.size > 0
+          ? Array.from(currentSelection)
           : [node.path];
 
       setInternalFileDragActive(true);
@@ -1680,28 +974,33 @@ export default function FileExplorerApplication({
       }
 
       const now = Date.now();
-      const previous = lastTouchTapRef.current;
-      if (previous && previous.path === node.path && now - previous.at < 500) {
-        lastTouchTapRef.current = null;
-        touchDragRef.current = null;
+      const previousTap = lastTouchTapReference.current;
+      if (
+        previousTap &&
+        previousTap.path === node.path &&
+        now - previousTap.at < 500
+      ) {
+        lastTouchTapReference.current = null;
+        touchDragReference.current = null;
         handleOpen(node);
         return;
       }
 
-      lastTouchTapRef.current = { path: node.path, at: now };
+      lastTouchTapReference.current = { path: node.path, at: now };
 
-      const selection = selectedPathsRef.current;
+      const currentSelection = selectedPathsReference.current;
       const draggedPaths =
-        selection.has(node.path) && selection.size > 0
-          ? Array.from(selection)
+        currentSelection.has(node.path) && currentSelection.size > 0
+          ? Array.from(currentSelection)
           : [node.path];
-      const containerRect = rootRef.current?.getBoundingClientRect();
+      const containerRect =
+        rootContainerReference.current?.getBoundingClientRect();
       if (!containerRect) return;
 
       const sourcePixels = draggedPaths.reduce<
         Record<string, { left: number; top: number }>
       >((accumulator, path) => {
-        const element = itemRefs.current.get(path);
+        const element = itemElementReferences.current.get(path);
         if (!element) return accumulator;
         const elementRect = element.getBoundingClientRect();
         accumulator[path] = {
@@ -1713,7 +1012,7 @@ export default function FileExplorerApplication({
 
       clearTouchDragVisual();
 
-      touchDragRef.current = {
+      touchDragReference.current = {
         pointerId: event.pointerId,
         startX: event.clientX,
         startY: event.clientY,
@@ -1727,24 +1026,24 @@ export default function FileExplorerApplication({
 
   const handleTouchPointerMove = useCallback(
     (event: React.PointerEvent<HTMLDivElement>) => {
-      const drag = touchDragRef.current;
-      if (!drag) return;
-      if (drag.pointerId !== event.pointerId) return;
+      const dragState = touchDragReference.current;
+      if (!dragState) return;
+      if (dragState.pointerId !== event.pointerId) return;
 
       const movedDistance =
-        Math.abs(event.clientX - drag.startX) +
-        Math.abs(event.clientY - drag.startY);
+        Math.abs(event.clientX - dragState.startX) +
+        Math.abs(event.clientY - dragState.startY);
 
-      if (!drag.active && movedDistance >= 10) {
-        drag.active = true;
-        lastTouchTapRef.current = null;
-        startTouchDragVisual(drag.paths, drag.sourcePixels);
+      if (!dragState.active && movedDistance >= 10) {
+        dragState.active = true;
+        lastTouchTapReference.current = null;
+        startTouchDragVisual(dragState.paths, dragState.sourcePixels);
       }
 
-      if (drag.active) {
+      if (dragState.active) {
         updateTouchDragVisualDelta({
-          x: event.clientX - drag.startX,
-          y: event.clientY - drag.startY,
+          x: event.clientX - dragState.startX,
+          y: event.clientY - dragState.startY,
         });
         event.preventDefault();
       }
@@ -1754,11 +1053,11 @@ export default function FileExplorerApplication({
 
   const handleTouchPointerUp = useCallback(
     (event: React.PointerEvent<HTMLDivElement>) => {
-      const drag = touchDragRef.current;
-      if (!drag) return;
-      if (drag.pointerId !== event.pointerId) return;
+      const dragState = touchDragReference.current;
+      if (!dragState) return;
+      if (dragState.pointerId !== event.pointerId) return;
 
-      if (drag.active) {
+      if (dragState.active) {
         const dropTarget = document.elementFromPoint(
           event.clientX,
           event.clientY,
@@ -1769,12 +1068,12 @@ export default function FileExplorerApplication({
         const destinationPath = dropZone?.dataset.fileDropPath;
 
         if (destinationPath) {
-          movePathsToDirectory(drag.paths, destinationPath);
+          movePathsToDirectory(dragState.paths, destinationPath);
         }
       }
 
       clearTouchDragVisual();
-      touchDragRef.current = null;
+      touchDragReference.current = null;
     },
     [clearTouchDragVisual, movePathsToDirectory],
   );
@@ -1793,9 +1092,9 @@ export default function FileExplorerApplication({
     (directoryPath: string, event: React.DragEvent<HTMLDivElement>) => {
       event.preventDefault();
       event.stopPropagation();
-      const paths = readDroppedPathsFromDataTransfer(event.dataTransfer);
-      if (!paths.length) return;
-      movePathsToDirectory(paths, directoryPath);
+      const droppedPaths = readDroppedPathsFromDataTransfer(event.dataTransfer);
+      if (!droppedPaths.length) return;
+      movePathsToDirectory(droppedPaths, directoryPath);
     },
     [movePathsToDirectory],
   );
@@ -1805,37 +1104,39 @@ export default function FileExplorerApplication({
       event.preventDefault();
       event.stopPropagation();
 
-      const paths = readDroppedPathsFromDataTransfer(event.dataTransfer);
-      if (!paths.length) return;
+      const droppedPaths = readDroppedPathsFromDataTransfer(event.dataTransfer);
+      if (!droppedPaths.length) return;
 
       const target = event.target as HTMLElement | null;
       const directoryDropZone = target?.closest(
         "[data-file-drop-zone='true'][data-file-drop-kind='directory']",
       ) as HTMLElement | null;
       const destinationPath =
-        directoryDropZone?.dataset.fileDropPath ?? currentPath;
+        directoryDropZone?.dataset.fileDropPath ?? currentDirectoryPath;
 
-      movePathsToDirectory(paths, destinationPath);
+      movePathsToDirectory(droppedPaths, destinationPath);
     },
-    [currentPath, movePathsToDirectory],
+    [currentDirectoryPath, movePathsToDirectory],
   );
 
+  /* ---- Breadcrumb drag-to-navigate ---- */
+
   const clearBreadcrumbHoverTimer = useCallback(() => {
-    if (breadcrumbHoverTimerRef.current) {
-      clearTimeout(breadcrumbHoverTimerRef.current);
-      breadcrumbHoverTimerRef.current = null;
+    if (breadcrumbHoverTimerReference.current) {
+      clearTimeout(breadcrumbHoverTimerReference.current);
+      breadcrumbHoverTimerReference.current = null;
     }
   }, []);
 
   const scheduleBreadcrumbAutoNavigate = useCallback(
     (path: string) => {
       clearBreadcrumbHoverTimer();
-      breadcrumbHoverTimerRef.current = setTimeout(() => {
-        navigate(path);
-        breadcrumbHoverTimerRef.current = null;
+      breadcrumbHoverTimerReference.current = setTimeout(() => {
+        navigateToDirectory(path);
+        breadcrumbHoverTimerReference.current = null;
       }, 1000);
     },
-    [clearBreadcrumbHoverTimer, navigate],
+    [clearBreadcrumbHoverTimer, navigateToDirectory],
   );
 
   useEffect(() => {
@@ -1844,86 +1145,93 @@ export default function FileExplorerApplication({
     };
   }, [clearBreadcrumbHoverTimer]);
 
+  /* ---- Create / rename handlers ---- */
+
   const handleCreateFolder = useCallback(() => {
     if (isPickerMode) return;
     setCreateMode("folder");
     setCreateValue("New Folder");
-    setCreateError("");
+    setCreateErrorMessage("");
   }, [isPickerMode]);
 
   const handleCreateFile = useCallback(() => {
     if (isPickerMode) return;
     setCreateMode("file");
     setCreateValue("New File.txt");
-    setCreateError("");
+    setCreateErrorMessage("");
   }, [isPickerMode]);
 
   const handleRenameSubmit = useCallback(() => {
     if (isPickerMode) return;
     if (!renameTarget) return;
-    const trimmed = renameValue.trim();
-    if (!trimmed) {
-      setRenameError("Name is required.");
+    const trimmedName = renameValue.trim();
+    if (!trimmedName) {
+      setRenameErrorMessage("Name is required.");
       return;
     }
-    if (trimmed === renameTarget.name) {
+    if (trimmedName === renameTarget.name) {
       setRenameTarget(null);
       return;
     }
-    const targetPath = fs.normalizePath(
-      `${renameTarget.parentPath}/${trimmed}`,
+    const targetPath = fileSystem.normalizePath(
+      `${renameTarget.parentPath}/${trimmedName}`,
     );
-    if (fs.exists(targetPath)) {
-      setRenameError("An item with this name already exists.");
+    if (fileSystem.exists(targetPath)) {
+      setRenameErrorMessage("An item with this name already exists.");
       return;
     }
-    fs.rename(renameTarget.path, trimmed);
+    fileSystem.rename(renameTarget.path, trimmedName);
     setRenameTarget(null);
-  }, [fs, isPickerMode, renameTarget, renameValue]);
+  }, [fileSystem, isPickerMode, renameTarget, renameValue]);
 
   const handleCreateSubmit = useCallback(() => {
     if (isPickerMode) return;
     if (!createMode) return;
-    const trimmed = createValue.trim();
-    if (!trimmed) {
-      setCreateError("Name is required.");
+    const trimmedName = createValue.trim();
+    if (!trimmedName) {
+      setCreateErrorMessage("Name is required.");
       return;
     }
-    const targetPath = fs.normalizePath(`${currentPath}/${trimmed}`);
-    if (fs.exists(targetPath)) {
-      setCreateError("An item with this name already exists.");
+    const targetPath = fileSystem.normalizePath(
+      `${currentDirectoryPath}/${trimmedName}`,
+    );
+    if (fileSystem.exists(targetPath)) {
+      setCreateErrorMessage("An item with this name already exists.");
       return;
     }
     if (createMode === "folder") {
-      fs.createDirectory(currentPath, trimmed);
+      fileSystem.createDirectory(currentDirectoryPath, trimmedName);
     } else {
-      fs.createFile(currentPath, trimmed, "");
+      fileSystem.createFile(currentDirectoryPath, trimmedName, "");
     }
     setCreateMode(null);
-  }, [createMode, createValue, currentPath, fs, isPickerMode]);
+  }, [createMode, createValue, currentDirectoryPath, fileSystem, isPickerMode]);
+
+  /* ---- Keyboard shortcuts ---- */
 
   const handleExplorerKeyDown = useCallback(
-    (e: React.KeyboardEvent<HTMLDivElement>) => {
-      const target = e.target as HTMLElement | null;
+    (event: React.KeyboardEvent<HTMLDivElement>) => {
+      const target = event.target as HTMLElement | null;
       if (target) {
         const tagName = target.tagName;
-        const isEditable =
+        const isEditableElement =
           tagName === "INPUT" ||
           tagName === "TEXTAREA" ||
           target.isContentEditable ||
           Boolean(target.closest(".monaco-editor"));
-        if (isEditable) {
-          return;
-        }
+        if (isEditableElement) return;
       }
 
-      const orderedPaths = contents.map((item) => item.path);
+      const orderedPaths = directoryContents.map((item) => item.path);
       const activePath =
         (lastSelectedPath && selectedPaths.has(lastSelectedPath)
           ? lastSelectedPath
           : Array.from(selectedPaths)[0]) ?? null;
 
-      const moveSelectionByOffset = (offset: number, extendRange: boolean) => {
+      const moveSelectionByOffset = (
+        offset: number,
+        shouldExtendRange: boolean,
+      ) => {
         if (orderedPaths.length === 0) return;
 
         let currentIndex = activePath ? orderedPaths.indexOf(activePath) : -1;
@@ -1938,94 +1246,95 @@ export default function FileExplorerApplication({
         const nextPath = orderedPaths[nextIndex];
         if (!nextPath) return;
 
-        if (extendRange && lastSelectedPath) {
+        if (shouldExtendRange && lastSelectedPath) {
           selectRange(lastSelectedPath, nextPath);
         } else {
           setSelectedPaths(new Set([nextPath]));
         }
         setLastSelectedPath(nextPath);
-        itemRefs.current.get(nextPath)?.scrollIntoView({
+        itemElementReferences.current.get(nextPath)?.scrollIntoView({
           behavior: "smooth",
           block: "nearest",
           inline: "nearest",
         });
       };
 
-      if (e.key === "ArrowLeft" || e.key === "ArrowUp") {
-        e.preventDefault();
-        moveSelectionByOffset(-1, e.shiftKey);
+      if (event.key === "ArrowLeft" || event.key === "ArrowUp") {
+        event.preventDefault();
+        moveSelectionByOffset(-1, event.shiftKey);
         return;
       }
-
-      if (e.key === "ArrowRight" || e.key === "ArrowDown") {
-        e.preventDefault();
-        moveSelectionByOffset(1, e.shiftKey);
+      if (event.key === "ArrowRight" || event.key === "ArrowDown") {
+        event.preventDefault();
+        moveSelectionByOffset(1, event.shiftKey);
         return;
       }
-
-      if (e.key === "Enter") {
-        e.preventDefault();
+      if (event.key === "Enter") {
+        event.preventDefault();
         const pathToOpen = activePath ?? orderedPaths[0];
         if (!pathToOpen) return;
-        const node = fs.getNode(pathToOpen);
-        if (!node) return;
-        handleOpen(node);
+        const fileNode = fileSystem.getNode(pathToOpen);
+        if (!fileNode) return;
+        handleOpen(fileNode);
         return;
       }
-
       if (
-        (e.key === "Delete" || e.key === "Backspace") &&
+        (event.key === "Delete" || event.key === "Backspace") &&
         selectedPaths.size > 0
       ) {
-        e.preventDefault();
+        event.preventDefault();
         selectedPaths.forEach((path) => {
-          fs.deleteNode(path);
+          fileSystem.deleteNode(path);
         });
         setSelectedPaths(new Set());
         return;
       }
-
-      if ((e.ctrlKey || e.metaKey) && e.key === "c" && selectedPaths.size > 0) {
-        e.preventDefault();
-        const nodes = Array.from(selectedPaths)
-          .map((p) => fs.getNode(p))
+      if (
+        (event.ctrlKey || event.metaKey) &&
+        event.key === "c" &&
+        selectedPaths.size > 0
+      ) {
+        event.preventDefault();
+        const selectedNodes = Array.from(selectedPaths)
+          .map((path) => fileSystem.getNode(path))
           .filter(Boolean) as FileSystemNode[];
         setFileClipboard({
           mode: "copy",
-          paths: nodes.map((node) => node.path),
+          paths: selectedNodes.map((node) => node.path),
           updatedAt: Date.now(),
         });
         return;
       }
-
-      if ((e.ctrlKey || e.metaKey) && e.key === "x" && selectedPaths.size > 0) {
-        e.preventDefault();
-        const nodes = Array.from(selectedPaths)
-          .map((p) => fs.getNode(p))
+      if (
+        (event.ctrlKey || event.metaKey) &&
+        event.key === "x" &&
+        selectedPaths.size > 0
+      ) {
+        event.preventDefault();
+        const selectedNodes = Array.from(selectedPaths)
+          .map((path) => fileSystem.getNode(path))
           .filter(Boolean) as FileSystemNode[];
         setFileClipboard({
           mode: "cut",
-          paths: nodes.map((node) => node.path),
+          paths: selectedNodes.map((node) => node.path),
           updatedAt: Date.now(),
         });
         return;
       }
-
-      if ((e.ctrlKey || e.metaKey) && e.key === "v" && clipboard) {
-        e.preventDefault();
+      if ((event.ctrlKey || event.metaKey) && event.key === "v" && clipboard) {
+        event.preventDefault();
         handlePaste();
         return;
       }
-
-      if ((e.ctrlKey || e.metaKey) && e.key === "a") {
-        e.preventDefault();
+      if ((event.ctrlKey || event.metaKey) && event.key === "a") {
+        event.preventDefault();
         setSelectedPaths(new Set(orderedPaths));
       }
     },
     [
       clipboard,
-      contents,
-      fs,
+      directoryContents,
+      fileSystem,
       handleOpen,
       handlePaste,
       lastSelectedPath,
@@ -2034,60 +1343,82 @@ export default function FileExplorerApplication({
     ],
   );
 
+  /* ---- Listen for external storage changes ---- */
+
   useEffect(() => {
-    const handleStorage = () => {
-      refresh();
+    const handleStorageEvent = () => {
+      refreshContents();
     };
-    window.addEventListener("storage", handleStorage);
-    return () => window.removeEventListener("storage", handleStorage);
-  }, [refresh]);
+    window.addEventListener("storage", handleStorageEvent);
+    return () => window.removeEventListener("storage", handleStorageEvent);
+  }, [refreshContents]);
 
-  const pathParts = useMemo(() => {
-    const parts = currentPath.split("/").filter(Boolean);
-    return parts.map((part, index) => ({
+  /* ---- Derived values ---- */
+
+  const breadcrumbSegments: BreadcrumbSegment[] = useMemo(() => {
+    const pathParts = currentDirectoryPath.split("/").filter(Boolean);
+    return pathParts.map((part, index) => ({
       name: part,
-      path: "/" + parts.slice(0, index + 1).join("/"),
+      path: "/" + pathParts.slice(0, index + 1).join("/"),
     }));
-  }, [currentPath]);
+  }, [currentDirectoryPath]);
 
-  const rootDirs = useMemo(() => {
+  const rootDirectories = useMemo(() => {
     void refreshTrigger;
-    const root = isPickerMode ? pickerRootPath : "/";
-    return fs
-      .getChildren(root, showHidden)
-      .filter((n) => n.type === "directory");
-  }, [fs, isPickerMode, pickerRootPath, showHidden, refreshTrigger]);
+    const rootPath = isPickerMode ? pickerRootPath : "/";
+    return fileSystem
+      .getChildren(rootPath, shouldShowHiddenFiles)
+      .filter((node) => node.type === "directory");
+  }, [
+    fileSystem,
+    isPickerMode,
+    pickerRootPath,
+    shouldShowHiddenFiles,
+    refreshTrigger,
+  ]);
 
   const pickerSelectedNode = useMemo(() => {
     if (!isPickerMode) return undefined;
     const selectedPath = Array.from(selectedPaths)[0];
     if (!selectedPath) return undefined;
-    const node = fs.getNode(selectedPath);
+    const node = fileSystem.getNode(selectedPath);
     if (!node) return undefined;
     if (!isPickerSelectable(node)) return undefined;
     return node;
-  }, [fs, isPickerMode, isPickerSelectable, selectedPaths]);
+  }, [fileSystem, isPickerMode, isPickerSelectable, selectedPaths]);
 
-  const stats = useMemo(() => {
-    return {
-      total: contents.length,
-      selected: selectedPaths.size,
-      folders: contents.filter((n) => n.type === "directory").length,
-      files: contents.filter((n) => n.type === "file").length,
-    };
-  }, [contents, selectedPaths]);
+  const fileStatistics = useMemo(
+    () => ({
+      totalItems: directoryContents.length,
+      selectedCount: selectedPaths.size,
+      folderCount: directoryContents.filter((node) => node.type === "directory")
+        .length,
+      fileCount: directoryContents.filter((node) => node.type === "file")
+        .length,
+    }),
+    [directoryContents, selectedPaths],
+  );
+
+  const handleSearchQueryChanged = useCallback((query: string) => {
+    setSearchQuery(query);
+    setIsSearchActive(Boolean(query));
+  }, []);
+
+  /* ------------------------------------------------------------------ */
+  /*  Render                                                            */
+  /* ------------------------------------------------------------------ */
 
   return (
     <TooltipProvider>
       <div
-        ref={rootRef}
+        ref={rootContainerReference}
         tabIndex={0}
         data-file-drop-zone="true"
         data-file-drop-kind="explorer-window"
-        data-file-drop-path={currentPath}
+        data-file-drop-path={currentDirectoryPath}
         className="flex flex-col h-full bg-background text-foreground outline-none"
         onMouseDownCapture={() => {
-          rootRef.current?.focus();
+          rootContainerReference.current?.focus();
         }}
         onPointerMoveCapture={handleTouchPointerMove}
         onPointerUpCapture={handleTouchPointerUp}
@@ -2095,395 +1426,101 @@ export default function FileExplorerApplication({
       >
         {childWindows}
 
-        <Dialog
-          open={Boolean(renameTarget)}
-          onOpenChange={(open) => {
-            if (!open) {
-              setRenameTarget(null);
-              setRenameError("");
-            }
+        {/* Rename dialog */}
+        <RenameDialog
+          isOpen={Boolean(renameTarget)}
+          targetName={renameTarget?.name || ""}
+          renameValue={renameValue}
+          errorMessage={renameErrorMessage}
+          onRenameValueChanged={(value) => {
+            setRenameValue(value);
+            if (renameErrorMessage) setRenameErrorMessage("");
           }}
-        >
-          <DialogContent className="sm:max-w-md">
-            <DialogHeader>
-              <DialogTitle>Rename</DialogTitle>
-              <DialogDescription>
-                Choose a new name for {renameTarget?.name || "this item"}.
-              </DialogDescription>
-            </DialogHeader>
-            <div className="grid gap-2">
-              <Label htmlFor="rename-input">Name</Label>
-              <Input
-                id="rename-input"
-                value={renameValue}
-                onChange={(event) => {
-                  setRenameValue(event.target.value);
-                  if (renameError) setRenameError("");
-                }}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter") {
-                    event.preventDefault();
-                    handleRenameSubmit();
-                  }
-                }}
-                autoFocus
-              />
-              {renameError ? (
-                <div className="text-xs text-destructive">{renameError}</div>
-              ) : null}
-            </div>
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setRenameTarget(null)}>
-                Cancel
-              </Button>
-              <Button onClick={handleRenameSubmit}>Rename</Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
-
-        <Dialog
-          open={Boolean(createMode)}
-          onOpenChange={(open) => {
-            if (!open) {
-              setCreateMode(null);
-              setCreateError("");
-            }
+          onSubmit={handleRenameSubmit}
+          onClose={() => {
+            setRenameTarget(null);
+            setRenameErrorMessage("");
           }}
-        >
-          <DialogContent className="sm:max-w-md">
-            <DialogHeader>
-              <DialogTitle>
-                {createMode === "folder" ? "New Folder" : "New File"}
-              </DialogTitle>
-              <DialogDescription>
-                Create a {createMode === "folder" ? "folder" : "file"} in{" "}
-                {currentPath}.
-              </DialogDescription>
-            </DialogHeader>
-            <div className="grid gap-2">
-              <Label htmlFor="create-input">Name</Label>
-              <Input
-                id="create-input"
-                value={createValue}
-                onChange={(event) => {
-                  setCreateValue(event.target.value);
-                  if (createError) setCreateError("");
-                }}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter") {
-                    event.preventDefault();
-                    handleCreateSubmit();
-                  }
-                }}
-                autoFocus
-              />
-              {createError ? (
-                <div className="text-xs text-destructive">{createError}</div>
-              ) : null}
-            </div>
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setCreateMode(null)}>
-                Cancel
-              </Button>
-              <Button onClick={handleCreateSubmit}>Create</Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
+        />
 
-        <div className="flex items-center gap-1 p-2 border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-          <div className="flex items-center gap-0.5">
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  onClick={goBack}
-                  disabled={historyIndex === 0}
-                >
-                  <ArrowLeft size={16} />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>Back</TooltipContent>
-            </Tooltip>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  onClick={goForward}
-                  disabled={historyIndex === history.length - 1}
-                >
-                  <ArrowRight size={16} />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>Forward</TooltipContent>
-            </Tooltip>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  onClick={goUp}
-                  disabled={currentPath === "/"}
-                >
-                  <ArrowUp size={16} />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>Go up</TooltipContent>
-            </Tooltip>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button variant="ghost" size="icon-sm" onClick={refresh}>
-                  <RefreshCw size={16} />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>Refresh</TooltipContent>
-            </Tooltip>
-          </div>
+        {/* Create file / folder dialog */}
+        <CreateItemDialog
+          createMode={createMode}
+          currentDirectoryPath={currentDirectoryPath}
+          createValue={createValue}
+          errorMessage={createErrorMessage}
+          onCreateValueChanged={(value) => {
+            setCreateValue(value);
+            if (createErrorMessage) setCreateErrorMessage("");
+          }}
+          onSubmit={handleCreateSubmit}
+          onClose={() => {
+            setCreateMode(null);
+            setCreateErrorMessage("");
+          }}
+        />
 
-          <Separator orientation="vertical" className="h-6 mx-1" />
-
-          <div className="flex-1 flex items-center gap-1 bg-muted/50 rounded-md px-2 py-1 min-w-0 overflow-hidden">
-            <button
-              onClick={() => navigate("/")}
-              className="hover:bg-accent rounded p-0.5 shrink-0"
-              data-file-drop-zone="true"
-              data-file-drop-kind="explorer-breadcrumb"
-              data-file-drop-path="/"
-              onDragOver={(event) => {
-                event.preventDefault();
-                event.stopPropagation();
-                event.dataTransfer.dropEffect = "move";
-              }}
-              onDragEnter={(event) => {
-                event.preventDefault();
-                scheduleBreadcrumbAutoNavigate("/");
-              }}
-              onDragLeave={() => {
-                clearBreadcrumbHoverTimer();
-              }}
-              onDrop={(event) => {
-                event.preventDefault();
-                event.stopPropagation();
-                clearBreadcrumbHoverTimer();
-                const paths = readDroppedPathsFromDataTransfer(
-                  event.dataTransfer,
-                );
-                if (!paths.length) return;
-                movePathsToDirectory(paths, "/");
-              }}
-            >
-              <HardDrive size={14} />
-            </button>
-            {pathParts.map((part) => (
-              <div key={part.path} className="flex items-center shrink-0">
-                <ChevronRight
-                  size={12}
-                  className="text-muted-foreground mx-0.5"
-                />
-                <button
-                  onClick={() => navigate(part.path)}
-                  className="hover:bg-accent rounded px-1 py-0.5 text-sm truncate max-w-32"
-                  data-file-drop-zone="true"
-                  data-file-drop-kind="explorer-breadcrumb"
-                  data-file-drop-path={part.path}
-                  onDragOver={(event) => {
-                    event.preventDefault();
-                    event.stopPropagation();
-                    event.dataTransfer.dropEffect = "move";
-                  }}
-                  onDragEnter={(event) => {
-                    event.preventDefault();
-                    scheduleBreadcrumbAutoNavigate(part.path);
-                  }}
-                  onDragLeave={() => {
-                    clearBreadcrumbHoverTimer();
-                  }}
-                  onDrop={(event) => {
-                    event.preventDefault();
-                    event.stopPropagation();
-                    clearBreadcrumbHoverTimer();
-                    const paths = readDroppedPathsFromDataTransfer(
-                      event.dataTransfer,
-                    );
-                    if (!paths.length) return;
-                    movePathsToDirectory(paths, part.path);
-                  }}
-                >
-                  {part.name}
-                </button>
-              </div>
-            ))}
-          </div>
-
-          <Separator orientation="vertical" className="h-6 mx-1" />
-
-          <div className="relative w-48">
-            <Search
-              size={14}
-              className="absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground"
-            />
-            <Input
-              value={searchQuery}
-              onChange={(e) => {
-                setSearchQuery(e.target.value);
-                setIsSearching(!!e.target.value);
-              }}
-              placeholder="Search..."
-              className="h-7 pl-7 text-sm"
-            />
-          </div>
-
-          <Separator orientation="vertical" className="h-6 mx-1" />
-
-          <div className="flex items-center gap-0.5">
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant={viewMode === "grid" ? "secondary" : "ghost"}
-                  size="icon-sm"
-                  onClick={() => setViewMode("grid")}
-                >
-                  <Grid3X3 size={16} />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>Grid view</TooltipContent>
-            </Tooltip>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant={viewMode === "list" ? "secondary" : "ghost"}
-                  size="icon-sm"
-                  onClick={() => setViewMode("list")}
-                >
-                  <LayoutList size={16} />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>List view</TooltipContent>
-            </Tooltip>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant={showHidden ? "secondary" : "ghost"}
-                  size="icon-sm"
-                  onClick={() => setShowHidden(!showHidden)}
-                >
-                  {showHidden ? <Eye size={16} /> : <EyeOff size={16} />}
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>
-                {showHidden ? "Hide hidden files" : "Show hidden files"}
-              </TooltipContent>
-            </Tooltip>
-          </div>
-
-          {!isPickerMode ? (
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="icon-sm">
-                  <MoreVertical size={16} />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem onClick={handleCreateFolder}>
-                  <FolderPlus size={16} className="mr-2" />
-                  New Folder
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={handleCreateFile}>
-                  <FilePlus size={16} className="mr-2" />
-                  New File
-                </DropdownMenuItem>
-                {clipboard ? (
-                  <>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem onClick={handlePaste}>
-                      <ClipboardPaste size={16} className="mr-2" />
-                      Paste
-                    </DropdownMenuItem>
-                  </>
-                ) : null}
-              </DropdownMenuContent>
-            </DropdownMenu>
-          ) : null}
-        </div>
+        {/* Toolbar with navigation, breadcrumbs, search, and view controls */}
+        <FileExplorerToolbar
+          canGoBack={navigationHistoryIndex > 0}
+          canGoForward={navigationHistoryIndex < navigationHistory.length - 1}
+          canGoUp={currentDirectoryPath !== "/"}
+          currentDirectoryPath={currentDirectoryPath}
+          breadcrumbSegments={breadcrumbSegments}
+          searchQuery={searchQuery}
+          viewMode={viewMode}
+          shouldShowHiddenFiles={shouldShowHiddenFiles}
+          isPickerMode={isPickerMode}
+          clipboard={clipboard}
+          onGoBack={navigateBack}
+          onGoForward={navigateForward}
+          onGoUp={navigateUp}
+          onRefresh={refreshContents}
+          onNavigateToDirectory={navigateToDirectory}
+          onSearchQueryChanged={handleSearchQueryChanged}
+          onViewModeChanged={setViewMode}
+          onToggleHiddenFiles={() =>
+            setShouldShowHiddenFiles((previous) => !previous)
+          }
+          onCreateFolder={handleCreateFolder}
+          onCreateFile={handleCreateFile}
+          onPaste={handlePaste}
+          onMovePathsToDirectory={movePathsToDirectory}
+          onScheduleBreadcrumbAutoNavigate={scheduleBreadcrumbAutoNavigate}
+          onClearBreadcrumbHoverTimer={clearBreadcrumbHoverTimer}
+        />
 
         <div className="flex flex-1 min-h-0">
+          {/* Sidebar with bookmarks and directory tree */}
           <div
             className="flex flex-col border-r border-border bg-muted/30 shrink-0"
             style={{ width: sidebarWidth }}
           >
-            <ScrollArea className="flex-1">
-              <div className="p-2">
-                <div className="mb-4">
-                  <div className="text-xs font-semibold text-muted-foreground uppercase px-2 mb-2">
-                    Places
-                  </div>
-                  {bookmarks.map((bookmark) => {
-                    const Icon = bookmark.icon;
-                    return (
-                      <button
-                        key={bookmark.path}
-                        onClick={() => navigate(bookmark.path)}
-                        className={cn(
-                          "flex items-center gap-2 w-full px-2 py-1.5 rounded-md text-sm hover:bg-accent/50 transition-colors",
-                          currentPath === bookmark.path &&
-                            "bg-accent text-accent-foreground",
-                        )}
-                      >
-                        <Icon size={16} className="shrink-0" />
-                        <span className="truncate">{bookmark.name}</span>
-                      </button>
-                    );
-                  })}
-                </div>
-
-                <Separator className="my-2" />
-
-                <div>
-                  <div className="text-xs font-semibold text-muted-foreground uppercase px-2 mb-2">
-                    File System
-                  </div>
-                  <button
-                    onClick={() =>
-                      navigate(isPickerMode ? pickerRootPath : "/")
-                    }
-                    className={cn(
-                      "flex items-center gap-2 w-full px-2 py-1 rounded-md text-sm hover:bg-accent/50",
-                      currentPath === (isPickerMode ? pickerRootPath : "/") &&
-                        "bg-accent text-accent-foreground",
-                    )}
-                  >
-                    <HardDrive size={16} className="text-muted-foreground" />
-                    <span>{isPickerMode ? pickerRootPath : "/"}</span>
-                  </button>
-                  {rootDirs.map((dir) => (
-                    <DirectoryTreeItem
-                      key={dir.path}
-                      node={dir}
-                      level={1}
-                      currentPath={currentPath}
-                      onNavigate={navigate}
-                      onOpenFile={handleOpen}
-                      showHidden={showHidden}
-                      onDropPathsToDirectory={movePathsToDirectory}
-                    />
-                  ))}
-                </div>
-              </div>
-            </ScrollArea>
+            <FileExplorerSidebar
+              bookmarks={sidebarBookmarks}
+              currentDirectoryPath={currentDirectoryPath}
+              rootDirectories={rootDirectories}
+              shouldShowHiddenFiles={shouldShowHiddenFiles}
+              isPickerMode={isPickerMode}
+              pickerRootPath={pickerRootPath}
+              onNavigateToDirectory={navigateToDirectory}
+              onOpenFile={handleOpen}
+              onDropPathsToDirectory={movePathsToDirectory}
+            />
           </div>
 
+          {/* Sidebar resize handle */}
           <div
             className="w-1 cursor-col-resize hover:bg-primary/20 active:bg-primary/40 transition-colors"
-            onMouseDown={(e) => {
+            onMouseDown={(mouseDownEvent) => {
               setIsResizing(true);
-              const startX = e.clientX;
+              const startX = mouseDownEvent.clientX;
               const startWidth = sidebarWidth;
 
-              const handleMouseMove = (e: MouseEvent) => {
-                const diff = e.clientX - startX;
+              const handleMouseMove = (moveEvent: MouseEvent) => {
+                const difference = moveEvent.clientX - startX;
                 setSidebarWidth(
-                  Math.max(150, Math.min(400, startWidth + diff)),
+                  Math.max(150, Math.min(400, startWidth + difference)),
                 );
               };
 
@@ -2498,59 +1535,65 @@ export default function FileExplorerApplication({
             }}
           />
 
+          {/* Main content area */}
           <div className="flex-1 flex flex-col min-w-0">
+            {/* List view column headers */}
             {viewMode === "list" && (
               <div className="flex items-center gap-3 px-3 py-2 border-b border-border bg-muted/30 text-xs font-medium text-muted-foreground">
                 <div className="w-5" />
                 <div
                   className="flex-1 cursor-pointer hover:text-foreground"
                   onClick={() => {
-                    if (sortBy === "name") {
+                    if (sortByField === "name") {
                       setSortOrder(sortOrder === "asc" ? "desc" : "asc");
                     } else {
-                      setSortBy("name");
+                      setSortByField("name");
                       setSortOrder("asc");
                     }
                   }}
                 >
-                  Name {sortBy === "name" && (sortOrder === "asc" ? "↑" : "↓")}
+                  Name{" "}
+                  {sortByField === "name" && (sortOrder === "asc" ? "↑" : "↓")}
                 </div>
                 <div
                   className="w-20 text-right cursor-pointer hover:text-foreground"
                   onClick={() => {
-                    if (sortBy === "size") {
+                    if (sortByField === "size") {
                       setSortOrder(sortOrder === "asc" ? "desc" : "asc");
                     } else {
-                      setSortBy("size");
+                      setSortByField("size");
                       setSortOrder("asc");
                     }
                   }}
                 >
-                  Size {sortBy === "size" && (sortOrder === "asc" ? "↑" : "↓")}
+                  Size{" "}
+                  {sortByField === "size" && (sortOrder === "asc" ? "↑" : "↓")}
                 </div>
                 <div
                   className="w-24 text-right cursor-pointer hover:text-foreground"
                   onClick={() => {
-                    if (sortBy === "modified") {
+                    if (sortByField === "modified") {
                       setSortOrder(sortOrder === "asc" ? "desc" : "asc");
                     } else {
-                      setSortBy("modified");
+                      setSortByField("modified");
                       setSortOrder("asc");
                     }
                   }}
                 >
                   Modified{" "}
-                  {sortBy === "modified" && (sortOrder === "asc" ? "↑" : "↓")}
+                  {sortByField === "modified" &&
+                    (sortOrder === "asc" ? "↑" : "↓")}
                 </div>
                 <div className="w-24">Permissions</div>
               </div>
             )}
 
+            {/* File content area with context menu for background right-click */}
             <ContextMenu>
               <ContextMenuTrigger className="flex-1 min-h-0 overflow-hidden">
                 <ScrollArea
                   className="h-full"
-                  viewportRef={viewportRef}
+                  viewportRef={viewportReference}
                   viewportClassName="relative min-h-full"
                   viewportProps={{
                     onDragOverCapture: (event) => {
@@ -2559,13 +1602,13 @@ export default function FileExplorerApplication({
                     },
                     onDropCapture: handleDropInExplorerArea,
                   }}
-                  onMouseDownCapture={startMarquee}
+                  onMouseDownCapture={startMarqueeSelection}
                 >
                   <div
-                    ref={contentRef}
+                    ref={contentContainerReference}
                     data-file-drop-zone="true"
                     data-file-drop-kind="explorer-root"
-                    data-file-drop-path={currentPath}
+                    data-file-drop-path={currentDirectoryPath}
                     className="relative h-full min-h-full w-full select-none"
                     onDragOver={(event) => {
                       event.preventDefault();
@@ -2581,8 +1624,8 @@ export default function FileExplorerApplication({
                   >
                     {viewMode === "grid" ? (
                       <div className="flex flex-wrap gap-2 p-4 content-start min-h-full w-full">
-                        {contents.length > 0 ? (
-                          contents.map((node) => (
+                        {directoryContents.length > 0 ? (
+                          directoryContents.map((node) => (
                             <FileGridItem
                               key={node.path}
                               node={node}
@@ -2611,14 +1654,16 @@ export default function FileExplorerApplication({
                           ))
                         ) : (
                           <div className="w-full h-32 flex items-center justify-center text-muted-foreground">
-                            {isSearching ? "No results found" : "Empty folder"}
+                            {isSearchActive
+                              ? "No results found"
+                              : "Empty folder"}
                           </div>
                         )}
                       </div>
                     ) : (
                       <div className="min-h-full w-full">
-                        {contents.length > 0 ? (
-                          contents.map((node) => (
+                        {directoryContents.length > 0 ? (
+                          directoryContents.map((node) => (
                             <FileListItem
                               key={node.path}
                               node={node}
@@ -2647,39 +1692,46 @@ export default function FileExplorerApplication({
                           ))
                         ) : (
                           <div className="w-full h-32 flex items-center justify-center text-muted-foreground">
-                            {isSearching ? "No results found" : "Empty folder"}
+                            {isSearchActive
+                              ? "No results found"
+                              : "Empty folder"}
                           </div>
                         )}
                       </div>
                     )}
+
+                    {/* Marquee selection rectangle */}
                     <div
-                      ref={marqueeRef}
+                      ref={marqueeElementReference}
                       className="absolute border border-primary/60 bg-primary/10 pointer-events-none rounded-sm"
                       style={{ display: "none" }}
                     />
 
+                    {/* Touch drag overlay */}
                     {typeof window !== "undefined" &&
                     touchDragVisual.isOverlayVisible &&
-                    rootRef.current
+                    rootContainerReference.current
                       ? createPortal(
                           <div className="pointer-events-none fixed inset-0 z-[8000]">
-                            {touchDragVisual.overlayIds.map((dragPath) => {
+                            {touchDragVisual.overlayIds.map((draggedPath) => {
                               const node =
-                                contents.find(
-                                  (item) => item.path === dragPath,
-                                ) ?? fs.getNode(dragPath);
+                                directoryContents.find(
+                                  (item) => item.path === draggedPath,
+                                ) ?? fileSystem.getNode(draggedPath);
                               if (!node) return null;
 
                               const overlayStyle =
-                                touchDragVisual.getOverlayItemStyle(dragPath);
+                                touchDragVisual.getOverlayItemStyle(
+                                  draggedPath,
+                                );
                               if (!overlayStyle) return null;
 
                               const containerRect =
-                                rootRef.current?.getBoundingClientRect();
+                                rootContainerReference.current?.getBoundingClientRect();
 
                               return (
                                 <div
-                                  key={`explorer-touch-overlay-${dragPath}`}
+                                  key={`explorer-touch-overlay-${draggedPath}`}
                                   className="absolute"
                                   style={{
                                     left:
@@ -2713,6 +1765,8 @@ export default function FileExplorerApplication({
                   </div>
                 </ScrollArea>
               </ContextMenuTrigger>
+
+              {/* Background context menu (right-click on empty space) */}
               <ContextMenuContent className="w-48">
                 {!isPickerMode ? (
                   <ContextMenuItem onClick={handleCreateFolder}>
@@ -2739,21 +1793,27 @@ export default function FileExplorerApplication({
                 {!isPickerMode ? <ContextMenuSeparator /> : null}
                 {!isPickerMode ? (
                   <ContextMenuItem
-                    onClick={() => handleOpenTerminalHere(currentPath)}
+                    onClick={() => handleOpenTerminalHere(currentDirectoryPath)}
                   >
                     <TerminalSquare size={16} className="mr-2" />
                     Open Terminal Here
                   </ContextMenuItem>
                 ) : null}
-                <ContextMenuItem onClick={() => setShowHidden(!showHidden)}>
-                  {showHidden ? (
+                <ContextMenuItem
+                  onClick={() =>
+                    setShouldShowHiddenFiles((previous) => !previous)
+                  }
+                >
+                  {shouldShowHiddenFiles ? (
                     <EyeOff size={16} className="mr-2" />
                   ) : (
                     <Eye size={16} className="mr-2" />
                   )}
-                  {showHidden ? "Hide hidden files" : "Show hidden files"}
+                  {shouldShowHiddenFiles
+                    ? "Hide hidden files"
+                    : "Show hidden files"}
                 </ContextMenuItem>
-                <ContextMenuItem onClick={refresh}>
+                <ContextMenuItem onClick={refreshContents}>
                   <RefreshCw size={16} className="mr-2" />
                   Refresh
                 </ContextMenuItem>
@@ -2762,6 +1822,7 @@ export default function FileExplorerApplication({
           </div>
         </div>
 
+        {/* Status bar / picker action bar */}
         {isPickerMode ? (
           <div className="flex items-center justify-between gap-3 px-3 py-2 border-t border-border bg-muted/30 text-xs text-muted-foreground">
             <div className="truncate">
@@ -2794,12 +1855,15 @@ export default function FileExplorerApplication({
         ) : (
           <div className="flex items-center justify-between px-3 py-1.5 border-t border-border bg-muted/30 text-xs text-muted-foreground">
             <div className="flex items-center gap-4">
-              <span>{stats.total} items</span>
-              {stats.selected > 0 && <span>{stats.selected} selected</span>}
+              <span>{fileStatistics.totalItems} items</span>
+              {fileStatistics.selectedCount > 0 && (
+                <span>{fileStatistics.selectedCount} selected</span>
+              )}
             </div>
             <div className="flex items-center gap-4">
               <span>
-                {stats.folders} folders, {stats.files} files
+                {fileStatistics.folderCount} folders, {fileStatistics.fileCount}{" "}
+                files
               </span>
               {clipboard && (
                 <span className="text-primary">

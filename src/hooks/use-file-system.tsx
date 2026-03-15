@@ -116,7 +116,7 @@ export function useFileSystem() {
     const storageKey = getFileSystemStorageKey(username);
     const stored = window.localStorage.getItem(storageKey);
 
-    // First time for this user — initialize with full default filesystem
+    // First time for this user - initialize with full default filesystem
     if (!stored) {
       const defaults = buildDefaultFileSystem(username);
       window.localStorage.setItem(storageKey, JSON.stringify(defaults));
@@ -591,6 +591,7 @@ export function useFileSystem() {
     getParentPath,
     getNodeName,
     isNodeReadOnly,
+    canWriteToDirectory,
     getHomePath,
   };
 }

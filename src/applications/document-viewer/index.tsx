@@ -9,257 +9,8 @@ import { OS_LAUNCH_APPLICATION_EVENT } from "@/lib/application-launcher";
 import { getHomePath } from "@/lib/system-user";
 import { FileSearch } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-
-const LIGHT_DOCUMENT_THEME = {
-  background: "#ffffff",
-  foreground: "#16171d",
-  mutedForeground: "#747986",
-  border: "#e6e8ee",
-  muted: "#f4f5f8",
-};
-
-function isHtmlLikeDocument(fileName: string, contents: string): boolean {
-  const ext = fileName.split(".").pop()?.toLowerCase() ?? "";
-  if (ext === "html" || ext === "htm") return true;
-  if (ext === "document") {
-    return /<\s*(html|body|main|section|article|div|h1|h2|h3|p|span|ul|ol|li)\b/i.test(
-      contents,
-    );
-  }
-  return false;
-}
-
-function scopeCssToDocumentViewer(css: string): string {
-  return css.replace(/([^{}]+)\{([^{}]*)\}/g, (full, rawSelector, rawBody) => {
-    const selector = String(rawSelector).trim();
-    const body = String(rawBody);
-    if (!selector || selector.startsWith("@")) return full;
-
-    const scopedSelectors = selector
-      .split(",")
-      .map((item) => item.trim())
-      .filter(Boolean)
-      .map((item) => {
-        const normalized = item
-          .replace(/(^|\s)html(\s|$)/g, "$1.document-viewer-rendered$2")
-          .replace(/(^|\s)body(\s|$)/g, "$1.document-viewer-rendered$2")
-          .replace(/^:root$/, ".document-viewer-rendered");
-
-        if (normalized.startsWith(".document-viewer-rendered")) {
-          return normalized;
-        }
-
-        return `.document-viewer-rendered ${normalized}`;
-      })
-      .join(", ");
-
-    return `${scopedSelectors} {${body}}`;
-  });
-}
-
-function extractRenderableHtml(contents: string): string {
-  if (typeof window === "undefined") return contents;
-
-  try {
-    const parser = new DOMParser();
-    const documentNode = parser.parseFromString(contents, "text/html");
-    const hasHtmlElement = /<\s*html[\s>]/i.test(contents);
-
-    if (hasHtmlElement) {
-      const bodyMarkup = documentNode.body?.innerHTML?.trim() || "";
-      const scopedStyleMarkup = Array.from(
-        documentNode.head?.querySelectorAll("style") ?? [],
-      )
-        .map((styleElement) =>
-          scopeCssToDocumentViewer(styleElement.textContent ?? ""),
-        )
-        .filter(Boolean)
-        .map((styleText) => `<style>${styleText}</style>`)
-        .join("\n");
-
-      return `${scopedStyleMarkup}\n${bodyMarkup}`.trim();
-    }
-
-    return contents;
-  } catch {
-    return contents;
-  }
-}
-
-function escapeHtml(value: string): string {
-  return value
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#39;");
-}
-
-function buildPrintableDocumentHtml(
-  fileName: string,
-  contents: string,
-): string {
-  const printBaseStyle = `
-    @page {
-      size: A4;
-      margin: 0;
-    }
-    html, body {
-      margin: 0;
-      padding: 0;
-      background: #ffffff;
-      color: #16171d;
-      -webkit-print-color-adjust: exact;
-      print-color-adjust: exact;
-    }
-    .page-break {
-      display: none !important;
-      break-before: auto !important;
-      page-break-before: auto !important;
-    }
-    .entry-header {
-      display: flex !important;
-      flex-direction: row !important;
-      align-items: flex-start !important;
-      justify-content: space-between !important;
-      gap: 12px !important;
-    }
-    .entry-title {
-      flex: 1 1 auto !important;
-      min-width: 0 !important;
-    }
-    .entry-meta,
-    .entry-links {
-      flex: 0 0 auto !important;
-      justify-content: flex-end !important;
-      text-align: right !important;
-    }
-  `;
-
-  if (isHtmlLikeDocument(fileName, contents)) {
-    const parser = new DOMParser();
-    const documentNode = parser.parseFromString(contents, "text/html");
-    const hasHtmlElement = /<\s*html[\s>]/i.test(contents);
-
-    if (hasHtmlElement) {
-      const head = documentNode.head ?? documentNode.createElement("head");
-      const style = documentNode.createElement("style");
-      style.textContent = printBaseStyle;
-      head.appendChild(style);
-      return `<!doctype html>\n${documentNode.documentElement.outerHTML}`;
-    }
-
-    const safeMarkup = extractRenderableHtml(contents);
-    return `<!doctype html>
-<html>
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <style>${printBaseStyle}</style>
-  </head>
-  <body>
-    ${safeMarkup}
-  </body>
-</html>`;
-  }
-
-  return `<!doctype html>
-<html>
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <style>
-      ${printBaseStyle}
-      pre {
-        margin: 0;
-        padding: 20px;
-        font-size: 14px;
-        line-height: 1.6;
-        font-family: Inter, ui-sans-serif, system-ui, sans-serif;
-        white-space: pre-wrap;
-        word-break: break-word;
-      }
-    </style>
-  </head>
-  <body>
-    <pre>${escapeHtml(contents)}</pre>
-  </body>
-</html>`;
-}
-
-function DocumentCanvas({
-  fileName,
-  contents,
-}: {
-  fileName: string;
-  contents: string;
-}) {
-  const htmlMarkup = useMemo(() => extractRenderableHtml(contents), [contents]);
-
-  if (!contents.trim()) {
-    return <div className="text-muted-foreground">(empty document)</div>;
-  }
-
-  if (isHtmlLikeDocument(fileName, contents)) {
-    return (
-      <div className="w-full py-2">
-        <div
-          className="mx-auto w-full max-w-[794px] rounded-md shadow-xl overflow-hidden"
-          style={{
-            width: "100%",
-            maxWidth: "794px",
-            backgroundColor: LIGHT_DOCUMENT_THEME.background,
-            color: LIGHT_DOCUMENT_THEME.foreground,
-            border: `1px solid ${LIGHT_DOCUMENT_THEME.border}`,
-          }}
-        >
-          <div
-            className="document-viewer-rendered min-h-[320px] w-full"
-            style={{
-              colorScheme: "light",
-              backgroundColor: LIGHT_DOCUMENT_THEME.background,
-              color: LIGHT_DOCUMENT_THEME.foreground,
-              userSelect: "text",
-              ["--background" as string]: LIGHT_DOCUMENT_THEME.background,
-              ["--foreground" as string]: LIGHT_DOCUMENT_THEME.foreground,
-              ["--muted-foreground" as string]:
-                LIGHT_DOCUMENT_THEME.mutedForeground,
-              ["--border" as string]: LIGHT_DOCUMENT_THEME.border,
-              ["--fg" as string]: LIGHT_DOCUMENT_THEME.foreground,
-              ["--muted" as string]: LIGHT_DOCUMENT_THEME.mutedForeground,
-              ["--line" as string]: LIGHT_DOCUMENT_THEME.border,
-              ["--chip" as string]: LIGHT_DOCUMENT_THEME.muted,
-            }}
-            onClickCapture={(event) => {
-              const target = event.target as HTMLElement | null;
-              if (!target) return;
-              const anchor = target.closest(
-                "a[href]",
-              ) as HTMLAnchorElement | null;
-              if (!anchor) return;
-
-              const rawHref = anchor.getAttribute("href") ?? "";
-              if (!rawHref || rawHref.startsWith("#")) return;
-
-              event.preventDefault();
-              event.stopPropagation();
-
-              const href = anchor.href || rawHref;
-              window.open(href, "_blank", "noopener,noreferrer");
-            }}
-            dangerouslySetInnerHTML={{ __html: htmlMarkup }}
-          />
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <pre className="whitespace-pre-wrap break-words text-sm leading-relaxed font-sans">
-      {contents}
-    </pre>
-  );
-}
+import DocumentCanvas from "./components/document-canvas";
+import { buildPrintableDocumentHtml } from "./lib/document-viewer-utils";
 
 export default function DocumentViewerApplication({
   filePath,
@@ -268,11 +19,11 @@ export default function DocumentViewerApplication({
   filePath?: string;
   mode?: "full" | "single";
 }) {
-  const fs = useFileSystem();
+  const fileSystem = useFileSystem();
   const documentsRootPath = `${getHomePath()}/Documents`;
-  const containerRef = useRef<HTMLDivElement | null>(null);
-  const singleScrollRef = useRef<HTMLDivElement | null>(null);
-  const fullScrollRef = useRef<HTMLDivElement | null>(null);
+  const containerReference = useRef<HTMLDivElement | null>(null);
+  const singleScrollReference = useRef<HTMLDivElement | null>(null);
+  const fullScrollReference = useRef<HTMLDivElement | null>(null);
   const [selectedPath, setSelectedPath] = useState<string | undefined>(
     filePath,
   );
@@ -280,16 +31,18 @@ export default function DocumentViewerApplication({
   const [isPickerOpen, setIsPickerOpen] = useState(false);
 
   const documentFiles = useMemo(() => {
-    return fs.getChildren(documentsRootPath, true).filter((node) => {
+    return fileSystem.getChildren(documentsRootPath, true).filter((node) => {
       if (node.type !== "file") return false;
-      const ext = node.name.split(".").pop()?.toLowerCase() ?? "";
-      return ["document", "txt", "md", "pdf", "html", "htm"].includes(ext);
+      const extension = node.name.split(".").pop()?.toLowerCase() ?? "";
+      return ["document", "txt", "md", "pdf", "html", "htm"].includes(
+        extension,
+      );
     });
-  }, [documentsRootPath, fs]);
+  }, [documentsRootPath, fileSystem]);
 
   useEffect(() => {
     if (filePath) {
-      setSelectedPath(fs.normalizePath(filePath));
+      setSelectedPath(fileSystem.normalizePath(filePath));
       return;
     }
     setSelectedPath(undefined);
@@ -298,27 +51,27 @@ export default function DocumentViewerApplication({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filePath]);
 
-  const selected = useMemo<FileSystemNode | undefined>(() => {
+  const selectedDocument = useMemo<FileSystemNode | undefined>(() => {
     if (selectedPath) {
-      const node = fs.getNode(selectedPath);
+      const node = fileSystem.getNode(selectedPath);
       if (node?.type === "file") return node;
     }
     return undefined;
-  }, [fs, selectedPath]);
+  }, [fileSystem, selectedPath]);
 
   const selectedContents = useMemo(() => {
-    if (!selected) return "";
-    return fs.getFileContents(selected.path) ?? "";
-  }, [fs, selected]);
+    if (!selectedDocument) return "";
+    return fileSystem.getFileContents(selectedDocument.path) ?? "";
+  }, [fileSystem, selectedDocument]);
 
   const downloadSelectedDocument = async () => {
-    if (!selected || isGeneratingPdf) return;
+    if (!selectedDocument || isGeneratingPdf) return;
 
     setIsGeneratingPdf(true);
 
     try {
       const printableHtml = buildPrintableDocumentHtml(
-        selected.name,
+        selectedDocument.name,
         selectedContents,
       );
 
@@ -367,7 +120,7 @@ export default function DocumentViewerApplication({
   };
 
   const getWindowElement = () =>
-    containerRef.current?.closest(
+    containerReference.current?.closest(
       ".applicationWindow",
     ) as HTMLDivElement | null;
 
@@ -386,13 +139,13 @@ export default function DocumentViewerApplication({
   };
 
   const openInTextEditor = () => {
-    if (!selected?.path) return;
+    if (!selectedDocument?.path) return;
 
     window.dispatchEvent(
       new CustomEvent(OS_LAUNCH_APPLICATION_EVENT, {
         detail: {
           appId: "text-editor",
-          args: [selected.path],
+          args: [selectedDocument.path],
         },
       }),
     );
@@ -437,42 +190,45 @@ export default function DocumentViewerApplication({
   );
 
   if (mode === "single") {
-    if (!selected) {
+    if (!selectedDocument) {
       return emptyStateView;
     }
 
     return (
       <div
-        ref={containerRef}
+        ref={containerReference}
         className="relative flex h-full w-full flex-col bg-background text-foreground"
       >
-        <div ref={singleScrollRef} className="relative flex-1 overflow-y-auto">
+        <div
+          ref={singleScrollReference}
+          className="relative flex-1 overflow-y-auto"
+        >
           <div className="px-5 py-4">
             <DocumentCanvas
-              fileName={selected.name}
+              fileName={selectedDocument.name}
               contents={selectedContents}
             />
           </div>
         </div>
-        <ScrollMoreButton scrollElementRef={singleScrollRef} />
+        <ScrollMoreButton scrollElementRef={singleScrollReference} />
       </div>
     );
   }
 
   return (
     <div
-      ref={containerRef}
+      ref={containerReference}
       className="w-full h-full bg-background text-foreground flex flex-col"
     >
-      {!selected ? (
+      {!selectedDocument ? (
         emptyStateView
       ) : (
         <div className="relative flex-1 bg-muted/30">
-          <div ref={fullScrollRef} className="h-full overflow-y-auto">
+          <div ref={fullScrollReference} className="h-full overflow-y-auto">
             <div className="px-5 py-4 min-h-full">
-              {selected ? (
+              {selectedDocument ? (
                 <DocumentCanvas
-                  fileName={selected.name}
+                  fileName={selectedDocument.name}
                   contents={selectedContents}
                 />
               ) : (
@@ -482,7 +238,7 @@ export default function DocumentViewerApplication({
               )}
             </div>
           </div>
-          <ScrollMoreButton scrollElementRef={fullScrollRef} />
+          <ScrollMoreButton scrollElementRef={fullScrollReference} />
         </div>
       )}
     </div>
