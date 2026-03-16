@@ -202,7 +202,7 @@ export default function AtlasDocument() {
       </p>
 
       <p>
-        While I can't discuss specific product details due to an NDA, the architecture was something I'm proud of. The codebase grew to around <strong>160k lines of code</strong>, and we adopted a strict <strong>Repository-Service-Router</strong> pattern that kept it all navigable. Every feature followed the same convention: repositories touched the database, services handled logic, routers validated input and delegated. No exceptions.
+        While I can't discuss specific product details due to an NDA, the architecture was something I'm proud of. The codebase grew to around <strong>90k lines of code</strong>, and we adopted a strict <strong>Repository-Service-Router</strong> pattern that kept it all navigable. Every feature followed the same convention: repositories touched the database, services handled logic, routers validated input and delegated. No exceptions.
       </p>
 
       <div class="section-label">Moving on</div>
