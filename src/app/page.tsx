@@ -36,6 +36,10 @@ import {
   signUpWithCredentials,
   useSession,
 } from "@/auth/client";
+import { CookieConsent } from "@/components/blocks/cookie-consent";
+import CookiePolicy from "@/components/legal/cookie-policy";
+import PrivacyPolicy from "@/components/legal/privacy-policy";
+import Terms from "@/components/legal/terms-of-service";
 import ScrollMoreButton from "@/components/system/scroll-more-button";
 import { Calendar } from "@/components/ui/calendar";
 import {
@@ -147,6 +151,18 @@ export default function OperatingSystemPage() {
   const [authError, setAuthError] = useState<string>("");
   const [isAuthPending, setIsAuthPending] = useState(false);
   const [authView, setAuthView] = useState<"sign-in" | "register">("sign-in");
+  const [legalView, setLegalView] = useState<
+    "terms" | "privacy" | "cookies" | null
+  >(null);
+  const [legalClosing, setLegalClosing] = useState(false);
+  const closeLegalView = useCallback(() => {
+    setLegalClosing(true);
+    setTimeout(() => {
+      setLegalView(null);
+      setLegalClosing(false);
+    }, 280);
+  }, []);
+  const [cookiesDeclined, setCookiesDeclined] = useState(false);
   const [isSystemUserReady, setIsSystemUserReady] = useState(false);
   const [isFileTransferDragActive, setIsFileTransferDragActive] =
     useState(false);
@@ -199,8 +215,7 @@ export default function OperatingSystemPage() {
         );
         if (!parsed) return null;
         const label =
-          parsed.meta.display_name ??
-          node.name.replace(/\.shortcut$/i, "");
+          parsed.meta.display_name ?? node.name.replace(/\.shortcut$/i, "");
 
         return {
           path: node.path,
@@ -285,13 +300,16 @@ export default function OperatingSystemPage() {
     setOperatingSystemVisible(false);
   }, [shouldShowOperatingSystem]);
 
-  const sessionUser = session.data?.user as {
-    username?: string;
-    name?: string;
-    id?: string;
-  } | undefined;
+  const sessionUser = session.data?.user as
+    | {
+        username?: string;
+        name?: string;
+        id?: string;
+      }
+    | undefined;
   const sessionStatus = session.status;
-  const sessionUsername = sessionUser?.username ?? sessionUser?.name ?? sessionUser?.id;
+  const sessionUsername =
+    sessionUser?.username ?? sessionUser?.name ?? sessionUser?.id;
 
   useEffect(() => {
     if (sessionStatus === "authenticated" && sessionUsername) {
@@ -712,7 +730,7 @@ export default function OperatingSystemPage() {
 
         {showLoginScreen && (
           <div className="absolute inset-0 z-[10000] bg-black/55 backdrop-blur-sm flex items-center justify-center p-4">
-            <div className="w-full max-w-md rounded-2xl border border-white/15 bg-background/85 p-5 shadow-2xl backdrop-blur-xl">
+            <div className="relative w-full max-w-md rounded-2xl border border-white/15 bg-background/60 p-5 shadow-2xl backdrop-blur-xl">
               <div className="space-y-1 text-center text-white">
                 <h1 className="text-2xl font-semibold tracking-wide">
                   hazhir.dev
@@ -720,12 +738,19 @@ export default function OperatingSystemPage() {
                 <p className="text-sm text-white/70">Welcome to your desktop</p>
               </div>
 
+              {cookiesDeclined && (
+                <p className="mt-4 text-sm text-amber-300 text-center">
+                  Cookies are required for authentication. Please accept cookies
+                  to sign in or register.
+                </p>
+              )}
+
               <div className="mt-4 grid grid-cols-2 gap-2 rounded-xl border border-white/10 bg-black/20 p-1">
                 <Button
                   type="button"
                   variant={authView === "sign-in" ? "secondary" : "ghost"}
                   className="h-8"
-                  disabled={isAuthPending}
+                  disabled={isAuthPending || cookiesDeclined}
                   onClick={() => {
                     setAuthError("");
                     setAuthView("sign-in");
@@ -737,7 +762,7 @@ export default function OperatingSystemPage() {
                   type="button"
                   variant={authView === "register" ? "secondary" : "ghost"}
                   className="h-8"
-                  disabled={isAuthPending}
+                  disabled={isAuthPending || cookiesDeclined}
                   onClick={() => {
                     setAuthError("");
                     setAuthView("register");
@@ -751,7 +776,7 @@ export default function OperatingSystemPage() {
                 <div className="mt-4 space-y-3">
                   <Button
                     className="w-full"
-                    disabled={isAuthPending}
+                    disabled={isAuthPending || cookiesDeclined}
                     onClick={async () => {
                       setAuthError("");
                       setIsAuthPending(true);
@@ -783,19 +808,21 @@ export default function OperatingSystemPage() {
                       placeholder="Email"
                       value={email}
                       onChange={(event) => setEmail(event.target.value)}
-                      disabled={isAuthPending}
+                      disabled={isAuthPending || cookiesDeclined}
                     />
                     <Input
                       type="password"
                       placeholder="Password"
                       value={password}
                       onChange={(event) => setPassword(event.target.value)}
-                      disabled={isAuthPending}
+                      disabled={isAuthPending || cookiesDeclined}
                     />
                     <Button
                       variant="secondary"
                       className="w-full"
-                      disabled={isAuthPending || !email || !password}
+                      disabled={
+                        isAuthPending || cookiesDeclined || !email || !password
+                      }
                       onClick={async () => {
                         setAuthError("");
                         setIsAuthPending(true);
@@ -829,7 +856,7 @@ export default function OperatingSystemPage() {
                   <Button
                     variant="ghost"
                     className="w-full text-white/80 hover:text-white"
-                    disabled={isAuthPending}
+                    disabled={isAuthPending || cookiesDeclined}
                     onClick={() => {
                       setAuthError("");
                       signInAsGuest();
@@ -846,14 +873,14 @@ export default function OperatingSystemPage() {
                     placeholder="Name"
                     value={registerName}
                     onChange={(event) => setRegisterName(event.target.value)}
-                    disabled={isAuthPending}
+                    disabled={isAuthPending || cookiesDeclined}
                   />
                   <Input
                     type="email"
                     placeholder="Email"
                     value={registerEmail}
                     onChange={(event) => setRegisterEmail(event.target.value)}
-                    disabled={isAuthPending}
+                    disabled={isAuthPending || cookiesDeclined}
                   />
                   <Input
                     type="password"
@@ -862,7 +889,7 @@ export default function OperatingSystemPage() {
                     onChange={(event) =>
                       setRegisterPassword(event.target.value)
                     }
-                    disabled={isAuthPending}
+                    disabled={isAuthPending || cookiesDeclined}
                   />
                   <Input
                     type="password"
@@ -871,13 +898,14 @@ export default function OperatingSystemPage() {
                     onChange={(event) =>
                       setRegisterPasswordConfirm(event.target.value)
                     }
-                    disabled={isAuthPending}
+                    disabled={isAuthPending || cookiesDeclined}
                   />
 
                   <Button
                     className="w-full"
                     disabled={
                       isAuthPending ||
+                      cookiesDeclined ||
                       !registerName ||
                       !registerEmail ||
                       !registerPassword ||
@@ -924,7 +952,69 @@ export default function OperatingSystemPage() {
                   {authError}
                 </p>
               )}
+
+              <p className="mt-4 text-center text-[11px] text-white/40 leading-relaxed">
+                By signing in you agree to the{" "}
+                <button
+                  type="button"
+                  className="underline hover:text-white/70 transition-colors"
+                  onClick={() => setLegalView("terms")}
+                >
+                  Terms of Service
+                </button>
+                ,{" "}
+                <button
+                  type="button"
+                  className="underline hover:text-white/70 transition-colors"
+                  onClick={() => setLegalView("privacy")}
+                >
+                  Privacy Policy
+                </button>
+                {" & "}
+                <button
+                  type="button"
+                  className="underline hover:text-white/70 transition-colors"
+                  onClick={() => setLegalView("cookies")}
+                >
+                  Cookie Policy
+                </button>
+                .
+              </p>
             </div>
+
+            {legalView && (
+              <div
+                key={legalView}
+                className={`absolute inset-3 z-10 flex flex-col rounded-xl border border-white/15 bg-background/95 shadow-2xl backdrop-blur-xl overflow-hidden ${
+                  legalClosing
+                    ? "animate-out fade-out slide-out-to-bottom-4 duration-300"
+                    : "animate-in fade-in slide-in-from-bottom-4 duration-300"
+                }`}
+              >
+                <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
+                  <h2 className="text-sm font-medium text-white">
+                    {legalView === "terms"
+                      ? "Terms of Service"
+                      : legalView === "privacy"
+                        ? "Privacy Policy"
+                        : "Cookie Policy"}
+                  </h2>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 px-2 text-white/70 hover:text-white"
+                    onClick={closeLegalView}
+                  >
+                    Back
+                  </Button>
+                </div>
+                <div className="flex-1 overflow-y-auto px-4 py-3 text-sm [&_h1]:text-lg [&_h1]:mb-3 [&_h2]:text-base [&_h2]:mt-5 [&_h2]:mb-1.5 [&_p]:text-white/80 [&_p]:text-xs [&_p]:leading-relaxed [&_ul]:text-white/80 [&_ul]:text-xs [&_li]:leading-relaxed [&_a]:text-blue-400">
+                  {legalView === "terms" && <Terms />}
+                  {legalView === "privacy" && <PrivacyPolicy />}
+                  {legalView === "cookies" && <CookiePolicy />}
+                </div>
+              </div>
+            )}
           </div>
         )}
       </main>
@@ -952,7 +1042,14 @@ export default function OperatingSystemPage() {
           Open new voxel game instance
         </ContextMenuItem>
       </ContextMenuContent>
-    </ContextMenu> */}
+    </ContextMenu> 
+    </>*/}
+      <CookieConsent
+        variant="small"
+        description="This site uses essential cookies for authentication. No tracking or advertising cookies are used."
+        onAcceptCallback={() => setCookiesDeclined(false)}
+        onDeclineCallback={() => setCookiesDeclined(true)}
+      />
     </>
   );
 }
