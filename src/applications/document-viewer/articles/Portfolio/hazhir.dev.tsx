@@ -194,8 +194,6 @@ export default function HazhirDevDocument() {
 
       <div class="divider"></div>
 
-      <div class="divider"></div>
-
       <p style="font-size: 12px; color: #94a3b8; margin-bottom: 0;">
         <a href="https://hazhir.dev">hazhir.dev</a> ·
         <a href="https://github.com/zin-yes/hazhir.dev">GitHub</a>
