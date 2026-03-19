@@ -3,7 +3,7 @@
 import FileExplorerApplication from "@/applications/file-explorer";
 import ApplicationEmptyState from "@/components/system/application-empty-state";
 import ScrollMoreButton from "@/components/system/scroll-more-button";
-import { Dialog, DialogContent } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { useFileSystem, type FileSystemNode } from "@/hooks/use-file-system";
 import { OS_LAUNCH_APPLICATION_EVENT } from "@/lib/application-launcher";
 import { getHomePath } from "@/lib/system-user";
@@ -162,6 +162,7 @@ export default function DocumentViewerApplication({
       />
       <Dialog open={isPickerOpen} onOpenChange={setIsPickerOpen}>
         <DialogContent className="w-[min(99vw,1720px)] max-w-[min(99vw,1720px)] sm:max-w-[min(99vw,1720px)] h-[min(90vh,860px)] p-0 overflow-hidden">
+          <DialogTitle className="sr-only">Open Document</DialogTitle>
           <FileExplorerApplication
             initialPath={`${getHomePath()}/Documents`}
             picker={{

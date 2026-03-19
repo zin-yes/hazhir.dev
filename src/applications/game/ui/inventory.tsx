@@ -5,9 +5,10 @@ import { BLOCK_ITEM_TEXTURES, BlockType } from "../blocks";
 interface InventoryProps {
   isOpen: boolean;
   onSelectBlock: (block: BlockType) => void;
+  onClose?: () => void;
 }
 
-export function Inventory({ isOpen, onSelectBlock }: InventoryProps) {
+export function Inventory({ isOpen, onSelectBlock, onClose }: InventoryProps) {
   if (!isOpen) return null;
 
   const blocks = Object.values(BlockType).filter(
@@ -16,9 +17,16 @@ export function Inventory({ isOpen, onSelectBlock }: InventoryProps) {
 
   return (
     <div className="absolute inset-0 flex items-center justify-center bg-black/60 z-50">
-      <Card className="w-[600px] h-[500px] bg-zinc-900/90 border-zinc-700 text-zinc-100">
-        <CardHeader>
+      <Card className="w-[calc(100vw-2rem)] max-w-[600px] h-[500px] max-h-[calc(100vh-4rem)] bg-zinc-900/90 border-zinc-700 text-zinc-100">
+        <CardHeader className="flex flex-row items-center justify-between">
           <CardTitle className="text-xl font-bold">Inventory</CardTitle>
+          <button
+            onClick={onClose}
+            className="text-zinc-400 hover:text-white text-2xl leading-none px-2"
+            data-mobile-ui
+          >
+            ✕
+          </button>
         </CardHeader>
         <CardContent>
           <ScrollArea className="h-[400px] pr-4">

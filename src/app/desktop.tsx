@@ -65,6 +65,7 @@ import {
   isExecutableFile,
   isShortcutFile,
 } from "@/lib/file-execution";
+import { requestLaunchApplication } from "@/lib/application-launcher";
 import {
   FILE_PATH_DROP_EVENT,
   readFileDragPayload,
@@ -86,6 +87,7 @@ import { getCurrentSystemUsername, getHomePath } from "@/lib/system-user";
 import { cn } from "@/lib/utils";
 import { WALLPAPERS } from "@/lib/wallpapers";
 
+import type { DeviceMode } from "@/hooks/use-device-mode";
 import Image from "next/image";
 import {
   ReactNode,
@@ -129,9 +131,12 @@ const DESKTOP_ICON_HEIGHT = 96;
 
 export default function Desktop({
   addWindow,
+  deviceMode = "desktop",
 }: {
   addWindow: (node: ReactNode) => void;
+  deviceMode?: DeviceMode;
 }) {
+  const isMobileOrTablet = deviceMode === "mobile" || deviceMode === "tablet";
   const fs = useFileSystem();
   const fsRef = useRef(fs);
   const desktopRootPath = `${getHomePath()}/Desktop`;
@@ -439,8 +444,9 @@ export default function Desktop({
         "ico",
       ]);
       if (imageExtensions.has(ext || "")) {
-        return () =>
-          addWindow(<ImageViewerApplicationWindow filePath={node.path} />);
+        return isMobileOrTablet
+          ? () => requestLaunchApplication("image-viewer", [node.path])
+          : () => addWindow(<ImageViewerApplicationWindow filePath={node.path} />);
       }
       const textExtensions = new Set([
         "txt",
@@ -459,21 +465,24 @@ export default function Desktop({
         "shortcut",
       ]);
       if (textExtensions.has(ext || "")) {
-        return () =>
-          addWindow(<TextEditorApplicationWindow filePath={node.path} />);
+        return isMobileOrTablet
+          ? () => requestLaunchApplication("text-editor", [node.path])
+          : () => addWindow(<TextEditorApplicationWindow filePath={node.path} />);
       }
       if (ext === "pdf" || ext === "document") {
-        return () =>
-          addWindow(
-            <SingleDocumentApplicationWindow
-              filePath={node.path}
-              title={node.name}
-            />,
-          );
+        return isMobileOrTablet
+          ? () => requestLaunchApplication("document-viewer", [node.path])
+          : () =>
+              addWindow(
+                <SingleDocumentApplicationWindow
+                  filePath={node.path}
+                  title={node.name}
+                />,
+              );
       }
       return null;
     },
-    [addWindow, fs],
+    [addWindow, fs, isMobileOrTablet],
   );
 
   const desktopItems = useMemo<DesktopItem[]>(() => {
@@ -484,13 +493,15 @@ export default function Desktop({
           : null;
       const openAction =
         node.type === "directory"
-          ? () =>
-              addWindow(
-                <FileExplorerApplicationWindow
-                  addWindow={addWindow}
-                  initialPath={node.path}
-                />,
-              )
+          ? isMobileOrTablet
+            ? () => requestLaunchApplication("file-explorer", [node.path])
+            : () =>
+                addWindow(
+                  <FileExplorerApplicationWindow
+                    addWindow={addWindow}
+                    initialPath={node.path}
+                  />,
+                )
           : getFileOpenAction(node);
 
       return {
@@ -505,7 +516,7 @@ export default function Desktop({
     });
 
     return nodes;
-  }, [addWindow, desktopNodes, getFileIcon, getFileOpenAction]);
+  }, [addWindow, desktopNodes, getFileIcon, getFileOpenAction, isMobileOrTablet]);
 
   const getDesktopItemSize = useCallback((item: DesktopItem) => {
     if (item.fileNode?.type === "file") {
@@ -949,6 +960,8 @@ export default function Desktop({
 
   const startMarquee = useCallback(
     (event: React.PointerEvent<HTMLDivElement>) => {
+      // Disable selection box on mobile/tablet
+      if (isMobileOrTablet) return;
       if (event.pointerType === "mouse" && event.button !== 0) return;
       const target = event.target as HTMLElement;
       if (target.closest("[data-desktop-icon='true']")) return;
@@ -970,7 +983,7 @@ export default function Desktop({
         updateSelection(new Set());
       }
     },
-    [selectedSet, updateSelection],
+    [isMobileOrTablet, selectedSet, updateSelection],
   );
 
   const handleIconPointerUp = useCallback(
@@ -988,6 +1001,13 @@ export default function Desktop({
         if (movedX + movedY > 8) return;
       }
 
+      // On mobile/tablet, single tap opens immediately
+      if (isMobileOrTablet) {
+        item.onOpen?.();
+        lastTapRef.current = null;
+        return;
+      }
+
       const now = Date.now();
       const previous = lastTapRef.current;
       if (previous && previous.id === item.id && now - previous.at < 320) {
@@ -998,7 +1018,7 @@ export default function Desktop({
 
       lastTapRef.current = { id: item.id, at: now };
     },
-    [],
+    [isMobileOrTablet],
   );
 
   const endSelection = useCallback(() => {
@@ -1912,7 +1932,7 @@ export default function Desktop({
           tabIndex={0}
           data-file-drop-zone="true"
           data-file-drop-kind="desktop-root"
-          className="w-screen h-screen absolute top-0 bottom-0 left-0 right-0 overflow-hidden z-0 select-none touch-none outline-none focus:outline-none"
+          className="w-screen h-dvh absolute top-0 bottom-0 left-0 right-0 overflow-hidden z-0 select-none touch-none outline-none focus:outline-none"
           onDragOver={(event) => {
             event.preventDefault();
           }}
@@ -1922,7 +1942,7 @@ export default function Desktop({
           }}
           onPointerDown={startMarquee}
           onKeyDown={handleDesktopKeyDown}
-          onContextMenu={handleDesktopContextMenu}
+          onContextMenu={isMobileOrTablet ? (e) => e.preventDefault() : handleDesktopContextMenu}
         >
           <Dialog
             open={Boolean(renameTargetId)}
@@ -2035,7 +2055,7 @@ export default function Desktop({
             </DialogContent>
           </Dialog>
 
-          <div className="h-[calc(100vh-52px)] w-full bottom-0 left-0 right-0 absolute p-4">
+          <div className={isMobileOrTablet ? "h-[calc(100dvh-80px)] w-full bottom-[52px] left-0 right-0 absolute p-4 pt-8" : "h-[calc(100dvh-52px)] w-full bottom-0 left-0 right-0 absolute p-4"}>
             <div ref={gridLayerRef} className="relative w-full h-full">
               {desktopItems.map((item) => (
                 <div
@@ -2067,7 +2087,8 @@ export default function Desktop({
                   }
                   onPointerUp={(event) => handleIconPointerUp(event, item)}
                   onDoubleClick={() => item.onOpen?.()}
-                  onContextMenu={(event) =>
+                  onClick={isMobileOrTablet ? () => item.onOpen?.() : undefined}
+                  onContextMenu={isMobileOrTablet ? (e) => e.preventDefault() : (event) =>
                     handleIconContextMenu(event, item.id)
                   }
                   onDragOver={(event) => {
@@ -2162,7 +2183,7 @@ export default function Desktop({
           ) : null}
         </div>
       </ContextMenuTrigger>
-      <ContextMenuContent className="w-56">
+      <ContextMenuContent className={`w-56 ${isMobileOrTablet ? "hidden" : ""}`}>
         {contextTarget ? (
           (() => {
             const item = contextTarget;

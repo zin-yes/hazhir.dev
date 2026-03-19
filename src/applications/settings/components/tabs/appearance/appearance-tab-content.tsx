@@ -35,21 +35,6 @@ function WallpaperPickerWidget({
   return (
     <div className="space-y-1.5">
       <Label className="text-xs">Wallpaper</Label>
-      <Select
-        value={String(selectedWallpaperIndex)}
-        onValueChange={(value) => onWallpaperSelected(Number(value))}
-      >
-        <SelectTrigger className="h-8 text-xs">
-          <SelectValue placeholder="Select wallpaper" />
-        </SelectTrigger>
-        <SelectContent>
-          {WALLPAPER_CHOICES.map((choice) => (
-            <SelectItem key={choice.value} value={choice.value}>
-              {choice.label}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
 
       {/* Large preview of the currently selected wallpaper */}
       <div className="relative aspect-[16/9] w-full overflow-hidden rounded-md border bg-muted/30">
@@ -171,11 +156,14 @@ function SlideshowSettingsWidget({
         <Select
           value={String(slideshowIntervalMilliseconds)}
           onValueChange={(value) => onSlideshowIntervalChanged(Number(value))}
+          defaultValue="-1"
         >
           <SelectTrigger className="h-8 text-xs">
             <SelectValue placeholder="Select interval" />
           </SelectTrigger>
           <SelectContent>
+            <SelectItem value={"-1"}>None</SelectItem>
+            <SelectItem value={String(60 * 1 * 1000)}>1 minute</SelectItem>
             <SelectItem value={String(60 * 5 * 1000)}>5 minutes</SelectItem>
             <SelectItem value={String(60 * 10 * 1000)}>10 minutes</SelectItem>
             <SelectItem value={String(60 * 15 * 1000)}>15 minutes</SelectItem>
@@ -250,9 +238,6 @@ export default function AppearanceTabContent({
         <Card className="w-full">
           <CardHeader className="p-4 pb-2">
             <CardTitle className="text-sm">Desktop appearance</CardTitle>
-            <CardDescription className="text-xs">
-              Changes apply immediately.
-            </CardDescription>
           </CardHeader>
           <CardContent className="grid gap-3 p-4 pt-2 grid-cols-1">
             <WallpaperPickerWidget

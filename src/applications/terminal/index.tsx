@@ -21,6 +21,7 @@ import {
   getCommandLinePrefix,
   insertTextIntoCommandBuffer,
   parseCommand,
+  parseRawData,
 } from "./command-line-routine";
 
 import ansi from "ansi-escape-sequences";
@@ -125,6 +126,13 @@ export default function TerminalApplication({
           terminal.focus();
         });
 
+        // On mobile, use touchend to focus the terminal so the virtual
+        // keyboard appears. We don't preventDefault here so the browser
+        // can open the keyboard normally.
+        terminalContainerRef.current.addEventListener("touchend", () => {
+          terminal.focus();
+        });
+
         fitAddon.fit();
 
         const currentSession = sessionRef.current;
@@ -172,7 +180,13 @@ export default function TerminalApplication({
             }
             terminal.write(getCommandLinePrefix(username));
 
+            // Track whether onKey handled the current input to avoid
+            // double-processing on desktop. On mobile, onKey often doesn't
+            // fire so onData picks up the input instead.
+            let keyHandled = false;
+
             terminal.onKey(async (event) => {
+              keyHandled = true;
               await parseCommand(
                 terminal,
                 event,
@@ -180,10 +194,21 @@ export default function TerminalApplication({
                 windowIdentifier,
               );
             });
+
+            terminal.onData(async (data) => {
+              if (keyHandled) {
+                keyHandled = false;
+                return;
+              }
+              await parseRawData(
+                terminal,
+                data,
+                sessionRef.current,
+                windowIdentifier,
+              );
+            });
           },
         );
-
-        terminal.onData(() => {});
       }
     }
   }, [

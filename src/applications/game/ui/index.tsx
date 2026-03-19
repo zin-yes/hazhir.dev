@@ -20,8 +20,12 @@ interface UILayerProps {
   hotbarSlots: BlockType[];
   isInventoryOpen: boolean;
   onSelectBlock: (block: BlockType) => void;
+  onSelectSlot?: (index: number) => void;
+  onCloseInventory?: () => void;
   debugInfo?: DebugInfo;
   isDebugVisible?: boolean;
+  isMobile?: boolean;
+  onStartMobile?: () => void;
 }
 
 export default function UILayer({
@@ -34,8 +38,12 @@ export default function UILayer({
   hotbarSlots,
   isInventoryOpen,
   onSelectBlock,
+  onSelectSlot,
+  onCloseInventory,
   debugInfo,
   isDebugVisible,
+  isMobile,
+  onStartMobile,
 }: UILayerProps) {
   const uiLayerRef = useRef<HTMLDivElement>(null);
   const [joinId, setJoinId] = useState("");
@@ -75,8 +83,8 @@ export default function UILayer({
         </div>
       )}
 
-      <Hotbar selectedSlot={selectedSlot} slots={hotbarSlots} />
-      <Inventory isOpen={isInventoryOpen} onSelectBlock={onSelectBlock} />
+      <Hotbar selectedSlot={selectedSlot} slots={hotbarSlots} onSelectSlot={onSelectSlot} />
+      <Inventory isOpen={isInventoryOpen} onSelectBlock={onSelectBlock} onClose={onCloseInventory} />
 
       {debugInfo && (
         <DebugOverlay
@@ -92,27 +100,44 @@ export default function UILayer({
         id={"infoLayer"}
       >
         <div className="w-[70%] flex flex-col justify-center gap-4">
-          <div className="bg-black p-6 px-8">
-            <h2 className="text-center font-bold text-lg">Controls</h2>
-            <p>
-              You can look around using your mouse, use{" "}
-              <span className="bg-white text-black px-2">LEFT CLICK</span> to
-              break a block and{" "}
-              <span className="bg-white text-black px-2">RIGHT CLICK</span> to
-              place a block. Use your
-              <span className="bg-white text-black px-2">WASD</span> keys to
-              move around.
-            </p>
-          </div>
-          <div className="bg-black p-6 px-8">
-            <h2 className="text-center font-bold text-lg">
-              To start playing...
-            </h2>
-            <p>
-              Focus the window by clicking, then press escape to start playing
-              (and do the same if you want to have your mouse back).
-            </p>
-          </div>
+          {isMobile ? (
+            <div className="bg-black p-6 px-8 pointer-events-auto">
+              <h2 className="text-center font-bold text-lg mb-3">Voxel Game</h2>
+              <p className="text-center mb-4 text-sm">
+                Use the joystick to move and drag to look around.
+              </p>
+              <button
+                onClick={onStartMobile}
+                className="bg-white text-black px-4 py-4 hover:bg-gray-200 w-full text-lg font-bold"
+              >
+                Tap to Start Playing
+              </button>
+            </div>
+          ) : (
+            <>
+              <div className="bg-black p-6 px-8">
+                <h2 className="text-center font-bold text-lg">Controls</h2>
+                <p>
+                  You can look around using your mouse, use{" "}
+                  <span className="bg-white text-black px-2">LEFT CLICK</span> to
+                  break a block and{" "}
+                  <span className="bg-white text-black px-2">RIGHT CLICK</span> to
+                  place a block. Use your
+                  <span className="bg-white text-black px-2">WASD</span> keys to
+                  move around.
+                </p>
+              </div>
+              <div className="bg-black p-6 px-8">
+                <h2 className="text-center font-bold text-lg">
+                  To start playing...
+                </h2>
+                <p>
+                  Focus the window by clicking, then press escape to start playing
+                  (and do the same if you want to have your mouse back).
+                </p>
+              </div>
+            </>
+          )}
           <div className="bg-black p-6 px-8 pointer-events-auto">
             <h2 className="text-center font-bold text-lg">World Management</h2>
             <div className="flex flex-col gap-2 mt-2">

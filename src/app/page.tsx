@@ -52,7 +52,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { useAuthPillar } from "@/hooks/use-auth-pillar";
 import { useFileSystem } from "@/hooks/use-file-system";
-import { OS_LAUNCH_APPLICATION_EVENT } from "@/lib/application-launcher";
+import { OS_LAUNCH_APPLICATION_EVENT, requestLaunchApplication } from "@/lib/application-launcher";
 import { executeFilePath } from "@/lib/file-execution";
 import {
   FILE_PATH_DROP_EVENT,
@@ -90,6 +90,88 @@ import {
 } from "./application-windows";
 import Desktop from "./desktop";
 import Wallpaper from "./wallpaper";
+import { useDeviceMode, type DeviceMode } from "@/hooks/use-device-mode";
+import {
+  MobileStatusBar,
+  NotificationDrawer,
+  AppDrawer,
+  AppSwitcher,
+  MobileNavBar,
+  MobileWindowContainer,
+  type MobileWindowEntry,
+  type MobileWindowAnimState,
+} from "@/operating-system/mobile";
+import LoadingWindow from "@/operating-system/application/window/loading";
+import dynamic from "next/dynamic";
+import { EditIcon, FileText } from "lucide-react";
+
+const TerminalApplication = dynamic(
+  () => import("@/applications/terminal"),
+  { loading: () => <LoadingWindow />, ssr: false },
+);
+const FileExplorerApplication = dynamic(
+  () => import("@/applications/file-explorer"),
+  { loading: () => <LoadingWindow />, ssr: false },
+);
+const MeditationApplication = dynamic(
+  () => import("@/applications/meditation"),
+  { loading: () => <LoadingWindow />, ssr: false },
+);
+const GameApplication = dynamic(
+  () => import("@/applications/game"),
+  { loading: () => <LoadingWindow />, ssr: false },
+);
+const CalculatorApplication = dynamic(
+  () => import("@/applications/calculator"),
+  { loading: () => <LoadingWindow />, ssr: false },
+);
+const VisualNovelApplication = dynamic(
+  () => import("@/applications/visual-novel"),
+  { loading: () => <LoadingWindow />, ssr: false },
+);
+const documentViewerImport = () => import("@/applications/document-viewer");
+const DocumentViewerApplication = dynamic(
+  documentViewerImport,
+  { loading: () => <LoadingWindow />, ssr: false },
+);
+
+// Preload document viewer when visiting /cv
+if (typeof window !== "undefined" && window.location.pathname === "/cv") {
+  documentViewerImport();
+}
+const ImageViewerApplication = dynamic(
+  () => import("@/applications/image-viewer"),
+  { loading: () => <LoadingWindow />, ssr: false },
+);
+const TextEditorApplication = dynamic(
+  () => import("@/applications/text-editor"),
+  { loading: () => <LoadingWindow />, ssr: false },
+);
+const SettingsApplication = dynamic(
+  () => import("@/applications/settings"),
+  { loading: () => <LoadingWindow />, ssr: false },
+);
+const FilePropertiesApplication = dynamic(
+  () => import("@/applications/file-properties"),
+  { loading: () => <LoadingWindow />, ssr: false },
+);
+const ChatApplication = dynamic(
+  () => import("@/applications/chat"),
+  { loading: () => <LoadingWindow />, ssr: false },
+);
+
+const MobileFileExplorerApplication = dynamic(
+  () => import("@/applications/file-explorer/mobile"),
+  { loading: () => <LoadingWindow />, ssr: false },
+);
+const MobileSettingsApplication = dynamic(
+  () => import("@/applications/settings/mobile"),
+  { loading: () => <LoadingWindow />, ssr: false },
+);
+const MobileChatApplication = dynamic(
+  () => import("@/applications/chat/mobile"),
+  { loading: () => <LoadingWindow />, ssr: false },
+);
 
 const OS_WINDOW_CURSOR_CHANGE_EVENT = "os-window-cursor-change";
 
@@ -140,8 +222,19 @@ function renderShortcutIcon(iconName?: string) {
 export default function OperatingSystemPage() {
   const fs = useFileSystem();
   const fsRef = useRef(fs);
+  const deviceMode = useDeviceMode();
+  const isMobileOrTablet = deviceMode === "mobile" || deviceMode === "tablet";
   const [hasMounted, setHasMounted] = useState(false);
   const [windows, setWindows] = useState<WindowEntry[]>([]);
+
+  // ─── Mobile/tablet state ───────────────────────────────
+  const [mobileWindows, setMobileWindows] = useState<MobileWindowEntry[]>([]);
+  const [activeWindowId, setActiveWindowId] = useState<string | null>(null);
+  const [notificationDrawerOpen, setNotificationDrawerOpen] = useState(false);
+  const [appDrawerOpen, setAppDrawerOpen] = useState(false);
+  const [appSwitcherOpen, setAppSwitcherOpen] = useState(false);
+  const [mobileAnimStates, setMobileAnimStates] = useState<Record<string, MobileWindowAnimState>>({});
+
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [registerName, setRegisterName] = useState("");
@@ -187,12 +280,106 @@ export default function OperatingSystemPage() {
     );
   }, []);
 
+  // ─── Mobile window management ─────────────────────────
+  const addMobileWindow = useCallback(
+    (
+      appId: string,
+      title: string,
+      icon: React.ReactNode,
+      node: React.ReactNode,
+      id?: string,
+    ) => {
+      const windowId = id ?? v4();
+      setMobileWindows((prev) => {
+        const existing = prev.find((w) => w.id === windowId);
+        if (existing) return prev;
+        return [...prev, { id: windowId, appId, title, icon, node }];
+      });
+      setMobileAnimStates((prev) => ({ ...prev, [windowId]: "entering" }));
+      setTimeout(() => {
+        setMobileAnimStates((prev) => {
+          const next = { ...prev };
+          if (next[windowId] === "entering") next[windowId] = "visible";
+          return next;
+        });
+      }, 300);
+      setActiveWindowId(windowId);
+      setAppSwitcherOpen(false);
+      setAppDrawerOpen(false);
+      return windowId;
+    },
+    [],
+  );
+
+  const removeMobileWindow = useCallback(
+    (windowId: string) => {
+      // Trigger close animation
+      setMobileAnimStates((prev) => ({ ...prev, [windowId]: "exiting-close" }));
+      setTimeout(() => {
+        setMobileWindows((prev) => prev.filter((w) => w.id !== windowId));
+        setMobileAnimStates((prev) => {
+          const next = { ...prev };
+          delete next[windowId];
+          return next;
+        });
+        setActiveWindowId((prev) => {
+          if (prev === windowId) return null;
+          return prev;
+        });
+      }, 300);
+    },
+    [],
+  );
+
   const openSettingsWindow = useCallback(
     (initialTab?: string) => {
-      addWindow(<SettingsApplicationWindow initialTab={initialTab} />);
+      if (isMobileOrTablet) {
+        addMobileWindow("settings", "Settings", <Settings size={16} />, <MobileSettingsApplication initialTab={initialTab} />);
+      } else {
+        addWindow(<SettingsApplicationWindow initialTab={initialTab} />);
+      }
     },
-    [addWindow],
+    [addWindow, addMobileWindow, isMobileOrTablet],
   );
+
+  const handleMobileHome = useCallback(() => {
+    if (activeWindowId) {
+      // Animate current window out before going home
+      setMobileAnimStates((prev) => ({ ...prev, [activeWindowId]: "exiting-home" }));
+      setTimeout(() => {
+        setActiveWindowId(null);
+        setMobileAnimStates((prev) => {
+          if (!activeWindowId) return prev;
+          const next = { ...prev };
+          delete next[activeWindowId];
+          return next;
+        });
+      }, 300);
+    } else {
+      setActiveWindowId(null);
+    }
+    setAppSwitcherOpen(false);
+    setAppDrawerOpen(false);
+    setNotificationDrawerOpen(false);
+  }, [activeWindowId]);
+
+  const handleMobileRecents = useCallback(() => {
+    if (activeWindowId && !appSwitcherOpen) {
+      // Animate current window shrinking into switcher view
+      setMobileAnimStates((prev) => ({ ...prev, [activeWindowId]: "exiting-switch" }));
+      setTimeout(() => {
+        setMobileAnimStates((prev) => {
+          if (!activeWindowId) return prev;
+          const next = { ...prev };
+          delete next[activeWindowId];
+          return next;
+        });
+      }, 250);
+    }
+    setAppSwitcherOpen((prev) => !prev);
+    setAppDrawerOpen(false);
+    setNotificationDrawerOpen(false);
+  }, []);
 
   useEffect(() => {
     fsRef.current = fs;
@@ -281,6 +468,16 @@ export default function OperatingSystemPage() {
 
   const session = useSession();
   const { isSignInModalRequested, dismissSignInModal } = useAuthPillar();
+
+  // Auto-login as guest when visiting /cv to bypass login screen
+  useEffect(() => {
+    if (!hasMounted) return;
+    if (window.location.pathname !== "/cv") return;
+    if (session.status === "authenticated") return;
+    if (session.status === "loading") return;
+    signInAsGuest();
+  }, [hasMounted, session.status]);
+
   const showLoginScreen =
     hasMounted &&
     (isSignInModalRequested ||
@@ -329,98 +526,204 @@ export default function OperatingSystemPage() {
         .detail;
       if (!detail?.appId) return;
 
-      switch (detail.appId) {
-        case "terminal":
-          addWindow(
-            <TerminalApplicationWindow
-              identifier={v4()}
-              initialPath={detail.args?.[0]}
-            />,
-          );
-          break;
-        case "file-explorer":
-          addWindow(
-            <FileExplorerApplicationWindow
-              addWindow={addWindow}
-              initialPath={detail.args?.[0]}
-            />,
-          );
-          break;
-        case "meditation":
-          addWindow(<MeditationApplicationWindow />);
-          break;
-        case "voxel-game":
-          addWindow(<GameApplicationWindow />);
-          break;
-        case "calculator":
-          addWindow(<CalculatorApplicationWindow />);
-          break;
-        case "visual-novel":
-          addWindow(<VisualNovelApplicationWindow />);
-          break;
-        case "document-viewer": {
-          const requested = detail.args?.[0];
-          if (!requested) {
-            addWindow(<DocumentViewerApplicationWindow />);
+      // Helper to decide whether to launch as mobile window or desktop window
+      const launchMobile = (
+        appId: string,
+        title: string,
+        icon: React.ReactNode,
+        content: React.ReactNode,
+        id?: string,
+      ) => {
+        addMobileWindow(appId, title, icon, content, id);
+      };
+
+      if (isMobileOrTablet) {
+        // ─── Mobile/tablet app launching ─────────────────
+        switch (detail.appId) {
+          case "terminal": {
+            const id = v4();
+            launchMobile(
+              "terminal",
+              "Terminal",
+              <TerminalSquare size={16} />,
+              <TerminalApplication windowIdentifier={id} initialPath={detail.args?.[0]} />,
+              id,
+            );
             break;
           }
-
-          const filePath =
-            requested === "CV"
-              ? `${getHomePath()}/Documents/CV.document`
-              : requested;
-          const title =
-            detail.args?.[1] ?? (filePath.split("/").pop() || "Document");
-          addWindow(
-            <SingleDocumentApplicationWindow
-              filePath={filePath}
-              title={title}
-            />,
-          );
-          break;
+          case "file-explorer":
+            launchMobile(
+              "file-explorer",
+              "Files",
+              <FolderClosed size={16} />,
+              <MobileFileExplorerApplication initialPath={detail.args?.[0]} />,
+            );
+            break;
+          case "meditation":
+            launchMobile("meditation", "Meditation", <Heart size={16} />, <MeditationApplication />);
+            break;
+          case "voxel-game":
+            launchMobile("voxel-game", "Voxel Game", <Gamepad2 size={16} />, <GameApplication />);
+            break;
+          case "calculator":
+            launchMobile("calculator", "Calculator", <Calculator size={16} />, <CalculatorApplication />);
+            break;
+          case "visual-novel":
+            launchMobile("visual-novel", "Visual Novel", <BookText size={16} />, <VisualNovelApplication />);
+            break;
+          case "document-viewer": {
+            const requested = detail.args?.[0];
+            const filePath = !requested
+              ? undefined
+              : requested === "CV"
+                ? `${getHomePath()}/Documents/CV.document`
+                : requested;
+            launchMobile(
+              "document-viewer",
+              "Document Viewer",
+              <BookOpen size={16} />,
+              <DocumentViewerApplication filePath={filePath} mode={filePath ? "single" : undefined} />,
+            );
+            break;
+          }
+          case "image-viewer":
+            launchMobile(
+              "image-viewer",
+              "Image Viewer",
+              <ImageIcon size={16} />,
+              <ImageViewerApplication initialFilePath={detail.args?.[0]} />,
+            );
+            break;
+          case "text-editor": {
+            const filePath = detail.args?.[0];
+            const windowId = v4();
+            const fileName = filePath?.split("/").pop() || "Text Editor";
+            launchMobile(
+              "text-editor",
+              `Text Editor - ${fileName}`,
+              <EditIcon size={16} />,
+              <TextEditorApplication filePath={filePath} identifier={windowId} onRequestClose={() => removeMobileWindow(windowId)} />,
+              windowId,
+            );
+            break;
+          }
+          case "settings":
+            launchMobile("settings", "Settings", <Settings size={16} />, <MobileSettingsApplication initialTab={detail.args?.[0]} />);
+            break;
+          case "file-properties":
+            launchMobile(
+              "file-properties",
+              "Properties",
+              <FileText size={16} />,
+              <FilePropertiesApplication filePath={detail.args?.[0]} />,
+            );
+            break;
+          case "chat":
+            launchMobile("chat", "Chat", <MessageSquare size={16} />, <MobileChatApplication />);
+            break;
+          default:
+            break;
         }
-        case "image-viewer": {
-          addWindow(
-            <ImageViewerApplicationWindow filePath={detail.args?.[0]} />,
-          );
-          break;
+      } else {
+        // ─── Desktop app launching ───────────────────────
+        switch (detail.appId) {
+          case "terminal":
+            addWindow(
+              <TerminalApplicationWindow
+                identifier={v4()}
+                initialPath={detail.args?.[0]}
+              />,
+            );
+            break;
+          case "file-explorer":
+            addWindow(
+              <FileExplorerApplicationWindow
+                addWindow={addWindow}
+                initialPath={detail.args?.[0]}
+              />,
+            );
+            break;
+          case "meditation":
+            addWindow(<MeditationApplicationWindow />);
+            break;
+          case "voxel-game":
+            addWindow(<GameApplicationWindow />);
+            break;
+          case "calculator":
+            addWindow(<CalculatorApplicationWindow />);
+            break;
+          case "visual-novel":
+            addWindow(<VisualNovelApplicationWindow />);
+            break;
+          case "document-viewer": {
+            const requested = detail.args?.[0];
+            if (!requested) {
+              addWindow(<DocumentViewerApplicationWindow />);
+              break;
+            }
+            const filePath =
+              requested === "CV"
+                ? `${getHomePath()}/Documents/CV.document`
+                : requested;
+            const title =
+              detail.args?.[1] ?? (filePath.split("/").pop() || "Document");
+            addWindow(
+              <SingleDocumentApplicationWindow
+                filePath={filePath}
+                title={title}
+              />,
+            );
+            break;
+          }
+          case "image-viewer":
+            addWindow(
+              <ImageViewerApplicationWindow filePath={detail.args?.[0]} />,
+            );
+            break;
+          case "text-editor": {
+            const filePath = detail.args?.[0];
+            const windowId = v4();
+            addWindow(
+              <TextEditorApplicationWindow
+                identifier={windowId}
+                filePath={filePath}
+                onClose={() => removeWindow(windowId)}
+              />,
+              windowId,
+            );
+            break;
+          }
+          case "settings":
+            openSettingsWindow(detail.args?.[0]);
+            break;
+          case "file-properties":
+            addWindow(
+              <FilePropertiesApplicationWindow filePath={detail.args?.[0]} />,
+            );
+            break;
+          case "chat":
+            addWindow(<ChatApplicationWindow />);
+            break;
+          default:
+            break;
         }
-        case "text-editor": {
-          const filePath = detail.args?.[0];
-          const windowId = v4();
-          addWindow(
-            <TextEditorApplicationWindow
-              identifier={windowId}
-              filePath={filePath}
-              onClose={() => removeWindow(windowId)}
-            />,
-            windowId,
-          );
-          break;
-        }
-        case "settings": {
-          openSettingsWindow(detail.args?.[0]);
-          break;
-        }
-        case "file-properties": {
-          addWindow(
-            <FilePropertiesApplicationWindow filePath={detail.args?.[0]} />,
-          );
-          break;
-        }
-        case "chat": {
-          addWindow(<ChatApplicationWindow />);
-          break;
-        }
-        default:
-          break;
       }
     };
 
     window.addEventListener(OS_LAUNCH_APPLICATION_EVENT, handler);
     return () =>
       window.removeEventListener(OS_LAUNCH_APPLICATION_EVENT, handler);
-  }, [addWindow, openSettingsWindow, removeWindow]);
+  }, [addMobileWindow, addWindow, isMobileOrTablet, openSettingsWindow, removeMobileWindow, removeWindow]);
+
+  // Auto-launch document viewer when visiting /cv
+  const hasAutoLaunched = useRef(false);
+  useEffect(() => {
+    if (!operatingSystemVisible || !isSystemUserReady || hasAutoLaunched.current) return;
+    if (window.location.pathname === "/cv") {
+      hasAutoLaunched.current = true;
+      requestLaunchApplication("document-viewer", ["CV"]);
+    }
+  }, [operatingSystemVisible, isSystemUserReady]);
 
   useEffect(() => {
     const updateDropZoneState = (x: number, y: number) => {
@@ -532,7 +835,7 @@ export default function OperatingSystemPage() {
     <>
       {/* <ContextMenu>
          <ContextMenuTrigger> */}
-      <main className="w-screen h-screen absolute top-0 bottom-0 left-0 right-0 overflow-hidden">
+      <main className="w-screen h-dvh absolute top-0 bottom-0 left-0 right-0 overflow-hidden">
         <Wallpaper />
 
         {shouldShowOperatingSystem && isSystemUserReady && (
@@ -543,187 +846,281 @@ export default function OperatingSystemPage() {
                 : "opacity-0 -translate-y-[5%] blur-[3px]"
             }`}
           >
-            <Desktop addWindow={addWindow} />
-            <div
-              aria-hidden="true"
-              className={`pointer-events-none absolute inset-0 z-5 transition-all duration-300 ${
-                isDesktopBackgroundBlurred
-                  ? "backdrop-blur-[1px] bg-black/20"
-                  : "backdrop-blur-0 bg-black/0"
-              }`}
-            />
-            <div
-              className={
-                "absolute top-0 left-0 right-0 z-1 flex flex-row justify-between m-2 p-1 text-white rounded-xl shadow-md bg-primary"
-              }
-            >
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button
-                    variant={"ghost"}
-                    size="icon"
-                    className="h-7 w-7 rounded-full bg-black/20 hover:bg-white/20"
-                    aria-label="Open menu"
-                  >
-                    <Circle className="size-3.5 fill-white text-white stroke-none" />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent
-                  align="start"
-                  sideOffset={8}
-                  className="ml-2 mt-1 w-[420px] rounded-2xl border border-white/10 bg-background/85 p-3 backdrop-blur-2xl z-9999"
+            {/* Desktop visible when no mobile app is in the foreground */}
+            {(!isMobileOrTablet || activeWindowId === null) && (
+              <Desktop addWindow={addWindow} deviceMode={deviceMode} />
+            )}
+
+            {/* ─── Desktop-only UI ─────────────────────────── */}
+            {!isMobileOrTablet && (
+              <>
+                <div
+                  aria-hidden="true"
+                  className={`pointer-events-none absolute inset-0 z-5 transition-all duration-300 ${
+                    isDesktopBackgroundBlurred
+                      ? "backdrop-blur-[1px] bg-black/20"
+                      : "backdrop-blur-0 bg-black/0"
+                  }`}
+                />
+                <div
+                  className={
+                    "absolute top-0 left-0 right-0 z-1 flex flex-row justify-between m-2 p-1 text-white rounded-xl shadow-md bg-primary"
+                  }
                 >
-                  <div className="rounded-xl border border-white/10 bg-black/20 px-3 py-2 flex items-center gap-2 text-sm text-white/75">
-                    <Search size={14} className="opacity-80" />
-                    <Input
-                      value={menuSearchValue}
-                      onChange={(event) =>
-                        setMenuSearchValue(event.target.value)
-                      }
-                      onKeyDown={(event) => event.stopPropagation()}
-                      placeholder="Search apps"
-                      className="h-6 border-0 bg-transparent p-0 text-sm text-white placeholder:text-white/50 focus-visible:ring-0"
-                    />
-                  </div>
-
-                  <div className="mt-3 px-1 text-xs font-medium text-white/70">
-                    Apps
-                  </div>
-
-                  <div className="relative mt-2">
-                    <div
-                      ref={menuAppsScrollRef}
-                      className="max-h-72 overflow-y-auto rounded-xl border border-white/10 bg-black/15 p-1"
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button
+                        variant={"ghost"}
+                        size="icon"
+                        className="h-7 w-7 rounded-full bg-black/20 hover:bg-white/20"
+                        aria-label="Open menu"
+                      >
+                        <Circle className="size-3.5 fill-white text-white stroke-none" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent
+                      align="start"
+                      sideOffset={8}
+                      className="ml-2 mt-1 w-[420px] rounded-2xl border border-white/10 bg-background/85 p-3 backdrop-blur-2xl z-9999"
                     >
-                      {filteredMenuItems.length > 0 ? (
-                        filteredMenuItems.map((item) => (
-                          <DropdownMenuItem
-                            key={item.path}
-                            title={item.description}
-                            className="rounded-lg px-2.5 py-2 text-sm text-white data-[highlighted]:bg-white/15"
-                            onMouseEnter={() =>
-                              setMenuHoveredDescription(item.description)
-                            }
-                            onClick={() => {
-                              const result = executeFilePath(
-                                item.path,
-                                fsRef.current,
-                              );
-                              if (!result.ok) {
-                                console.warn(result.message);
-                              }
-                              setMenuSearchValue("");
-                            }}
-                          >
-                            {renderShortcutIcon(item.iconName)}
-                            <span className="truncate">{item.label}</span>
-                            {item.shortcut.type === "link" ? (
-                              <ExternalLink
-                                size={14}
-                                className="ml-auto text-white/70"
-                              />
-                            ) : null}
-                          </DropdownMenuItem>
-                        ))
-                      ) : (
-                        <div className="px-3 py-4 text-sm text-white/60">
-                          No matching apps.
-                        </div>
-                      )}
-                    </div>
-                    <ScrollMoreButton
-                      scrollElementRef={menuAppsScrollRef}
-                      className="bottom-3 border-white/20 bg-black/75 text-white hover:bg-white/20 hover:text-white"
-                    />
-                  </div>
+                      <div className="rounded-xl border border-white/10 bg-black/20 px-3 py-2 flex items-center gap-2 text-sm text-white/75">
+                        <Search size={14} className="opacity-80" />
+                        <Input
+                          value={menuSearchValue}
+                          onChange={(event) =>
+                            setMenuSearchValue(event.target.value)
+                          }
+                          onKeyDown={(event) => event.stopPropagation()}
+                          placeholder="Search apps"
+                          className="h-6 border-0 bg-transparent p-0 text-sm text-white placeholder:text-white/50 focus-visible:ring-0"
+                        />
+                      </div>
 
-                  <div className="mt-2 rounded-lg border border-white/10 bg-black/10 px-2.5 py-2 text-xs text-white/70 min-h-8">
-                    {menuHoveredDescription ||
-                      "Hover an item to view its description."}
-                  </div>
-                </DropdownMenuContent>
-              </DropdownMenu>
-              <CalendarDropdown time={time} />
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button
-                    variant={"ghost"}
-                    size="icon"
-                    className="h-7 w-7 rounded-full bg-black/20 hover:bg-white/20"
-                    aria-label="Open profile menu"
-                  >
-                    {session.data?.user.image ? (
-                      <Image
-                        loader={({ src, width, quality }) =>
-                          `${src}?w=${width}&q=${quality || 75}`
-                        }
-                        width={28}
-                        height={28}
-                        src={session.data?.user.image}
-                        alt={"Profile picture."}
-                        className="rounded-full m-0 p-0"
-                      />
-                    ) : (
-                      <User2 className="size-4" />
-                    )}
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent
-                  align="end"
-                  sideOffset={8}
-                  className="w-52 rounded-xl border border-white/10 bg-background/85 p-1 backdrop-blur-2xl z-9999"
+                      <div className="mt-3 px-1 text-xs font-medium text-white/70">
+                        Apps
+                      </div>
+
+                      <div className="relative mt-2">
+                        <div
+                          ref={menuAppsScrollRef}
+                          className="max-h-72 overflow-y-auto rounded-xl border border-white/10 bg-black/15 p-1"
+                        >
+                          {filteredMenuItems.length > 0 ? (
+                            filteredMenuItems.map((item) => (
+                              <DropdownMenuItem
+                                key={item.path}
+                                title={item.description}
+                                className="rounded-lg px-2.5 py-2 text-sm text-white data-[highlighted]:bg-white/15"
+                                onMouseEnter={() =>
+                                  setMenuHoveredDescription(item.description)
+                                }
+                                onClick={() => {
+                                  const result = executeFilePath(
+                                    item.path,
+                                    fsRef.current,
+                                  );
+                                  if (!result.ok) {
+                                    console.warn(result.message);
+                                  }
+                                  setMenuSearchValue("");
+                                }}
+                              >
+                                {renderShortcutIcon(item.iconName)}
+                                <span className="truncate">{item.label}</span>
+                                {item.shortcut.type === "link" ? (
+                                  <ExternalLink
+                                    size={14}
+                                    className="ml-auto text-white/70"
+                                  />
+                                ) : null}
+                              </DropdownMenuItem>
+                            ))
+                          ) : (
+                            <div className="px-3 py-4 text-sm text-white/60">
+                              No matching apps.
+                            </div>
+                          )}
+                        </div>
+                        <ScrollMoreButton
+                          scrollElementRef={menuAppsScrollRef}
+                          className="bottom-3 border-white/20 bg-black/75 text-white hover:bg-white/20 hover:text-white"
+                        />
+                      </div>
+
+                      <div className="mt-2 rounded-lg border border-white/10 bg-black/10 px-2.5 py-2 text-xs text-white/70 min-h-8">
+                        {menuHoveredDescription ||
+                          "Hover an item to view its description."}
+                      </div>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                  <CalendarDropdown time={time} />
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button
+                        variant={"ghost"}
+                        size="icon"
+                        className="h-7 w-7 rounded-full bg-black/20 hover:bg-white/20"
+                        aria-label="Open profile menu"
+                      >
+                        {session.data?.user.image ? (
+                          <Image
+                            loader={({ src, width, quality }) =>
+                              `${src}?w=${width}&q=${quality || 75}`
+                            }
+                            width={28}
+                            height={28}
+                            src={session.data?.user.image}
+                            alt={"Profile picture."}
+                            className="rounded-full m-0 p-0"
+                          />
+                        ) : (
+                          <User2 className="size-4" />
+                        )}
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent
+                      align="end"
+                      sideOffset={8}
+                      className="w-52 rounded-xl border border-white/10 bg-background/85 p-1 backdrop-blur-2xl z-9999"
+                    >
+                      <DropdownMenuItem
+                        className="rounded-lg px-2.5 py-2 text-sm text-white data-[highlighted]:bg-white/15"
+                        onClick={() => openSettingsWindow("system")}
+                      >
+                        <Settings size={14} className="text-white/80" />
+                        Settings
+                      </DropdownMenuItem>
+                      <DropdownMenuSeparator className="bg-white/10" />
+                      <DropdownMenuItem
+                        className="rounded-lg px-2.5 py-2 text-sm text-white data-[highlighted]:bg-white/15"
+                        onClick={async () => {
+                          await signOut({ callbackUrl: "/" });
+                        }}
+                      >
+                        <LogOut size={14} className="text-white/80" />
+                        Sign out
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
+
+                <div
+                  className="relative z-10 w-screen h-dvh pointer-events-none"
+                  id="operating-system-container"
                 >
-                  <DropdownMenuItem
-                    className="rounded-lg px-2.5 py-2 text-sm text-white data-[highlighted]:bg-white/15"
-                    onClick={() => openSettingsWindow("system")}
-                  >
-                    <Settings size={14} className="text-white/80" />
-                    Settings
-                  </DropdownMenuItem>
-                  <DropdownMenuSeparator className="bg-white/10" />
-                  <DropdownMenuItem
-                    className="rounded-lg px-2.5 py-2 text-sm text-white data-[highlighted]:bg-white/15"
-                    onClick={async () => {
-                      await signOut({ callbackUrl: "/" });
+                  {windows.map((window) => {
+                    return (
+                      <React.Fragment key={window.id}>{window.node}</React.Fragment>
+                    );
+                  })}
+                </div>
+
+                {isFileTransferDragActive && (
+                  <div
+                    className="pointer-events-none fixed z-[2147483647] transition-transform"
+                    style={{
+                      left: dragCursor.x + 10,
+                      top: dragCursor.y - 34,
                     }}
                   >
-                    <LogOut size={14} className="text-white/80" />
-                    Sign out
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </div>
+                    <div
+                      className={`flex items-center gap-1 rounded-md px-2 py-1 text-xs font-semibold border ${
+                        isOverDropZone
+                          ? "bg-emerald-700 border-emerald-200 text-white shadow-lg shadow-emerald-950/50"
+                          : "bg-rose-800 border-rose-200 text-white shadow-lg shadow-rose-950/60"
+                      }`}
+                    >
+                      <FileSymlink size={12} />
+                      <span>{isOverDropZone ? "Drop" : "No drop"}</span>
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
 
-            <div
-              className="relative z-10 w-screen h-screen pointer-events-none"
-              id="operating-system-container"
-            >
-              {windows.map((window) => {
-                return (
-                  <React.Fragment key={window.id}>{window.node}</React.Fragment>
-                );
-              })}
-            </div>
+            {/* ─── Mobile/tablet UI ────────────────────────── */}
+            {isMobileOrTablet && (
+              <>
+                <MobileStatusBar
+                  onPullDown={() => setNotificationDrawerOpen(true)}
+                  activeTitle={
+                    activeWindowId && !appSwitcherOpen
+                      ? mobileWindows.find((w) => w.id === activeWindowId)?.title ?? null
+                      : null
+                  }
+                  activeTitlebarColor={
+                    activeWindowId && !appSwitcherOpen
+                      ? "hsl(var(--primary))"
+                      : null
+                  }
+                  userImage={session.data?.user.image ?? null}
+                  onOpenSettings={() => openSettingsWindow("system")}
+                  onSignOut={async () => {
+                    await signOut({ callbackUrl: "/" });
+                  }}
+                />
 
-            {isFileTransferDragActive && (
-              <div
-                className="pointer-events-none fixed z-[2147483647] transition-transform"
-                style={{
-                  left: dragCursor.x + 10,
-                  top: dragCursor.y - 34,
-                }}
-              >
-                <div
-                  className={`flex items-center gap-1 rounded-md px-2 py-1 text-xs font-semibold border ${
-                    isOverDropZone
-                      ? "bg-emerald-700 border-emerald-200 text-white shadow-lg shadow-emerald-950/50"
-                      : "bg-rose-800 border-rose-200 text-white shadow-lg shadow-rose-950/60"
-                  }`}
-                >
-                  <FileSymlink size={12} />
-                  <span>{isOverDropZone ? "Drop" : "No drop"}</span>
-                </div>
-              </div>
+                {/* Active mobile window */}
+                {mobileWindows.map((win) => (
+                  <MobileWindowContainer
+                    key={win.id}
+                    window={win}
+                    visible={activeWindowId === win.id && !appSwitcherOpen}
+                    animState={mobileAnimStates[win.id]}
+                    onAnimationEnd={() => {
+                      setMobileAnimStates((prev) => {
+                        const next = { ...prev };
+                        delete next[win.id];
+                        return next;
+                      });
+                    }}
+                  />
+                ))}
+
+                {/* Notification drawer */}
+                <NotificationDrawer
+                  open={notificationDrawerOpen}
+                  onClose={() => setNotificationDrawerOpen(false)}
+                />
+
+                {/* App drawer */}
+                <AppDrawer
+                  open={appDrawerOpen}
+                  onClose={() => setAppDrawerOpen(false)}
+                  onLaunchApp={(path) => {
+                    const result = executeFilePath(path, fsRef.current);
+                    if (!result.ok) {
+                      console.warn(result.message);
+                    }
+                  }}
+                />
+
+                {/* App switcher */}
+                <AppSwitcher
+                  open={appSwitcherOpen}
+                  windows={mobileWindows}
+                  activeWindowId={activeWindowId}
+                  onSelectWindow={(id) => {
+                    setActiveWindowId(id);
+                    setAppSwitcherOpen(false);
+                  }}
+                  onCloseWindow={(id) => {
+                    removeMobileWindow(id);
+                  }}
+                  onClose={() => setAppSwitcherOpen(false)}
+                />
+
+                {/* Bottom navigation bar */}
+                <MobileNavBar
+                  onHome={handleMobileHome}
+                  onRecents={handleMobileRecents}
+                  onAppDrawer={() => {
+                    setAppDrawerOpen(true);
+                    setAppSwitcherOpen(false);
+                    setNotificationDrawerOpen(false);
+                  }}
+                />
+              </>
             )}
           </div>
         )}
@@ -1044,12 +1441,14 @@ export default function OperatingSystemPage() {
       </ContextMenuContent>
     </ContextMenu> 
     </>*/}
-      <CookieConsent
-        variant="small"
-        description="This site uses essential cookies for authentication. No tracking or advertising cookies are used."
-        onAcceptCallback={() => setCookiesDeclined(false)}
-        onDeclineCallback={() => setCookiesDeclined(true)}
-      />
+      {typeof window !== "undefined" && window.location.pathname === "/cv" ? null : (
+        <CookieConsent
+          variant="small"
+          description="This site uses essential cookies for authentication. No tracking or advertising cookies are used."
+          onAcceptCallback={() => setCookiesDeclined(false)}
+          onDeclineCallback={() => setCookiesDeclined(true)}
+        />
+      )}
     </>
   );
 }

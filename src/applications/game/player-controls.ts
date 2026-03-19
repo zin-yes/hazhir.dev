@@ -17,6 +17,7 @@ export class PlayerControls {
   private canJump = false;
   private isFlying = false;
   private isShifting = false;
+  public isMobile = false;
 
   private readonly speed = 5;
   private readonly jumpForce = 9.5;
@@ -141,6 +142,58 @@ export class PlayerControls {
     document.addEventListener("keyup", this.onKeyUp);
   }
 
+  public setMoveState(state: {
+    forward?: boolean;
+    backward?: boolean;
+    left?: boolean;
+    right?: boolean;
+    up?: boolean;
+    down?: boolean;
+    shifting?: boolean;
+  }) {
+    if (state.forward !== undefined) this.moveForward = state.forward;
+    if (state.backward !== undefined) this.moveBackward = state.backward;
+    if (state.left !== undefined) this.moveLeft = state.left;
+    if (state.right !== undefined) this.moveRight = state.right;
+    if (state.up !== undefined) this.moveUp = state.up;
+    if (state.down !== undefined) this.moveDown = state.down;
+    if (state.shifting !== undefined) this.isShifting = state.shifting;
+  }
+
+  public rotateCamera(deltaX: number, deltaY: number) {
+    const euler = new THREE.Euler(0, 0, 0, "YXZ");
+    euler.setFromQuaternion(this.controls.object.quaternion);
+    euler.y -= deltaX * 0.003;
+    euler.x -= deltaY * 0.003;
+    euler.x = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, euler.x));
+    this.controls.object.quaternion.setFromEuler(euler);
+  }
+
+  public jump() {
+    if (this.isFlying) {
+      this.moveUp = true;
+    } else if (
+      this.physics.isInWater(
+        this.controls.object.position,
+        this.currentEyeHeight,
+      )
+    ) {
+      this.moveUp = true;
+    } else if (this.canJump) {
+      this.velocity.y = this.jumpForce;
+      this.canJump = false;
+    }
+  }
+
+  public stopJump() {
+    this.moveUp = false;
+  }
+
+  public toggleFlying() {
+    this.isFlying = !this.isFlying;
+    this.velocity.set(0, 0, 0);
+  }
+
   public dispose() {
     document.removeEventListener("keydown", this.onKeyDown);
     document.removeEventListener("keyup", this.onKeyUp);
@@ -164,7 +217,7 @@ export class PlayerControls {
     this.controls.object.position.y += diff;
 
     if (this.isFlying) {
-      if (this.controls.isLocked) {
+      if (this.controls.isLocked || this.isMobile) {
         const forward = new THREE.Vector3();
         const right = new THREE.Vector3();
 
@@ -207,7 +260,7 @@ export class PlayerControls {
       this.velocity.y -= this.gravity * delta * 0.1;
       this.velocity.multiplyScalar(0.9);
 
-      if (this.controls.isLocked) {
+      if (this.controls.isLocked || this.isMobile) {
         const forward = new THREE.Vector3();
         const right = new THREE.Vector3();
 
@@ -243,7 +296,7 @@ export class PlayerControls {
     // Apply Gravity
     this.velocity.y -= this.gravity * delta;
 
-    if (this.controls.isLocked) {
+    if (this.controls.isLocked || this.isMobile) {
       // Calculate desired horizontal velocity
       const forward = new THREE.Vector3();
       const right = new THREE.Vector3();
