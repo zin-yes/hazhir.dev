@@ -33,36 +33,42 @@ const cvData = {
   links: [
     { label: "GitHub", href: "https://github.com/zin-yes" },
     { label: "LinkedIn", href: "https://www.linkedin.com/in/hazhir-taher/" },
+    { label: "Portfolio", href: "https://hazhir.dev" },
   ],
 
   summary:
-    'Self-taught developer, programming since age 10. Built and launched real products using Next.js and TypeScript, including a SaaS platform that reached <strong>~30k SEK monthly recurring revenue</strong> and closed companies like <a href="https://www.scrive.com/">Scrive</a> as part of the <a href="https://antler.co/">Antler residency program</a>. Equally passionate about computer graphics and game engine development.',
+    'Self-taught full-stack developer, coding since age 10. Built and launched real products using Next.js and TypeScript, including a SaaS product closing companies like <a href="https://www.scrive.com/">Scrive</a>.',
 
   experience: [
     {
-      title: "Technical Co-Founder | Atlas",
+      title: "Technical co-founder | Atlas",
       meta: "Jun 2025 - Dec 2025",
-      links: [{ label: "Website", href: "https://useatlas.io" }],
+      links: [
+        { label: "Article", href: "https://hazhir.dev/atlas" },
+        { label: "Website", href: "https://useatlas.io" },
+      ],
       bullets: [
-        'Co-founded and built a SaaS platform as part of the <a href="https://antler.co/">Antler</a> residency program, reaching <strong>~30k SEK monthly recurring revenue</strong> and closing customers like <a href="https://www.scrive.com/">Scrive</a>.',
-        "Designed and implemented full-stack architecture using Next.js, TypeScript, and Vercel.",
-        "Rapidly shipped product features and bug fixes based on feedback from early users.",
-        "Worked directly with customers to iterate product features and improve user experience.",
+        'Built an AI sales SaaS product with natural language search for prospecting - closing customers like <a href="https://www.scrive.com/">Scrive</a>.',
+        'Got into the <a href="https://antler.co/">Antler</a> residency program.',
+        "Reached <strong>~30k SEK in monthly recurring revenue</strong>.",
+        "Went from MVP to a stable version one of the product still operating today in only a couple of months.",
+        "Talked to users daily to fix issues and add features.",
+        'See more at <a href="https://hazhir.dev/atlas">this article</a>.',
       ],
     },
     {
-      title: "Technical Co-Founder | Valufy",
-      meta: "2023 - 2024",
+      title: "Technical co-founder | Valufy",
+      meta: "Oct 2023 - Aug 2024",
       bullets: [
-        "Designed and implemented backend infrastructure using SST and AWS.",
-        "Developed a web and mobile product prototype with two co-founders.",
-        "Iterated product features using feedback from early beta testers.",
+        "Co-founded a SaaS making filing personal insurance claims more fair through simplifying the management of evidence (e.g. receipts, video, evaluations).",
+        "Developed web and mobile MVPs for problem validation.",
         'Presented the product at <a href="https://www.venturecup.se/">VentureCup Regional Final East</a>.',
+        "Unfortunately, due to a lack of interest in the product, we discontinued Valufy.",
       ],
     },
     {
-      title: "Game Developer | Minecraft Game Show (Mithzan)",
-      meta: "2020 - 2022",
+      title: "Game developer | YouTube game show (Mithzan)",
+      meta: "Aug 2020 - Jun 2022",
       links: [
         {
           label: "YouTube Playlist",
@@ -70,9 +76,8 @@ const cvData = {
         },
       ],
       bullets: [
-        "Developed a custom Minecraft game show platform using the Spigot API in Java.",
+        "Modded Minecraft to produce a game show using the Spigot API in Java.",
         "Implemented multiplayer gameplay systems and server-side logic for competitive challenges.",
-        "Worked closely with ~10 YouTube creators to iterate gameplay features.",
         "Content produced using the system reached <strong>~40k average viewers</strong> across participating channels.",
       ],
     },
@@ -80,24 +85,25 @@ const cvData = {
 
   projects: [
     {
-      title: "hazhir.dev | Interactive Developer Portfolio",
+      title: "hazhir.dev | Portfolio",
       links: [
-        { label: "Live Website", href: "https://hazhir.dev" },
+        { label: "Article", href: "https://hazhir.dev/hazhir-dev" },
         {
           label: "Repository",
           href: "https://github.com/zin-yes/hazhir.dev",
         },
+        { label: "Website", href: "https://hazhir.dev" },
       ],
       paragraphs: [
-        "OS-themed interactive portfolio featuring a <strong>custom browser-based terminal and voxel game</strong>.",
-        "Implemented <strong>infinite procedural terrain generation</strong> using Three.js and WebGL.",
-        "Full-stack implementation using Next.js, TypeScript, TailwindCSS, Better-Auth, and Drizzle ORM.",
-        "Automated deployment and CI/CD using Vercel.",
+        "OS-themed interactive portfolio featuring a <strong>file system, terminal, a 3d game, and much more</strong>.",
+        "Full-stack implementation using Next.js, Three.js, Drizzle ORM, tRPC.",
+        'See more at <a href="https://hazhir.dev/hazhir-dev">this article</a>.',
       ],
     },
     {
-      title: "Gamma Engine | Java 3D Game Engine",
+      title: "Gamma Engine | 3D Game Engine made in Java",
       links: [
+        { label: "Article", href: "https://hazhir.dev/gamma-engine" },
         {
           label: "Repository",
           href: "https://github.com/zin-yes/gamma-engine",
@@ -108,19 +114,22 @@ const cvData = {
         },
       ],
       paragraphs: [
-        "Developed a custom 3D game engine in Java as a long-term personal project.",
-        "Implemented physically-based rendering, 3D audio with OpenAL, and physics using JBullet.",
+        "Developed a custom 3D game engine in Java as a long-term personal project, and to make games to play with my friends.",
+        "Physically-based rendering, 3D audio with OpenAL, and physics using JBullet.",
         "Achieves <strong>100+ FPS</strong> on mid-range hardware with ~150k polygons and high-resolution textures.",
-        "Used the engine to develop several small games and technical experiments.",
+        'See more at <a href="https://hazhir.dev/gamma-engine">this article</a>.',
       ],
     },
     {
-      title: "MetricJournal | Personal Productivity SaaS",
-      links: [{ label: "Live Website", href: "https://metricjournal.com" }],
+      title: "MetricJournal | Productivity SaaS",
+      links: [
+        { label: "Article", href: "https://hazhir.dev/metricjournal" },
+        { label: "Website", href: "https://metricjournal.com" },
+      ],
       paragraphs: [
-        "Built and launched a <strong>personal productivity web app</strong> used for daily journaling, task management, and habit tracking.",
-        "Added social features so users can share activity and receive reactions and comments from others.",
-        "Handled the full product lifecycle: design, development, deployment, and payments.",
+        "Built and launched a <strong>productivity web app</strong> used for daily journaling, task management, and habit tracking.",
+        "Full-stack implementation using Next.js, Drizzle ORM, tRPC, and Stripe.",
+        'See more at <a href="https://hazhir.dev/metricjournal">this article</a>.',
       ],
     },
   ],
@@ -147,13 +156,13 @@ const cvData = {
     "Next.js",
     "React",
     "TailwindCSS",
+    "Three.js",
     "Java",
     "OpenGL",
-    "Three.js",
-    "Vercel",
     "C++",
     "Python",
     "Git",
+    "Vercel",
   ],
 } as const;
 
