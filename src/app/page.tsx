@@ -135,9 +135,47 @@ const DocumentViewerApplication = dynamic(
   { loading: () => <LoadingWindow />, ssr: false },
 );
 
-// Preload document viewer when visiting /cv
-if (typeof window !== "undefined" && window.location.pathname === "/cv") {
-  documentViewerImport();
+// ─── Auto-launch route registry ────────────────────────────────────────────
+// Each entry maps a pathname to the app that should be auto-launched there.
+// The page re-exports the main page component, so adding a new route only
+// requires (a) a new entry here, and (b) a new src/app/<slug>/page.tsx.
+type AutoLaunchRoute = {
+  preload?: () => Promise<unknown>;
+  appId: string;
+  getArgs: () => string[];
+};
+
+const autoLaunchRoutes: Record<string, AutoLaunchRoute> = {
+  "/cv": {
+    preload: documentViewerImport,
+    appId: "document-viewer",
+    getArgs: () => ["CV"],
+  },
+  "/hazhir-dev": {
+    preload: documentViewerImport,
+    appId: "document-viewer",
+    getArgs: () => [`${getHomePath()}/Documents/hazhir.dev.document`],
+  },
+  "/metricjournal": {
+    preload: documentViewerImport,
+    appId: "document-viewer",
+    getArgs: () => [`${getHomePath()}/Documents/MetricJournal.document`],
+  },
+  "/atlas": {
+    preload: documentViewerImport,
+    appId: "document-viewer",
+    getArgs: () => [`${getHomePath()}/Documents/Atlas.document`],
+  },
+  "/gamma-engine": {
+    preload: documentViewerImport,
+    appId: "document-viewer",
+    getArgs: () => [`${getHomePath()}/Documents/Gamma-Engine.document`],
+  },
+};
+
+// Preload modules for the current route
+if (typeof window !== "undefined") {
+  autoLaunchRoutes[window.location.pathname]?.preload?.();
 }
 const ImageViewerApplication = dynamic(
   () => import("@/applications/image-viewer"),
@@ -469,10 +507,10 @@ export default function OperatingSystemPage() {
   const session = useSession();
   const { isSignInModalRequested, dismissSignInModal } = useAuthPillar();
 
-  // Auto-login as guest when visiting /cv to bypass login screen
+  // Auto-login as guest when visiting an auto-launch route to bypass login screen
   useEffect(() => {
     if (!hasMounted) return;
-    if (window.location.pathname !== "/cv") return;
+    if (!(window.location.pathname in autoLaunchRoutes)) return;
     if (session.status === "authenticated") return;
     if (session.status === "loading") return;
     signInAsGuest();
@@ -715,14 +753,14 @@ export default function OperatingSystemPage() {
       window.removeEventListener(OS_LAUNCH_APPLICATION_EVENT, handler);
   }, [addMobileWindow, addWindow, isMobileOrTablet, openSettingsWindow, removeMobileWindow, removeWindow]);
 
-  // Auto-launch document viewer when visiting /cv
+  // Auto-launch application when visiting a configured route
   const hasAutoLaunched = useRef(false);
   useEffect(() => {
     if (!operatingSystemVisible || !isSystemUserReady || hasAutoLaunched.current) return;
-    if (window.location.pathname === "/cv") {
-      hasAutoLaunched.current = true;
-      requestLaunchApplication("document-viewer", ["CV"]);
-    }
+    const route = autoLaunchRoutes[window.location.pathname];
+    if (!route) return;
+    hasAutoLaunched.current = true;
+    requestLaunchApplication(route.appId, route.getArgs());
   }, [operatingSystemVisible, isSystemUserReady]);
 
   useEffect(() => {
@@ -1446,7 +1484,7 @@ export default function OperatingSystemPage() {
       </ContextMenuContent>
     </ContextMenu> 
     </>*/}
-      {typeof window !== "undefined" && window.location.pathname === "/cv" ? null : (
+      {typeof window !== "undefined" && window.location.pathname in autoLaunchRoutes ? null : (
         <CookieConsent
           variant="small"
           description="This site uses essential cookies for authentication. No tracking or advertising cookies are used."
