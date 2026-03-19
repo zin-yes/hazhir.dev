@@ -1300,3 +1300,89 @@ export async function parseCommand(
       break;
   }
 }
+
+/**
+ * Handle raw string data from terminal.onData(), used for mobile virtual
+ * keyboard input that bypasses onKey.
+ */
+export async function parseRawData(
+  terminal: Terminal,
+  data: string,
+  session: ReturnType<typeof useSession>,
+  windowIdentifier: string,
+) {
+  setActiveTerminalWindow(windowIdentifier);
+
+  for (let i = 0; i < data.length; i++) {
+    const ch = data[i];
+    const code = ch.charCodeAt(0);
+
+    if (ch === "\r") {
+      // Enter
+      clearAutocompleteDisplay(terminal);
+      resetAutocompleteState();
+
+      if (
+        _autocompleteSuggestions.length > 0 &&
+        _autocompleteSelectedIndex >= 0
+      ) {
+        clearAutocompleteDisplay(terminal);
+        resetAutocompleteState();
+        return;
+      }
+
+      _commandBuffer = await onCommand(
+        _commandBuffer,
+        terminal,
+        session,
+        windowIdentifier,
+        { writePrompt: true },
+      );
+      return;
+    }
+
+    if (ch === "\x7f" || code === 8) {
+      // Backspace
+      clearAutocompleteDisplay(terminal);
+      resetAutocompleteState();
+      if (
+        _commandBuffer.cursorPosition <= _commandBuffer.content.length &&
+        _commandBuffer.cursorPosition > 0
+      ) {
+        _commandBuffer = removeFromTerminalAndCommandBuffer(
+          1,
+          _commandBuffer,
+          terminal,
+        );
+      }
+      continue;
+    }
+
+    // Ignore escape sequences (arrow keys etc. — handled by onKey on desktop)
+    if (ch === "\x1b") {
+      // Skip the rest of the escape sequence
+      if (i + 1 < data.length && data[i + 1] === "[") {
+        i += 2; // skip ESC and [
+        // Skip until we hit a letter (the terminator)
+        while (i < data.length && !/[A-Za-z~]/.test(data[i])) {
+          i++;
+        }
+      }
+      continue;
+    }
+
+    // Ignore other control characters
+    if (code < 32) {
+      continue;
+    }
+
+    // Printable character
+    clearAutocompleteDisplay(terminal);
+    resetAutocompleteState();
+    _commandBuffer = writeToTerminalAndCommandBuffer(
+      ch,
+      _commandBuffer,
+      terminal,
+    );
+  }
+}

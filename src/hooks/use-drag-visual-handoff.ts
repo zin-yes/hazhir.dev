@@ -107,7 +107,10 @@ export function useDragVisualHandoff(options?: UseDragVisualHandoffOptions) {
   );
 
   const updateDelta = useCallback((nextDelta: DragVisualDelta) => {
-    setDelta(nextDelta);
+    setDelta((prev) => {
+      if (prev.x === nextDelta.x && prev.y === nextDelta.y) return prev;
+      return nextDelta;
+    });
   }, []);
 
   const startHandoff = useCallback(

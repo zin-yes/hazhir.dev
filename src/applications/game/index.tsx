@@ -39,6 +39,7 @@ import { RemotePlayer } from "./network/RemotePlayer";
 import { PhysicsEngine } from "./physics-engine";
 import { PlayerControls } from "./player-controls";
 import { FRAGMENT_SHADER, VERTEX_SHADER } from "./shaders/chunk";
+import { MobileControls } from "./ui/mobile-controls";
 import UILayer from "./ui/index";
 import { calculateOffset, getSurfaceHeightFromSeed } from "./utils";
 import { updateWater } from "./water-physics";
@@ -222,6 +223,8 @@ export default function Game() {
   const [isInventoryOpen, setIsInventoryOpen] = useState(false);
   const isInventoryOpenRef = useRef(false);
   const [isDebugVisible, setIsDebugVisible] = useState(false);
+  const [isMobile, setIsMobile] = useState(false);
+  const [isMobilePlaying, setIsMobilePlaying] = useState(false);
   const [debugInfo, setDebugInfo] = useState({
     fps: 0,
     playerPosition: { x: 0, y: 0, z: 0 },
@@ -611,6 +614,14 @@ export default function Game() {
         containerRef.current,
         physics,
       );
+
+      const isMobileDevice = window.matchMedia(
+        "(pointer: coarse) and (hover: none)",
+      ).matches;
+      if (isMobileDevice) {
+        setIsMobile(true);
+        playerControlsRef.current.isMobile = true;
+      }
 
       playerControlsRef.current.controls.addEventListener("lock", () => {
         const infoLayer = document.getElementById("infoLayer");
@@ -1133,7 +1144,7 @@ export default function Game() {
   }
 
   function updateIndicator() {
-    if (playerControlsRef.current?.controls.isLocked) {
+    if (playerControlsRef.current?.controls.isLocked || playerControlsRef.current?.isMobile) {
       let cameraDirection: THREE.Vector3 = new THREE.Vector3();
       camera.getWorldDirection(cameraDirection);
       cameraDirection.normalize();
@@ -1252,7 +1263,7 @@ export default function Game() {
   }
 
   function placeBlock(type: BlockType) {
-    if (playerControlsRef.current?.controls.isLocked) {
+    if (playerControlsRef.current?.controls.isLocked || playerControlsRef.current?.isMobile) {
       raycaster.setFromCamera(pointer, camera);
 
       const intersections = raycaster.intersectObjects(
@@ -1432,7 +1443,7 @@ export default function Game() {
   }
 
   function breakBlock() {
-    if (playerControlsRef.current?.controls.isLocked) {
+    if (playerControlsRef.current?.controls.isLocked || playerControlsRef.current?.isMobile) {
       let cameraDirection: THREE.Vector3 = new THREE.Vector3();
       camera.getWorldDirection(cameraDirection);
       cameraDirection.normalize();
@@ -2428,7 +2439,7 @@ export default function Game() {
       let lookingAtBlock: { x: number; y: number; z: number } | null = null;
       let blockAtCursor: { type: number; light: number } | null = null;
 
-      if (playerControlsRef.current?.controls.isLocked) {
+      if (playerControlsRef.current?.controls.isLocked || playerControlsRef.current?.isMobile) {
         let cameraDirection: THREE.Vector3 = new THREE.Vector3();
         camera.getWorldDirection(cameraDirection);
         cameraDirection.normalize();
@@ -2537,7 +2548,11 @@ export default function Game() {
   };
 
   return (
-    <div className="text-md w-full h-full bg-background" ref={containerRef}>
+    <div
+      className="text-md w-full h-full bg-background"
+      ref={containerRef}
+      style={{ touchAction: "none" }}
+    >
       <UILayer
         onHost={() => {
           networkManager.current.hostGame().then((id) => setPeerId(id));
@@ -2561,9 +2576,57 @@ export default function Game() {
           newSlots[clampedIndex] = block;
           setHotbarSlots(newSlots);
         }}
+        onSelectSlot={(index) => setSelectedSlot(index)}
+        onCloseInventory={() => {
+          setIsInventoryOpen(false);
+          if (!isMobile) playerControlsRef.current?.controls.lock();
+        }}
         debugInfo={debugInfo}
         isDebugVisible={isDebugVisible}
+        isMobile={isMobile}
+        onStartMobile={() => {
+          const infoLayer = document.getElementById("infoLayer");
+          if (infoLayer) infoLayer.style.display = "none";
+          setIsMobilePlaying(true);
+        }}
       />
+      {isMobilePlaying && (
+        <MobileControls
+          containerRef={containerRef}
+          enabled={!isInventoryOpen}
+          onMovement={(forward, backward, left, right) => {
+            playerControlsRef.current?.setMoveState({
+              forward,
+              backward,
+              left,
+              right,
+            });
+          }}
+          onCameraRotate={(dx, dy) => {
+            playerControlsRef.current?.rotateCamera(dx, dy);
+          }}
+          onJumpStart={() => {
+            playerControlsRef.current?.jump();
+          }}
+          onJumpEnd={() => {
+            playerControlsRef.current?.stopJump();
+          }}
+          onBreak={() => {
+            breakBlock();
+          }}
+          onPlace={() => {
+            const blockType =
+              hotbarSlotsRef.current[selectedSlotRef.current];
+            if (blockType) placeBlock(blockType);
+          }}
+          onToggleFly={() => {
+            playerControlsRef.current?.toggleFlying();
+          }}
+          onToggleInventory={() => {
+            setIsInventoryOpen((prev) => !prev);
+          }}
+        />
+      )}
     </div>
   );
 }

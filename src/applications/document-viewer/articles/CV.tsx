@@ -137,9 +137,9 @@ const cvData = {
   ],
 
   languages: [
-    { name: "English", level: "Fluent" },
-    { name: "Swedish", level: "Fluent" },
-    { name: "Kurdish", level: "Fluent" },
+    { name: "English", level: "fluent" },
+    { name: "Swedish", level: "fluent" },
+    { name: "Kurdish", level: "fluent" },
   ],
 
   favorites: [
@@ -148,12 +148,12 @@ const cvData = {
     "React",
     "TailwindCSS",
     "Java",
+    "OpenGL",
+    "Three.js",
+    "Vercel",
     "C++",
     "Python",
     "Git",
-    "Vercel",
-    "Three.js",
-    "OpenGL",
   ],
 } as const;
 
