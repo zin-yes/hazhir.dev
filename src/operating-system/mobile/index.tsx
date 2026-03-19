@@ -105,9 +105,8 @@ export function MobileStatusBar({
       className="fixed top-0 left-0 right-0 z-[9000] flex items-center justify-between px-4 py-1 text-white text-xs select-none transition-colors duration-300"
       style={{
         height: 28,
-        backgroundColor: hasActiveApp
-          ? (activeTitlebarColor ?? "hsl(var(--primary))")
-          : "transparent",
+        backgroundColor: hasActiveApp ? "#000000" : "transparent",
+        color: hasActiveApp ? "#ffffff" : undefined,
       }}
       onPointerDown={(e) => {
         if (profileMenuOpen) return;
@@ -732,16 +731,18 @@ export function MobileNavBar({
   onHome,
   onRecents,
   onAppDrawer,
+  isAppDrawerOpen,
 }: {
   onHome: () => void;
   onRecents: () => void;
   onAppDrawer: () => void;
+  isAppDrawerOpen?: boolean;
 }) {
   const swipeStartRef = useRef<number | null>(null);
 
   return (
     <div
-      className="fixed bottom-0 left-0 right-0 z-[9050] flex flex-col items-center bg-black/30 backdrop-blur-md"
+      className="fixed bottom-0 left-0 right-0 z-[9999] flex flex-col items-center bg-black/30 backdrop-blur-md"
       onPointerDown={(e) => {
         swipeStartRef.current = e.clientY;
       }}
@@ -780,7 +781,11 @@ export function MobileNavBar({
           onClick={onAppDrawer}
           aria-label="App drawer"
         >
-          <ChevronDown size={21} className="rotate-180 text-white" />
+          <ChevronDown
+            size={21}
+            className="text-white transition-transform duration-300"
+            style={{ transform: isAppDrawerOpen ? "rotate(0deg)" : "rotate(180deg)" }}
+          />
         </button>
       </div>
     </div>
