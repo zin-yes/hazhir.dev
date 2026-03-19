@@ -1114,10 +1114,15 @@ export default function OperatingSystemPage() {
                 <MobileNavBar
                   onHome={handleMobileHome}
                   onRecents={handleMobileRecents}
+                  isAppDrawerOpen={appDrawerOpen}
                   onAppDrawer={() => {
-                    setAppDrawerOpen(true);
-                    setAppSwitcherOpen(false);
-                    setNotificationDrawerOpen(false);
+                    if (appDrawerOpen) {
+                      setAppDrawerOpen(false);
+                    } else {
+                      setAppDrawerOpen(true);
+                      setAppSwitcherOpen(false);
+                      setNotificationDrawerOpen(false);
+                    }
                   }}
                 />
               </>
