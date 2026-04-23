@@ -53,6 +53,7 @@ const cvData = {
         "Reached <strong>~30k SEK in monthly recurring revenue</strong>.",
         "Went from MVP to a stable version one of the product still operating today in only a couple of months.",
         "Talked to users daily to fix issues and add features.",
+        "Atlas eventually became a part of the Antler portfolio.",
         'See more at <a href="https://hazhir.dev/atlas">this article</a>.',
       ],
     },
