@@ -1,6 +1,9 @@
+import { PostHogPageView } from "@/components/posthog-pageview";
 import { Toaster } from "@/components/ui/sonner";
+import { PostHogProvider } from "@/providers/posthog-provider";
 import { ThemeProvider } from "@/providers/theme-provider";
 import { TrpcProvider } from "@/providers/trpc-provider";
+import { Suspense } from "react";
 
 import "./global.css";
 
@@ -38,18 +41,23 @@ export default function RootLayout({
       <body
         className={`${default_font.className} h-full overflow-hidden overscroll-none`}
       >
-        <TrpcProvider>
-          <ThemeProvider
-            enableSystem
-            storageKey="currentTheme"
-            attribute="class"
-            defaultTheme="dark"
-            forcedTheme="dark"
-          >
-            {children}
-            <Toaster richColors position="top-right" />
-          </ThemeProvider>
-        </TrpcProvider>
+        <PostHogProvider>
+          <TrpcProvider>
+            <ThemeProvider
+              enableSystem
+              storageKey="currentTheme"
+              attribute="class"
+              defaultTheme="dark"
+              forcedTheme="dark"
+            >
+              <Suspense>
+                <PostHogPageView />
+              </Suspense>
+              {children}
+              <Toaster richColors position="top-right" />
+            </ThemeProvider>
+          </TrpcProvider>
+        </PostHogProvider>
       </body>
     </html>
   );

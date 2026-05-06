@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { useSession } from "@/auth/client";
 import { trpc } from "@/lib/trpc/client";
+import posthog from "posthog-js";
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                             */
@@ -148,6 +149,7 @@ export function useChatState() {
       setFriendEmailInputValue("");
       setIsAddFriendFormVisible(false);
       pendingFriendsQuery.refetch();
+      posthog.capture("friend_request_sent");
     },
   });
   const respondToFriendRequestMutation =
@@ -610,6 +612,8 @@ export function useChatState() {
 
     const generatedMessageId = crypto.randomUUID();
     const trimmedContent = messageInputValue.trim();
+
+    posthog.capture("chat_message_sent");
 
     /* Persist via server */
     sendMessageMutation.mutate({

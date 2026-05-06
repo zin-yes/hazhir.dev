@@ -16,6 +16,7 @@ import {
   hasFileDragType,
   readDroppedPathsFromDataTransfer,
 } from "@/lib/file-transfer-dnd";
+import { usePostHog } from "posthog-js/react";
 import { setActiveTerminalWindow, setCwd } from "./command-callbacks/cd";
 import {
   getCommandLinePrefix,
@@ -87,6 +88,10 @@ export default function TerminalApplication({
       terminal.options.theme = terminalTheme;
     }
   }, [terminalTheme]);
+
+  const posthog = usePostHog();
+  const posthogRef = useRef(posthog);
+  useEffect(() => { posthogRef.current = posthog; }, [posthog]);
 
   const session = useSession();
   const sessionRef = useRef(session);
@@ -187,6 +192,9 @@ export default function TerminalApplication({
 
             terminal.onKey(async (event) => {
               keyHandled = true;
+              if (event.domEvent.key === "Enter") {
+                posthogRef.current?.capture("terminal_command_typed");
+              }
               await parseCommand(
                 terminal,
                 event,

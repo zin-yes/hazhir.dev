@@ -4,13 +4,16 @@ export default function Terms() {
       <h1 className="text-3xl font-bold mb-6">Terms of Service</h1>
 
       <p className="mb-4 text-sm text-gray-400">
-        Last updated: March 14th 2026
+        Last updated: May 7th 2026
       </p>
 
       <h2 className="text-xl font-semibold mt-8 mb-2">Service Description</h2>
       <p>
         This website is an experimental portfolio project that simulates an
-        operating system environment within a web browser.
+        operating system environment within a web browser. The site collects
+        anonymous interaction analytics to understand how it is used. See the{" "}
+        <a href="/privacy" className="text-blue-400">Privacy Policy</a> for
+        details.
       </p>
 
       <h2 className="text-xl font-semibold mt-8 mb-2">Acceptable Use</h2>

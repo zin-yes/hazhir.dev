@@ -53,6 +53,7 @@ import { Input } from "@/components/ui/input";
 import { useAuthPillar } from "@/hooks/use-auth-pillar";
 import { useFileSystem } from "@/hooks/use-file-system";
 import { OS_LAUNCH_APPLICATION_EVENT, requestLaunchApplication } from "@/lib/application-launcher";
+import { usePostHog } from "posthog-js/react";
 import { executeFilePath } from "@/lib/file-execution";
 import {
   FILE_PATH_DROP_EVENT,
@@ -258,6 +259,10 @@ function renderShortcutIcon(iconName?: string) {
   }
 }
 export default function OperatingSystemPage() {
+  const posthog = usePostHog();
+  const posthogRef = useRef(posthog);
+  useEffect(() => { posthogRef.current = posthog; }, [posthog]);
+
   const fs = useFileSystem();
   const fsRef = useRef(fs);
   const deviceMode = useDeviceMode();
@@ -563,6 +568,7 @@ export default function OperatingSystemPage() {
       const detail = (event as CustomEvent<{ appId: string; args?: string[] }>)
         .detail;
       if (!detail?.appId) return;
+      posthogRef.current?.capture("app_launched", { app_id: detail.appId });
 
       // Helper to decide whether to launch as mobile window or desktop window
       const launchMobile = (
@@ -1484,12 +1490,24 @@ export default function OperatingSystemPage() {
       </ContextMenuContent>
     </ContextMenu> 
     </>*/}
-      {typeof window !== "undefined" && window.location.pathname in autoLaunchRoutes ? null : (
+      {typeof window !== "undefined" && window.location.pathname in autoLaunchRoutes && (
         <CookieConsent
           variant="small"
-          description="This site uses essential cookies for authentication. No tracking or advertising cookies are used."
-          onAcceptCallback={() => setCookiesDeclined(false)}
-          onDeclineCallback={() => setCookiesDeclined(true)}
+          description={
+            <>
+              This site uses analytics to understand how it&apos;s used. See our{" "}
+              <a href="/privacy" className="underline hover:no-underline">Privacy Policy</a> and{" "}
+              <a href="/cookies" className="underline hover:no-underline">Cookie Policy</a> for details.
+            </>
+          }
+          onAcceptCallback={() => {
+            setCookiesDeclined(false);
+            posthog?.startSessionRecording();
+          }}
+          onDeclineCallback={() => {
+            setCookiesDeclined(true);
+            posthog?.stopSessionRecording();
+          }}
         />
       )}
     </>
