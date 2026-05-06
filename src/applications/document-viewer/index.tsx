@@ -9,8 +9,11 @@ import { OS_LAUNCH_APPLICATION_EVENT } from "@/lib/application-launcher";
 import { getHomePath } from "@/lib/system-user";
 import { FileSearch } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { usePostHog } from "posthog-js/react";
 import DocumentCanvas from "./components/document-canvas";
 import { buildPrintableDocumentHtml } from "./lib/document-viewer-utils";
+
+const ARTICLE_PATHS = ["/atlas", "/hazhir-dev", "/metricjournal", "/gamma-engine"];
 
 export default function DocumentViewerApplication({
   filePath,
@@ -19,6 +22,7 @@ export default function DocumentViewerApplication({
   filePath?: string;
   mode?: "full" | "single";
 }) {
+  const posthog = usePostHog();
   const fileSystem = useFileSystem();
   const documentsRootPath = `${getHomePath()}/Documents`;
   const containerReference = useRef<HTMLDivElement | null>(null);
@@ -29,6 +33,9 @@ export default function DocumentViewerApplication({
   );
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
   const [isPickerOpen, setIsPickerOpen] = useState(false);
+  const cvEventFiredRef = useRef(false);
+  const articleEventFiredRef = useRef(false);
+  const scrollMilestonesRef = useRef<Set<number>>(new Set());
 
   const documentFiles = useMemo(() => {
     return fileSystem.getChildren(documentsRootPath, true).filter((node) => {
@@ -63,6 +70,52 @@ export default function DocumentViewerApplication({
     if (!selectedDocument) return "";
     return fileSystem.getFileContents(selectedDocument.path) ?? "";
   }, [fileSystem, selectedDocument]);
+
+  // Fire cv_opened once when the CV document becomes available
+  useEffect(() => {
+    if (!selectedDocument || cvEventFiredRef.current) return;
+    if (selectedDocument.name !== "CV.document") return;
+    cvEventFiredRef.current = true;
+    posthog?.capture("cv_opened", {
+      source: window.location.pathname === "/cv" ? "cv_url" : "app",
+      referrer: document.referrer,
+    });
+  }, [selectedDocument, posthog]);
+
+  // Fire article_opened once when a non-CV document loads on an article route
+  useEffect(() => {
+    if (!selectedDocument || articleEventFiredRef.current) return;
+    if (selectedDocument.name === "CV.document") return;
+    if (!ARTICLE_PATHS.includes(window.location.pathname)) return;
+    articleEventFiredRef.current = true;
+    posthog?.capture("article_opened", {
+      article: selectedDocument.name.replace(".document", ""),
+      source: window.location.pathname,
+    });
+  }, [selectedDocument, posthog]);
+
+  // Scroll depth tracking for CV — fires at 25/50/75/100% milestones
+  useEffect(() => {
+    if (!selectedDocument || selectedDocument.name !== "CV.document") return;
+    const scrollEl = mode === "single" ? singleScrollReference.current : fullScrollReference.current;
+    if (!scrollEl) return;
+
+    const handleScroll = () => {
+      const { scrollTop, scrollHeight, clientHeight } = scrollEl;
+      const scrollable = scrollHeight - clientHeight;
+      if (scrollable <= 0) return;
+      const pct = Math.floor((scrollTop / scrollable) * 100);
+      for (const milestone of [25, 50, 75, 100]) {
+        if (pct >= milestone && !scrollMilestonesRef.current.has(milestone)) {
+          scrollMilestonesRef.current.add(milestone);
+          posthog?.capture("cv_scroll_depth", { depth_percent: milestone });
+        }
+      }
+    };
+
+    scrollEl.addEventListener("scroll", handleScroll, { passive: true });
+    return () => scrollEl.removeEventListener("scroll", handleScroll);
+  }, [selectedDocument, mode, posthog]);
 
   const downloadSelectedDocument = async () => {
     if (!selectedDocument || isGeneratingPdf) return;

@@ -3,6 +3,7 @@
 import { buildDefaultFileSystem } from "@/config/system-file-system";
 import { getImagesDirectoryPath } from "@/lib/image-files";
 import { getCurrentSystemUsername, getHomePath } from "@/lib/system-user";
+import { usePostHog } from "posthog-js/react";
 
 export type FileSystemNodeType = "file" | "directory";
 
@@ -45,6 +46,8 @@ export function getFileSystemStorageKey(username: string): string {
 }
 
 export function useFileSystem() {
+  const posthog = usePostHog();
+
   function normalizePath(path: string): string {
     const raw = (path || "").replace(/\/+/g, "/");
     const absolute = raw.startsWith("/") ? raw : `/${raw}`;
@@ -295,6 +298,7 @@ export function useFileSystem() {
       isHidden: name.startsWith("."),
     });
     saveFileSystem(fs);
+    posthog?.capture("file_created", { extension: name.split(".").pop() ?? "unknown" });
     return true;
   }
 
@@ -316,6 +320,7 @@ export function useFileSystem() {
       modifiedAt: Date.now(),
     };
     saveFileSystem(fs);
+    posthog?.capture("file_edited", { extension: fs[index].name.split(".").pop() ?? "unknown" });
     return true;
   }
 

@@ -19,7 +19,7 @@ interface CookieConsentProps extends React.HTMLAttributes<HTMLDivElement> {
   demo?: boolean;
   onAcceptCallback?: () => void;
   onDeclineCallback?: () => void;
-  description?: string;
+  description?: React.ReactNode;
   learnMoreHref?: string;
 }
 
@@ -31,7 +31,13 @@ const CookieConsent = React.forwardRef<HTMLDivElement, CookieConsentProps>(
       onAcceptCallback = () => {},
       onDeclineCallback = () => {},
       className,
-      description = "We use cookies to ensure you get the best experience on our website. For more information on how we use cookies, please see our cookie policy.",
+      description = (
+        <>
+          This site uses analytics to understand how it&apos;s used. See our{" "}
+          <a href="/privacy" className="underline hover:no-underline">Privacy Policy</a> and{" "}
+          <a href="/cookies" className="underline hover:no-underline">Cookie Policy</a> for details.
+        </>
+      ),
       learnMoreHref = "#",
       ...props
     },
@@ -74,6 +80,11 @@ const CookieConsent = React.forwardRef<HTMLDivElement, CookieConsentProps>(
 
     if (hide) return null;
 
+    const overlayClasses = cn(
+      "fixed inset-0 z-[999998] bg-black/60 backdrop-blur-sm transition-all duration-700",
+      !isOpen ? "opacity-0 pointer-events-none" : "opacity-100",
+    );
+
     const containerClasses = cn(
       "fixed z-[999999] transition-all duration-700",
       !isOpen ? "translate-y-full opacity-0" : "translate-y-0 opacity-100",
@@ -93,6 +104,8 @@ const CookieConsent = React.forwardRef<HTMLDivElement, CookieConsentProps>(
 
     if (variant === "default") {
       return (
+        <>
+          <div className={overlayClasses} />
         <div {...commonWrapperProps}>
           <Card className="m-3 shadow-lg">
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
@@ -128,11 +141,14 @@ const CookieConsent = React.forwardRef<HTMLDivElement, CookieConsentProps>(
             </CardFooter>
           </Card>
         </div>
+        </>
       );
     }
 
     if (variant === "small") {
       return (
+        <>
+          <div className={overlayClasses} />
         <div {...commonWrapperProps}>
           <Card className="m-3 shadow-lg">
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2 h-0 px-4">
@@ -163,11 +179,14 @@ const CookieConsent = React.forwardRef<HTMLDivElement, CookieConsentProps>(
             </CardFooter>
           </Card>
         </div>
+        </>
       );
     }
 
     if (variant === "mini") {
       return (
+        <>
+          <div className={overlayClasses} />
         <div {...commonWrapperProps}>
           <Card className="mx-3 p-0 py-3 shadow-lg">
             <CardContent className="sm:flex grid gap-4 p-0 px-3.5">
@@ -196,6 +215,7 @@ const CookieConsent = React.forwardRef<HTMLDivElement, CookieConsentProps>(
             </CardContent>
           </Card>
         </div>
+        </>
       );
     }
 
