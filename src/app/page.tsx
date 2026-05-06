@@ -1490,7 +1490,7 @@ export default function OperatingSystemPage() {
       </ContextMenuContent>
     </ContextMenu> 
     </>*/}
-      {typeof window !== "undefined" && window.location.pathname in autoLaunchRoutes && (
+      {hasMounted && window.location.pathname in autoLaunchRoutes && (
         <CookieConsent
           variant="small"
           description={
