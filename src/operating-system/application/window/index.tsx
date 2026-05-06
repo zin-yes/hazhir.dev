@@ -23,6 +23,7 @@ import {
   addTopResizeHandleEvent,
 } from "@/operating-system/application/window/resizability";
 import { AppWindowIcon, Maximize2, Minimize2, X } from "lucide-react";
+import { usePostHog } from "posthog-js/react";
 import { v4 } from "uuid";
 
 const OS_WINDOW_CURSOR_CHANGE_EVENT = "os-window-cursor-change";
@@ -109,6 +110,8 @@ export default function ApplicationWindow({
     allow_overflow?: boolean;
   };
 }) {
+  const posthog = usePostHog();
+  const isResizingRef = useRef(false);
   const [maximized, setMaximized] = useState(false);
   const isFirefox =
     typeof navigator !== "undefined" && /firefox/i.test(navigator.userAgent);
@@ -298,6 +301,30 @@ export default function ApplicationWindow({
 
       // Dragging handle for the pane.
       addDraggingHandleEvent(titleElement, ref.current);
+
+      // Mark resize start on any resize handle pointerdown
+      const resizeHandles = [
+        rightResizeHandleElement, leftResizeHandleElement,
+        topResizeHandleElement, bottomResizeHandleElement,
+        bottomRightResizeHandleElement, topRightResizeHandleElement,
+        bottomLeftResizeHandleElement, topLeftResizeHandleElement,
+      ].filter(Boolean);
+      const onResizeStart = () => { isResizingRef.current = true; };
+      resizeHandles.forEach((handle) => handle.addEventListener("pointerdown", onResizeStart));
+
+      // Fire window_resized once per drag on pointerup
+      const onResizeEnd = () => {
+        if (isResizingRef.current) {
+          isResizingRef.current = false;
+          posthog?.capture("window_resized", { window_type: type ?? "UNDEFINED" });
+        }
+      };
+      document.addEventListener("pointerup", onResizeEnd);
+
+      return () => {
+        resizeHandles.forEach((handle) => handle.removeEventListener("pointerdown", onResizeStart));
+        document.removeEventListener("pointerup", onResizeEnd);
+      };
     }
   }, [
     ref,
@@ -306,6 +333,8 @@ export default function ApplicationWindow({
     settings.starting_width!,
     settings.starting_height!,
     titleId,
+    type,
+    posthog,
   ]);
 
   const maximize = () => {
@@ -320,6 +349,7 @@ export default function ApplicationWindow({
         ref.current.getElementsByClassName(styles.body)[0] as HTMLDivElement
       ).style.borderRadius = "0em";
       setMaximized(true);
+      posthog?.capture("window_maximized", { window_type: type ?? "UNDEFINED" });
 
       setTimeout(() => {
         if (ref.current) ref.current.style.transition = "";
@@ -360,6 +390,7 @@ export default function ApplicationWindow({
           addDraggingHandleEvent(titleElement, ref.current);
         }
         setMaximized(false);
+        posthog?.capture("window_restored", { window_type: type ?? "UNDEFINED" });
       }
     }
   };
