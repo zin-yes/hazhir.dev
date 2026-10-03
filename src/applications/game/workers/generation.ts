@@ -31,11 +31,7 @@ function getDirtHeight(
   return dirtHeight;
 }
 
-export function getSurfaceHeight(
-  noiseGenerator: typeof FastNoiseLite,
-  x: number,
-  z: number
-): number {
+function configureSurfaceNoise(noiseGenerator: typeof FastNoiseLite) {
   noiseGenerator.SetNoiseType(FastNoiseLite.NoiseType.OpenSimplex2);
   noiseGenerator.SetFractalType(FastNoiseLite.FractalType.FBm);
   noiseGenerator.SetFrequency(0.0035 * GENERATION_FREQUENCY_MULTIPLIER);
@@ -43,6 +39,23 @@ export function getSurfaceHeight(
   noiseGenerator.SetFractalLacunarity(2.24);
   noiseGenerator.SetFractalGain(0.42);
   noiseGenerator.SetFractalWeightedStrength(0);
+}
+
+export function getSurfaceHeight(
+  noiseGenerator: typeof FastNoiseLite,
+  x: number,
+  z: number
+): number {
+  configureSurfaceNoise(noiseGenerator);
+  return sampleSurfaceHeight(noiseGenerator, x, z);
+}
+
+// Expects a generator already passed through configureSurfaceNoise.
+function sampleSurfaceHeight(
+  noiseGenerator: typeof FastNoiseLite,
+  x: number,
+  z: number
+): number {
   const noiseValue = noiseGenerator.GetNoise(x, 0, z);
   let surfaceY = 0;
 
@@ -105,41 +118,6 @@ function getTunnelCaveNoise(
   noiseGenerator.SetFractalWeightedStrength(0);
   noiseGenerator.SetFractalPingPongStrength(1.17);
   const noiseValue = noiseGenerator.GetNoise(x, y * 3, z);
-  return noiseValue;
-}
-
-function getChamberCaveNoise(
-  noiseGenerator: typeof FastNoiseLite,
-  x: number,
-  y: number,
-  z: number
-): number {
-  noiseGenerator.SetNoiseType(FastNoiseLite.NoiseType.Cellular);
-  noiseGenerator.SetFractalType(FastNoiseLite.FractalType.None);
-  noiseGenerator.SetFrequency(0.03);
-  noiseGenerator.SetFractalOctaves(1);
-  noiseGenerator.SetFractalLacunarity(0);
-  noiseGenerator.SetFractalGain(0);
-  noiseGenerator.SetFractalWeightedStrength(0);
-  noiseGenerator.SetCellularDistanceFunction(
-    FastNoiseLite.CellularDistanceFunction.Euclidean
-  );
-  noiseGenerator.SetCellularReturnType(
-    FastNoiseLite.CellularReturnType.Distance2Mul
-  );
-  const noiseValue = noiseGenerator.GetNoise(x, y * 3, z);
-  return noiseValue;
-}
-
-function getPorousnessNoise(
-  noiseGenerator: typeof FastNoiseLite,
-  x: number,
-  z: number
-): number {
-  noiseGenerator.SetNoiseType(FastNoiseLite.NoiseType.Perlin);
-  noiseGenerator.SetFractalType(FastNoiseLite.FractalType.None);
-  noiseGenerator.SetFrequency(0.009);
-  const noiseValue = noiseGenerator.GetNoise(x, 0, z);
   return noiseValue;
 }
 
@@ -282,27 +260,84 @@ const BLOCK_LAYERS: BlockLayer[] = [
 
 const WATER_LEVEL = 80;
 
+// Highest a tree leaf can sit above the grass it grows from.
+const TREE_CANOPY_REACH = 10;
+const TREE_COLUMN_MARGIN = 2;
+
+interface TerrainSampler {
+  surfaceHeightAt(x: number, z: number): number;
+  porousnessAt(x: number, z: number): number;
+  chamberCaveNoiseAt(x: number, y: number, z: number): number;
+}
+
+function columnKey(x: number, z: number): number {
+  return (x + 1048576) * 2097152 + (z + 1048576);
+}
+
+// Each noise generator is configured once and every per-column value is
+// computed once, instead of reconfiguring and resampling per block.
+function createTerrainSampler(seed: number): TerrainSampler {
+  const surfaceNoise = new FastNoiseLite();
+  surfaceNoise.SetSeed(seed);
+  configureSurfaceNoise(surfaceNoise);
+
+  const chamberNoise = new FastNoiseLite();
+  chamberNoise.SetSeed(seed);
+  chamberNoise.SetNoiseType(FastNoiseLite.NoiseType.Cellular);
+  chamberNoise.SetFractalType(FastNoiseLite.FractalType.None);
+  chamberNoise.SetFrequency(0.03);
+  chamberNoise.SetFractalOctaves(1);
+  chamberNoise.SetFractalLacunarity(0);
+  chamberNoise.SetFractalGain(0);
+  chamberNoise.SetFractalWeightedStrength(0);
+  chamberNoise.SetCellularDistanceFunction(
+    FastNoiseLite.CellularDistanceFunction.Euclidean
+  );
+  chamberNoise.SetCellularReturnType(
+    FastNoiseLite.CellularReturnType.Distance2Mul
+  );
+
+  const porousnessNoise = new FastNoiseLite();
+  porousnessNoise.SetSeed(seed);
+  porousnessNoise.SetNoiseType(FastNoiseLite.NoiseType.Perlin);
+  porousnessNoise.SetFractalType(FastNoiseLite.FractalType.None);
+  porousnessNoise.SetFrequency(0.009);
+
+  const surfaceHeights = new Map<number, number>();
+  const porousnessValues = new Map<number, number>();
+
+  return {
+    surfaceHeightAt(x, z) {
+      const key = columnKey(x, z);
+      let height = surfaceHeights.get(key);
+      if (height === undefined) {
+        height = sampleSurfaceHeight(surfaceNoise, x, z);
+        surfaceHeights.set(key, height);
+      }
+      return height;
+    },
+    porousnessAt(x, z) {
+      const key = columnKey(x, z);
+      let porousness = porousnessValues.get(key);
+      if (porousness === undefined) {
+        porousness = porousnessNoise.GetNoise(x, 0, z);
+        porousnessValues.set(key, porousness);
+      }
+      return porousness;
+    },
+    chamberCaveNoiseAt(x, y, z) {
+      return chamberNoise.GetNoise(x, y * 3, z);
+    },
+  };
+}
+
 function generateBlock(
-  noiseGenerator: typeof FastNoiseLite,
+  sampler: TerrainSampler,
   x: number,
   y: number,
   z: number
 ): number {
-  //return y < 2
-  //  ? Math.abs(x % CHUNK_WIDTH) === 0 ||
-  //    Math.abs(x % CHUNK_WIDTH) === CHUNK_WIDTH ||
-  //    Math.abs(z % CHUNK_LENGTH) === 0 ||
-  //    Math.abs(z % CHUNK_LENGTH) === CHUNK_LENGTH
-  //    ? BlockType.AIR
-  //    : BlockType.COBBLESTONE
-  //  : BlockType.AIR;
-  //const flowerGrassNoise = getFlowerGrassNoise(x, z);
-
-  // const splochNoise = getSplochNoise(noiseGenerator, x, y, z);
-  // const chamberCaveNoise = getChamberCaveNoise(noiseGenerator, x, y, z);
-  // const porousnessNoise = getPorousnessNoise(noiseGenerator, x, z);
-
-  const surfaceY = getSurfaceHeight(noiseGenerator, x, z);
+  const surfaceY = sampler.surfaceHeightAt(x, z);
 
   let block = BlockType.AIR;
 
@@ -337,8 +372,8 @@ function generateBlock(
     block !== BlockType.HUMUS &&
     block !== BlockType.SILT
   ) {
-    const chamberCaveNoise = getChamberCaveNoise(noiseGenerator, x, y, z);
-    const porousnessNoise = getPorousnessNoise(noiseGenerator, x, z);
+    const chamberCaveNoise = sampler.chamberCaveNoiseAt(x, y, z);
+    const porousnessNoise = sampler.porousnessAt(x, z);
     const isChamberCave = chamberCaveNoise > -0.7 + porousnessNoise * 0.2;
 
     if (isChamberCave) block = BlockType.AIR;
@@ -354,7 +389,7 @@ function pseudoRandom(x: number, z: number, seed: number): number {
 
 // Check if a tree would spawn at a given global position (deterministic)
 function wouldTreeSpawnAt(
-  noiseGenerator: typeof FastNoiseLite,
+  sampler: TerrainSampler,
   globalX: number,
   globalZ: number,
   seed: number
@@ -362,7 +397,7 @@ function wouldTreeSpawnAt(
   const treeRnd = pseudoRandom(globalX, globalZ, seed);
   if (treeRnd <= 0.98) return false;
 
-  const surfaceY = getSurfaceHeight(noiseGenerator, globalX, globalZ);
+  const surfaceY = sampler.surfaceHeightAt(globalX, globalZ);
   const grassY = Math.floor(surfaceY);
 
   // Check if there's grass at surface (trees only spawn on grass)
@@ -373,7 +408,7 @@ function wouldTreeSpawnAt(
 
 // Check if any tree exists within a given radius of a position
 function hasTreeNearby(
-  noiseGenerator: typeof FastNoiseLite,
+  sampler: TerrainSampler,
   globalX: number,
   globalZ: number,
   seed: number,
@@ -382,7 +417,7 @@ function hasTreeNearby(
   for (let dx = -radius; dx <= radius; dx++) {
     for (let dz = -radius; dz <= radius; dz++) {
       if (dx === 0 && dz === 0) continue;
-      if (wouldTreeSpawnAt(noiseGenerator, globalX + dx, globalZ + dz, seed)) {
+      if (wouldTreeSpawnAt(sampler, globalX + dx, globalZ + dz, seed)) {
         return true;
       }
     }
@@ -511,14 +546,30 @@ export function _generateChunk(
   }
 }
 
+function maxSurfaceHeightAround(
+  sampler: TerrainSampler,
+  chunkX: number,
+  chunkZ: number
+): number {
+  let maxHeight = -Infinity;
+  for (let x = -TREE_COLUMN_MARGIN; x < CHUNK_WIDTH + TREE_COLUMN_MARGIN; x++) {
+    for (let z = -TREE_COLUMN_MARGIN; z < CHUNK_LENGTH + TREE_COLUMN_MARGIN; z++) {
+      maxHeight = Math.max(
+        maxHeight,
+        sampler.surfaceHeightAt(x + CHUNK_WIDTH * chunkX, z + CHUNK_LENGTH * chunkZ)
+      );
+    }
+  }
+  return maxHeight;
+}
+
 export function generateChunk(
   seed: number,
   chunkX: number,
   chunkY: number,
   chunkZ: number
 ): ArrayBuffer {
-  const noiseGenerator = new FastNoiseLite();
-  noiseGenerator.SetSeed(seed);
+  const sampler = createTerrainSampler(seed);
 
   const chunk: Uint8Array = new Uint8Array(
     CHUNK_WIDTH * CHUNK_HEIGHT * CHUNK_LENGTH
@@ -529,11 +580,22 @@ export function generateChunk(
   let treesPlaced = 0;
 
   startWorkerSection("terrainNoise");
+  const chunkFloorY = chunkY * CHUNK_HEIGHT;
+  const isEntirelyAboveTerrain =
+    chunkFloorY >= WATER_LEVEL &&
+    chunkFloorY > maxSurfaceHeightAround(sampler, chunkX, chunkZ) + TREE_CANOPY_REACH;
+  if (isEntirelyAboveTerrain) {
+    endWorkerSection();
+    addWorkerCounter("blocksGenerated", chunk.length);
+    addWorkerCounter("skippedAirChunks", 1);
+    return chunk.buffer;
+  }
+
   for (let x = 0; x < CHUNK_WIDTH; x++) {
     for (let y = 0; y < CHUNK_HEIGHT; y++) {
       for (let z = 0; z < CHUNK_LENGTH; z++) {
         const generatedBlock = generateBlock(
-          noiseGenerator,
+          sampler,
           x + CHUNK_WIDTH * chunkX,
           y + CHUNK_HEIGHT * chunkY,
           z + CHUNK_LENGTH * chunkZ
@@ -556,14 +618,14 @@ export function generateChunk(
       const globalZ = z + CHUNK_LENGTH * chunkZ;
 
       // Skip flora placement if a tree would spawn here
-      if (wouldTreeSpawnAt(noiseGenerator, globalX, globalZ, seed)) {
+      if (wouldTreeSpawnAt(sampler, globalX, globalZ, seed)) {
         continue;
       }
 
       // Tall grass: make it more common than flowers and trees
       const tallRnd = pseudoRandom(globalX, globalZ, seed + 456);
       if (tallRnd > 0.9) {
-        const surfaceY = getSurfaceHeight(noiseGenerator, globalX, globalZ);
+        const surfaceY = sampler.surfaceHeightAt(globalX, globalZ);
         const grassY = Math.floor(surfaceY);
 
         if (grassY >= WATER_LEVEL) {
@@ -580,7 +642,7 @@ export function generateChunk(
         const flowerRnd = pseudoRandom(globalX, globalZ, seed + 123);
 
         if (flowerRnd > 0.97) {
-          const surfaceY = getSurfaceHeight(noiseGenerator, globalX, globalZ);
+          const surfaceY = sampler.surfaceHeightAt(globalX, globalZ);
           const grassY = Math.floor(surfaceY);
 
           if (grassY >= WATER_LEVEL) {
@@ -620,15 +682,15 @@ export function generateChunk(
 
       if (treeRnd > 0.98) {
         // Check if another tree would spawn within 3 blocks
-        if (hasTreeNearby(noiseGenerator, globalX, globalZ, seed, 3)) {
+        if (hasTreeNearby(sampler, globalX, globalZ, seed, 3)) {
           continue;
         }
 
-        const surfaceY = getSurfaceHeight(noiseGenerator, globalX, globalZ);
+        const surfaceY = sampler.surfaceHeightAt(globalX, globalZ);
         const grassY = Math.floor(surfaceY);
 
         const potentialGrass = generateBlock(
-          noiseGenerator,
+          sampler,
           globalX,
           grassY,
           globalZ
@@ -658,5 +720,5 @@ export function generateChunk(
   addWorkerCounter("treesPlaced", treesPlaced);
   addWorkerCounter("floraPlaced", floraPlaced);
 
-  return new Uint8Array(chunk).buffer;
+  return chunk.buffer;
 }
