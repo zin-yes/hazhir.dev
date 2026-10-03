@@ -6,6 +6,7 @@
     "dev": "next dev",
     "build": "next build",
     "generate:blocks": "bun scripts/generate-blocks.ts",
+    "generate:plant-voxels": "bun scripts/generate-plant-voxels.ts",
     "start": "next start",
     "lint": "next lint",
     "db:push": "drizzle-kit push",
