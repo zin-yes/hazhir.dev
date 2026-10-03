@@ -1,4 +1,5 @@
 import { BlockType, getWaterLevel, isWater } from "./blocks";
+import { profiler } from "./profiler";
 
 // Safe version of isWater that handles null
 const safeIsWater = (block: BlockType | null): block is BlockType => {
@@ -12,6 +13,23 @@ const safeGetWaterLevel = (block: BlockType | null): number => {
 };
 
 export function updateWater(
+  x: number,
+  y: number,
+  z: number,
+  getBlock: (x: number, y: number, z: number) => BlockType | null,
+  setBlock: (x: number, y: number, z: number, block: BlockType) => void,
+  scheduleUpdate: (x: number, y: number, z: number) => void
+) {
+  profiler.addCounter("game.water.cellsUpdated");
+  const scopeToken = profiler.begin("main.water.updateWater");
+  try {
+    updateWaterCell(x, y, z, getBlock, setBlock, scheduleUpdate);
+  } finally {
+    profiler.end(scopeToken);
+  }
+}
+
+function updateWaterCell(
   x: number,
   y: number,
   z: number,

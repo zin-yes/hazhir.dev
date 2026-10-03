@@ -1,3 +1,5 @@
+import { estimateTransferBytes, profiler } from "../profiler";
+
 const DATABASE_NAME = "hazhir-dev-voxel-worlds";
 const OBJECT_STORE_NAME = "worlds";
 const LEGACY_SAVE_STORAGE_KEY = "hazhir-dev-save";
@@ -38,13 +40,25 @@ function openDatabase(): Promise<IDBDatabase> {
 async function runTransaction<Result>(
   mode: IDBTransactionMode,
   operation: (store: IDBObjectStore) => IDBRequest<Result>,
+  operationName: string,
 ): Promise<Result> {
+  const startedAtMs = profiler.now();
   const database = await openDatabase();
+  profiler.recordTimer(
+    `main.worldStore.${operationName}.open`,
+    profiler.now() - startedAtMs,
+    "latency",
+  );
   return new Promise<Result>((resolve, reject) => {
     const transaction = database.transaction(OBJECT_STORE_NAME, mode);
     const request = operation(transaction.objectStore(OBJECT_STORE_NAME));
     transaction.oncomplete = () => {
       database.close();
+      profiler.recordTimer(
+        `main.worldStore.${operationName}`,
+        profiler.now() - startedAtMs,
+        "latency",
+      );
       resolve(request.result);
     };
     transaction.onerror = () => {
@@ -86,11 +100,14 @@ export function createWorldRecord(name: string, seed: number): StoredWorld {
 }
 
 export function saveWorldRecord(world: StoredWorld): Promise<IDBValidKey> {
-  return runTransaction("readwrite", (store) => store.put(world));
+  if (profiler.enabled) {
+    profiler.recordBytes("bytes.worldStore.put", estimateTransferBytes(world));
+  }
+  return runTransaction("readwrite", (store) => store.put(world), "put");
 }
 
 export function deleteWorldRecord(worldId: string): Promise<undefined> {
-  return runTransaction("readwrite", (store) => store.delete(worldId));
+  return runTransaction("readwrite", (store) => store.delete(worldId), "delete");
 }
 
 async function importLegacySaveIfPresent(): Promise<void> {
@@ -120,8 +137,13 @@ async function importLegacySaveIfPresent(): Promise<void> {
 
 export async function listWorldRecords(): Promise<StoredWorld[]> {
   await importLegacySaveIfPresent();
-  const worlds = await runTransaction<StoredWorld[]>("readonly", (store) =>
-    store.getAll(),
+  const worlds = await runTransaction<StoredWorld[]>(
+    "readonly",
+    (store) => store.getAll(),
+    "getAll",
   );
+  if (profiler.enabled) {
+    profiler.recordBytes("bytes.worldStore.getAll", estimateTransferBytes(worlds));
+  }
   return worlds.sort((a, b) => b.lastPlayedAt - a.lastPlayedAt);
 }

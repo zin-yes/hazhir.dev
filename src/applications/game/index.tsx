@@ -1,6 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  Profiler as ReactProfiler,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ProfilerOnRenderCallback,
+} from "react";
 import { toast } from "sonner";
 
 import { Sky } from "three/addons/objects/Sky.js";
@@ -52,10 +59,32 @@ import {
 } from "./worlds/world-store";
 import { calculateOffset, getSurfaceHeightFromSeed } from "./utils";
 import { updateWater } from "./water-physics";
+import {
+  estimateTransferBytes,
+  profiler,
+  type BenchmarkOptions,
+} from "./profiler";
+import {
+  runBenchmark,
+  type BenchmarkBridge,
+  type CameraPose,
+} from "./profiler/benchmark";
+import {
+  calibrateStructuredClone,
+  installBrowserObservers,
+} from "./profiler/browser-observers";
+import { saveBenchmarkResult } from "./profiler/export-report";
+import { mountProfilerOverlay } from "./profiler/mount-overlay";
+import {
+  createProfiledRender,
+  type ProfiledRender,
+} from "./profiler/profiled-render";
+import { sampleSceneMemory } from "./profiler/scene-memory-sampler";
 
 const FLYING_SPEED = 10;
 const AUTOSAVE_INTERVAL_MILLISECONDS = 30000;
 const JOIN_TIMEOUT_MILLISECONDS = 15000;
+const BENCHMARK_LOAD_TIMEOUT_MILLISECONDS = 180000;
 const DEFAULT_HOTBAR_BLOCKS = [
   BlockType.DIRT,
   BlockType.GRASS,
@@ -72,8 +101,29 @@ const DEFAULT_HOTBAR_BLOCKS = [
 // TODO: Jungle biome
 // import Stats from "stats.js";
 
+const reportReactCommitToProfiler: ProfilerOnRenderCallback = (
+  _id,
+  _phase,
+  actualDuration,
+) => {
+  if (profiler.enabled) {
+    profiler.recordMainThreadTimer("main.react.commit.game", actualDuration);
+  }
+};
+
 export default function Game() {
+  const gameBodyStartedAtMs = profiler.enabled ? profiler.now() : 0;
+  profiler.addCounter("game.reactRenders");
   const initialized = useRef(false);
+  const profiledRenderRef = useRef<ProfiledRender | null>(null);
+  const isBenchmarkWorldRef = useRef(false);
+  const benchmarkFrameCallbacksRef = useRef(
+    new Set<(deltaSeconds: number) => void>(),
+  );
+  const textureArrayBytesRef = useRef(0);
+  const raycastStepsRef = useRef(0);
+  const getBlockCallsRef = useRef(0);
+  const pendingEditStartedAtRef = useRef<Map<string, number>>(new Map());
 
   // const stats = new Stats();
   // stats.showPanel(0); // 0: fps, 1: ms, 2: mb, 3+: custom
@@ -104,6 +154,7 @@ export default function Game() {
             name: "generation",
           }),
         3,
+        "generation",
       ),
     [],
   );
@@ -115,6 +166,7 @@ export default function Game() {
             name: "lighting",
           }),
         2,
+        "lighting",
       ),
     [],
   );
@@ -126,6 +178,7 @@ export default function Game() {
             name: "mesh",
           }),
         3,
+        "mesh",
       ),
     [],
   );
@@ -137,6 +190,7 @@ export default function Game() {
             name: "texture-array",
           }),
         1,
+        "texture-array",
       ),
     [],
   );
@@ -321,6 +375,7 @@ export default function Game() {
     chunkPositions.current = [];
 
     loadTracker.resetWorldStages();
+    const loadStartedAtMs = profiler.now();
 
     let initialLoadTasks =
       (POSITIVE_X_RENDER_DISTANCE + NEGATIVE_X_RENDER_DISTANCE) *
@@ -374,10 +429,22 @@ export default function Game() {
           });
         }
 
+        profiler.recordTimer(
+          "chunk.pipeline.generate",
+          profiler.now() - loadStartedAtMs,
+          "latency",
+        );
+        profiler.addCounter("game.chunks.generated");
         chunksGenerated++;
         loadTracker.report("terrain", chunksGenerated / initialLoadTasks);
       }),
     ).then(async () => {
+      profiler.recordTimer(
+        "chunk.load.terrain",
+        profiler.now() - loadStartedAtMs,
+        "latency",
+      );
+      const lightingStartedAtMs = profiler.now();
       // 2. Initialize Light
       const queues: { [key: string]: number[] } = {};
 
@@ -409,12 +476,23 @@ export default function Game() {
             lightChunks.current[chunkName] = light;
             queues[chunkName] = queue;
 
+            profiler.recordTimer(
+              "chunk.pipeline.initLight",
+              profiler.now() - lightingStartedAtMs,
+              "latency",
+            );
             chunksLit++;
             loadTracker.report("lighting", chunksLit / initialLoadTasks);
           }),
         );
       }
 
+      profiler.recordTimer(
+        "chunk.load.lighting",
+        profiler.now() - lightingStartedAtMs,
+        "latency",
+      );
+      const lightSpreadStartedAtMs = profiler.now();
       // 3. Propagate Light
       const lightUpdates: { [key: string]: Uint8Array[] } = {};
 
@@ -461,6 +539,11 @@ export default function Game() {
           if (!lightUpdates[chunkName]) lightUpdates[chunkName] = [];
           lightUpdates[chunkName].push(centerLight);
 
+          profiler.recordTimer(
+            "chunk.pipeline.propagateLight",
+            profiler.now() - lightSpreadStartedAtMs,
+            "latency",
+          );
           chunksSpread++;
           loadTracker.report("light-spread", chunksSpread / initialLoadTasks);
 
@@ -473,7 +556,13 @@ export default function Game() {
         }),
       );
 
+      profiler.recordTimer(
+        "chunk.load.lightSpread",
+        profiler.now() - lightSpreadStartedAtMs,
+        "latency",
+      );
       // Merge updates
+      const mergeInitialToken = profiler.begin("main.light.mergeInitial");
       Object.keys(lightUpdates).forEach((chunkName) => {
         const updates = lightUpdates[chunkName];
         if (updates.length === 0) return;
@@ -487,7 +576,9 @@ export default function Game() {
         }
         lightChunks.current[chunkName] = merged;
       });
+      profiler.end(mergeInitialToken);
 
+      const meshingStartedAtMs = profiler.now();
       // 4. Generate Mesh
       chunksToGenerate.forEach(({ x, y, z }) => {
         const chunkName = generateChunkName(x, y, z);
@@ -535,10 +626,32 @@ export default function Game() {
             }) => {
               addChunkMesh(opaque, transparent, chunkName, x, y, z);
 
+              profiler.recordTimer(
+                "chunk.pipeline.mesh",
+                profiler.now() - meshingStartedAtMs,
+                "latency",
+              );
+              profiler.recordTimer(
+                "chunk.pipeline.total",
+                profiler.now() - loadStartedAtMs,
+                "latency",
+              );
               tasksDone++;
 
               loadTracker.report("meshing", tasksDone / initialLoadTasks);
-              if (tasksDone >= initialLoadTasks) loadTracker.finish();
+              if (tasksDone >= initialLoadTasks) {
+                profiler.recordTimer(
+                  "chunk.load.meshing",
+                  profiler.now() - meshingStartedAtMs,
+                  "latency",
+                );
+                profiler.recordTimer(
+                  "chunk.load.total",
+                  profiler.now() - loadStartedAtMs,
+                  "latency",
+                );
+                loadTracker.finish();
+              }
             },
           )
           .catch((err) => {
@@ -548,6 +661,7 @@ export default function Game() {
     });
 
     intervalRef.current = setInterval(() => {
+      const streamingToken = profiler.begin("main.interval.chunkStreaming");
       const playerChunkX = Math.round(camera.position.x / CHUNK_WIDTH);
       const playerChunkY = Math.round(camera.position.y / CHUNK_HEIGHT);
       const playerChunkZ = Math.round(camera.position.z / CHUNK_LENGTH);
@@ -555,6 +669,7 @@ export default function Game() {
       pruneChunks(playerChunkX, playerChunkY, playerChunkZ);
 
       generateNearbyChunks(playerChunkX, playerChunkY, playerChunkZ);
+      profiler.end(streamingToken);
     }, 500);
   }
 
@@ -615,6 +730,7 @@ export default function Game() {
       scene.add(indicatorMesh);
 
       const sky = new Sky();
+      sky.name = "sky";
       sky.scale.setScalar(450000);
 
       const phi = THREE.MathUtils.degToRad(90);
@@ -632,6 +748,51 @@ export default function Game() {
       renderer.setSize(window.innerWidth, window.innerHeight);
       renderer.setPixelRatio(window.devicePixelRatio);
       containerRef.current.appendChild(renderer.domElement);
+
+      profiledRenderRef.current = createProfiledRender(renderer, scene, camera);
+      const unmountProfilerOverlay = mountProfilerOverlay({
+        runBenchmark: (options?: BenchmarkOptions) =>
+          runBenchmark(createBenchmarkBridge(), options),
+      });
+      const uninstallBrowserObservers = installBrowserObservers(profiler);
+      let hasCalibratedStructuredClone = false;
+      const calibrateStructuredCloneOnce = () => {
+        if (hasCalibratedStructuredClone || !profiler.enabled) return;
+        hasCalibratedStructuredClone = true;
+        void calibrateStructuredClone(profiler);
+      };
+      const stopCalibrationListener = profiler.onEnabledChange(
+        calibrateStructuredCloneOnce,
+      );
+      calibrateStructuredCloneOnce();
+      profiler.setSessionInfo({
+        game: {
+          chunkWidth: CHUNK_WIDTH,
+          chunkHeight: CHUNK_HEIGHT,
+          chunkLength: CHUNK_LENGTH,
+          voxelsPerChunk: CHUNK_WIDTH * CHUNK_HEIGHT * CHUNK_LENGTH,
+          renderDistanceChunksX:
+            POSITIVE_X_RENDER_DISTANCE + NEGATIVE_X_RENDER_DISTANCE,
+          renderDistanceChunksY:
+            POSITIVE_Y_RENDER_DISTANCE + NEGATIVE_Y_RENDER_DISTANCE,
+          renderDistanceChunksZ:
+            POSITIVE_Z_RENDER_DISTANCE + NEGATIVE_Z_RENDER_DISTANCE,
+          chunkPruningDistance: CHUNK_PRUNING_DISTANCE,
+          generationWorkers: 3,
+          lightingWorkers: 2,
+          meshWorkers: 3,
+          textureCount: Object.values(Texture).length,
+        },
+      });
+      const removeSceneMemorySampler = profiler.addSampler(() =>
+        sampleSceneMemory({
+          getScene: () => scene,
+          getChunks: () => chunks.current,
+          getLightChunks: () => lightChunks.current,
+          getModifiedChunks: () => modifiedChunks.current,
+          getTextureArrayBytes: () => textureArrayBytesRef.current,
+        }),
+      );
 
       const physics = new PhysicsEngine(getBlock);
       playerControlsRef.current = new PlayerControls(
@@ -701,6 +862,7 @@ export default function Game() {
         )
         .then((result) => {
           if (result) {
+            textureArrayBytesRef.current = result.data.byteLength;
             textureArray = new THREE.DataArrayTexture(
               result.data,
               TEXTURE_SIZE,
@@ -760,6 +922,10 @@ export default function Game() {
           }
 
           renderer.setAnimationLoop(render);
+
+          if (new URLSearchParams(window.location.search).has("benchmark")) {
+            void runBenchmarkAndSave();
+          }
         })
         .catch((error) => {
           console.error(error);
@@ -874,6 +1040,7 @@ export default function Game() {
       };
 
       nm.onData = (data, senderId) => {
+        const handlePacketToken = profiler.begin("main.network.handlePacket");
         if (data.type === "HANDSHAKE") {
           seedRef.current = data.seed;
           if (phaseRef.current === "loading" && !activeWorldRef.current) {
@@ -902,6 +1069,10 @@ export default function Game() {
         } else if (data.type === "BLOCK_UPDATE") {
           setBlock(data.x, data.y, data.z, data.blockType, false);
         } else if (data.type === "WORLD_STATE") {
+          profiler.addCounter("game.network.worldStateBlocks", data.blocks.length);
+          const applyWorldStateToken = profiler.begin(
+            "main.network.applyWorldState",
+          );
           const chunksToUpdate = new Set<string>();
           data.blocks.forEach((b) => {
             const chunkX = Math.floor(b.x / CHUNK_WIDTH);
@@ -960,11 +1131,13 @@ export default function Game() {
             chunkVersions.current[chunkName]++;
             regenerateChunkMesh(cx, cy, cz);
           });
+          profiler.end(applyWorldStateToken);
         }
 
         if (nm.isHost && data.type !== "HANDSHAKE") {
           nm.broadcast(data, senderId);
         }
+        profiler.end(handlePacketToken);
       };
 
       return () => {
@@ -977,6 +1150,13 @@ export default function Game() {
         }
 
         nm.disconnect();
+
+        profiledRenderRef.current?.dispose();
+        profiledRenderRef.current = null;
+        removeSceneMemorySampler();
+        stopCalibrationListener();
+        uninstallBrowserObservers();
+        unmountProfilerOverlay();
 
         renderer.setAnimationLoop(null);
         renderer.dispose();
@@ -1010,10 +1190,18 @@ export default function Game() {
 
   function addChunkToQueue(chunkX: number, chunkY: number, chunkZ: number) {
     chunkPositions.current.push({ chunkX, chunkY, chunkZ });
+    const requestedAtMs = profiler.now();
 
     generationWorkerPool
       .exec("generateChunk", [seedRef.current, chunkX, chunkY, chunkZ])
       .then(async (result: ArrayBuffer) => {
+        const generatedAtMs = profiler.now();
+        profiler.recordTimer(
+          "chunk.pipeline.generate",
+          generatedAtMs - requestedAtMs,
+          "latency",
+        );
+        profiler.addCounter("game.chunks.generated");
         const chunk = new Uint8Array(result);
         const chunkName = generateChunkName(chunkX, chunkY, chunkZ);
         chunks.current[chunkName] = chunk;
@@ -1042,6 +1230,12 @@ export default function Game() {
           ],
         );
         lightChunks.current[chunkName] = light;
+        const lightInitializedAtMs = profiler.now();
+        profiler.recordTimer(
+          "chunk.pipeline.initLight",
+          lightInitializedAtMs - generatedAtMs,
+          "latency",
+        );
 
         // Propagate Light
         const neighbors = {
@@ -1095,8 +1289,14 @@ export default function Game() {
             queue,
           ]);
         lightChunks.current[chunkName] = centerLight;
+        profiler.recordTimer(
+          "chunk.pipeline.propagateLight",
+          profiler.now() - lightInitializedAtMs,
+          "latency",
+        );
 
         // Apply neighbor updates
+        const mergeNeighborToken = profiler.begin("main.light.mergeNeighbor");
         Object.entries(neighborLightUpdates).forEach(([key, update]) => {
           const [dx, dy, dz] = key.split(",").map(Number);
           const neighborName = generateChunkName(
@@ -1112,6 +1312,7 @@ export default function Game() {
             }
           }
         });
+        profiler.end(mergeNeighborToken);
 
         const adjChunks = {
           left: chunks.current[generateChunkName(chunkX - 1, chunkY, chunkZ)],
@@ -1135,6 +1336,7 @@ export default function Game() {
           chunkZ,
         );
 
+        const meshStartedAtMs = profiler.now();
         meshWorkerPool
           .exec("generateMesh", [
             result,
@@ -1178,6 +1380,16 @@ export default function Game() {
                 chunkY,
                 chunkZ,
               );
+              profiler.recordTimer(
+                "chunk.pipeline.mesh",
+                profiler.now() - meshStartedAtMs,
+                "latency",
+              );
+              profiler.recordTimer(
+                "chunk.pipeline.total",
+                profiler.now() - requestedAtMs,
+                "latency",
+              );
             },
           )
           .catch((err) => {
@@ -1189,7 +1401,22 @@ export default function Game() {
       });
   }
 
+  function flushRaycastSteps() {
+    profiler.addCounter("game.raycast.steps", raycastStepsRef.current);
+    raycastStepsRef.current = 0;
+  }
+
   function updateIndicator() {
+    const scopeToken = profiler.begin("main.frame.updateIndicator");
+    try {
+      updateIndicatorUnprofiled();
+    } finally {
+      flushRaycastSteps();
+      profiler.end(scopeToken);
+    }
+  }
+
+  function updateIndicatorUnprofiled() {
     if (playerControlsRef.current?.controls.isLocked || playerControlsRef.current?.isMobile) {
       let cameraDirection: THREE.Vector3 = new THREE.Vector3();
       camera.getWorldDirection(cameraDirection);
@@ -1203,6 +1430,7 @@ export default function Game() {
       );
 
       for (let step = 0; step < 5 * 50; step++) {
+        raycastStepsRef.current++;
         const x = Math.round(currentPoint.x);
         const y = Math.round(currentPoint.y);
         const z = Math.round(currentPoint.z);
@@ -1238,6 +1466,16 @@ export default function Game() {
   const pointer = new THREE.Vector2(0.5 * 2 - 1, -0.5 * 2 + 1);
 
   function placeBlock(type: BlockType) {
+    const scopeToken = profiler.begin("main.edit.placeBlock");
+    try {
+      placeBlockUnprofiled(type);
+    } finally {
+      flushRaycastSteps();
+      profiler.end(scopeToken);
+    }
+  }
+
+  function placeBlockUnprofiled(type: BlockType) {
     if (playerControlsRef.current?.controls.isLocked || playerControlsRef.current?.isMobile) {
       raycaster.setFromCamera(pointer, camera);
 
@@ -1266,6 +1504,7 @@ export default function Game() {
       let y = 0;
       let z = 0;
       for (let step = 0; step < 5 * 50; step++) {
+        raycastStepsRef.current++;
         x = Math.round(currentPoint.x);
         y = Math.round(currentPoint.y);
         z = Math.round(currentPoint.z);
@@ -1418,6 +1657,16 @@ export default function Game() {
   }
 
   function breakBlock() {
+    const scopeToken = profiler.begin("main.edit.breakBlock");
+    try {
+      breakBlockUnprofiled();
+    } finally {
+      flushRaycastSteps();
+      profiler.end(scopeToken);
+    }
+  }
+
+  function breakBlockUnprofiled() {
     if (playerControlsRef.current?.controls.isLocked || playerControlsRef.current?.isMobile) {
       let cameraDirection: THREE.Vector3 = new THREE.Vector3();
       camera.getWorldDirection(cameraDirection);
@@ -1431,6 +1680,7 @@ export default function Game() {
       );
 
       for (let step = 0; step < 5 * 50; step++) {
+        raycastStepsRef.current++;
         const x = Math.round(currentPoint.x);
         const y = Math.round(currentPoint.y);
         const z = Math.round(currentPoint.z);
@@ -1448,6 +1698,47 @@ export default function Game() {
         }
       }
     }
+  }
+
+  function addMeshToScene(mesh: THREE.Mesh) {
+    const scopeToken = profiler.begin("main.chunk.sceneAdd");
+    scene.add(mesh);
+    profiler.end(scopeToken);
+  }
+
+  function recordChunkGeometryStats(
+    chunkName: string,
+    kind: "opaque" | "transparent",
+    geometry: {
+      positions: ArrayBuffer;
+      normals: ArrayBuffer;
+      indices: ArrayBuffer;
+      uvs: ArrayBuffer;
+      textureIndices: ArrayBuffer;
+      lightLevels: ArrayBuffer;
+      ambientOcclusion: ArrayBuffer;
+    },
+  ) {
+    if (!profiler.enabled) return;
+    const bytesByAttribute = {
+      positions: geometry.positions.byteLength,
+      normals: geometry.normals.byteLength,
+      uvs: geometry.uvs.byteLength,
+      textureIndices: geometry.textureIndices.byteLength,
+      lightLevels: geometry.lightLevels.byteLength,
+      ambientOcclusion: geometry.ambientOcclusion.byteLength,
+      indices: geometry.indices.byteLength,
+    };
+    profiler.recordMesh(chunkName, {
+      kind,
+      vertexCount: geometry.positions.byteLength / 12,
+      triangleCount: geometry.indices.byteLength / 12,
+      bytesByAttribute,
+    });
+    profiler.recordBytes(
+      "bytes.geometry.toGpu",
+      Object.values(bytesByAttribute).reduce((sum, bytes) => sum + bytes, 0),
+    );
   }
 
   function addChunkMesh(
@@ -1476,6 +1767,10 @@ export default function Game() {
   ) {
     if (!materialsRef.current.opaque || !materialsRef.current.transparent)
       return;
+
+    const buildGeometryToken = profiler.begin("main.chunk.buildGeometry");
+    recordChunkGeometryStats(chunkName, "opaque", opaque);
+    recordChunkGeometryStats(chunkName, "transparent", transparent);
 
     // Opaque Mesh
     const opaqueGeometry = new THREE.BufferGeometry();
@@ -1516,7 +1811,7 @@ export default function Game() {
     opaqueMesh.name = chunkName;
     opaqueMesh.renderOrder = 0;
 
-    scene.add(opaqueMesh);
+    addMeshToScene(opaqueMesh);
 
     // Transparent Mesh
     const transparentGeometry = new THREE.BufferGeometry();
@@ -1559,10 +1854,12 @@ export default function Game() {
     transparentMesh.name = chunkName + "_transparent";
     transparentMesh.renderOrder = 1;
 
-    scene.add(transparentMesh);
+    addMeshToScene(transparentMesh);
+    profiler.end(buildGeometryToken);
   }
 
   function getBlock(x: number, y: number, z: number) {
+    getBlockCallsRef.current++;
     const chunkX = Math.floor(x / CHUNK_WIDTH);
     const chunkY = Math.floor(y / CHUNK_HEIGHT);
     const chunkZ = Math.floor(z / CHUNK_LENGTH);
@@ -1588,6 +1885,7 @@ export default function Game() {
       if (!isSimulationActive()) return;
       if (pendingWaterUpdates.current.size === 0) return;
 
+      const waterToken = profiler.begin("main.interval.water");
       const updates = Array.from(pendingWaterUpdates.current);
       pendingWaterUpdates.current.clear();
 
@@ -1595,6 +1893,7 @@ export default function Game() {
         const [x, y, z] = key.split(",").map(Number);
         updateWater(x, y, z, getBlock, setBlock, scheduleWaterUpdate);
       });
+      profiler.end(waterToken);
     }, 650);
 
     return () => clearInterval(interval);
@@ -1608,6 +1907,7 @@ export default function Game() {
     const chunkName = generateChunkName(chunkX, chunkY, chunkZ);
     const chunk = chunks.current[chunkName];
     if (!chunk) return;
+    profiler.addCounter("game.light.updates");
 
     const topChunkName = generateChunkName(chunkX, chunkY + 1, chunkZ);
     const topChunk = chunks.current[topChunkName]?.buffer;
@@ -1676,6 +1976,7 @@ export default function Game() {
     lightChunks.current[chunkName] = centerLight;
 
     // Apply neighbor updates
+    const mergeNeighborToken = profiler.begin("main.light.mergeNeighbor");
     if (neighborLightUpdates) {
       Object.entries(neighborLightUpdates).forEach(([key, update]) => {
         const [dx, dy, dz] = key.split(",").map(Number);
@@ -1695,11 +1996,13 @@ export default function Game() {
         }
       });
     }
+    profiler.end(mergeNeighborToken);
 
     regenerateChunkMesh(chunkX, chunkY, chunkZ);
   }
 
   async function updateLightForRegion(cx: number, cy: number, cz: number) {
+    profiler.addCounter("game.light.updates");
     const chunksToUpdate: { x: number; y: number; z: number }[] = [];
     for (let x = -1; x <= 1; x++) {
       for (let y = -1; y <= 1; y++) {
@@ -1778,6 +2081,7 @@ export default function Game() {
       lightChunks.current[centerName] = centerLight;
 
       // Apply updates to neighbors
+      const mergeCenterToken = profiler.begin("main.light.mergeNeighbor");
       if (neighborLightUpdates) {
         Object.entries(neighborLightUpdates).forEach(([key, update]) => {
           const [dx, dy, dz] = key.split(",").map(Number);
@@ -1791,6 +2095,7 @@ export default function Game() {
           }
         });
       }
+      profiler.end(mergeCenterToken);
     }
 
     // 3. Propagate Neighbors
@@ -1834,6 +2139,7 @@ export default function Game() {
         lightChunks.current[chunkName] = centerLight;
 
         // Apply updates (though mostly redundant if we don't iterate further)
+        const mergeSpreadToken = profiler.begin("main.light.mergeNeighbor");
         if (neighborLightUpdates) {
           Object.entries(neighborLightUpdates).forEach(([key, update]) => {
             const [dx, dy, dz] = key.split(",").map(Number);
@@ -1847,6 +2153,7 @@ export default function Game() {
             }
           });
         }
+        profiler.end(mergeSpreadToken);
       }),
     );
 
@@ -1855,6 +2162,22 @@ export default function Game() {
   }
 
   function setBlock(
+    x: number,
+    y: number,
+    z: number,
+    type: number,
+    broadcast: boolean = true,
+  ) {
+    profiler.addCounter("game.setBlock.calls");
+    const scopeToken = profiler.begin("main.edit.setBlock");
+    try {
+      return setBlockUnprofiled(x, y, z, type, broadcast);
+    } finally {
+      profiler.end(scopeToken);
+    }
+  }
+
+  function setBlockUnprofiled(
     x: number,
     y: number,
     z: number,
@@ -1881,6 +2204,9 @@ export default function Game() {
     const chunk = chunks.current[chunkName];
 
     if (!chunk) return BlockType.AIR;
+    if (profiler.enabled) {
+      pendingEditStartedAtRef.current.set(chunkName, profiler.now());
+    }
 
     // Get old block before modifying for light change detection
     const oldBlock = chunk[blockIndex];
@@ -1940,6 +2266,7 @@ export default function Game() {
   }
 
   function getChunkBorders(chunkX: number, chunkY: number, chunkZ: number) {
+    const extractBordersToken = profiler.begin("main.chunk.extractBorders");
     const borders: {
       top?: ArrayBuffer;
       bottom?: ArrayBuffer;
@@ -2064,6 +2391,13 @@ export default function Game() {
     extractBorder(chunkX + 1, chunkY, chunkZ, "right");
     extractBorder(chunkX - 1, chunkY, chunkZ, "left");
 
+    profiler.end(extractBordersToken);
+    if (profiler.enabled) {
+      profiler.recordBytes(
+        "bytes.borders.perMesh",
+        estimateTransferBytes([borders, borderLights]),
+      );
+    }
     return { borders, borderLights };
   }
 
@@ -2074,6 +2408,8 @@ export default function Game() {
 
       if (!lightChunks.current[chunkName]) return;
 
+      profiler.addCounter("game.mesh.regenerations");
+      const regenerateToken = profiler.begin("main.chunk.regenerateBookkeeping");
       const { borders, borderLights } = getChunkBorders(chunkX, chunkY, chunkZ);
 
       meshWorkerPool
@@ -2121,12 +2457,23 @@ export default function Game() {
                 chunkY,
                 chunkZ,
               );
+              const editStartedAtMs =
+                pendingEditStartedAtRef.current.get(chunkName);
+              if (editStartedAtMs !== undefined) {
+                pendingEditStartedAtRef.current.delete(chunkName);
+                profiler.recordTimer(
+                  "chunk.pipeline.edit",
+                  profiler.now() - editStartedAtMs,
+                  "latency",
+                );
+              }
             }
           },
         )
         .catch((err) => {
           console.error(err);
         });
+      profiler.end(regenerateToken);
     }
   }
 
@@ -2137,6 +2484,8 @@ export default function Game() {
   let prevTime = performance.now();
 
   function pruneChunkMesh(chunkName: string) {
+    const disposeToken = profiler.begin("main.chunk.dispose");
+    profiler.removeMesh(chunkName);
     let mesh = scene.getObjectByName(chunkName) as THREE.Mesh;
     while (mesh) {
       mesh.geometry.dispose();
@@ -2154,6 +2503,7 @@ export default function Game() {
         chunkName + "_transparent",
       ) as THREE.Mesh;
     }
+    profiler.end(disposeToken);
   }
 
   function pruneChunks(
@@ -2179,6 +2529,7 @@ export default function Game() {
         ) > CHUNK_PRUNING_DISTANCE
       ) {
         pruneChunkMesh(chunkName);
+        profiler.addCounter("game.chunks.pruned");
       } else {
         prunedChunkPositions.push(chunkPosition);
         if (chunks.current[chunkName]) {
@@ -2270,6 +2621,12 @@ export default function Game() {
 
   function tickChunks() {
     if (connectedToHostRef.current) return;
+    if (profiler.enabled) {
+      profiler.addCounter(
+        "game.randomTicks",
+        Object.keys(chunks.current).length * 100,
+      );
+    }
     Object.keys(chunks.current).forEach((chunkName) => {
       if (!chunks.current[chunkName]) return;
       const [chunkX, chunkY, chunkZ] = chunkName.split(",").map(Number);
@@ -2333,7 +2690,9 @@ export default function Game() {
   useEffect(() => {
     const tickInterval = setInterval(() => {
       if (!isSimulationActive()) return;
+      const randomTickToken = profiler.begin("main.interval.randomTick");
       tickChunks();
+      profiler.end(randomTickToken);
     }, 50); // 20 ticks per second
 
     return () => clearInterval(tickInterval);
@@ -2380,11 +2739,26 @@ export default function Game() {
   }
 
   async function saveActiveWorld(shouldAnnounce = false) {
+    if (isBenchmarkWorldRef.current) return;
+    const buildSnapshotToken = profiler.begin("main.save.buildSnapshot");
     const snapshot = buildSnapshotOfActiveWorld();
+    profiler.end(buildSnapshotToken);
     if (!snapshot) return;
+    if (profiler.enabled) {
+      profiler.recordBytes(
+        "bytes.save.snapshot",
+        estimateTransferBytes(snapshot.modifiedChunks),
+      );
+    }
     try {
       activeWorldRef.current = snapshot;
+      const saveStartedAtMs = profiler.now();
       await saveWorldRecord(snapshot);
+      profiler.recordTimer(
+        "main.save.indexedDb",
+        profiler.now() - saveStartedAtMs,
+        "latency",
+      );
       if (shouldAnnounce) toast.success("World saved");
     } catch (error) {
       console.error("Failed to save world:", error);
@@ -2546,7 +2920,74 @@ export default function Game() {
     };
   }, []);
 
+  function createBenchmarkBridge(): BenchmarkBridge {
+    const cameraPositionBeforeBenchmark = camera.position.clone();
+    const cameraQuaternionBeforeBenchmark = camera.quaternion.clone();
+    const frameCallbacks = benchmarkFrameCallbacksRef.current;
+
+    return {
+      enterBenchmarkWorld(seed) {
+        void saveActiveWorld();
+        isBenchmarkWorldRef.current = true;
+        enterWorld(createWorldRecord("Benchmark", seed));
+      },
+      waitUntilWorldLoaded: () =>
+        new Promise<void>((resolve, reject) => {
+          const waitStartedAtMs = performance.now();
+          const poll = setInterval(() => {
+            if (loadProgressRef.current >= 1) {
+              clearInterval(poll);
+              resolve();
+            } else if (
+              performance.now() - waitStartedAtMs >
+              BENCHMARK_LOAD_TIMEOUT_MILLISECONDS
+            ) {
+              clearInterval(poll);
+              reject(new Error("Benchmark world did not finish loading"));
+            }
+          }, 50);
+        }),
+      setPlaying(playing) {
+        playerControlsRef.current?.resetMotion();
+        setPhase(playing ? "playing" : "paused");
+      },
+      setFlying: (flying) => playerControlsRef.current?.setFlying(flying),
+      setCameraPose({ position, yaw, pitch }: CameraPose) {
+        camera.position.set(position.x, position.y, position.z);
+        camera.quaternion.setFromEuler(new THREE.Euler(pitch, yaw, 0, "YXZ"));
+      },
+      getCameraPosition: () => ({
+        x: camera.position.x,
+        y: camera.position.y,
+        z: camera.position.z,
+      }),
+      editBlock: (x, y, z, blockType) => setBlock(x, y, z, blockType),
+      onFrame(callback) {
+        frameCallbacks.add(callback);
+        return () => frameCallbacks.delete(callback);
+      },
+      restore() {
+        isBenchmarkWorldRef.current = false;
+        activeWorldRef.current = null;
+        frameCallbacks.clear();
+        playerControlsRef.current?.setFlying(false);
+        camera.position.copy(cameraPositionBeforeBenchmark);
+        camera.quaternion.copy(cameraQuaternionBeforeBenchmark);
+        setPhase("title");
+      },
+      getSurfaceHeight: (x, z) => getSurfaceHeightFromSeed(seedRef.current, x, z),
+    };
+  }
+
+  async function runBenchmarkAndSave(options?: BenchmarkOptions) {
+    const result = await runBenchmark(createBenchmarkBridge(), options);
+    const savedPaths = await saveBenchmarkResult(result);
+    console.info("[profiler] benchmark saved", savedPaths);
+    return result;
+  }
+
   const render = () => {
+    profiler.beginFrame();
     // stats.begin();
     const time = performance.now();
     const delta = (time - prevTime) / 1000;
@@ -2562,6 +3003,7 @@ export default function Game() {
 
     // Update debug info every few frames to avoid excessive re-renders
     if (Math.floor(time / 100) !== Math.floor(prevTime / 100)) {
+      const debugInfoToken = profiler.begin("main.frame.debugInfo");
       const playerChunkX = Math.floor(camera.position.x / CHUNK_WIDTH);
       const playerChunkY = Math.floor(camera.position.y / CHUNK_HEIGHT);
       const playerChunkZ = Math.floor(camera.position.z / CHUNK_LENGTH);
@@ -2587,6 +3029,7 @@ export default function Game() {
         let lastZ = Math.round(currentPoint.z);
 
         for (let step = 0; step < 5 * 50; step++) {
+          raycastStepsRef.current++;
           const x = Math.round(currentPoint.x);
           const y = Math.round(currentPoint.y);
           const z = Math.round(currentPoint.z);
@@ -2648,6 +3091,8 @@ export default function Game() {
         lookingAt: lookingAtBlock,
         seed: seedRef.current,
       });
+      flushRaycastSteps();
+      profiler.end(debugInfoToken);
     }
 
     // document.getElementById("crosshairLayer")!.innerHTML = `Chunks: ${
@@ -2657,8 +3102,11 @@ export default function Game() {
     // }`;
 
     if (playerControlsRef.current && isSimulationActive()) {
+      const playerUpdateToken = profiler.begin("main.frame.playerUpdate");
       playerControlsRef.current.update(delta);
+      profiler.end(playerUpdateToken);
 
+      const networkSendToken = profiler.begin("main.frame.networkSend");
       if (networkManager.current.myPeerId) {
         const obj = playerControlsRef.current.controls.object;
         networkManager.current.send({
@@ -2668,108 +3116,130 @@ export default function Game() {
           rotation: { x: obj.rotation.x, y: obj.rotation.y, z: obj.rotation.z },
         });
       }
+      profiler.end(networkSendToken);
     }
 
     if (isSimulationActive()) {
+      const remotePlayersToken = profiler.begin("main.frame.remotePlayers");
       remotePlayers.current.forEach((rp) => rp.update(delta));
+      profiler.end(remotePlayersToken);
     }
+
+    benchmarkFrameCallbacksRef.current.forEach((callback) => callback(delta));
 
     prevTime = time;
 
-    renderer.render(scene, camera);
+    profiler.addCounter("game.getBlock.calls", getBlockCallsRef.current);
+    getBlockCallsRef.current = 0;
+
+    if (profiledRenderRef.current) {
+      profiledRenderRef.current.render();
+    } else {
+      renderer.render(scene, camera);
+    }
     // stats.end();
+    profiler.endFrame();
   };
 
+  if (gameBodyStartedAtMs !== 0) {
+    profiler.recordMainThreadTimer(
+      "main.react.gameBody",
+      profiler.now() - gameBodyStartedAtMs,
+    );
+  }
+
   return (
-    <div
-      className="text-md w-full h-full bg-background"
-      ref={containerRef}
-      style={{ touchAction: "none" }}
-    >
-      <UILayer
-        onHost={() => {
-          networkManager.current.hostGame().then((id) => setPeerId(id));
-        }}
-        onJoin={(id) => {
-          networkManager.current.joinGame(id);
-        }}
-        phase={phase}
-        loadProgress={loadProgress}
-        loadStageLabel={loadStageLabel}
-        loadStages={loadStages}
-        activeWorldName={activeWorldName}
-        worlds={worlds}
-        isLoadingWorlds={isLoadingWorlds}
-        onPlayWorld={playWorld}
-        onCreateWorld={createAndPlayWorld}
-        onRenameWorld={renameWorld}
-        onDeleteWorld={deleteWorld}
-        onJoinHostedWorld={joinHostedWorld}
-        onResume={resumePlaying}
-        onOpenPauseMenu={openPauseMenu}
-        onSaveNow={() => saveActiveWorld(true)}
-        onExitToWorlds={exitToWorlds}
-        peerId={peerId}
-        selectedSlot={selectedSlot}
-        hotbarSlots={hotbarSlots}
-        isInventoryOpen={isInventoryOpen}
-        onSelectBlock={(block) => {
-          const clampedIndex = Math.max(
-            0,
-            Math.min(selectedSlot, HOTBAR_SIZE - 1),
-          );
-          const base = normalizeHotbar(hotbarSlots);
-          const newSlots = [...base];
-          newSlots[clampedIndex] = block;
-          setHotbarSlots(newSlots);
-        }}
-        onSelectSlot={(index) => setSelectedSlot(index)}
-        onCloseInventory={() => {
-          isInventoryOpenRef.current = false;
-          setIsInventoryOpen(false);
-          if (!isMobile) playerControlsRef.current?.controls.lock();
-        }}
-        debugInfo={debugInfo}
-        isDebugVisible={isDebugVisible}
-        isMobile={isMobile}
-      />
-      {isMobile && phase === "playing" && (
-        <MobileControls
-          containerRef={containerRef}
-          enabled={!isInventoryOpen}
-          onMovement={(forward, backward, left, right) => {
-            playerControlsRef.current?.setMoveState({
-              forward,
-              backward,
-              left,
-              right,
-            });
+    <ReactProfiler id="game" onRender={reportReactCommitToProfiler}>
+      <div
+        className="text-md w-full h-full bg-background"
+        ref={containerRef}
+        style={{ touchAction: "none" }}
+      >
+        <UILayer
+          onHost={() => {
+            networkManager.current.hostGame().then((id) => setPeerId(id));
           }}
-          onCameraRotate={(dx, dy) => {
-            playerControlsRef.current?.rotateCamera(dx, dy);
+          onJoin={(id) => {
+            networkManager.current.joinGame(id);
           }}
-          onJumpStart={() => {
-            playerControlsRef.current?.jump();
+          phase={phase}
+          loadProgress={loadProgress}
+          loadStageLabel={loadStageLabel}
+          loadStages={loadStages}
+          activeWorldName={activeWorldName}
+          worlds={worlds}
+          isLoadingWorlds={isLoadingWorlds}
+          onPlayWorld={playWorld}
+          onCreateWorld={createAndPlayWorld}
+          onRenameWorld={renameWorld}
+          onDeleteWorld={deleteWorld}
+          onJoinHostedWorld={joinHostedWorld}
+          onResume={resumePlaying}
+          onOpenPauseMenu={openPauseMenu}
+          onSaveNow={() => saveActiveWorld(true)}
+          onExitToWorlds={exitToWorlds}
+          peerId={peerId}
+          selectedSlot={selectedSlot}
+          hotbarSlots={hotbarSlots}
+          isInventoryOpen={isInventoryOpen}
+          onSelectBlock={(block) => {
+            const clampedIndex = Math.max(
+              0,
+              Math.min(selectedSlot, HOTBAR_SIZE - 1),
+            );
+            const base = normalizeHotbar(hotbarSlots);
+            const newSlots = [...base];
+            newSlots[clampedIndex] = block;
+            setHotbarSlots(newSlots);
           }}
-          onJumpEnd={() => {
-            playerControlsRef.current?.stopJump();
+          onSelectSlot={(index) => setSelectedSlot(index)}
+          onCloseInventory={() => {
+            isInventoryOpenRef.current = false;
+            setIsInventoryOpen(false);
+            if (!isMobile) playerControlsRef.current?.controls.lock();
           }}
-          onBreak={() => {
-            breakBlock();
-          }}
-          onPlace={() => {
-            const blockType =
-              hotbarSlotsRef.current[selectedSlotRef.current];
-            if (blockType) placeBlock(blockType);
-          }}
-          onToggleFly={() => {
-            playerControlsRef.current?.toggleFlying();
-          }}
-          onToggleInventory={() => {
-            setIsInventoryOpen((prev) => !prev);
-          }}
+          debugInfo={debugInfo}
+          isDebugVisible={isDebugVisible}
+          isMobile={isMobile}
         />
-      )}
-    </div>
+        {isMobile && phase === "playing" && (
+          <MobileControls
+            containerRef={containerRef}
+            enabled={!isInventoryOpen}
+            onMovement={(forward, backward, left, right) => {
+              playerControlsRef.current?.setMoveState({
+                forward,
+                backward,
+                left,
+                right,
+              });
+            }}
+            onCameraRotate={(dx, dy) => {
+              playerControlsRef.current?.rotateCamera(dx, dy);
+            }}
+            onJumpStart={() => {
+              playerControlsRef.current?.jump();
+            }}
+            onJumpEnd={() => {
+              playerControlsRef.current?.stopJump();
+            }}
+            onBreak={() => {
+              breakBlock();
+            }}
+            onPlace={() => {
+              const blockType =
+                hotbarSlotsRef.current[selectedSlotRef.current];
+              if (blockType) placeBlock(blockType);
+            }}
+            onToggleFly={() => {
+              playerControlsRef.current?.toggleFlying();
+            }}
+            onToggleInventory={() => {
+              setIsInventoryOpen((prev) => !prev);
+            }}
+          />
+        )}
+      </div>
+    </ReactProfiler>
   );
 }

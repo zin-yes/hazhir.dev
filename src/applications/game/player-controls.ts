@@ -199,6 +199,11 @@ export class PlayerControls {
     this.moveUp = false;
   }
 
+  public setFlying(flying: boolean) {
+    this.isFlying = flying;
+    this.velocity.set(0, 0, 0);
+  }
+
   public toggleFlying() {
     this.isFlying = !this.isFlying;
     this.velocity.set(0, 0, 0);

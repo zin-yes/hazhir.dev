@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { BlockType, NON_COLLIDABLE_BLOCKS, getHitboxes } from "./blocks";
+import { profiler } from "./profiler";
 
 export class PhysicsEngine {
   private getBlock: (x: number, y: number, z: number) => BlockType | null;
@@ -17,6 +18,29 @@ export class PhysicsEngine {
     delta: number,
     eyeHeight: number = 1.62,
     isShifting: boolean = false
+  ): void {
+    const scopeToken = profiler.begin("main.physics.resolveCollision");
+    try {
+      this.resolveCollisionUnprofiled(
+        position,
+        velocity,
+        playerBox,
+        delta,
+        eyeHeight,
+        isShifting
+      );
+    } finally {
+      profiler.end(scopeToken);
+    }
+  }
+
+  private resolveCollisionUnprofiled(
+    position: THREE.Vector3,
+    velocity: THREE.Vector3,
+    playerBox: THREE.Box3,
+    delta: number,
+    eyeHeight: number,
+    isShifting: boolean
   ): void {
     const wasOnGround = this.isOnGround(position, eyeHeight);
 
@@ -97,6 +121,18 @@ export class PhysicsEngine {
     position: THREE.Vector3,
     eyeHeight: number = 1.62
   ): boolean {
+    const scopeToken = profiler.begin("main.physics.isOnGround");
+    try {
+      return this.isOnGroundUnprofiled(position, eyeHeight);
+    } finally {
+      profiler.end(scopeToken);
+    }
+  }
+
+  private isOnGroundUnprofiled(
+    position: THREE.Vector3,
+    eyeHeight: number
+  ): boolean {
     const box = new THREE.Box3();
     this.updatePlayerBox(box, position, eyeHeight);
     box.min.y -= 0.05;
@@ -105,6 +141,18 @@ export class PhysicsEngine {
   }
 
   public isInWater(position: THREE.Vector3, eyeHeight: number = 1.62): boolean {
+    const scopeToken = profiler.begin("main.physics.isInWater");
+    try {
+      return this.isInWaterUnprofiled(position, eyeHeight);
+    } finally {
+      profiler.end(scopeToken);
+    }
+  }
+
+  private isInWaterUnprofiled(
+    position: THREE.Vector3,
+    eyeHeight: number
+  ): boolean {
     const box = new THREE.Box3();
     this.updatePlayerBox(box, position, eyeHeight);
     const minX = Math.round(box.min.x);
@@ -144,6 +192,7 @@ export class PhysicsEngine {
   }
 
   private checkCollision(box: THREE.Box3): boolean {
+    profiler.addCounter("game.physics.collisionChecks");
     const epsilon = 0.001;
     const minX = Math.round(box.min.x + epsilon);
     const maxX = Math.round(box.max.x - epsilon);

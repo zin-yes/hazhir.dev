@@ -1,4 +1,5 @@
 import Peer, { DataConnection } from "peerjs";
+import { estimateTransferBytes, profiler } from "../profiler";
 import { NetworkPacket } from "./types";
 
 export class NetworkManager {
@@ -67,6 +68,7 @@ export class NetworkManager {
     });
 
     conn.on("data", (data) => {
+      this.recordPacketTraffic("received", data as NetworkPacket);
       if (this.onData) {
         this.onData(data as NetworkPacket, conn.peer);
       }
@@ -83,7 +85,24 @@ export class NetworkManager {
     });
   }
 
+  private recordPacketTraffic(
+    direction: "sent" | "received",
+    packet: NetworkPacket,
+    recipientCount = 1,
+  ) {
+    if (!profiler.enabled) return;
+    const packetBytes = estimateTransferBytes(packet);
+    for (let recipient = 0; recipient < recipientCount; recipient++) {
+      profiler.recordBytes(`network.${direction}.${packet.type}`, packetBytes);
+    }
+  }
+
   public send(packet: NetworkPacket, targetId?: string) {
+    this.recordPacketTraffic(
+      "sent",
+      packet,
+      targetId ? 1 : this.connections.size,
+    );
     if (targetId) {
       const conn = this.connections.get(targetId);
       if (conn && conn.open) {
@@ -100,6 +119,11 @@ export class NetworkManager {
   }
 
   public broadcast(packet: NetworkPacket, excludeId?: string) {
+    this.recordPacketTraffic(
+      "sent",
+      packet,
+      excludeId ? Math.max(0, this.connections.size - 1) : this.connections.size,
+    );
     this.connections.forEach((conn, id) => {
       if (conn.open && id !== excludeId) {
         conn.send(packet);
