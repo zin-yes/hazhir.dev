@@ -413,6 +413,63 @@ export default function Game() {
   const queuedMeshRequestsRef = useRef(new Map<string, Promise<void>>());
   const tickableBlocksRef = useRef(new TickableBlockIndex());
 
+  const NEIGHBOR_CHUNK_OFFSETS: {
+    key: string;
+    dx: number;
+    dy: number;
+    dz: number;
+    borderFacingUs: BorderFace;
+  }[] = [
+    { key: "-1,0,0", dx: -1, dy: 0, dz: 0, borderFacingUs: "left" },
+    { key: "1,0,0", dx: 1, dy: 0, dz: 0, borderFacingUs: "right" },
+    { key: "0,1,0", dx: 0, dy: 1, dz: 0, borderFacingUs: "top" },
+    { key: "0,-1,0", dx: 0, dy: -1, dz: 0, borderFacingUs: "bottom" },
+    { key: "0,0,1", dx: 0, dy: 0, dz: 1, borderFacingUs: "front" },
+    { key: "0,0,-1", dx: 0, dy: 0, dz: -1, borderFacingUs: "back" },
+  ];
+
+  /** The six face neighbors' blocks and light, which the light spread reads and the worker copies. */
+  function gatherNeighborLightInputs(
+    chunkX: number,
+    chunkY: number,
+    chunkZ: number,
+  ) {
+    const neighbors: { [key: string]: ArrayBuffer | undefined } = {};
+    const neighborLights: { [key: string]: ArrayBuffer | undefined } = {};
+    for (const { key, dx, dy, dz } of NEIGHBOR_CHUNK_OFFSETS) {
+      const name = generateChunkName(chunkX + dx, chunkY + dy, chunkZ + dz);
+      neighbors[key] = chunks.current[name]?.buffer as ArrayBuffer | undefined;
+      neighborLights[key] = lightChunks.current[name]?.buffer as
+        | ArrayBuffer
+        | undefined;
+    }
+    return { neighbors, neighborLights };
+  }
+
+  /**
+   * A chunk where every open cell already has full sky light can only gain block
+   * light, and only from a neighbor that has some next to it. With none, spreading
+   * light through the chunk changes nothing, so the whole worker round trip is skipped.
+   */
+  function canSkipLightSpread(
+    chunkX: number,
+    chunkY: number,
+    chunkZ: number,
+  ): boolean {
+    for (const { dx, dy, dz, borderFacingUs } of NEIGHBOR_CHUNK_OFFSETS) {
+      const neighborLight =
+        lightChunks.current[
+          generateChunkName(chunkX + dx, chunkY + dy, chunkZ + dz)
+        ];
+      if (!neighborLight) continue;
+      const border = new Uint8Array(extractBorderSlab(neighborLight, borderFacingUs));
+      for (let index = 0; index < border.length; index++) {
+        if ((border[index] & 0xf) !== 0) return false;
+      }
+    }
+    return true;
+  }
+
   function startWorldGeneration(currentSeed: number) {
     if (intervalRef.current) clearInterval(intervalRef.current);
 
@@ -494,7 +551,8 @@ export default function Game() {
       );
       const lightingStartedAtMs = profiler.now();
       // 2. Initialize Light
-      const queues: { [key: string]: number[] } = {};
+      const queues: { [key: string]: Uint32Array } = {};
+      const fullySunlitChunks = new Set<string>();
 
       // Group by Y to ensure top-down lighting initialization
       const chunksByY: { [y: number]: { x: number; z: number }[] } = {};
@@ -517,12 +575,13 @@ export default function Game() {
             const topChunk = chunks.current[topChunkName]?.buffer;
             const topChunkLight = lightChunks.current[topChunkName]?.buffer;
 
-            const { light, queue } = await lightingWorkerPool.exec(
+            const { light, queue, isFullySunlit } = await lightingWorkerPool.exec(
               "initializeChunkLight",
               [chunk.buffer, currentSeed, x, y, z, topChunk, topChunkLight],
             );
             lightChunks.current[chunkName] = light;
             queues[chunkName] = queue;
+            if (isFullySunlit) fullySunlitChunks.add(chunkName);
 
             profiler.recordTimer(
               "chunk.pipeline.initLight",
@@ -551,38 +610,15 @@ export default function Game() {
           const chunk = chunks.current[chunkName];
           const queue = queues[chunkName];
 
-          const neighbors = {
-            "-1,0,0": chunks.current[generateChunkName(x - 1, y, z)]?.buffer,
-            "1,0,0": chunks.current[generateChunkName(x + 1, y, z)]?.buffer,
-            "0,1,0": chunks.current[generateChunkName(x, y + 1, z)]?.buffer,
-            "0,-1,0": chunks.current[generateChunkName(x, y - 1, z)]?.buffer,
-            "0,0,1": chunks.current[generateChunkName(x, y, z + 1)]?.buffer,
-            "0,0,-1": chunks.current[generateChunkName(x, y, z - 1)]?.buffer,
-          };
-
-          const neighborLights = {
-            "-1,0,0":
-              lightChunks.current[generateChunkName(x - 1, y, z)]?.buffer,
-            "1,0,0":
-              lightChunks.current[generateChunkName(x + 1, y, z)]?.buffer,
-            "0,1,0":
-              lightChunks.current[generateChunkName(x, y + 1, z)]?.buffer,
-            "0,-1,0":
-              lightChunks.current[generateChunkName(x, y - 1, z)]?.buffer,
-            "0,0,1":
-              lightChunks.current[generateChunkName(x, y, z + 1)]?.buffer,
-            "0,0,-1":
-              lightChunks.current[generateChunkName(x, y, z - 1)]?.buffer,
-          };
-
           const { centerLight, neighborLightUpdates } =
-            await lightingWorkerPool.exec("propagateChunkLight", [
-              chunk.buffer,
-              light.buffer,
-              neighbors,
-              neighborLights,
-              queue,
-            ]);
+            fullySunlitChunks.has(chunkName) && canSkipLightSpread(x, y, z)
+              ? { centerLight: light, neighborLightUpdates: {} }
+              : await lightingWorkerPool.exec("propagateChunkLight", [
+                  chunk.buffer,
+                  light.buffer,
+                  ...Object.values(gatherNeighborLightInputs(x, y, z)),
+                  queue,
+                ]);
 
           if (!lightUpdates[chunkName]) lightUpdates[chunkName] = [];
           lightUpdates[chunkName].push(centerLight);
@@ -1271,7 +1307,7 @@ export default function Game() {
         const topChunk = chunks.current[topChunkName]?.buffer;
         const topChunkLight = lightChunks.current[topChunkName]?.buffer;
 
-        const { light, queue } = await lightingWorkerPool.exec(
+        const { light, queue, isFullySunlit } = await lightingWorkerPool.exec(
           "initializeChunkLight",
           [
             chunk.buffer,
@@ -1292,56 +1328,17 @@ export default function Game() {
         );
 
         // Propagate Light
-        const neighbors = {
-          "-1,0,0":
-            chunks.current[generateChunkName(chunkX - 1, chunkY, chunkZ)]
-              ?.buffer,
-          "1,0,0":
-            chunks.current[generateChunkName(chunkX + 1, chunkY, chunkZ)]
-              ?.buffer,
-          "0,1,0":
-            chunks.current[generateChunkName(chunkX, chunkY + 1, chunkZ)]
-              ?.buffer,
-          "0,-1,0":
-            chunks.current[generateChunkName(chunkX, chunkY - 1, chunkZ)]
-              ?.buffer,
-          "0,0,1":
-            chunks.current[generateChunkName(chunkX, chunkY, chunkZ + 1)]
-              ?.buffer,
-          "0,0,-1":
-            chunks.current[generateChunkName(chunkX, chunkY, chunkZ - 1)]
-              ?.buffer,
-        };
-
-        const neighborLights = {
-          "-1,0,0":
-            lightChunks.current[generateChunkName(chunkX - 1, chunkY, chunkZ)]
-              ?.buffer,
-          "1,0,0":
-            lightChunks.current[generateChunkName(chunkX + 1, chunkY, chunkZ)]
-              ?.buffer,
-          "0,1,0":
-            lightChunks.current[generateChunkName(chunkX, chunkY + 1, chunkZ)]
-              ?.buffer,
-          "0,-1,0":
-            lightChunks.current[generateChunkName(chunkX, chunkY - 1, chunkZ)]
-              ?.buffer,
-          "0,0,1":
-            lightChunks.current[generateChunkName(chunkX, chunkY, chunkZ + 1)]
-              ?.buffer,
-          "0,0,-1":
-            lightChunks.current[generateChunkName(chunkX, chunkY, chunkZ - 1)]
-              ?.buffer,
-        };
-
         const { centerLight, neighborLightUpdates } =
-          await lightingWorkerPool.exec("propagateChunkLight", [
-            chunk.buffer,
-            lightChunks.current[chunkName].buffer,
-            neighbors,
-            neighborLights,
-            queue,
-          ]);
+          isFullySunlit && canSkipLightSpread(chunkX, chunkY, chunkZ)
+            ? { centerLight: lightChunks.current[chunkName], neighborLightUpdates: {} }
+            : await lightingWorkerPool.exec("propagateChunkLight", [
+                chunk.buffer,
+                lightChunks.current[chunkName].buffer,
+                ...Object.values(
+                  gatherNeighborLightInputs(chunkX, chunkY, chunkZ),
+                ),
+                queue,
+              ]);
         lightChunks.current[chunkName] = centerLight;
         profiler.recordTimer(
           "chunk.pipeline.propagateLight",
