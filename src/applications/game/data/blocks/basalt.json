@@ -1,0 +1,9 @@
+{
+  "id": 76,
+  "name": "BASALT",
+  "texture": {
+    "default": "basalt_top.png",
+    "sides": "basalt_side.png"
+  },
+  "model": "CUBE"
+}

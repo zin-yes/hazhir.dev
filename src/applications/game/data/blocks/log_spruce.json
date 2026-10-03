@@ -1,0 +1,9 @@
+{
+  "id": 93,
+  "name": "LOG_SPRUCE",
+  "texture": {
+    "default": "log_spruce_top.png",
+    "sides": "log_spruce_side.png"
+  },
+  "model": "CUBE"
+}

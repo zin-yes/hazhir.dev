@@ -1,0 +1,9 @@
+{
+  "id": 101,
+  "name": "LOG_BAOBAB",
+  "texture": {
+    "default": "log_baobab_top.png",
+    "sides": "log_baobab_side.png"
+  },
+  "model": "CUBE"
+}

@@ -1,0 +1,9 @@
+{
+  "id": 96,
+  "name": "LOG_CHERRY",
+  "texture": {
+    "default": "log_cherry_top.png",
+    "sides": "log_cherry_side.png"
+  },
+  "model": "CUBE"
+}

@@ -1,0 +1,9 @@
+{
+  "id": 98,
+  "name": "LOG_PALM",
+  "texture": {
+    "default": "log_palm_top.png",
+    "sides": "log_palm_side.png"
+  },
+  "model": "CUBE"
+}

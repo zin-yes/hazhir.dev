@@ -1,0 +1,10 @@
+{
+  "id": 60,
+  "name": "PODZOL",
+  "texture": {
+    "default": "dirt.png",
+    "sides": "podzol_side.png",
+    "top": "podzol_top.png"
+  },
+  "model": "CUBE"
+}

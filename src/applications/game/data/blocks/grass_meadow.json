@@ -1,0 +1,10 @@
+{
+  "id": 59,
+  "name": "GRASS_MEADOW",
+  "texture": {
+    "default": "dirt.png",
+    "sides": "grass_meadow_side.png",
+    "top": "grass_meadow_top.png"
+  },
+  "model": "CUBE"
+}

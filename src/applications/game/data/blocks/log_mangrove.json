@@ -1,0 +1,9 @@
+{
+  "id": 99,
+  "name": "LOG_MANGROVE",
+  "texture": {
+    "default": "log_mangrove_top.png",
+    "sides": "log_mangrove_side.png"
+  },
+  "model": "CUBE"
+}

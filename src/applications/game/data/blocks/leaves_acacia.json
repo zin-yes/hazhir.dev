@@ -1,0 +1,7 @@
+{
+  "id": 104,
+  "name": "LEAVES_ACACIA",
+  "texture": "leaves_acacia.png",
+  "model": "CUBE",
+  "isTransparent": true
+}

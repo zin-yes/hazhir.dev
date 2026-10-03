@@ -1,0 +1,7 @@
+{
+  "id": 111,
+  "name": "LEAVES_MANGROVE",
+  "texture": "leaves_mangrove.png",
+  "model": "CUBE",
+  "isTransparent": true
+}

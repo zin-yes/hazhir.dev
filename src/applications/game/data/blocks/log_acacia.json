@@ -1,0 +1,9 @@
+{
+  "id": 94,
+  "name": "LOG_ACACIA",
+  "texture": {
+    "default": "log_acacia_top.png",
+    "sides": "log_acacia_side.png"
+  },
+  "model": "CUBE"
+}

@@ -1,0 +1,9 @@
+{
+  "id": 95,
+  "name": "LOG_JUNGLE",
+  "texture": {
+    "default": "log_jungle_top.png",
+    "sides": "log_jungle_side.png"
+  },
+  "model": "CUBE"
+}

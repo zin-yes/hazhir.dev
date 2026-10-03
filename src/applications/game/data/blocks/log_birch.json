@@ -1,0 +1,9 @@
+{
+  "id": 92,
+  "name": "LOG_BIRCH",
+  "texture": {
+    "default": "log_birch_top.png",
+    "sides": "log_birch_side.png"
+  },
+  "model": "CUBE"
+}

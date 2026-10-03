@@ -1,0 +1,9 @@
+{
+  "id": 97,
+  "name": "LOG_DEAD",
+  "texture": {
+    "default": "log_dead_top.png",
+    "sides": "log_dead_side.png"
+  },
+  "model": "CUBE"
+}

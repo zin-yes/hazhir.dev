@@ -1,0 +1,9 @@
+{
+  "id": 100,
+  "name": "LOG_REDWOOD",
+  "texture": {
+    "default": "log_redwood_top.png",
+    "sides": "log_redwood_side.png"
+  },
+  "model": "CUBE"
+}

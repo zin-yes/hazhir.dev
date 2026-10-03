@@ -1,0 +1,10 @@
+{
+  "id": 55,
+  "name": "GRASS_LUSH",
+  "texture": {
+    "default": "dirt.png",
+    "sides": "grass_lush_side.png",
+    "top": "grass_lush_top.png"
+  },
+  "model": "CUBE"
+}

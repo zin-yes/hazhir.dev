@@ -1,0 +1,7 @@
+{
+  "id": 80,
+  "name": "SNOW_SLAB",
+  "texture": "snow_block.png",
+  "isTransparent": true,
+  "model": "SLAB_BOTTOM"
+}

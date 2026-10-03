@@ -1,0 +1,10 @@
+{
+  "id": 77,
+  "name": "SANDSTONE",
+  "texture": {
+    "default": "sandstone_top.png",
+    "sides": "sandstone_side.png",
+    "top": "sandstone_top.png"
+  },
+  "model": "CUBE"
+}
