@@ -124,6 +124,21 @@ describe("emitPlantVoxels", () => {
     expect(darkenedVertices.length).toBeGreaterThan(0);
   });
 
+  test("a solid block beside the plant shades the voxels near it but not the far side", () => {
+    const openMesh = meshPlant(BlockType.TALL_GRASS);
+    const besideWallMesh = meshPlant(BlockType.TALL_GRASS, (x) => x < 0);
+
+    let nearWallDarkened = 0;
+    for (let vertex = 0; vertex < openMesh.ambientOcclusion.length; vertex++) {
+      const isDarker = besideWallMesh.ambientOcclusion[vertex] < openMesh.ambientOcclusion[vertex];
+      if (isDarker && besideWallMesh.positions[vertex * 3] <= 0.5) nearWallDarkened++;
+      if (besideWallMesh.positions[vertex * 3] >= 0.5) {
+        expect(besideWallMesh.ambientOcclusion[vertex]).toBe(openMesh.ambientOcclusion[vertex]);
+      }
+    }
+    expect(nearWallDarkened).toBeGreaterThan(100);
+  });
+
   test("a lone pixel voxel exposes all six faces and shared faces are culled", () => {
     const sapling = meshPlant(BlockType.SAPLING);
     const faceCount = sapling.indices.length / 6;

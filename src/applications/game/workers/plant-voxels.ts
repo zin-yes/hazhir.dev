@@ -11,6 +11,17 @@ const CROP_FAR_SHEET = TEXTURE_SIZE - 1 - CROP_NEAR_SHEET;
 const FLAT_QUAD_LAYER = 1;
 
 const FULLY_LIT_AMBIENT_OCCLUSION = 3;
+// How many voxels from a neighbouring solid block its shadow reaches onto the plant.
+const NEIGHBOR_SHADOW_REACH = 6;
+
+const NEIGHBOR_BLOCK_DIRECTIONS: Vector[] = [
+  [1, 0, 0],
+  [-1, 0, 0],
+  [0, 1, 0],
+  [0, -1, 0],
+  [0, 0, 1],
+  [0, 0, -1],
+];
 
 const TEXTURE_FILE_NAMES = Object.values(Texture);
 
@@ -139,6 +150,22 @@ function cornerAmbientOcclusion(
   );
 }
 
+// Darkens a vertex by how close it is to each solid block touching the plant's block.
+function neighborShadowAmbientOcclusion(
+  occludingNeighborDirections: Vector[],
+  vertexInVoxels: Vector
+): number {
+  let shadowStrength = 0;
+  for (const direction of occludingNeighborDirections) {
+    const axis = direction.findIndex((component) => component !== 0);
+    const distanceInVoxels =
+      direction[axis] > 0 ? TEXTURE_SIZE - vertexInVoxels[axis] : vertexInVoxels[axis];
+    const reach = Math.max(0, 1 - distanceInVoxels / NEIGHBOR_SHADOW_REACH);
+    shadowStrength += reach * reach;
+  }
+  return FULLY_LIT_AMBIENT_OCCLUSION * (1 - Math.min(1, shadowStrength));
+}
+
 export function emitPlantVoxels(
   target: PlantMeshBuffers,
   block: BlockType,
@@ -153,6 +180,11 @@ export function emitPlantVoxels(
   if (!pixelRows) return;
 
   const cells = buildVoxelCells(block, pixelRows);
+
+  const occludingNeighborDirections = NEIGHBOR_BLOCK_DIRECTIONS.filter(
+    ([directionX, directionY, directionZ]) =>
+      isWorldBlockOccluding(blockX + directionX, blockY + directionY, blockZ + directionZ)
+  );
 
   const isCellOccluding = (cellX: number, cellY: number, cellZ: number) => {
     const isInsideOwnBlock = [cellX, cellY, cellZ].every(
@@ -186,7 +218,14 @@ export function emitPlantVoxels(
       ];
 
       const cornerOcclusion = corners.map((corner) =>
-        cornerAmbientOcclusion(isCellOccluding, cell, face, corner)
+        Math.min(
+          cornerAmbientOcclusion(isCellOccluding, cell, face, corner),
+          neighborShadowAmbientOcclusion(occludingNeighborDirections, [
+            cell.cellX + corner[0],
+            cell.cellY + corner[1],
+            cell.cellZ + corner[2],
+          ])
+        )
       );
 
       for (const corner of corners) {
