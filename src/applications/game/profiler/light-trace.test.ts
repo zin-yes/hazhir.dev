@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { buildLightEditRows } from "./light-report";
 import { LightEditTrace, classifyLightEdit } from "./light-trace";
 import { Profiler } from "./profiler";
+import { buildProfileReport } from "./report";
 
 function createClockedProfiler() {
   let nowMs = 0;
@@ -76,5 +77,55 @@ describe("LightEditTrace", () => {
     const [row] = buildLightEditRows(profiler.snapshot());
     expect(row.total.mean).toBe(12);
     expect(row.firstMesh).toBeNull();
+  });
+});
+
+describe("lightEditLatencyHint", () => {
+  async function recordEdits(
+    kind: "lightPlace" | "blockPlace",
+    stages: [string, number][],
+    meshMs: number,
+    edits: number,
+  ) {
+    const { profiler, advance } = createClockedProfiler();
+    for (let edit = 0; edit < edits; edit++) {
+      const trace = new LightEditTrace(profiler, kind);
+      for (const [stage, milliseconds] of stages)
+        await trace.stage(stage, () => advance(milliseconds));
+      trace.markRelit();
+      let finishMesh!: () => void;
+      trace.trackMesh(new Promise<void>((resolve) => (finishMesh = resolve)));
+      const finished = trace.finish();
+      advance(meshMs);
+      finishMesh();
+      await finished;
+    }
+    return buildProfileReport(profiler.snapshot());
+  }
+
+  test("points at relighting when the stages before meshing dominate", async () => {
+    const report = await recordEdits(
+      "lightPlace",
+      [
+        ["initializeLight", 60],
+        ["propagateNeighbors", 90],
+      ],
+      10,
+      5,
+    );
+    const hint = report.hints.find((candidate) =>
+      candidate.title.includes("Light edits"),
+    );
+    expect(hint?.severity).toBe("high");
+    expect(hint?.evidence).toContain("lightPlace");
+    expect(hint?.evidence).toContain("propagateNeighbors");
+    expect(hint?.suggestion).toContain("relighting");
+  });
+
+  test("stays quiet when edits show up quickly", async () => {
+    const report = await recordEdits("blockPlace", [["relight", 1]], 2, 6);
+    expect(
+      report.hints.some((hint) => hint.title.includes("Light edits")),
+    ).toBe(false);
   });
 });

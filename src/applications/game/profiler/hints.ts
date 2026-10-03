@@ -1,3 +1,4 @@
+import { lightEditLatencyHint } from "./light-hints";
 import { buildWorkerMethodRows } from "./metric-names";
 import {
   budgetSharePercent,
@@ -91,6 +92,7 @@ export function buildOptimizationHints(
     reactRenderHint(snapshot),
     longTaskHint(snapshot),
     heapAllocationHint(snapshot),
+    lightEditLatencyHint(snapshot),
     ...workerPoolHints(snapshot),
   ];
   return rules
