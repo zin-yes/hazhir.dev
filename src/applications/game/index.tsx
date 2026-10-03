@@ -36,6 +36,7 @@ import { HOTBAR_SIZE, normalizeHotbar } from "./constants";
 import { NetworkManager } from "./network/NetworkManager";
 import { RemotePlayer } from "./network/RemotePlayer";
 import { PhysicsEngine } from "./physics-engine";
+import { LoadTracker } from "./load-progress";
 import { PlayerControls } from "./player-controls";
 import { FRAGMENT_SHADER, VERTEX_SHADER } from "./shaders/chunk";
 import { MobileControls } from "./ui/mobile-controls";
@@ -180,16 +181,6 @@ export default function Game() {
     [containerRef, camera, renderer],
   );
 
-  function setInitialLoadCompletion(value: number) {
-    loadProgressRef.current = value;
-    setLoadProgress(value);
-    if (value === 1) {
-      setTimeout(() => {
-        if (phaseRef.current === "loading") setPhase("paused");
-      }, 400);
-    }
-  }
-
   const [selectedSlot, setSelectedSlot] = useState(0);
   const selectedSlotRef = useRef(0);
   const [hotbarSlots, setHotbarSlots] = useState<BlockType[]>(
@@ -203,7 +194,22 @@ export default function Game() {
   const [phase, setPhaseState] = useState<GamePhase>("title");
   const phaseRef = useRef<GamePhase>("title");
   const [loadProgress, setLoadProgress] = useState(0);
+  const [loadStageLabel, setLoadStageLabel] = useState("Starting threads");
   const loadProgressRef = useRef(0);
+  const loadTracker = useMemo(
+    () =>
+      new LoadTracker(({ progress, label }) => {
+        loadProgressRef.current = progress;
+        setLoadProgress(progress);
+        setLoadStageLabel(label);
+        if (progress >= 1) {
+          setTimeout(() => {
+            if (phaseRef.current === "loading") setPhase("paused");
+          }, 150);
+        }
+      }),
+    [],
+  );
   const [worlds, setWorlds] = useState<StoredWorld[]>([]);
   const [isLoadingWorlds, setIsLoadingWorlds] = useState(true);
   const [activeWorldName, setActiveWorldName] = useState("");
@@ -312,12 +318,17 @@ export default function Game() {
     lightChunks.current = {};
     chunkPositions.current = [];
 
+    loadTracker.resetWorldStages();
+
     let initialLoadTasks =
       (POSITIVE_X_RENDER_DISTANCE + NEGATIVE_X_RENDER_DISTANCE) *
       (POSITIVE_Y_RENDER_DISTANCE + NEGATIVE_Y_RENDER_DISTANCE) *
       (POSITIVE_Z_RENDER_DISTANCE + NEGATIVE_Z_RENDER_DISTANCE);
 
     let tasksDone = 0;
+    let chunksGenerated = 0;
+    let chunksLit = 0;
+    let chunksSpread = 0;
 
     const chunksToGenerate: { x: number; y: number; z: number }[] = [];
 
@@ -360,6 +371,9 @@ export default function Game() {
             chunk[index] = type;
           });
         }
+
+        chunksGenerated++;
+        loadTracker.report("terrain", chunksGenerated / initialLoadTasks);
       }),
     ).then(async () => {
       // 2. Initialize Light
@@ -392,6 +406,9 @@ export default function Game() {
             );
             lightChunks.current[chunkName] = light;
             queues[chunkName] = queue;
+
+            chunksLit++;
+            loadTracker.report("lighting", chunksLit / initialLoadTasks);
           }),
         );
       }
@@ -441,6 +458,9 @@ export default function Game() {
 
           if (!lightUpdates[chunkName]) lightUpdates[chunkName] = [];
           lightUpdates[chunkName].push(centerLight);
+
+          chunksSpread++;
+          loadTracker.report("light-spread", chunksSpread / initialLoadTasks);
 
           Object.entries(neighborLightUpdates).forEach(([key, update]) => {
             const [dx, dy, dz] = key.split(",").map(Number);
@@ -513,7 +533,7 @@ export default function Game() {
 
               tasksDone++;
 
-              setInitialLoadCompletion(tasksDone / initialLoadTasks);
+              loadTracker.report("meshing", tasksDone / initialLoadTasks);
             },
           )
           .catch((err) => {
@@ -655,8 +675,25 @@ export default function Game() {
         }
       }
 
+      const bootWorkerPools = [
+        generationWorkerPool,
+        lightingWorkerPool,
+        meshWorkerPool,
+        textureArrayWorkerPool,
+      ];
+      const totalBootWorkers = 3 + 2 + 3 + 1;
+      let bootWorkersReady = 0;
+      bootWorkerPools.forEach((pool) =>
+        pool.warmUp(() => {
+          bootWorkersReady++;
+          loadTracker.report("threads", bootWorkersReady / totalBootWorkers);
+        }),
+      );
+
       textureArrayWorkerPool
-        .exec("loadTextureArray", [window.location.origin])
+        .exec("loadTextureArray", [window.location.origin], (fraction) =>
+          loadTracker.report("textures", fraction * 0.9),
+        )
         .then((result) => {
           if (result) {
             textureArray = new THREE.DataArrayTexture(
@@ -710,6 +747,7 @@ export default function Game() {
               depthWrite: false,
             });
 
+            loadTracker.report("textures", 1);
             texturesReadyRef.current = true;
             const worldWaitingForTextures = worldWaitingForTexturesRef.current;
             worldWaitingForTexturesRef.current = null;
@@ -2378,8 +2416,6 @@ export default function Game() {
     }
     playerControlsRef.current?.resetMotion();
 
-    loadProgressRef.current = 0;
-    setLoadProgress(0);
     setPhase("loading");
     startWorldGeneration(world.seed);
   }
@@ -2438,8 +2474,7 @@ export default function Game() {
     setHotbarSlots(normalizeHotbar(DEFAULT_HOTBAR_BLOCKS));
     setSelectedSlot(0);
     setActiveWorldName("Hosted world");
-    loadProgressRef.current = 0;
-    setLoadProgress(0);
+    loadTracker.resetWorldStages();
     setPhase("loading");
 
     const abandonJoin = (reason: string) => {
@@ -2640,6 +2675,7 @@ export default function Game() {
         }}
         phase={phase}
         loadProgress={loadProgress}
+        loadStageLabel={loadStageLabel}
         activeWorldName={activeWorldName}
         worlds={worlds}
         isLoadingWorlds={isLoadingWorlds}

@@ -8,7 +8,10 @@ async function loadImage(url: string) {
   return await createImageBitmap(image);
 }
 
-export async function loadTextureArray(baseUrl: string) {
+export async function loadTextureArray(
+  baseUrl: string,
+  onProgress?: (fraction: number) => void,
+) {
   const canvas = new OffscreenCanvas(TEXTURE_SIZE, TEXTURE_SIZE);
   const context = canvas.getContext("2d", {
     colorSpace: THREE.SRGBColorSpace,
@@ -28,6 +31,7 @@ export async function loadTextureArray(baseUrl: string) {
       const imageData = context.getImageData(0, 0, TEXTURE_SIZE, TEXTURE_SIZE);
 
       textureData.push(new Uint8ClampedArray(imageData.data.buffer));
+      onProgress?.(textureData.length / texturesToLoad.length);
     }
 
     let length = 0;

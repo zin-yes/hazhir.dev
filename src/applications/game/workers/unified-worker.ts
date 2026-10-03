@@ -7,7 +7,9 @@ addEventListener("message", async (event: MessageEvent) => {
   const { id, method, params } = event.data;
   try {
     let result;
-    if (method === "generateChunk") {
+    if (method === "ping") {
+      result = true;
+    } else if (method === "generateChunk") {
       result = generateChunk(params[0], params[1], params[2], params[3]);
     } else if (method === "generateMesh") {
       result = generateMesh(
@@ -21,7 +23,9 @@ addEventListener("message", async (event: MessageEvent) => {
         params[7]
       );
     } else if (method === "loadTextureArray") {
-      result = await loadTextureArray(params[0]);
+      result = await loadTextureArray(params[0], (fraction) =>
+        postMessage({ id, progress: fraction }),
+      );
     } else if (method === "initializeChunkLight") {
       result = initializeChunkLight(
         new Uint8Array(params[0]),
