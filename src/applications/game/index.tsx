@@ -554,20 +554,21 @@ export default function Game() {
       const queues: { [key: string]: Uint32Array } = {};
       const fullySunlitChunks = new Set<string>();
 
-      // Group by Y to ensure top-down lighting initialization
-      const chunksByY: { [y: number]: { x: number; z: number }[] } = {};
-      chunksToGenerate.forEach(({ x, y, z }) => {
-        if (!chunksByY[y]) chunksByY[y] = [];
-        chunksByY[y].push({ x, z });
+      // A chunk's sky light comes from the chunk above it, so each column of chunks is
+      // lit top-down. Columns are independent of each other and run side by side.
+      const chunkColumns = new Map<string, { x: number; y: number; z: number }[]>();
+      chunksToGenerate.forEach((chunkPosition) => {
+        const columnKey = `${chunkPosition.x},${chunkPosition.z}`;
+        chunkColumns.set(columnKey, [
+          ...(chunkColumns.get(columnKey) ?? []),
+          chunkPosition,
+        ]);
       });
 
-      const sortedYs = Object.keys(chunksByY)
-        .map(Number)
-        .sort((a, b) => b - a);
-
-      for (const y of sortedYs) {
-        await Promise.all(
-          chunksByY[y].map(async ({ x, z }) => {
+      await Promise.all(
+        Array.from(chunkColumns.values()).map(async (column) => {
+          const topDown = [...column].sort((first, second) => second.y - first.y);
+          for (const { x, y, z } of topDown) {
             const chunkName = generateChunkName(x, y, z);
             const chunk = chunks.current[chunkName];
 
@@ -590,9 +591,9 @@ export default function Game() {
             );
             chunksLit++;
             loadTracker.report("lighting", chunksLit / initialLoadTasks);
-          }),
-        );
-      }
+          }
+        }),
+      );
 
       profiler.recordTimer(
         "chunk.load.lighting",

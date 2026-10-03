@@ -34,18 +34,23 @@ Frames are tracked as intervals between render callbacks. Every main-thread scop
 
 Targets (ranked list per group plus hints), Frames (interval, busy and GPU graphs, percentiles, worst frames), Main (scope tree), Workers (pool utilization, queue depth, per-method sections and efficiency), GPU (frame and pass time, draw calls, triangles, driver CPU, uploads), Transfers (bytes, serialization, latencies), Memory, Meshes (heaviest chunks, vertex distribution), Events.
 
+### Light tab
+
+Follows every block edit from the click to the last re-meshed chunk on screen. Each edit is one of `lightPlace`, `lightBreak`, `blockPlace`, `blockBreak`. The tab and the markdown report show per kind: end to end time, first mesh on screen, relight (light data final) and remesh (relight to last mesh), then the pipeline stages with their share of the total, plus cells and chunks touched per edit. Stage timers are `light.stage.<kind>.<stage>`, end to end timers `light.edit.<kind>.<total|firstMesh|relight|remesh>`, and a hint fires when the p95 is over 40 ms. Code: `light-trace.ts`, `light-report.ts`, `light-hints.ts`.
+
 Header buttons: Pause, Reset, Save to `.profiles`, Copy markdown, Download JSON, Run benchmark, and a "GPU pass split" checkbox. Pass split renders sky, opaque, transparent and overlay objects as separate passes so each gets its own GPU timer. It distorts CPU render time slightly, so leave it off unless GPU time is the question.
 
 ## Benchmark
 
-Creates a throwaway in-memory world (default seed `20240607`) and runs four phases, each profiled on its own. The world is never saved or listed, and the game returns to the title screen afterwards.
+Creates a throwaway in-memory world (default seed `20240607`) and runs five phases, each profiled on its own. The world is never saved or listed, and the game returns to the title screen afterwards.
 
 1. `world-load`: cold start until every initial mesh is on screen, including the staged load timings.
 2. `fly`: straight flight at 12 blocks per second so new chunks stream in (default 20 s).
 3. `hover`: stationary, camera turning, steady-state rendering after a 3 s warmup (default 8 s).
 4. `edit`: a burst of place and break edits, alternating stone and light sources (default 8 s).
+5. `light-edit`: one edit at a time on a ring, cycling place light, break light, place block, break block, waiting for each to settle so the Light tab numbers are not blurred by queueing (default 10 s).
 
-Options: `runBenchmark({ seed, flySeconds, hoverSeconds, editSeconds })`. The `overall` report merges the phases: totals and counts are exact, percentiles are the worst phase's value.
+Options: `runBenchmark({ seed, flySeconds, hoverSeconds, editSeconds, lightEditSeconds })`. The `overall` report merges the phases: totals and counts are exact, percentiles are the worst phase's value.
 
 ## Agent workflow
 
