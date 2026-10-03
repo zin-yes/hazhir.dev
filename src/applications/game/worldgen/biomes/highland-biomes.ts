@@ -1,0 +1,110 @@
+// Mountain, moorland and volcanic biomes.
+
+import { BlockType } from "@/applications/game/blocks";
+import { BiomeId } from "./biome-types";
+import { defineBiome } from "./define-biome";
+
+export const HIGHLAND_BIOMES = [
+  defineBiome({
+    id: BiomeId.AlpineMeadow,
+    name: "Alpine Meadow",
+    topBlock: BlockType.GRASS_MEADOW,
+    rockBlock: BlockType.LIMESTONE,
+    trees: [
+      { species: "krummholz", weight: 1 },
+      { species: "spruce", weight: 1 },
+      { species: "bush_spruce", weight: 1 },
+    ],
+    treeDensity: 0.04,
+    groundCover: [
+      { block: BlockType.TALL_GRASS, chance: 0.15 },
+      { block: BlockType.FORGETMENOTS_FLOWER, chance: 0.2, patch: { scale: 9, threshold: 0.55 } },
+      { block: BlockType.ANEMONE_FLOWER, chance: 0.18, patch: { scale: 11, threshold: 0.6 } },
+      { block: BlockType.PONPON_FLOWER, chance: 0.14, patch: { scale: 8, threshold: 0.6 } },
+      { block: BlockType.LAVENDER, chance: 0.16, patch: { scale: 13, threshold: 0.66 } },
+    ],
+  }),
+  defineBiome({
+    id: BiomeId.SubalpineForest,
+    name: "Subalpine Forest",
+    topBlock: BlockType.GRASS_COLD,
+    rockBlock: BlockType.GRANITE,
+    trees: [
+      { species: "spruce", weight: 5 },
+      { species: "pine", weight: 3 },
+      { species: "krummholz", weight: 1 },
+      { species: "bush_spruce", weight: 1 },
+    ],
+    treeDensity: 0.42,
+    groundCover: [
+      { block: BlockType.FERN, chance: 0.05, shadeAffinity: 1 },
+      { block: BlockType.HEATHER, chance: 0.1, patch: { scale: 10, threshold: 0.6 } },
+      { block: BlockType.TALL_GRASS, chance: 0.05 },
+    ],
+  }),
+  defineBiome({
+    id: BiomeId.SnowyPeaks,
+    name: "Snowy Peaks",
+    topBlock: BlockType.SNOW_BLOCK,
+    topDepth: 2,
+    fillerBlock: BlockType.STONE,
+    fillerDepth: 3,
+    rockBlock: BlockType.SLATE,
+    shallowWaterFloor: BlockType.GRAVEL,
+  }),
+  defineBiome({
+    id: BiomeId.RockyPeaks,
+    name: "Rocky Peaks",
+    topBlock: BlockType.STONE,
+    topDepth: 2,
+    fillerBlock: BlockType.GRANITE,
+    fillerDepth: 4,
+    rockBlock: BlockType.SLATE,
+    shallowWaterFloor: BlockType.GRAVEL,
+    trees: [{ species: "krummholz", weight: 1 }],
+    treeDensity: 0.004,
+    groundCover: [{ block: BlockType.HEATHER, chance: 0.05, patch: { scale: 8, threshold: 0.7 } }],
+  }),
+  defineBiome({
+    id: BiomeId.HighlandMoor,
+    name: "Highland Moor",
+    topBlock: BlockType.GRASS_DRY,
+    fillerBlock: BlockType.COARSE_DIRT,
+    rockBlock: BlockType.GRANITE,
+    trees: [
+      { species: "heath_mat", weight: 3 },
+      { species: "krummholz", weight: 1 },
+      { species: "bush_spruce", weight: 1 },
+      { species: "dead", weight: 0.3 },
+    ],
+    treeDensity: 0.06,
+    groundCover: [
+      { block: BlockType.HEATHER, chance: 0.2, patch: { scale: 9, threshold: 0.55 } },
+      { block: BlockType.TALL_GRASS, chance: 0.1 },
+      { block: BlockType.LAVENDER, chance: 0.1, patch: { scale: 12, threshold: 0.65 } },
+    ],
+  }),
+  defineBiome({
+    id: BiomeId.VolcanicSlopes,
+    name: "Volcanic Slopes",
+    topBlock: BlockType.ASH,
+    topDepth: 3,
+    fillerBlock: BlockType.BASALT,
+    fillerDepth: 8,
+    rockBlock: BlockType.BASALT,
+    shallowWaterFloor: BlockType.ASH,
+    deepWaterFloor: BlockType.BASALT,
+    trees: [{ species: "dead", weight: 1 }],
+    treeDensity: 0.005,
+    groundCover: [{ block: BlockType.DEAD_BUSH, chance: 0.003 }],
+  }),
+  defineBiome({
+    id: BiomeId.VolcanicCrater,
+    name: "Volcanic Crater",
+    topBlock: BlockType.OBSIDIAN,
+    topDepth: 2,
+    fillerBlock: BlockType.BASALT,
+    fillerDepth: 8,
+    rockBlock: BlockType.BASALT,
+  }),
+];
