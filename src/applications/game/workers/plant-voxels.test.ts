@@ -5,7 +5,10 @@ import { BLOCK_TEXTURES, BlockType, Texture } from "../blocks";
 import { TEXTURE_SIZE } from "../config";
 import { PLANT_PIXEL_MASKS } from "../data/plant-pixel-masks";
 import { WORDS_PER_VERTEX, unpackVertex } from "../vertex-format";
-import { buildPlantTemplate } from "./plant-voxels";
+import {
+  buildPlantBillboardTemplate,
+  buildPlantTemplate,
+} from "./plant-voxels";
 
 const PLANT_BLOCKS = [
   BlockType.TALL_GRASS,
@@ -41,12 +44,14 @@ function opaquePixelsOf(block: BlockType): Set<string> {
   PLANT_PIXEL_MASKS[fileName].forEach((row, rowIndex) =>
     [...row].forEach((character, columnIndex) => {
       if (character === "#") opaque.add(`${columnIndex},${rowIndex}`);
-    })
+    }),
   );
   return opaque;
 }
 
-function sampledPixels(vertices: ReturnType<typeof templateVertices>["vertices"]): Set<string> {
+function sampledPixels(
+  vertices: ReturnType<typeof templateVertices>["vertices"],
+): Set<string> {
   const sampled = new Set<string>();
   for (const vertex of vertices) {
     const column = vertex.u * TEXTURE_SIZE - 0.5;
@@ -59,14 +64,16 @@ function sampledPixels(vertices: ReturnType<typeof templateVertices>["vertices"]
 describe("plant pixel masks", () => {
   test("match the alpha channel of every plant texture", async () => {
     for (const fileName of Object.keys(PLANT_PIXEL_MASKS)) {
-      const { data, info } = await sharp(path.join(process.cwd(), "public/game", fileName))
+      const { data, info } = await sharp(
+        path.join(process.cwd(), "public/game", fileName),
+      )
         .ensureAlpha()
         .raw()
         .toBuffer({ resolveWithObject: true });
       const rowsFromPng = Array.from({ length: info.height }, (_, row) =>
         Array.from({ length: info.width }, (_, column) =>
-          data[(row * info.width + column) * 4 + 3] >= 128 ? "#" : "."
-        ).join("")
+          data[(row * info.width + column) * 4 + 3] >= 128 ? "#" : ".",
+        ).join(""),
       );
       expect(PLANT_PIXEL_MASKS[fileName]).toEqual(rowsFromPng);
     }
@@ -87,7 +94,8 @@ describe("buildPlantTemplate", () => {
         const crossingColumns = SHEET_CROSSING_COLUMNS[block] ?? [];
         for (const pixel of opaquePixels) {
           const column = Number(pixel.split(",")[0]);
-          if (!crossingColumns.includes(column)) expect(sampled.has(pixel)).toBe(true);
+          if (!crossingColumns.includes(column))
+            expect(sampled.has(pixel)).toBe(true);
         }
       });
 
@@ -118,8 +126,47 @@ describe("buildPlantTemplate", () => {
 
   test("voxels pressed against other voxels are darker than isolated ones", () => {
     const { vertices } = templateVertices(BlockType.TALL_GRASS);
-    const occlusionValues = new Set(vertices.map((vertex) => vertex.ambientOcclusion));
+    const occlusionValues = new Set(
+      vertices.map((vertex) => vertex.ambientOcclusion),
+    );
     expect(Math.min(...occlusionValues)).toBeLessThan(3);
     expect(Math.max(...occlusionValues)).toBe(3);
+  });
+});
+
+describe("buildPlantBillboardTemplate", () => {
+  test("draws each sheet from both sides, with far fewer quads than the voxel plant", () => {
+    expect(buildPlantBillboardTemplate(BlockType.TALL_GRASS).quadCount).toBe(4);
+    expect(
+      buildPlantBillboardTemplate(BlockType.FORGETMENOTS_FLOWER).quadCount,
+    ).toBe(8);
+    expect(buildPlantBillboardTemplate(BlockType.BELLIS_FLOWER).quadCount).toBe(
+      2,
+    );
+    for (const block of PLANT_BLOCKS) {
+      expect(buildPlantBillboardTemplate(block).quadCount).toBeLessThan(
+        buildPlantTemplate(block).quadCount,
+      );
+    }
+  });
+
+  test("the sheets span the whole texture inside the block", () => {
+    const words = new Uint32Array(
+      buildPlantBillboardTemplate(BlockType.SAPLING).vertexBuffer,
+    );
+    const vertices = [];
+    for (let vertex = 0; vertex < words.length / WORDS_PER_VERTEX; vertex++) {
+      vertices.push(unpackVertex(words[vertex * 2], words[vertex * 2 + 1]));
+    }
+    expect(Math.min(...vertices.map((vertex) => vertex.u))).toBe(0);
+    expect(Math.max(...vertices.map((vertex) => vertex.u))).toBe(1);
+    expect(Math.min(...vertices.map((vertex) => vertex.v))).toBe(0);
+    expect(Math.max(...vertices.map((vertex) => vertex.v))).toBe(1);
+    for (const vertex of vertices) {
+      for (const coordinate of [vertex.x, vertex.y, vertex.z]) {
+        expect(coordinate).toBeGreaterThanOrEqual(0);
+        expect(coordinate).toBeLessThanOrEqual(1);
+      }
+    }
   });
 });

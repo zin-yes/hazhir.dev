@@ -17,7 +17,7 @@ export interface SceneMemoryGauge {
   unit: "bytes" | "count";
 }
 
-const CHUNK_MESH_NAME_PATTERN = /^-?\d+,-?\d+,-?\d+(_transparent|_plant_\d+)?$/;
+const CHUNK_MESH_NAME_PATTERN = /^-?\d+,-?\d+,-?\d+(_transparent|_plant_\d+_(voxel|billboard))?$/;
 
 function sum(values: number[]): number {
   let total = 0;

@@ -1,4 +1,11 @@
-import { BLOCK_TEXTURES, BlockType, Texture, isCrop, isCrossBlock, isFlatQuad } from "../blocks";
+import {
+  BLOCK_TEXTURES,
+  BlockType,
+  Texture,
+  isCrop,
+  isCrossBlock,
+  isFlatQuad,
+} from "../blocks";
 import { TEXTURE_SIZE } from "../config";
 import { PLANT_PIXEL_MASKS } from "../data/plant-pixel-masks";
 import { packPositionWord, packSurfaceWord } from "../vertex-format";
@@ -49,7 +56,10 @@ function cellKey(cellX: number, cellY: number, cellZ: number): number {
   return (cellX * TEXTURE_SIZE + cellY) * TEXTURE_SIZE + cellZ;
 }
 
-function buildVoxelCells(block: BlockType, pixelRows: string[]): Map<number, VoxelCell> {
+function buildVoxelCells(
+  block: BlockType,
+  pixelRows: string[],
+): Map<number, VoxelCell> {
   const cells = new Map<number, VoxelCell>();
 
   const claimCell = (
@@ -57,10 +67,11 @@ function buildVoxelCells(block: BlockType, pixelRows: string[]): Map<number, Vox
     cellY: number,
     cellZ: number,
     pixelColumn: number,
-    pixelRow: number
+    pixelRow: number,
   ) => {
     const key = cellKey(cellX, cellY, cellZ);
-    if (!cells.has(key)) cells.set(key, { cellX, cellY, cellZ, pixelColumn, pixelRow });
+    if (!cells.has(key))
+      cells.set(key, { cellX, cellY, cellZ, pixelColumn, pixelRow });
   };
 
   for (let pixelRow = 0; pixelRow < TEXTURE_SIZE; pixelRow++) {
@@ -73,7 +84,13 @@ function buildVoxelCells(block: BlockType, pixelRows: string[]): Map<number, Vox
         claimCell(pixelColumn, cellY, CROSS_SHEET_Z, pixelColumn, pixelRow);
         claimCell(CROSS_SHEET_X, cellY, pixelColumn, pixelColumn, pixelRow);
       } else if (isFlatQuad(block)) {
-        claimCell(pixelColumn, FLAT_QUAD_LAYER, pixelRow, pixelColumn, pixelRow);
+        claimCell(
+          pixelColumn,
+          FLAT_QUAD_LAYER,
+          pixelRow,
+          pixelColumn,
+          pixelRow,
+        );
       } else if (isCrop(block)) {
         for (const sheet of [CROP_NEAR_SHEET, CROP_FAR_SHEET]) {
           claimCell(pixelColumn, cellY, sheet, pixelColumn, pixelRow);
@@ -91,9 +108,11 @@ function cornerAmbientOcclusion(
   cells: Map<number, VoxelCell>,
   cell: VoxelCell,
   face: VoxelFace,
-  corner: Vector
+  corner: Vector,
 ): number {
-  const [firstTangent, secondTangent] = [0, 1, 2].filter((axis) => face.normal[axis] === 0);
+  const [firstTangent, secondTangent] = [0, 1, 2].filter(
+    (axis) => face.normal[axis] === 0,
+  );
   const firstStep: Vector = [0, 0, 0];
   firstStep[firstTangent] = corner[firstTangent] === 1 ? 1 : -1;
   const secondStep: Vector = [0, 0, 0];
@@ -104,17 +123,25 @@ function cornerAmbientOcclusion(
   const originZ = cell.cellZ + face.normal[2];
 
   const isFirstSideBlocked = cells.has(
-    cellKey(originX + firstStep[0], originY + firstStep[1], originZ + firstStep[2])
+    cellKey(
+      originX + firstStep[0],
+      originY + firstStep[1],
+      originZ + firstStep[2],
+    ),
   );
   const isSecondSideBlocked = cells.has(
-    cellKey(originX + secondStep[0], originY + secondStep[1], originZ + secondStep[2])
+    cellKey(
+      originX + secondStep[0],
+      originY + secondStep[1],
+      originZ + secondStep[2],
+    ),
   );
   const isCornerBlocked = cells.has(
     cellKey(
       originX + firstStep[0] + secondStep[0],
       originY + firstStep[1] + secondStep[1],
-      originZ + firstStep[2] + secondStep[2]
-    )
+      originZ + firstStep[2] + secondStep[2],
+    ),
   );
 
   if (isFirstSideBlocked && isSecondSideBlocked) return 0;
@@ -137,7 +164,8 @@ export function buildPlantTemplate(block: BlockType): PlantTemplate {
   const textureIndex = BLOCK_TEXTURES[block].DEFAULT;
   const pixelRows = PLANT_PIXEL_MASKS[TEXTURE_FILE_NAMES[textureIndex]];
   const stream = new VertexStream();
-  if (!pixelRows) return { blockType: block, vertexBuffer: stream.toBuffer(), quadCount: 0 };
+  if (!pixelRows)
+    return { blockType: block, vertexBuffer: stream.toBuffer(), quadCount: 0 };
 
   const cells = buildVoxelCells(block, pixelRows);
 
@@ -148,30 +176,43 @@ export function buildPlantTemplate(block: BlockType): PlantTemplate {
     for (const face of VOXEL_FACES) {
       const [normalX, normalY, normalZ] = face.normal;
       const isHidden = cells.has(
-        cellKey(cell.cellX + normalX, cell.cellY + normalY, cell.cellZ + normalZ)
+        cellKey(
+          cell.cellX + normalX,
+          cell.cellY + normalY,
+          cell.cellZ + normalZ,
+        ),
       );
       if (isHidden) continue;
 
       const corners: Vector[] = [
         face.base,
         face.base.map((value, axis) => value + face.alongU[axis]) as Vector,
-        face.base.map((value, axis) => value + face.alongU[axis] + face.alongV[axis]) as Vector,
+        face.base.map(
+          (value, axis) => value + face.alongU[axis] + face.alongV[axis],
+        ) as Vector,
         face.base.map((value, axis) => value + face.alongV[axis]) as Vector,
       ];
       const cornerOcclusion = corners.map((corner) =>
-        cornerAmbientOcclusion(cells, cell, face, corner)
+        cornerAmbientOcclusion(cells, cell, face, corner),
       );
       const positionWords = corners.map((corner) =>
-        packPositionWord(cell.cellX + corner[0], cell.cellY + corner[1], cell.cellZ + corner[2])
+        packPositionWord(
+          cell.cellX + corner[0],
+          cell.cellY + corner[1],
+          cell.cellZ + corner[2],
+        ),
       );
       const surfaceWords = cornerOcclusion.map((occlusion) =>
-        packSurfaceWord(u32, v32, textureIndex, occlusion, 0)
+        packSurfaceWord(u32, v32, textureIndex, occlusion, 0),
       );
 
       // Split along the brighter diagonal so a dark corner does not streak across the quad.
       const shouldFlipDiagonal =
-        cornerOcclusion[1] + cornerOcclusion[3] > cornerOcclusion[0] + cornerOcclusion[2];
-      const [first, second, third, fourth] = shouldFlipDiagonal ? [2, 3, 1, 0] : [1, 2, 0, 3];
+        cornerOcclusion[1] + cornerOcclusion[3] >
+        cornerOcclusion[0] + cornerOcclusion[2];
+      const [first, second, third, fourth] = shouldFlipDiagonal
+        ? [2, 3, 1, 0]
+        : [1, 2, 0, 3];
       stream.pushQuad(
         positionWords[first],
         surfaceWords[first],
@@ -181,11 +222,112 @@ export function buildPlantTemplate(block: BlockType): PlantTemplate {
         surfaceWords[third],
         positionWords[fourth],
         surfaceWords[fourth],
-        false
+        false,
       );
     }
   }
 
   const vertexBuffer = stream.toBuffer();
   return { blockType: block, vertexBuffer, quadCount: stream.vertexCount / 4 };
+}
+
+type Corner2 = [number, number];
+
+/**
+ * A distant stand-in for the voxel plant: the same sheets as flat textured quads,
+ * each drawn from both sides. Positions are in 1/16 block units, and the sheets sit
+ * on the whole-voxel line closest to where the voxels are, so they stay on the grid.
+ */
+export function buildPlantBillboardTemplate(block: BlockType): PlantTemplate {
+  const textureIndex = BLOCK_TEXTURES[block].DEFAULT;
+  const stream = new VertexStream();
+  const unit = TEXTURE_SIZE;
+
+  // A sheet is described by its four corners (x, y, z) with the texture corner each one samples.
+  const pushSheet = (corners: Vector[], textureCorners: Corner2[]) => {
+    const positionWords = corners.map((corner) =>
+      packPositionWord(corner[0], corner[1], corner[2]),
+    );
+    const surfaceWords = textureCorners.map(([column, row]) =>
+      packSurfaceWord(
+        column * 2,
+        row * 2,
+        textureIndex,
+        FULLY_LIT_AMBIENT_OCCLUSION,
+        0,
+      ),
+    );
+    stream.pushQuad(
+      positionWords[0],
+      surfaceWords[0],
+      positionWords[1],
+      surfaceWords[1],
+      positionWords[2],
+      surfaceWords[2],
+      positionWords[3],
+      surfaceWords[3],
+      false,
+    );
+    stream.pushQuad(
+      positionWords[1],
+      surfaceWords[1],
+      positionWords[0],
+      surfaceWords[0],
+      positionWords[3],
+      surfaceWords[3],
+      positionWords[2],
+      surfaceWords[2],
+      false,
+    );
+  };
+
+  // Corner order for every sheet: bottom-left, bottom-right, top-left, top-right of the texture.
+  const textureCorners: Corner2[] = [
+    [0, unit],
+    [unit, unit],
+    [0, 0],
+    [unit, 0],
+  ];
+  const upright = (fixedAxis: 0 | 2, fixedAt: number) =>
+    [0, unit].flatMap((bottomOrTop) =>
+      [0, unit].map((along) => {
+        const corner: Vector = [0, 0, 0];
+        corner[fixedAxis] = fixedAt;
+        corner[fixedAxis === 0 ? 2 : 0] = along;
+        corner[1] = bottomOrTop === 0 ? 0 : unit;
+        return corner;
+      }),
+    );
+
+  if (isCrossBlock(block)) {
+    pushSheet(upright(2, CROSS_SHEET_Z), textureCorners);
+    pushSheet(upright(0, CROSS_SHEET_X), textureCorners);
+  } else if (isCrop(block)) {
+    for (const sheet of [CROP_NEAR_SHEET, CROP_FAR_SHEET]) {
+      pushSheet(upright(2, sheet), textureCorners);
+      pushSheet(upright(0, sheet), textureCorners);
+    }
+  } else if (isFlatQuad(block)) {
+    const layer = FLAT_QUAD_LAYER;
+    pushSheet(
+      [
+        [0, layer, 0],
+        [unit, layer, 0],
+        [0, layer, unit],
+        [unit, layer, unit],
+      ],
+      [
+        [0, 0],
+        [unit, 0],
+        [0, unit],
+        [unit, unit],
+      ],
+    );
+  }
+
+  return {
+    blockType: block,
+    vertexBuffer: stream.toBuffer(),
+    quadCount: stream.vertexCount / 4,
+  };
 }

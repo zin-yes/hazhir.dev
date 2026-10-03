@@ -96,6 +96,15 @@ import { sampleSceneMemory } from "./profiler/scene-memory-sampler";
 
 const FLYING_SPEED = 10;
 const RANDOM_TICKS_PER_CHUNK = 100;
+// Chunks whose centers are farther than this from the camera draw plants as flat sheets.
+const PLANT_VOXEL_DETAIL_DISTANCE = 72;
+const PLANT_DETAIL_UPDATE_INTERVAL_MS = 250;
+
+interface PlantDetailMeshes {
+  center: THREE.Vector3;
+  voxel: THREE.Mesh[];
+  billboard: THREE.Mesh[];
+}
 const AUTOSAVE_INTERVAL_MILLISECONDS = 30000;
 const JOIN_TIMEOUT_MILLISECONDS = 15000;
 const BENCHMARK_LOAD_TIMEOUT_MILLISECONDS = 180000;
@@ -385,6 +394,7 @@ export default function Game() {
     plants?: THREE.ShaderMaterial;
   }>({});
   const chunkMeshesRef = useRef(new Map<string, THREE.Mesh[]>());
+  const plantDetailRef = useRef(new Map<string, PlantDetailMeshes>());
   const queuedMeshRequestsRef = useRef(new Set<string>());
   const tickableBlocksRef = useRef(new TickableBlockIndex());
 
@@ -1676,6 +1686,17 @@ export default function Game() {
     return mesh;
   }
 
+  function applyPlantDetail(plantDetail: PlantDetailMeshes) {
+    const isNear =
+      plantDetail.center.distanceTo(camera.position) <= PLANT_VOXEL_DETAIL_DISTANCE;
+    for (const mesh of plantDetail.voxel) mesh.visible = isNear;
+    for (const mesh of plantDetail.billboard) mesh.visible = !isNear;
+  }
+
+  function updatePlantDetail() {
+    plantDetailRef.current.forEach(applyPlantDetail);
+  }
+
   function addChunkMesh(
     meshResult: ChunkMeshResult,
     chunkName: string,
@@ -1722,27 +1743,41 @@ export default function Game() {
 
     let plantVertexCount = 0;
     let plantInstanceBytes = 0;
+    const plantDetail: PlantDetailMeshes = {
+      center: new THREE.Vector3(
+        chunkX * CHUNK_WIDTH + CHUNK_WIDTH / 2 - 0.5,
+        chunkY * CHUNK_HEIGHT + CHUNK_HEIGHT / 2 - 0.5,
+        chunkZ * CHUNK_LENGTH + CHUNK_LENGTH / 2 - 0.5,
+      ),
+      voxel: [],
+      billboard: [],
+    };
     for (const batch of meshResult.plants) {
-      const plantGeometry = createPlantInstanceGeometry(
-        batch.blockType,
-        batch.instances,
-      );
-      if (!plantGeometry) continue;
-      plantVertexCount +=
-        (batch.instances.byteLength / 4) * plantTemplateVertexCount(batch.blockType);
-      plantInstanceBytes += batch.instances.byteLength;
-      meshes.push(
-        placeChunkMesh(
+      for (const detail of ["voxel", "billboard"] as const) {
+        const plantGeometry = createPlantInstanceGeometry(
+          batch.blockType,
+          batch.instances,
+          detail,
+        );
+        if (!plantGeometry) continue;
+        const plantMesh = placeChunkMesh(
           plantGeometry,
           plants,
-          `${chunkName}_plant_${batch.blockType}`,
+          `${chunkName}_plant_${batch.blockType}_${detail}`,
           0,
           chunkX,
           chunkY,
           chunkZ,
-        ),
-      );
+        );
+        plantDetail[detail].push(plantMesh);
+        meshes.push(plantMesh);
+      }
+      plantVertexCount +=
+        (batch.instances.byteLength / 4) * plantTemplateVertexCount(batch.blockType);
+      plantInstanceBytes += batch.instances.byteLength;
     }
+    plantDetailRef.current.set(chunkName, plantDetail);
+    applyPlantDetail(plantDetail);
     if (plantInstanceBytes > 0) {
       recordChunkGeometryStats(chunkName, "plants", {
         vertexCount: plantVertexCount,
@@ -2372,6 +2407,7 @@ export default function Game() {
   function pruneChunkMesh(chunkName: string) {
     const disposeToken = profiler.begin("main.chunk.dispose");
     profiler.removeMesh(chunkName);
+    plantDetailRef.current.delete(chunkName);
     const meshes = chunkMeshesRef.current.get(chunkName);
     if (meshes) {
       for (const mesh of meshes) {
@@ -2877,6 +2913,8 @@ export default function Game() {
     return result;
   }
 
+  let lastPlantDetailUpdateMs = 0;
+
   const render = () => {
     profiler.beginFrame();
     // stats.begin();
@@ -2891,6 +2929,11 @@ export default function Game() {
     }
 
     updateIndicator();
+
+    if (time - lastPlantDetailUpdateMs >= PLANT_DETAIL_UPDATE_INTERVAL_MS) {
+      lastPlantDetailUpdateMs = time;
+      updatePlantDetail();
+    }
 
     // The debug readout is the only consumer of this state, so nothing re-renders while it is hidden.
     if (

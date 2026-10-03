@@ -5,7 +5,10 @@ import {
   VERTICES_PER_QUAD,
   WORDS_PER_VERTEX,
 } from "./vertex-format";
-import { buildPlantTemplate } from "./workers/plant-voxels";
+import {
+  buildPlantBillboardTemplate,
+  buildPlantTemplate,
+} from "./workers/plant-voxels";
 
 const PACKED_VERTEX_ATTRIBUTE = "packedVertex";
 const PLANT_INSTANCE_ATTRIBUTE = "instanceData";
@@ -84,30 +87,40 @@ interface PlantTemplateAttribute {
   quadCount: number;
 }
 
-const plantTemplates = new Map<number, PlantTemplateAttribute>();
+export type PlantDetail = "voxel" | "billboard";
 
-function getPlantTemplate(blockType: number): PlantTemplateAttribute {
-  let template = plantTemplates.get(blockType);
+const plantTemplates = new Map<string, PlantTemplateAttribute>();
+
+function getPlantTemplate(
+  blockType: number,
+  detail: PlantDetail,
+): PlantTemplateAttribute {
+  const key = `${blockType}:${detail}`;
+  let template = plantTemplates.get(key);
   if (!template) {
-    const built = buildPlantTemplate(blockType);
+    const built =
+      detail === "voxel"
+        ? buildPlantTemplate(blockType)
+        : buildPlantBillboardTemplate(blockType);
     const attribute = new THREE.BufferAttribute(
       new Uint32Array(built.vertexBuffer),
       WORDS_PER_VERTEX,
     );
     attribute.name = SHARED_ATTRIBUTE_NAME;
     template = { attribute, quadCount: built.quadCount };
-    plantTemplates.set(blockType, template);
+    plantTemplates.set(key, template);
   }
   return template;
 }
 
-/** One draw for every plant of a type in a chunk: a shared voxel template, one uint32 per plant. */
+/** One draw for every plant of a type in a chunk: a shared template, one uint32 per plant. */
 export function createPlantInstanceGeometry(
   blockType: number,
   instanceBuffer: ArrayBuffer,
+  detail: PlantDetail = "voxel",
 ): THREE.InstancedBufferGeometry | null {
   const instanceWords = new Uint32Array(instanceBuffer);
-  const template = getPlantTemplate(blockType);
+  const template = getPlantTemplate(blockType, detail);
   if (instanceWords.length === 0 || template.quadCount === 0) return null;
 
   const geometry = new THREE.InstancedBufferGeometry();
@@ -121,7 +134,7 @@ export function createPlantInstanceGeometry(
 }
 
 export function plantTemplateVertexCount(blockType: number): number {
-  return getPlantTemplate(blockType).quadCount * VERTICES_PER_QUAD;
+  return getPlantTemplate(blockType, "voxel").quadCount * VERTICES_PER_QUAD;
 }
 
 /**
