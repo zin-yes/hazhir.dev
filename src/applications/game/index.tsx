@@ -258,6 +258,7 @@ export default function Game() {
   const [isInventoryOpen, setIsInventoryOpen] = useState(false);
   const isInventoryOpenRef = useRef(false);
   const [isDebugVisible, setIsDebugVisible] = useState(false);
+  const isDebugVisibleRef = useRef(false);
   const [isMobile, setIsMobile] = useState(false);
   const [phase, setPhaseState] = useState<GamePhase>("title");
   const phaseRef = useRef<GamePhase>("title");
@@ -311,6 +312,10 @@ export default function Game() {
   const fpsFrames = useRef<number[]>([]);
 
   const playerControlsRef = useRef<PlayerControls | null>(null);
+
+  useEffect(() => {
+    isDebugVisibleRef.current = isDebugVisible;
+  }, [isDebugVisible]);
 
   useEffect(() => {
     selectedSlotRef.current = selectedSlot;
@@ -2887,76 +2892,49 @@ export default function Game() {
 
     updateIndicator();
 
-    // Update debug info every few frames to avoid excessive re-renders
-    if (Math.floor(time / 100) !== Math.floor(prevTime / 100)) {
+    // The debug readout is the only consumer of this state, so nothing re-renders while it is hidden.
+    if (
+      isDebugVisibleRef.current &&
+      Math.floor(time / 100) !== Math.floor(prevTime / 100)
+    ) {
       const debugInfoToken = profiler.begin("main.frame.debugInfo");
       const playerChunkX = Math.floor(camera.position.x / CHUNK_WIDTH);
       const playerChunkY = Math.floor(camera.position.y / CHUNK_HEIGHT);
       const playerChunkZ = Math.floor(camera.position.z / CHUNK_LENGTH);
 
-      // Find what block we're looking at
       let lookingAtBlock: { x: number; y: number; z: number } | null = null;
       let blockAtCursor: { type: number; light: number } | null = null;
 
       if (playerControlsRef.current?.controls.isLocked || playerControlsRef.current?.isMobile) {
-        let cameraDirection: THREE.Vector3 = new THREE.Vector3();
-        camera.getWorldDirection(cameraDirection);
-        cameraDirection.normalize();
-        cameraDirection.multiplyScalar(0.02);
+        const hit = castCameraRay();
+        if (hit) {
+          lookingAtBlock = { x: hit.x, y: hit.y, z: hit.z };
 
-        let currentPoint = new THREE.Vector3(
-          camera.position.x,
-          camera.position.y,
-          camera.position.z,
-        );
-
-        let lastX = Math.round(currentPoint.x);
-        let lastY = Math.round(currentPoint.y);
-        let lastZ = Math.round(currentPoint.z);
-
-        for (let step = 0; step < 5 * 50; step++) {
-          raycastStepsRef.current++;
-          const x = Math.round(currentPoint.x);
-          const y = Math.round(currentPoint.y);
-          const z = Math.round(currentPoint.z);
-
-          currentPoint = currentPoint.add(
-            new THREE.Vector3(
-              cameraDirection.x,
-              cameraDirection.y,
-              cameraDirection.z,
-            ),
-          );
-          const blockType = getBlock(x, y, z);
-          if (blockType !== null && blockType !== BlockType.AIR) {
-            lookingAtBlock = { x, y, z };
-
-            const chunkX = Math.floor(lastX / CHUNK_WIDTH);
-            const chunkY = Math.floor(lastY / CHUNK_HEIGHT);
-            const chunkZ = Math.floor(lastZ / CHUNK_LENGTH);
-
-            const chunkName = generateChunkName(chunkX, chunkY, chunkZ);
-            const lightChunk = lightChunks.current[chunkName];
-
-            let lightLevel = 0;
-            if (lightChunk) {
-              const blockChunkX = lastX - chunkX * CHUNK_WIDTH;
-              const blockChunkY = lastY - chunkY * CHUNK_HEIGHT;
-              const blockChunkZ = lastZ - chunkZ * CHUNK_LENGTH;
-              const rawLight =
-                lightChunk[
-                  calculateOffset(blockChunkX, blockChunkY, blockChunkZ)
-                ];
-              lightLevel = (rawLight >> 4) & 0xf;
-            }
-
-            blockAtCursor = { type: blockType, light: lightLevel };
-            break;
+          // Light is read from the open block in front of the face that was hit.
+          const litX = hit.x + hit.normal.x;
+          const litY = hit.y + hit.normal.y;
+          const litZ = hit.z + hit.normal.z;
+          const chunkX = Math.floor(litX / CHUNK_WIDTH);
+          const chunkY = Math.floor(litY / CHUNK_HEIGHT);
+          const chunkZ = Math.floor(litZ / CHUNK_LENGTH);
+          const lightChunk =
+            lightChunks.current[generateChunkName(chunkX, chunkY, chunkZ)];
+          let lightLevel = 0;
+          if (lightChunk) {
+            const rawLight =
+              lightChunk[
+                calculateOffset(
+                  litX - chunkX * CHUNK_WIDTH,
+                  litY - chunkY * CHUNK_HEIGHT,
+                  litZ - chunkZ * CHUNK_LENGTH,
+                )
+              ];
+            lightLevel = (rawLight >> 4) & 0xf;
           }
-
-          lastX = x;
-          lastY = y;
-          lastZ = z;
+          blockAtCursor = {
+            type: getBlock(hit.x, hit.y, hit.z) as number,
+            light: lightLevel,
+          };
         }
       }
 
