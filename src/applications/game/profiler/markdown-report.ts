@@ -1,3 +1,4 @@
+import { buildLightEditRows } from "./light-report";
 import { buildEfficiencyLines, buildWorkerMethodRows } from "./metric-names";
 import { estimateSelfMillisecondsPerSecond } from "./cost-model";
 import type {
@@ -28,6 +29,7 @@ const GROUP_TITLES: Record<OptimizationTarget["group"], string> = {
   transfer: "Transfers (worker messages and GPU uploads)",
   worker: "Workers (background CPU)",
   memory: "Memory",
+  light: "Light edits (wall clock per edit)",
   latency: "Latency (wall clock, not CPU)",
 };
 
@@ -51,6 +53,7 @@ export function renderBenchmarkMarkdown(result: BenchmarkResult): string {
     lines.push(...renderFrameSection(phase.report, 3));
     lines.push(...renderTargetSections(phase.report.targets, 3, PHASE_TARGET_ROWS_PER_GROUP));
     lines.push(...renderHintSection(phase.report, 3));
+    lines.push(...renderLightEditSection(phase.report, 3));
   }
   lines.push("## Overall", "");
   lines.push(...renderReportSections(result.overall, 3, TARGET_ROWS_PER_GROUP, true));
@@ -67,6 +70,7 @@ function renderReportSections(
     ...renderSessionSection(report, headingLevel),
     ...renderFrameSection(report, headingLevel),
     ...renderHintSection(report, headingLevel),
+    ...renderLightEditSection(report, headingLevel),
     ...renderTargetSections(report.targets, headingLevel, targetRows),
   ];
   if (includeAppendix) lines.push(...renderAppendix(report, headingLevel));
@@ -142,6 +146,53 @@ function renderHintSection(report: ProfileReport, level: number): string[] {
     lines.push(`  - Suggestion: ${hint.suggestion}`);
   }
   lines.push("");
+  return lines;
+}
+
+function renderLightEditSection(report: ProfileReport, level: number): string[] {
+  const rows = buildLightEditRows(report.snapshot);
+  if (rows.length === 0) return [];
+  const lines = [heading(level, "Light edits, click to pixels"), ""];
+  lines.push(
+    "Wall clock from the block edit to the last affected chunk mesh on screen. relight = light data final, remesh = relight to last mesh.",
+    "",
+  );
+  lines.push(
+    markdownTable(
+      ["edit", "count", "total mean", "total p95", "total max", "first mesh", "relight", "remesh"],
+      rows.map((row) => [
+        row.kind,
+        `${row.total.count}`,
+        formatMilliseconds(row.total.mean),
+        formatMilliseconds(row.total.p95),
+        formatMilliseconds(row.total.max),
+        formatOptional(row.firstMesh, (timer) => formatMilliseconds(timer.mean)),
+        formatOptional(row.relight, (timer) => formatMilliseconds(timer.mean)),
+        formatOptional(row.remesh, (timer) => formatMilliseconds(timer.mean)),
+      ]),
+    ),
+    "",
+  );
+  for (const row of rows) {
+    if (row.stages.length === 0 && row.counters.length === 0) continue;
+    lines.push(heading(level + 1, `${row.kind} stages`), "");
+    lines.push(
+      markdownTable(
+        ["stage", "mean", "p95", "max", "share of total"],
+        row.stages.map((stage) => [
+          stage.name,
+          formatMilliseconds(stage.timer.mean),
+          formatMilliseconds(stage.timer.p95),
+          formatMilliseconds(stage.timer.max),
+          `${stage.shareOfTotalPercent.toFixed(0)}%`,
+        ]),
+      ),
+      "",
+    );
+    if (row.counters.length > 0) {
+      lines.push(row.counters.map((counter) => `${counter.name}: ${counter.perEdit.toFixed(1)} per edit`).join(", "), "");
+    }
+  }
   return lines;
 }
 

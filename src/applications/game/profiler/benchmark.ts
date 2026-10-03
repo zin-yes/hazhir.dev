@@ -13,6 +13,10 @@ export const DEFAULT_BENCHMARK_SEED = 20240607;
 const DEFAULT_FLY_SECONDS = 20;
 const DEFAULT_HOVER_SECONDS = 8;
 const DEFAULT_EDIT_SECONDS = 8;
+const DEFAULT_LIGHT_EDIT_SECONDS = 10;
+const LIGHT_EDIT_SETTLE_PAUSE_MS = 150;
+const LIGHT_EDIT_RING_RADIUS_BLOCKS = 8;
+const LIGHT_EDIT_RING_POSITIONS = 8;
 const HOVER_WARMUP_SECONDS = 3;
 const FLIGHT_SPEED_BLOCKS_PER_SECOND = 12;
 const FLIGHT_ALTITUDE_ABOVE_SURFACE = 8;
@@ -47,6 +51,13 @@ export interface BenchmarkBridge {
   setCameraPose(pose: CameraPose): void;
   getCameraPosition(): Vector3Like;
   editBlock(x: number, y: number, z: number, blockType: number): void;
+  /** Edits a block and resolves once its relight and every re-mesh it caused are on screen. */
+  editBlockAndSettle(
+    x: number,
+    y: number,
+    z: number,
+    blockType: number,
+  ): Promise<void>;
   /** Registers a callback that runs inside every render frame. */
   onFrame(callback: (deltaSeconds: number) => void): () => void;
   /** Returns the game to the state it was in before the benchmark. */
@@ -54,7 +65,8 @@ export interface BenchmarkBridge {
   getSurfaceHeight(x: number, z: number): number;
 }
 
-export type BenchmarkPhaseKind = "world-load" | "fly" | "hover" | "edit";
+export type BenchmarkPhaseKind =
+  "world-load" | "fly" | "hover" | "edit" | "light-edit";
 
 export interface BenchmarkPhasePlan {
   name: BenchmarkPhaseKind;
@@ -71,7 +83,9 @@ export interface EditTarget {
   blockType: number;
 }
 
-export function buildPhasePlan(options: BenchmarkOptions = {}): BenchmarkPhasePlan[] {
+export function buildPhasePlan(
+  options: BenchmarkOptions = {},
+): BenchmarkPhasePlan[] {
   return [
     { name: "world-load", durationSeconds: null, warmupSeconds: 0 },
     {
@@ -87,6 +101,11 @@ export function buildPhasePlan(options: BenchmarkOptions = {}): BenchmarkPhasePl
     {
       name: "edit",
       durationSeconds: options.editSeconds ?? DEFAULT_EDIT_SECONDS,
+      warmupSeconds: 0,
+    },
+    {
+      name: "light-edit",
+      durationSeconds: options.lightEditSeconds ?? DEFAULT_LIGHT_EDIT_SECONDS,
       warmupSeconds: 0,
     },
   ].filter(
@@ -117,7 +136,9 @@ export function computeHoverPose(
 ): CameraPose {
   return {
     position,
-    yaw: FACING_POSITIVE_X_YAW_RADIANS + HOVER_YAW_RADIANS_PER_SECOND * elapsedSeconds,
+    yaw:
+      FACING_POSITIVE_X_YAW_RADIANS +
+      HOVER_YAW_RADIANS_PER_SECOND * elapsedSeconds,
     pitch: LOOKING_DOWN_PITCH_RADIANS,
   };
 }
@@ -127,7 +148,10 @@ export function computeHoverPose(
  * it. Every second pair uses a light source so both the sunlight-only and the
  * block-light relight paths run.
  */
-export function computeEditTarget(index: number, center: Vector3Like): EditTarget {
+export function computeEditTarget(
+  index: number,
+  center: Vector3Like,
+): EditTarget {
   const pairIndex = Math.floor(index / 2);
   const ringPosition = pairIndex % EDIT_RING_POSITIONS;
   const angle = (ringPosition / EDIT_RING_POSITIONS) * Math.PI * 2;
@@ -142,6 +166,31 @@ export function computeEditTarget(index: number, center: Vector3Like): EditTarge
         ? BlockType.GLOWSTONE
         : BlockType.STONE
       : BlockType.AIR,
+  };
+}
+
+/**
+ * One edit at a time on a ring around the center, cycling through the four kinds
+ * (place light, break light, place block, break block) so every position sees each.
+ */
+export function computeLightEditTarget(
+  index: number,
+  center: Vector3Like,
+): EditTarget {
+  const kindIndex = index % 4;
+  const ringPosition = Math.floor(index / 4) % LIGHT_EDIT_RING_POSITIONS;
+  const angle = (ringPosition / LIGHT_EDIT_RING_POSITIONS) * Math.PI * 2;
+  const blockTypeByKind = [
+    BlockType.GLOWSTONE,
+    BlockType.AIR,
+    BlockType.STONE,
+    BlockType.AIR,
+  ];
+  return {
+    x: Math.round(center.x + Math.cos(angle) * LIGHT_EDIT_RING_RADIUS_BLOCKS),
+    z: Math.round(center.z + Math.sin(angle) * LIGHT_EDIT_RING_RADIUS_BLOCKS),
+    action: kindIndex % 2 === 0 ? "place" : "break",
+    blockType: blockTypeByKind[kindIndex],
   };
 }
 
@@ -179,7 +228,9 @@ export async function runBenchmark(
     startedAtIso,
     seed,
     phases,
-    overall: buildProfileReport(mergeSnapshots(phaseSnapshots, "benchmark-overall")),
+    overall: buildProfileReport(
+      mergeSnapshots(phaseSnapshots, "benchmark-overall"),
+    ),
   };
 }
 
@@ -203,17 +254,27 @@ async function runTimedPhase(
   const startPosition = { ...bridge.getCameraPosition() };
   const flightStart = {
     x: startPosition.x,
-    y: bridge.getSurfaceHeight(startPosition.x, startPosition.z) + FLIGHT_ALTITUDE_ABOVE_SURFACE,
+    y:
+      bridge.getSurfaceHeight(startPosition.x, startPosition.z) +
+      FLIGHT_ALTITUDE_ABOVE_SURFACE,
     z: startPosition.z,
   };
   const durationSeconds = plan.durationSeconds ?? 0;
   let editIndex = 0;
   let nextEditAtSeconds = 0;
 
+  if (plan.name === "light-edit") {
+    return runLightEditPhase(bridge, driver, plan, startPosition);
+  }
+
   const driveFrame = (elapsedSeconds: number) => {
     if (plan.name === "fly") {
       bridge.setCameraPose(
-        computeFlightPose(elapsedSeconds, flightStart, FLIGHT_SPEED_BLOCKS_PER_SECOND),
+        computeFlightPose(
+          elapsedSeconds,
+          flightStart,
+          FLIGHT_SPEED_BLOCKS_PER_SECOND,
+        ),
       );
     } else {
       bridge.setCameraPose(computeHoverPose(elapsedSeconds, startPosition));
@@ -221,7 +282,8 @@ async function runTimedPhase(
     if (plan.name !== "edit") return;
     while (elapsedSeconds >= nextEditAtSeconds) {
       const target = computeEditTarget(editIndex++, startPosition);
-      const groundY = Math.round(bridge.getSurfaceHeight(target.x, target.z)) + 1;
+      const groundY =
+        Math.round(bridge.getSurfaceHeight(target.x, target.z)) + 1;
       bridge.editBlock(target.x, groundY, target.z, target.blockType);
       nextEditAtSeconds += EDIT_INTERVAL_SECONDS;
     }
@@ -232,6 +294,40 @@ async function runTimedPhase(
   }
   profiler.reset(plan.name);
   await driver.runFor(durationSeconds, driveFrame);
+  return profiler.snapshot(plan.name);
+}
+
+/** Edits one block at a time, waiting for the light and meshes to settle before the next. */
+async function runLightEditPhase(
+  bridge: BenchmarkBridge,
+  driver: FrameDriver,
+  plan: BenchmarkPhasePlan,
+  center: Vector3Like,
+): Promise<ProfileSnapshot> {
+  const durationMs = (plan.durationSeconds ?? 0) * 1000;
+  const driveFrame = (elapsedSeconds: number) =>
+    bridge.setCameraPose(computeHoverPose(elapsedSeconds, center));
+
+  profiler.reset(plan.name);
+  const startedAtMs = performance.now();
+  const edits = (async () => {
+    let editIndex = 0;
+    while (performance.now() - startedAtMs < durationMs) {
+      const target = computeLightEditTarget(editIndex++, center);
+      const groundY =
+        Math.round(bridge.getSurfaceHeight(target.x, target.z)) + 1;
+      await bridge.editBlockAndSettle(
+        target.x,
+        groundY,
+        target.z,
+        target.blockType,
+      );
+      await new Promise((resolve) =>
+        setTimeout(resolve, LIGHT_EDIT_SETTLE_PAUSE_MS),
+      );
+    }
+  })();
+  await driver.runUntil(edits, driveFrame);
   return profiler.snapshot(plan.name);
 }
 
@@ -263,6 +359,23 @@ class FrameDriver {
     });
   }
 
+  /** Drives the camera every frame until the given work finishes. */
+  async runUntil(
+    work: Promise<void>,
+    driveFrame: (elapsedSeconds: number) => void,
+  ): Promise<void> {
+    let elapsedSeconds = 0;
+    this.activeFrame = (deltaSeconds) => {
+      elapsedSeconds += Math.min(deltaSeconds, MAX_FRAME_DELTA_SECONDS);
+      driveFrame(elapsedSeconds);
+    };
+    try {
+      await work;
+    } finally {
+      this.activeFrame = null;
+    }
+  }
+
   dispose() {
     this.unsubscribe?.();
     this.unsubscribe = null;
@@ -280,7 +393,10 @@ export function mergeSnapshots(
   label: string,
 ): ProfileSnapshot {
   const last = snapshots[snapshots.length - 1];
-  const profiledForMs = snapshots.reduce((sum, item) => sum + item.profiledForMs, 0);
+  const profiledForMs = snapshots.reduce(
+    (sum, item) => sum + item.profiledForMs,
+    0,
+  );
   const profiledSeconds = Math.max(profiledForMs / 1000, 1e-9);
 
   const mergeNamed = <Entry extends DistributionSummary & { name: string }>(
@@ -299,7 +415,8 @@ export function mergeSnapshots(
       };
       if ("selfTotal" in merged) {
         (merged as { selfTotal: number }).selfTotal = entries.reduce(
-          (sum, entry) => sum + (entry as unknown as { selfTotal: number }).selfTotal,
+          (sum, entry) =>
+            sum + (entry as unknown as { selfTotal: number }).selfTotal,
           0,
         );
       }
@@ -314,7 +431,8 @@ export function mergeSnapshots(
       counterTotals.set(counter.name, {
         ...counter,
         total: (existing?.total ?? 0) + counter.total,
-        recentPerSecond: ((existing?.total ?? 0) + counter.total) / profiledSeconds,
+        recentPerSecond:
+          ((existing?.total ?? 0) + counter.total) / profiledSeconds,
       });
     }
   }
@@ -326,12 +444,30 @@ export function mergeSnapshots(
     frames: {
       ...last.frames,
       count: snapshots.reduce((sum, item) => sum + item.frames.count, 0),
-      intervalMs: mergeDistributions(snapshots.map((item) => item.frames.intervalMs), profiledSeconds),
-      busyMs: mergeDistributions(snapshots.map((item) => item.frames.busyMs), profiledSeconds),
-      gpuMs: mergeDistributions(snapshots.map((item) => item.frames.gpuMs), profiledSeconds),
-      framesOver16Point7Ms: snapshots.reduce((sum, item) => sum + item.frames.framesOver16Point7Ms, 0),
-      framesOver33Ms: snapshots.reduce((sum, item) => sum + item.frames.framesOver33Ms, 0),
-      framesOver50Ms: snapshots.reduce((sum, item) => sum + item.frames.framesOver50Ms, 0),
+      intervalMs: mergeDistributions(
+        snapshots.map((item) => item.frames.intervalMs),
+        profiledSeconds,
+      ),
+      busyMs: mergeDistributions(
+        snapshots.map((item) => item.frames.busyMs),
+        profiledSeconds,
+      ),
+      gpuMs: mergeDistributions(
+        snapshots.map((item) => item.frames.gpuMs),
+        profiledSeconds,
+      ),
+      framesOver16Point7Ms: snapshots.reduce(
+        (sum, item) => sum + item.frames.framesOver16Point7Ms,
+        0,
+      ),
+      framesOver33Ms: snapshots.reduce(
+        (sum, item) => sum + item.frames.framesOver33Ms,
+        0,
+      ),
+      framesOver50Ms: snapshots.reduce(
+        (sum, item) => sum + item.frames.framesOver50Ms,
+        0,
+      ),
       worst: snapshots
         .flatMap((item) => item.frames.worst)
         .sort((first, second) => second.intervalMs - first.intervalMs)
@@ -348,7 +484,9 @@ function mergeDistributions(
   distributions: DistributionSummary[],
   profiledSeconds: number,
 ): DistributionSummary {
-  const nonEmpty = distributions.filter((distribution) => distribution.count > 0);
+  const nonEmpty = distributions.filter(
+    (distribution) => distribution.count > 0,
+  );
   if (nonEmpty.length === 0) return { ...distributions[0] };
   const count = nonEmpty.reduce((sum, item) => sum + item.count, 0);
   const total = nonEmpty.reduce((sum, item) => sum + item.total, 0);

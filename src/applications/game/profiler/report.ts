@@ -39,6 +39,7 @@ const GROUP_ORDER: OptimizationTarget["group"][] = [
   "transfer",
   "worker",
   "memory",
+  "light",
   "latency",
 ];
 
@@ -50,6 +51,7 @@ export function buildProfileReport(snapshot: ProfileSnapshot): ProfileReport {
     ...buildTransferTargets(snapshot),
     ...buildWorkerTargets(snapshot),
     ...buildMemoryTargets(snapshot),
+    ...buildLightTargets(snapshot),
     ...buildLatencyTargets(snapshot),
   ];
 
@@ -271,6 +273,21 @@ function memoryDraftFromGauge(gauge: GaugeSummary): TargetDraft {
 
 function formatMegabytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(2)}MB`;
+}
+
+function buildLightTargets(snapshot: ProfileSnapshot): TargetDraft[] {
+  return snapshot.timers
+    .filter((timer) => timer.domain === "light")
+    .map((timer) =>
+      timerTarget(
+        "light",
+        timer,
+        null,
+        false,
+        `wall-clock time per edit, ${timer.count} edits`,
+      ),
+    )
+    .sort((first, second) => (second.p95Ms ?? 0) - (first.p95Ms ?? 0));
 }
 
 function buildLatencyTargets(snapshot: ProfileSnapshot): TargetDraft[] {

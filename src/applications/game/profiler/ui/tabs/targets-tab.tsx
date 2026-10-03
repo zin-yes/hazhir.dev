@@ -14,6 +14,7 @@ const GROUP_TITLES: Record<OptimizationTarget["group"], string> = {
   transfer: "Transfers",
   worker: "Workers",
   memory: "Memory",
+  light: "Light edits",
   latency: "Latency",
 };
 

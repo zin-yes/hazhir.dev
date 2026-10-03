@@ -12,6 +12,7 @@ import { isOverlayVisible, subscribeOverlayVisibility } from "./overlay-visibili
 import { EventsTab } from "./tabs/events-tab";
 import { FramesTab } from "./tabs/frames-tab";
 import { GpuTab } from "./tabs/gpu-tab";
+import { LightTab } from "./tabs/light-tab";
 import { MainThreadTab } from "./tabs/main-thread-tab";
 import { MemoryTab } from "./tabs/memory-tab";
 import { MeshesTab } from "./tabs/meshes-tab";
@@ -26,6 +27,7 @@ const TABS = [
   { id: "frames", label: "Frames", Component: FramesTab },
   { id: "main", label: "Main", Component: MainThreadTab },
   { id: "workers", label: "Workers", Component: WorkersTab },
+  { id: "light", label: "Light", Component: LightTab },
   { id: "gpu", label: "GPU", Component: GpuTab },
   { id: "transfers", label: "Transfers", Component: TransfersTab },
   { id: "memory", label: "Memory", Component: MemoryTab },

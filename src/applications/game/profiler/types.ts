@@ -23,6 +23,7 @@ export type MetricDomain =
   | "gl"
   | "transfer"
   | "latency"
+  | "light"
   | "browser";
 
 export interface DistributionSummary {
@@ -201,6 +202,7 @@ export interface OptimizationTarget {
     | "worker"
     | "transfer"
     | "memory"
+    | "light"
     | "latency";
   name: string;
   /** Cost in milliseconds per wall-clock second (null for pure size entries). */
@@ -246,6 +248,8 @@ export interface BenchmarkOptions {
   hoverSeconds?: number;
   /** Place and break blocks in a burst (relight and remesh path). */
   editSeconds?: number;
+  /** One edit at a time, waiting for each to settle (light edit latency, click to pixels). */
+  lightEditSeconds?: number;
 }
 
 export interface ProfilerSettings {
