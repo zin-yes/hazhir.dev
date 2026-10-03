@@ -185,6 +185,16 @@ export class PlayerControls {
     }
   }
 
+  public resetMotion() {
+    this.velocity.set(0, 0, 0);
+    this.moveForward = false;
+    this.moveBackward = false;
+    this.moveLeft = false;
+    this.moveRight = false;
+    this.moveUp = false;
+    this.moveDown = false;
+  }
+
   public stopJump() {
     this.moveUp = false;
   }

@@ -24,7 +24,6 @@ import * as THREE from "three";
 
 import {
   BlockType,
-  LOADING_SCREEN_TEXTURES,
   NON_COLLIDABLE_BLOCKS,
   TRANSPARENT_BLOCKS,
   Texture,
@@ -40,11 +39,32 @@ import { PhysicsEngine } from "./physics-engine";
 import { PlayerControls } from "./player-controls";
 import { FRAGMENT_SHADER, VERTEX_SHADER } from "./shaders/chunk";
 import { MobileControls } from "./ui/mobile-controls";
-import UILayer from "./ui/index";
+import UILayer, { type GamePhase } from "./ui/index";
+import {
+  type StoredWorld,
+  createWorldRecord,
+  deleteWorldRecord,
+  generateRandomSeed,
+  hashTextToSeed,
+  listWorldRecords,
+  saveWorldRecord,
+} from "./worlds/world-store";
 import { calculateOffset, getSurfaceHeightFromSeed } from "./utils";
 import { updateWater } from "./water-physics";
 
 const FLYING_SPEED = 10;
+const AUTOSAVE_INTERVAL_MILLISECONDS = 30000;
+const DEFAULT_HOTBAR_BLOCKS = [
+  BlockType.DIRT,
+  BlockType.GRASS,
+  BlockType.STONE,
+  BlockType.LOG,
+  BlockType.PLANKS,
+  BlockType.LEAVES,
+  BlockType.GLASS,
+  BlockType.GLOWSTONE,
+  BlockType.COBBLESTONE,
+];
 
 // TODO: Sakura biome
 // TODO: Jungle biome
@@ -142,8 +162,6 @@ export default function Game() {
     [],
   );
 
-  let initialLoadCompletion = 0;
-
   const resizeObserver = useMemo(
     () =>
       new ResizeObserver(() => {
@@ -162,69 +180,48 @@ export default function Game() {
   );
 
   function setInitialLoadCompletion(value: number) {
-    const loadingLayerBackground = document.getElementById(
-      "loadingLayerBackground",
-    ) as HTMLDivElement;
-
-    if (loadingLayerBackground) {
-      if (Math.random() > 0.6) {
-        loadingLayerBackground.innerHTML += `<div class="w-[10%] aspect-square" style="image-rendering:pixelated;background-image: url(/game/${
-          LOADING_SCREEN_TEXTURES[
-            Math.floor(Math.random() * LOADING_SCREEN_TEXTURES.length)
-          ]
-        });background-size: 100% 100%;background-position: center center"></div>`;
-      }
-    }
-
-    initialLoadCompletion = value;
-
-    const initialLoadCompletionElement = document.getElementById(
-      "initialLoadCompletion",
-    ) as HTMLDivElement;
-    const loadingLayerElement = document.getElementById(
-      "loadingLayer",
-    ) as HTMLDivElement;
-    if (initialLoadCompletionElement) {
-      initialLoadCompletionElement.innerHTML =
-        Math.round(initialLoadCompletion * 100) + "%";
-      if (initialLoadCompletion === 1) {
-        setTimeout(() => {
-          if (loadingLayerElement) {
-            loadingLayerElement.style.pointerEvents = "none";
-            loadingLayerElement.style.opacity = "0";
-          }
-        }, 400);
-        setTimeout(() => {
-          if (loadingLayerElement) {
-            loadingLayerBackground.remove();
-            loadingLayerElement.remove();
-          }
-        }, 1400);
-      }
+    loadProgressRef.current = value;
+    setLoadProgress(value);
+    if (value === 1) {
+      setTimeout(() => {
+        if (phaseRef.current === "loading") setPhase("paused");
+      }, 400);
     }
   }
 
   const [selectedSlot, setSelectedSlot] = useState(0);
   const selectedSlotRef = useRef(0);
   const [hotbarSlots, setHotbarSlots] = useState<BlockType[]>(
-    normalizeHotbar([
-      BlockType.DIRT,
-      BlockType.GRASS,
-      BlockType.STONE,
-      BlockType.LOG,
-      BlockType.PLANKS,
-      BlockType.LEAVES,
-      BlockType.GLASS,
-      BlockType.GLOWSTONE,
-      BlockType.COBBLESTONE,
-    ]),
+    normalizeHotbar(DEFAULT_HOTBAR_BLOCKS),
   );
   const hotbarSlotsRef = useRef(hotbarSlots);
   const [isInventoryOpen, setIsInventoryOpen] = useState(false);
   const isInventoryOpenRef = useRef(false);
   const [isDebugVisible, setIsDebugVisible] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
-  const [isMobilePlaying, setIsMobilePlaying] = useState(false);
+  const [phase, setPhaseState] = useState<GamePhase>("title");
+  const phaseRef = useRef<GamePhase>("title");
+  const [loadProgress, setLoadProgress] = useState(0);
+  const loadProgressRef = useRef(0);
+  const [worlds, setWorlds] = useState<StoredWorld[]>([]);
+  const [isLoadingWorlds, setIsLoadingWorlds] = useState(true);
+  const [activeWorldName, setActiveWorldName] = useState("");
+  const activeWorldRef = useRef<StoredWorld | null>(null);
+  const texturesReadyRef = useRef(false);
+  const worldWaitingForTexturesRef = useRef<StoredWorld | null>(null);
+
+  function setPhase(nextPhase: GamePhase) {
+    phaseRef.current = nextPhase;
+    setPhaseState(nextPhase);
+  }
+
+  function isSimulationActive() {
+    return (
+      phaseRef.current === "playing" ||
+      !!networkManager.current.myPeerId ||
+      connectedToHostRef.current
+    );
+  }
   const [debugInfo, setDebugInfo] = useState({
     fps: 0,
     playerPosition: { x: 0, y: 0, z: 0 },
@@ -258,11 +255,13 @@ export default function Game() {
         return;
       }
 
-      if (event.code === "KeyE") {
+      if (event.code === "KeyE" && phaseRef.current === "playing") {
         if (isInventoryOpen) {
+          isInventoryOpenRef.current = false;
           setIsInventoryOpen(false);
           playerControlsRef.current?.controls.lock();
         } else {
+          isInventoryOpenRef.current = true;
           setIsInventoryOpen(true);
           playerControlsRef.current?.controls.unlock();
         }
@@ -624,13 +623,15 @@ export default function Game() {
       }
 
       playerControlsRef.current.controls.addEventListener("lock", () => {
-        const infoLayer = document.getElementById("infoLayer");
-        if (infoLayer) infoLayer.style.display = "none";
+        if (phaseRef.current === "paused") setPhase("playing");
       });
 
       playerControlsRef.current.controls.addEventListener("unlock", () => {
-        const infoLayer = document.getElementById("infoLayer");
-        if (infoLayer) infoLayer.style.display = "flex";
+        const isOpeningInventory = isInventoryOpenRef.current;
+        if (phaseRef.current === "playing" && !isOpeningInventory) {
+          setPhase("paused");
+          saveActiveWorld();
+        }
       });
 
       for (
@@ -708,7 +709,10 @@ export default function Game() {
               depthWrite: false,
             });
 
-            startWorldGeneration(seedRef.current);
+            texturesReadyRef.current = true;
+            const worldWaitingForTextures = worldWaitingForTexturesRef.current;
+            worldWaitingForTexturesRef.current = null;
+            if (worldWaitingForTextures) enterWorld(worldWaitingForTextures);
           }
 
           renderer.setAnimationLoop(render);
@@ -726,11 +730,14 @@ export default function Game() {
       const onKeyUp = function (event: KeyboardEvent) {
         switch (event.code) {
           case "KeyT":
-            placeTree();
+            if (phaseRef.current === "playing") placeTree();
             break;
           case "Escape":
             if (isInventoryOpenRef.current) {
+              isInventoryOpenRef.current = false;
               setIsInventoryOpen(false);
+              setPhase("paused");
+              saveActiveWorld();
             }
             break;
         }
@@ -741,17 +748,7 @@ export default function Game() {
       };
 
       const onMouseDown = (event: MouseEvent) => {
-        const controls = playerControlsRef.current?.controls;
-        if (!controls) return;
-        if (!controls.isLocked) {
-          const canStartPlaying =
-            event.button === 0 &&
-            initialLoadCompletion === 1 &&
-            !isInventoryOpenRef.current &&
-            !playerControlsRef.current?.isMobile;
-          if (canStartPlaying) controls.lock();
-          return;
-        }
+        if (!playerControlsRef.current?.controls.isLocked) return;
         if (event.button === 0) {
           breakBlock();
         } else if (event.button === 2) {
@@ -1598,6 +1595,7 @@ export default function Game() {
 
   useEffect(() => {
     const interval = setInterval(() => {
+      if (!isSimulationActive()) return;
       if (pendingWaterUpdates.current.size === 0) return;
 
       const updates = Array.from(pendingWaterUpdates.current);
@@ -2342,76 +2340,192 @@ export default function Game() {
 
   useEffect(() => {
     const tickInterval = setInterval(() => {
+      if (!isSimulationActive()) return;
       tickChunks();
     }, 50); // 20 ticks per second
 
     return () => clearInterval(tickInterval);
   }, []);
 
-  function saveWorld() {
-    if (!playerControlsRef.current) return;
-    const playerObj = playerControlsRef.current.controls.object;
-    const saveData = {
+  function refreshWorlds() {
+    return listWorldRecords()
+      .then(setWorlds)
+      .catch((error) => {
+        console.error("Failed to list worlds:", error);
+        toast.error("Could not read saved worlds");
+      })
+      .finally(() => setIsLoadingWorlds(false));
+  }
+
+  useEffect(() => {
+    refreshWorlds();
+  }, []);
+
+  function buildSnapshotOfActiveWorld(): StoredWorld | null {
+    const activeWorld = activeWorldRef.current;
+    if (!activeWorld || !playerControlsRef.current) return null;
+    if (loadProgressRef.current < 1) return null;
+    const playerObject = playerControlsRef.current.controls.object;
+    return {
+      ...activeWorld,
       seed: seedRef.current,
+      lastPlayedAt: Date.now(),
       modifiedChunks: Array.from(modifiedChunks.current.entries()).map(
-        ([key, map]) => [key, Array.from(map.entries())],
+        ([chunkName, edits]) => [chunkName, Array.from(edits.entries())],
       ),
       position: {
-        x: playerObj.position.x,
-        y: playerObj.position.y,
-        z: playerObj.position.z,
+        x: playerObject.position.x,
+        y: playerObject.position.y,
+        z: playerObject.position.z,
       },
       rotation: {
-        x: playerObj.rotation.x,
-        y: playerObj.rotation.y,
-        z: playerObj.rotation.z,
+        x: playerObject.rotation.x,
+        y: playerObject.rotation.y,
+        z: playerObject.rotation.z,
       },
       hotbarSlots: normalizeHotbar(hotbarSlotsRef.current),
     };
-    localStorage.setItem("hazhir-dev-save", JSON.stringify(saveData));
-    toast.success("World saved!");
   }
 
-  function loadWorld() {
-    const saveString = localStorage.getItem("hazhir-dev-save");
-    if (!saveString) {
-      toast.info("No save found!");
+  async function saveActiveWorld(shouldAnnounce = false) {
+    const snapshot = buildSnapshotOfActiveWorld();
+    if (!snapshot) return;
+    try {
+      activeWorldRef.current = snapshot;
+      await saveWorldRecord(snapshot);
+      if (shouldAnnounce) toast.success("World saved");
+    } catch (error) {
+      console.error("Failed to save world:", error);
+      toast.error("Failed to save world");
+    }
+  }
+
+  function enterWorld(world: StoredWorld) {
+    if (!texturesReadyRef.current) {
+      worldWaitingForTexturesRef.current = world;
+      setActiveWorldName(world.name);
+      setPhase("loading");
       return;
     }
-    try {
-      const saveData = JSON.parse(saveString);
-      seedRef.current = saveData.seed;
-      modifiedChunks.current = new Map(
-        saveData.modifiedChunks.map(
-          ([key, entries]: [string, [number, number][]]) => [
-            key,
-            new Map(entries),
-          ],
-        ),
-      );
-      setHotbarSlots(normalizeHotbar(saveData.hotbarSlots));
 
-      if (playerControlsRef.current) {
-        const playerObj = playerControlsRef.current.controls.object;
-        playerObj.position.set(
-          saveData.position.x,
-          saveData.position.y,
-          saveData.position.z,
+    activeWorldRef.current = world;
+    seedRef.current = world.seed;
+    modifiedChunks.current = new Map(
+      world.modifiedChunks.map(([chunkName, edits]) => [
+        chunkName,
+        new Map(edits),
+      ]),
+    );
+    setHotbarSlots(normalizeHotbar(world.hotbarSlots ?? DEFAULT_HOTBAR_BLOCKS));
+    setSelectedSlot(0);
+    setActiveWorldName(world.name);
+
+    const playerObject = playerControlsRef.current?.controls.object;
+    if (playerObject) {
+      if (world.position && world.rotation) {
+        playerObject.position.set(
+          world.position.x,
+          world.position.y,
+          world.position.z,
         );
-        playerObj.rotation.set(
-          saveData.rotation.x,
-          saveData.rotation.y,
-          saveData.rotation.z,
+        playerObject.rotation.set(
+          world.rotation.x,
+          world.rotation.y,
+          world.rotation.z,
         );
+      } else {
+        playerObject.position.set(
+          0,
+          getSurfaceHeightFromSeed(world.seed, 0, 0) + 2,
+          0,
+        );
+        playerObject.rotation.set(0, 0, 0);
       }
+    }
+    playerControlsRef.current?.resetMotion();
 
-      startWorldGeneration(seedRef.current);
-      toast.success("World loaded!");
-    } catch (e) {
-      console.error("Failed to load save:", e);
-      toast.error("Failed to load save!");
+    loadProgressRef.current = 0;
+    setLoadProgress(0);
+    setPhase("loading");
+    startWorldGeneration(world.seed);
+  }
+
+  async function playWorld(worldId: string) {
+    const world = worlds.find((candidate) => candidate.id === worldId);
+    if (world) enterWorld(world);
+  }
+
+  async function createAndPlayWorld(name: string, seedText: string) {
+    const trimmedSeedText = seedText.trim();
+    const seed = !trimmedSeedText
+      ? generateRandomSeed()
+      : /^\d+$/.test(trimmedSeedText)
+        ? Number(trimmedSeedText) % 1000000000
+        : hashTextToSeed(trimmedSeedText);
+    const world = createWorldRecord(name.trim() || "New World", seed);
+    try {
+      await saveWorldRecord(world);
+    } catch (error) {
+      console.error("Failed to create world:", error);
+      toast.error("Failed to create world");
+      return;
+    }
+    refreshWorlds();
+    enterWorld(world);
+  }
+
+  async function renameWorld(worldId: string, name: string) {
+    const world = worlds.find((candidate) => candidate.id === worldId);
+    if (!world) return;
+    await saveWorldRecord({ ...world, name });
+    refreshWorlds();
+  }
+
+  async function deleteWorld(worldId: string) {
+    await deleteWorldRecord(worldId);
+    refreshWorlds();
+  }
+
+  async function exitToWorlds() {
+    await saveActiveWorld();
+    networkManager.current.disconnect();
+    networkManager.current.myPeerId = "";
+    connectedToHostRef.current = false;
+    setConnectedToHost(false);
+    setPeerId("");
+    activeWorldRef.current = null;
+    await refreshWorlds();
+    setPhase("title");
+  }
+
+  function resumePlaying() {
+    if (isMobile) {
+      setPhase("playing");
+    } else {
+      playerControlsRef.current?.controls.lock();
     }
   }
+
+  function openPauseMenu() {
+    setPhase("paused");
+    saveActiveWorld();
+  }
+
+  useEffect(() => {
+    const autosaveInterval = setInterval(() => {
+      if (phaseRef.current === "playing") saveActiveWorld();
+    }, AUTOSAVE_INTERVAL_MILLISECONDS);
+    const saveWhenHidden = () => {
+      if (document.visibilityState === "hidden") saveActiveWorld();
+    };
+    document.addEventListener("visibilitychange", saveWhenHidden);
+    window.addEventListener("pagehide", saveWhenHidden);
+    return () => {
+      clearInterval(autosaveInterval);
+      document.removeEventListener("visibilitychange", saveWhenHidden);
+      window.removeEventListener("pagehide", saveWhenHidden);
+    };
+  }, []);
 
   const render = () => {
     // stats.begin();
@@ -2523,7 +2637,7 @@ export default function Game() {
     //   scene.children.length * CHUNK_WIDTH * CHUNK_HEIGHT * CHUNK_LENGTH
     // }`;
 
-    if (playerControlsRef.current) {
+    if (playerControlsRef.current && isSimulationActive()) {
       playerControlsRef.current.update(delta);
 
       if (networkManager.current.myPeerId) {
@@ -2537,7 +2651,9 @@ export default function Game() {
       }
     }
 
-    remotePlayers.current.forEach((rp) => rp.update(delta));
+    if (isSimulationActive()) {
+      remotePlayers.current.forEach((rp) => rp.update(delta));
+    }
 
     prevTime = time;
 
@@ -2558,8 +2674,19 @@ export default function Game() {
         onJoin={(id) => {
           networkManager.current.joinGame(id);
         }}
-        onSave={saveWorld}
-        onLoad={loadWorld}
+        phase={phase}
+        loadProgress={loadProgress}
+        activeWorldName={activeWorldName}
+        worlds={worlds}
+        isLoadingWorlds={isLoadingWorlds}
+        onPlayWorld={playWorld}
+        onCreateWorld={createAndPlayWorld}
+        onRenameWorld={renameWorld}
+        onDeleteWorld={deleteWorld}
+        onResume={resumePlaying}
+        onOpenPauseMenu={openPauseMenu}
+        onSaveNow={() => saveActiveWorld(true)}
+        onExitToWorlds={exitToWorlds}
         peerId={peerId}
         selectedSlot={selectedSlot}
         hotbarSlots={hotbarSlots}
@@ -2576,19 +2703,15 @@ export default function Game() {
         }}
         onSelectSlot={(index) => setSelectedSlot(index)}
         onCloseInventory={() => {
+          isInventoryOpenRef.current = false;
           setIsInventoryOpen(false);
           if (!isMobile) playerControlsRef.current?.controls.lock();
         }}
         debugInfo={debugInfo}
         isDebugVisible={isDebugVisible}
         isMobile={isMobile}
-        onStartMobile={() => {
-          const infoLayer = document.getElementById("infoLayer");
-          if (infoLayer) infoLayer.style.display = "none";
-          setIsMobilePlaying(true);
-        }}
       />
-      {isMobilePlaying && (
+      {isMobile && phase === "playing" && (
         <MobileControls
           containerRef={containerRef}
           enabled={!isInventoryOpen}

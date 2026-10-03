@@ -1,20 +1,36 @@
 import { Silkscreen } from "next/font/google";
-import { useRef, useState } from "react";
-import { BlockType } from "../blocks";
+import { BlockType, LOADING_SCREEN_TEXTURES } from "../blocks";
+import type { StoredWorld } from "../worlds/world-store";
 import { DebugInfo, DebugOverlay } from "./debug-overlay";
 import { Hotbar } from "./hotbar";
 import { Inventory } from "./inventory";
+import { LoadingScreen } from "./menu/loading-screen";
+import { PauseMenu } from "./menu/pause-menu";
+import { TitleMenu } from "./menu/title-menu";
 
 const DEFAULT_UI_FONT = Silkscreen({
   weight: ["400", "700"],
   subsets: ["latin"],
 });
 
+export type GamePhase = "title" | "loading" | "paused" | "playing";
+
 interface UILayerProps {
+  phase: GamePhase;
+  loadProgress: number;
+  activeWorldName: string;
+  worlds: StoredWorld[];
+  isLoadingWorlds: boolean;
+  onPlayWorld: (worldId: string) => void;
+  onCreateWorld: (name: string, seedText: string) => void;
+  onRenameWorld: (worldId: string, name: string) => void;
+  onDeleteWorld: (worldId: string) => void;
+  onResume: () => void;
+  onOpenPauseMenu: () => void;
+  onSaveNow: () => void;
+  onExitToWorlds: () => void;
   onHost?: () => void;
   onJoin?: (id: string) => void;
-  onSave?: () => void;
-  onLoad?: () => void;
   peerId?: string;
   selectedSlot: number;
   hotbarSlots: BlockType[];
@@ -25,14 +41,24 @@ interface UILayerProps {
   debugInfo?: DebugInfo;
   isDebugVisible?: boolean;
   isMobile?: boolean;
-  onStartMobile?: () => void;
 }
 
 export default function UILayer({
+  phase,
+  loadProgress,
+  activeWorldName,
+  worlds,
+  isLoadingWorlds,
+  onPlayWorld,
+  onCreateWorld,
+  onRenameWorld,
+  onDeleteWorld,
+  onResume,
+  onOpenPauseMenu,
+  onSaveNow,
+  onExitToWorlds,
   onHost,
   onJoin,
-  onSave,
-  onLoad,
   peerId,
   selectedSlot,
   hotbarSlots,
@@ -43,10 +69,8 @@ export default function UILayer({
   debugInfo,
   isDebugVisible,
   isMobile,
-  onStartMobile,
 }: UILayerProps) {
-  const uiLayerRef = useRef<HTMLDivElement>(null);
-  const [joinId, setJoinId] = useState("");
+  const isInWorld = phase === "playing" || phase === "paused";
 
   return (
     <div
@@ -54,145 +78,77 @@ export default function UILayer({
         "absolute top-0 bottom-0 left-0 right-0 flex flex-col " +
         DEFAULT_UI_FONT.className
       }
-      ref={uiLayerRef}
     >
-      <div
-        className="w-full h-full flex justify-center items-center flex-col transition-all duration-1000 bg-black z-10"
-        id={"loadingLayer"}
-      >
+      {phase === "playing" && !isInventoryOpen && (
         <div
-          className="absolute top-0 bottom-0 left-0 right-0 z-10 flex flex-row flex-wrap h-fit"
-          id={"loadingLayerBackground"}
-        ></div>
-        <div className="z-10 flex flex-col justify-center items-center">
-          <h1 className="text-2xl">Generating world...</h1>
-          <p className="text-xl" id="initialLoadCompletion">
-            0%
-          </p>
-        </div>
-      </div>
-
-      {!isInventoryOpen && (
-        <div
-          className={
-            "absolute top-0 bottom-0 right-0 left-0 flex items-center justify-center pointer-events-none mix-blend-difference text-3xl font-normal z-1"
-          }
+          className="absolute inset-0 flex items-center justify-center pointer-events-none mix-blend-difference text-3xl font-normal z-1"
           id={"crosshairLayer"}
         >
           +
         </div>
       )}
 
-      <Hotbar selectedSlot={selectedSlot} slots={hotbarSlots} onSelectSlot={onSelectSlot} />
-      <Inventory isOpen={isInventoryOpen} onSelectBlock={onSelectBlock} onClose={onCloseInventory} />
+      {isInWorld && (
+        <Hotbar
+          selectedSlot={selectedSlot}
+          slots={hotbarSlots}
+          onSelectSlot={onSelectSlot}
+        />
+      )}
+      <Inventory
+        isOpen={isInventoryOpen}
+        onSelectBlock={onSelectBlock}
+        onClose={onCloseInventory}
+      />
 
-      {debugInfo && (
+      {debugInfo && isInWorld && (
         <DebugOverlay
           isVisible={isDebugVisible ?? false}
           debugInfo={debugInfo}
         />
       )}
 
-      <div
-        className={
-          "absolute top-0 bottom-0 right-0 left-0 flex flex-col items-center justify-center pointer-events-none text-md font-normal z-2"
-        }
-        id={"infoLayer"}
-      >
-        <div className="w-[70%] flex flex-col justify-center gap-4">
-          {isMobile ? (
-            <div className="bg-black p-6 px-8 pointer-events-auto">
-              <h2 className="text-center font-bold text-lg mb-3">Voxel Game</h2>
-              <p className="text-center mb-4 text-sm">
-                Use the joystick to move and drag to look around.
-              </p>
-              <button
-                onClick={onStartMobile}
-                className="bg-white text-black px-4 py-4 hover:bg-gray-200 w-full text-lg font-bold"
-              >
-                Tap to Start Playing
-              </button>
-            </div>
-          ) : (
-            <>
-              <div className="bg-black p-6 px-8">
-                <h2 className="text-center font-bold text-lg">Controls</h2>
-                <p>
-                  You can look around using your mouse, use{" "}
-                  <span className="bg-white text-black px-2">LEFT CLICK</span> to
-                  break a block and{" "}
-                  <span className="bg-white text-black px-2">RIGHT CLICK</span> to
-                  place a block. Use your
-                  <span className="bg-white text-black px-2">WASD</span> keys to
-                  move around.
-                </p>
-              </div>
-              <div className="bg-black p-6 px-8">
-                <h2 className="text-center font-bold text-lg">
-                  To start playing...
-                </h2>
-                <p>
-                  Click anywhere on the game to start playing. Press Escape to get your
-                  mouse back.
-                </p>
-              </div>
-            </>
-          )}
-          <div className="bg-black p-6 px-8 pointer-events-auto">
-            <h2 className="text-center font-bold text-lg">World Management</h2>
-            <div className="flex flex-col gap-2 mt-2">
-              <button
-                onClick={onSave}
-                className="bg-white text-black px-4 py-2 hover:bg-gray-200"
-              >
-                Save World
-              </button>
-              <button
-                onClick={onLoad}
-                className="bg-white text-black px-4 py-2 hover:bg-gray-200"
-              >
-                Load World
-              </button>
-            </div>
-          </div>
-          <div className="bg-black p-6 px-8 pointer-events-auto">
-            <h2 className="text-center font-bold text-lg">Multiplayer</h2>
-            <div className="flex flex-col gap-2 mt-2">
-              {peerId ? (
-                <p>
-                  Your ID:{" "}
-                  <span className="select-all bg-white text-black px-1">
-                    {peerId}
-                  </span>
-                </p>
-              ) : (
-                <button
-                  onClick={onHost}
-                  className="bg-white text-black px-4 py-2 hover:bg-gray-200"
-                >
-                  Host Game
-                </button>
-              )}
+      {isMobile && phase === "playing" && (
+        <button
+          data-mobile-ui
+          onClick={onOpenPauseMenu}
+          className="absolute right-3 top-3 z-30 rounded-md bg-black/50 px-3 py-2 text-xs font-bold"
+        >
+          Menu
+        </button>
+      )}
 
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  placeholder="Enter Host ID"
-                  className="text-black px-2 py-1 grow"
-                  value={joinId}
-                  onChange={(e) => setJoinId(e.target.value)}
-                />
-                <button
-                  onClick={() => onJoin && onJoin(joinId)}
-                  className="bg-white text-black px-4 py-1 hover:bg-gray-200"
-                >
-                  Join
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
+      {phase === "title" && (
+        <TitleMenu
+          worlds={worlds}
+          isLoadingWorlds={isLoadingWorlds}
+          onPlayWorld={onPlayWorld}
+          onCreateWorld={onCreateWorld}
+          onRenameWorld={onRenameWorld}
+          onDeleteWorld={onDeleteWorld}
+        />
+      )}
+
+      {phase === "paused" && (
+        <PauseMenu
+          worldName={activeWorldName}
+          isMobile={isMobile ?? false}
+          peerId={peerId}
+          onResume={onResume}
+          onSaveNow={onSaveNow}
+          onExitToWorlds={onExitToWorlds}
+          onHost={onHost}
+          onJoin={onJoin}
+        />
+      )}
+
+      {phase === "loading" && (
+        <LoadingScreen
+          progress={loadProgress}
+          worldName={activeWorldName}
+          tileTextures={LOADING_SCREEN_TEXTURES}
+        />
+      )}
     </div>
   );
 }
