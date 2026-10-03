@@ -57,6 +57,7 @@ import {
   VERTEX_SHADER,
 } from "./shaders/chunk";
 import { TickableBlockIndex, pickTickedBlocks } from "./random-tick";
+import { type BorderFace, extractBorderSlab } from "./chunk-borders";
 import { castVoxelRay } from "./voxel-ray";
 import type { ChunkMeshResult } from "./workers/mesh-types";
 import { MobileControls } from "./ui/mobile-controls";
@@ -2198,121 +2199,20 @@ export default function Game() {
 
   function getChunkBorders(chunkX: number, chunkY: number, chunkZ: number) {
     const extractBordersToken = profiler.begin("main.chunk.extractBorders");
-    const borders: {
-      top?: ArrayBuffer;
-      bottom?: ArrayBuffer;
-      left?: ArrayBuffer;
-      right?: ArrayBuffer;
-      front?: ArrayBuffer;
-      back?: ArrayBuffer;
-    } = {};
-
-    const borderLights: {
-      top?: ArrayBuffer;
-      bottom?: ArrayBuffer;
-      left?: ArrayBuffer;
-      right?: ArrayBuffer;
-      front?: ArrayBuffer;
-      back?: ArrayBuffer;
-    } = {};
+    const borders: { [face in BorderFace]?: ArrayBuffer } = {};
+    const borderLights: { [face in BorderFace]?: ArrayBuffer } = {};
 
     const extractBorder = (
-      nx: number,
-      ny: number,
-      nz: number,
-      face: "top" | "bottom" | "left" | "right" | "front" | "back",
+      neighborX: number,
+      neighborY: number,
+      neighborZ: number,
+      face: BorderFace,
     ) => {
-      const name = generateChunkName(nx, ny, nz);
+      const name = generateChunkName(neighborX, neighborY, neighborZ);
       const chunk = chunks.current[name];
       const light = lightChunks.current[name];
-
-      if (chunk) {
-        let border: Uint8Array;
-        if (face === "top") {
-          border = new Uint8Array(CHUNK_WIDTH * CHUNK_LENGTH);
-          for (let x = 0; x < CHUNK_WIDTH; x++)
-            for (let z = 0; z < CHUNK_LENGTH; z++)
-              border[x * CHUNK_LENGTH + z] = chunk[calculateOffset(x, 0, z)];
-          borders.top = border.buffer as ArrayBuffer;
-        } else if (face === "bottom") {
-          border = new Uint8Array(CHUNK_WIDTH * CHUNK_LENGTH);
-          for (let x = 0; x < CHUNK_WIDTH; x++)
-            for (let z = 0; z < CHUNK_LENGTH; z++)
-              border[x * CHUNK_LENGTH + z] =
-                chunk[calculateOffset(x, CHUNK_HEIGHT - 1, z)];
-          borders.bottom = border.buffer as ArrayBuffer;
-        } else if (face === "front") {
-          border = new Uint8Array(CHUNK_WIDTH * CHUNK_HEIGHT);
-          for (let x = 0; x < CHUNK_WIDTH; x++)
-            for (let y = 0; y < CHUNK_HEIGHT; y++)
-              border[x * CHUNK_HEIGHT + y] = chunk[calculateOffset(x, y, 0)];
-          borders.front = border.buffer as ArrayBuffer;
-        } else if (face === "back") {
-          border = new Uint8Array(CHUNK_WIDTH * CHUNK_HEIGHT);
-          for (let x = 0; x < CHUNK_WIDTH; x++)
-            for (let y = 0; y < CHUNK_HEIGHT; y++)
-              border[x * CHUNK_HEIGHT + y] =
-                chunk[calculateOffset(x, y, CHUNK_LENGTH - 1)];
-          borders.back = border.buffer as ArrayBuffer;
-        } else if (face === "right") {
-          border = new Uint8Array(CHUNK_HEIGHT * CHUNK_LENGTH);
-          for (let y = 0; y < CHUNK_HEIGHT; y++)
-            for (let z = 0; z < CHUNK_LENGTH; z++)
-              border[y * CHUNK_LENGTH + z] = chunk[calculateOffset(0, y, z)];
-          borders.right = border.buffer as ArrayBuffer;
-        } else if (face === "left") {
-          border = new Uint8Array(CHUNK_HEIGHT * CHUNK_LENGTH);
-          for (let y = 0; y < CHUNK_HEIGHT; y++)
-            for (let z = 0; z < CHUNK_LENGTH; z++)
-              border[y * CHUNK_LENGTH + z] =
-                chunk[calculateOffset(CHUNK_WIDTH - 1, y, z)];
-          borders.left = border.buffer as ArrayBuffer;
-        }
-      }
-
-      if (light) {
-        let border: Uint8Array;
-        if (face === "top") {
-          border = new Uint8Array(CHUNK_WIDTH * CHUNK_LENGTH);
-          for (let x = 0; x < CHUNK_WIDTH; x++)
-            for (let z = 0; z < CHUNK_LENGTH; z++)
-              border[x * CHUNK_LENGTH + z] = light[calculateOffset(x, 0, z)];
-          borderLights.top = border.buffer as ArrayBuffer;
-        } else if (face === "bottom") {
-          border = new Uint8Array(CHUNK_WIDTH * CHUNK_LENGTH);
-          for (let x = 0; x < CHUNK_WIDTH; x++)
-            for (let z = 0; z < CHUNK_LENGTH; z++)
-              border[x * CHUNK_LENGTH + z] =
-                light[calculateOffset(x, CHUNK_HEIGHT - 1, z)];
-          borderLights.bottom = border.buffer as ArrayBuffer;
-        } else if (face === "front") {
-          border = new Uint8Array(CHUNK_WIDTH * CHUNK_HEIGHT);
-          for (let x = 0; x < CHUNK_WIDTH; x++)
-            for (let y = 0; y < CHUNK_HEIGHT; y++)
-              border[x * CHUNK_HEIGHT + y] = light[calculateOffset(x, y, 0)];
-          borderLights.front = border.buffer as ArrayBuffer;
-        } else if (face === "back") {
-          border = new Uint8Array(CHUNK_WIDTH * CHUNK_HEIGHT);
-          for (let x = 0; x < CHUNK_WIDTH; x++)
-            for (let y = 0; y < CHUNK_HEIGHT; y++)
-              border[x * CHUNK_HEIGHT + y] =
-                light[calculateOffset(x, y, CHUNK_LENGTH - 1)];
-          borderLights.back = border.buffer as ArrayBuffer;
-        } else if (face === "right") {
-          border = new Uint8Array(CHUNK_HEIGHT * CHUNK_LENGTH);
-          for (let y = 0; y < CHUNK_HEIGHT; y++)
-            for (let z = 0; z < CHUNK_LENGTH; z++)
-              border[y * CHUNK_LENGTH + z] = light[calculateOffset(0, y, z)];
-          borderLights.right = border.buffer as ArrayBuffer;
-        } else if (face === "left") {
-          border = new Uint8Array(CHUNK_HEIGHT * CHUNK_LENGTH);
-          for (let y = 0; y < CHUNK_HEIGHT; y++)
-            for (let z = 0; z < CHUNK_LENGTH; z++)
-              border[y * CHUNK_LENGTH + z] =
-                light[calculateOffset(CHUNK_WIDTH - 1, y, z)];
-          borderLights.left = border.buffer as ArrayBuffer;
-        }
-      }
+      if (chunk) borders[face] = extractBorderSlab(chunk, face);
+      if (light) borderLights[face] = extractBorderSlab(light, face);
     };
 
     extractBorder(chunkX, chunkY + 1, chunkZ, "top");
