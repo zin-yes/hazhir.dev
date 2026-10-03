@@ -25,6 +25,7 @@ interface UILayerProps {
   onCreateWorld: (name: string, seedText: string) => void;
   onRenameWorld: (worldId: string, name: string) => void;
   onDeleteWorld: (worldId: string) => void;
+  onJoinHostedWorld: (hostId: string) => void;
   onResume: () => void;
   onOpenPauseMenu: () => void;
   onSaveNow: () => void;
@@ -53,6 +54,7 @@ export default function UILayer({
   onCreateWorld,
   onRenameWorld,
   onDeleteWorld,
+  onJoinHostedWorld,
   onResume,
   onOpenPauseMenu,
   onSaveNow,
@@ -126,6 +128,7 @@ export default function UILayer({
           onCreateWorld={onCreateWorld}
           onRenameWorld={onRenameWorld}
           onDeleteWorld={onDeleteWorld}
+          onJoinHostedWorld={onJoinHostedWorld}
         />
       )}
 

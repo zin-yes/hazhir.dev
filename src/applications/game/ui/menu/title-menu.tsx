@@ -9,6 +9,7 @@ interface TitleMenuProps {
   onCreateWorld: (name: string, seedText: string) => void;
   onRenameWorld: (worldId: string, name: string) => void;
   onDeleteWorld: (worldId: string) => void;
+  onJoinHostedWorld: (hostId: string) => void;
 }
 
 function formatLastPlayed(timestamp: number): string {
@@ -33,7 +34,9 @@ export function TitleMenu({
   onCreateWorld,
   onRenameWorld,
   onDeleteWorld,
+  onJoinHostedWorld,
 }: TitleMenuProps) {
+  const [hostIdInput, setHostIdInput] = useState("");
   const [isCreating, setIsCreating] = useState(false);
   const [newWorldName, setNewWorldName] = useState("");
   const [newWorldSeed, setNewWorldSeed] = useState("");
@@ -191,6 +194,32 @@ export function TitleMenu({
             ))}
           </ul>
         )}
+      </MenuPanel>
+
+      <MenuPanel>
+        <h2 className="mb-1 text-lg font-bold">Join a friend</h2>
+        <p className="mb-3 text-xs text-neutral-400">
+          Enter a host ID to jump into their world. Nothing is saved to your
+          worlds.
+        </p>
+        <form
+          className="flex gap-2"
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (hostIdInput.trim()) onJoinHostedWorld(hostIdInput.trim());
+          }}
+        >
+          <input
+            type="text"
+            placeholder="Host ID"
+            className="min-w-0 grow rounded-md bg-white px-3 py-2 text-black"
+            value={hostIdInput}
+            onChange={(event) => setHostIdInput(event.target.value)}
+          />
+          <MenuButton type="submit" disabled={!hostIdInput.trim()}>
+            Join
+          </MenuButton>
+        </form>
       </MenuPanel>
     </MenuBackdrop>
   );
