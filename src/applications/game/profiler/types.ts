@@ -234,3 +234,22 @@ export interface BenchmarkResult {
   phases: { name: string; durationSeconds: number; report: ProfileReport }[];
   overall: ProfileReport;
 }
+
+export interface BenchmarkOptions {
+  /** World seed so runs are comparable. Defaults to a fixed constant. */
+  seed?: number;
+  /** Straight-line flight over unloaded terrain (chunk streaming). */
+  flySeconds?: number;
+  /** Camera turning in place over loaded terrain (steady-state rendering). */
+  hoverSeconds?: number;
+  /** Place and break blocks in a burst (relight and remesh path). */
+  editSeconds?: number;
+}
+
+export interface ProfilerSettings {
+  /**
+   * Splits renderer.render into sky / opaque / transparent / overlay passes so
+   * each gets its own GPU timer query. Slightly distorts CPU render time.
+   */
+  gpuPassBreakdown: boolean;
+}

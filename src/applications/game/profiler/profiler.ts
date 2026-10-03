@@ -11,6 +11,7 @@ import {
   type MeshGeometryStats,
   type MetricDomain,
   type ProfileSnapshot,
+  type ProfilerSettings,
   type SessionInfo,
   type TimerSummary,
   type WorkerPoolSummary,
@@ -69,6 +70,7 @@ export type ProfilerClock = () => number;
  */
 export class Profiler {
   enabled = false;
+  readonly settings: ProfilerSettings = { gpuPassBreakdown: false };
 
   private readonly clock: ProfilerClock;
   private startedAtMs = 0;
