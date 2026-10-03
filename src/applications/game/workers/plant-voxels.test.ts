@@ -4,7 +4,7 @@ import sharp from "sharp";
 import { BLOCK_TEXTURES, BlockType, Texture } from "../blocks";
 import { TEXTURE_SIZE } from "../config";
 import { PLANT_PIXEL_MASKS } from "../data/plant-pixel-masks";
-import { type PlantMeshBuffers, emitPlantVoxels } from "./plant-voxels";
+import { type IsWorldBlockOccluding, type PlantMeshBuffers, emitPlantVoxels } from "./plant-voxels";
 
 const PLANT_BLOCKS = [
   BlockType.TALL_GRASS,
@@ -24,7 +24,10 @@ const SHEET_CROSSING_COLUMNS: Partial<Record<BlockType, number[]>> = {
   [BlockType.FORGETMENOTS_FLOWER]: [5, 10],
 };
 
-function meshPlant(block: BlockType): PlantMeshBuffers {
+function meshPlant(
+  block: BlockType,
+  isWorldBlockOccluding: IsWorldBlockOccluding = () => false
+): PlantMeshBuffers {
   const mesh: PlantMeshBuffers = {
     positions: [],
     normals: [],
@@ -32,8 +35,9 @@ function meshPlant(block: BlockType): PlantMeshBuffers {
     uvs: [],
     textureIndices: [],
     lightLevels: [],
+    ambientOcclusion: [],
   };
-  emitPlantVoxels(mesh, block, 0, 0, 0, BLOCK_TEXTURES[block].DEFAULT, 15);
+  emitPlantVoxels(mesh, block, 0, 0, 0, BLOCK_TEXTURES[block].DEFAULT, 15, isWorldBlockOccluding);
   return mesh;
 }
 
@@ -107,6 +111,18 @@ describe("emitPlantVoxels", () => {
       });
     });
   }
+
+  test("every vertex gets an AO value, and the stem darkens where it meets solid ground", () => {
+    const openMesh = meshPlant(BlockType.TALL_GRASS);
+    expect(openMesh.ambientOcclusion.length).toBe(openMesh.positions.length / 3);
+    expect(Math.min(...openMesh.ambientOcclusion)).toBeLessThan(3);
+
+    const onGroundMesh = meshPlant(BlockType.TALL_GRASS, (_x, y) => y < 0);
+    const darkenedVertices = onGroundMesh.ambientOcclusion.filter(
+      (value, vertex) => value < openMesh.ambientOcclusion[vertex]
+    );
+    expect(darkenedVertices.length).toBeGreaterThan(0);
+  });
 
   test("a lone pixel voxel exposes all six faces and shared faces are culled", () => {
     const sapling = meshPlant(BlockType.SAPLING);

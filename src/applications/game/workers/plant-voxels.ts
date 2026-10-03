@@ -10,6 +10,8 @@ const CROP_NEAR_SHEET = 5;
 const CROP_FAR_SHEET = TEXTURE_SIZE - 1 - CROP_NEAR_SHEET;
 const FLAT_QUAD_LAYER = 1;
 
+const FULLY_LIT_AMBIENT_OCCLUSION = 3;
+
 const TEXTURE_FILE_NAMES = Object.values(Texture);
 
 export interface PlantMeshBuffers {
@@ -19,7 +21,10 @@ export interface PlantMeshBuffers {
   uvs: number[];
   textureIndices: number[];
   lightLevels: number[];
+  ambientOcclusion: number[];
 }
+
+export type IsWorldBlockOccluding = (blockX: number, blockY: number, blockZ: number) => boolean;
 
 interface VoxelCell {
   cellX: number;
@@ -92,6 +97,48 @@ function buildVoxelCells(block: BlockType, pixelRows: string[]): Map<number, Vox
   return cells;
 }
 
+// 3 = open, 0 = boxed in. Cells outside the plant's own block defer to the world.
+function cornerAmbientOcclusion(
+  isCellOccluding: (cellX: number, cellY: number, cellZ: number) => boolean,
+  cell: VoxelCell,
+  face: VoxelFace,
+  corner: Vector
+): number {
+  const [firstTangent, secondTangent] = [0, 1, 2].filter((axis) => face.normal[axis] === 0);
+  const firstStep: Vector = [0, 0, 0];
+  firstStep[firstTangent] = corner[firstTangent] === 1 ? 1 : -1;
+  const secondStep: Vector = [0, 0, 0];
+  secondStep[secondTangent] = corner[secondTangent] === 1 ? 1 : -1;
+
+  const originX = cell.cellX + face.normal[0];
+  const originY = cell.cellY + face.normal[1];
+  const originZ = cell.cellZ + face.normal[2];
+
+  const isFirstSideBlocked = isCellOccluding(
+    originX + firstStep[0],
+    originY + firstStep[1],
+    originZ + firstStep[2]
+  );
+  const isSecondSideBlocked = isCellOccluding(
+    originX + secondStep[0],
+    originY + secondStep[1],
+    originZ + secondStep[2]
+  );
+  const isCornerBlocked = isCellOccluding(
+    originX + firstStep[0] + secondStep[0],
+    originY + firstStep[1] + secondStep[1],
+    originZ + firstStep[2] + secondStep[2]
+  );
+
+  if (isFirstSideBlocked && isSecondSideBlocked) return 0;
+  return (
+    FULLY_LIT_AMBIENT_OCCLUSION -
+    Number(isFirstSideBlocked) -
+    Number(isSecondSideBlocked) -
+    Number(isCornerBlocked)
+  );
+}
+
 export function emitPlantVoxels(
   target: PlantMeshBuffers,
   block: BlockType,
@@ -99,12 +146,25 @@ export function emitPlantVoxels(
   blockY: number,
   blockZ: number,
   textureIndex: number,
-  lightLevel: number
+  lightLevel: number,
+  isWorldBlockOccluding: IsWorldBlockOccluding = () => false
 ) {
   const pixelRows = PLANT_PIXEL_MASKS[TEXTURE_FILE_NAMES[textureIndex]];
   if (!pixelRows) return;
 
   const cells = buildVoxelCells(block, pixelRows);
+
+  const isCellOccluding = (cellX: number, cellY: number, cellZ: number) => {
+    const isInsideOwnBlock = [cellX, cellY, cellZ].every(
+      (cellAxis) => cellAxis >= 0 && cellAxis < TEXTURE_SIZE
+    );
+    if (isInsideOwnBlock) return cells.has(cellKey(cellX, cellY, cellZ));
+    return isWorldBlockOccluding(
+      blockX + Math.floor(cellX / TEXTURE_SIZE),
+      blockY + Math.floor(cellY / TEXTURE_SIZE),
+      blockZ + Math.floor(cellZ / TEXTURE_SIZE)
+    );
+  };
 
   for (const cell of cells.values()) {
     const u = (cell.pixelColumn + 0.5) / TEXTURE_SIZE;
@@ -125,6 +185,10 @@ export function emitPlantVoxels(
         face.base.map((value, axis) => value + face.alongV[axis]) as Vector,
       ];
 
+      const cornerOcclusion = corners.map((corner) =>
+        cornerAmbientOcclusion(isCellOccluding, cell, face, corner)
+      );
+
       for (const corner of corners) {
         target.positions.push(
           blockX + (cell.cellX + corner[0]) * VOXEL_SIZE,
@@ -136,15 +200,30 @@ export function emitPlantVoxels(
         target.textureIndices.push(textureIndex);
         target.lightLevels.push(lightLevel);
       }
+      target.ambientOcclusion.push(...cornerOcclusion);
 
-      target.indices.push(
-        firstVertexIndex,
-        firstVertexIndex + 1,
-        firstVertexIndex + 2,
-        firstVertexIndex,
-        firstVertexIndex + 2,
-        firstVertexIndex + 3
-      );
+      // Split along the brighter diagonal so a dark corner does not streak across the quad.
+      const shouldFlipDiagonal =
+        cornerOcclusion[1] + cornerOcclusion[3] > cornerOcclusion[0] + cornerOcclusion[2];
+      if (shouldFlipDiagonal) {
+        target.indices.push(
+          firstVertexIndex + 1,
+          firstVertexIndex + 2,
+          firstVertexIndex + 3,
+          firstVertexIndex + 1,
+          firstVertexIndex + 3,
+          firstVertexIndex
+        );
+      } else {
+        target.indices.push(
+          firstVertexIndex,
+          firstVertexIndex + 1,
+          firstVertexIndex + 2,
+          firstVertexIndex,
+          firstVertexIndex + 2,
+          firstVertexIndex + 3
+        );
+      }
     }
   }
 }

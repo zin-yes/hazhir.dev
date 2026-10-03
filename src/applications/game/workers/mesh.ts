@@ -231,7 +231,7 @@ export function generateMesh(
         if (block === BlockType.AIR) continue;
         solidBlocksVisited++;
 
-        // Plant voxels and stairs emit vertices without AO of their own.
+        // Stairs emit vertices without AO of their own.
         padAmbientOcclusion(opaque);
         padAmbientOcclusion(transparent);
 
@@ -481,7 +481,8 @@ export function generateMesh(
             y,
             z,
             textureIndexDefault,
-            currentLight
+            currentLight,
+            isOccludingBlock
           );
           plantVoxelsEmitted++;
           plantQuadsEmitted += (opaque.indices.length - indexCountBeforePlant) / 6;
