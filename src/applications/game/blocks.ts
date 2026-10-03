@@ -217,8 +217,8 @@ export const Texture = {
   FLOWER_FORGETMENOTS: "flower_forgetmenots.png",
 };
 
+/** Fully opaque textures only: no glass, leaves, water, flowers or saplings. */
 export const LOADING_SCREEN_TEXTURES = [
-
   "dirt.png",
   "humus.png",
   "silt.png",
@@ -233,21 +233,11 @@ export const LOADING_SCREEN_TEXTURES = [
   "cobblestone.png",
   "sand.png",
   "marble.png",
-  "leaves.png",
-  "water.png",
-  "decorative_glass.png",
-  "glass.png",
   "grass_side.png",
   "grass_top.png",
   "planks.png",
   "log_top_bottom.png",
   "log_side.png",
-  "tall_grass.png",
-  "flower_anemone.png",
-  "flower_ponpon.png",
-  "sapling.png",
-  "flower_bellis.png",
-  "flower_forgetmenots.png",
 ];
 
 function getTextureIndexByName(name: string): number {

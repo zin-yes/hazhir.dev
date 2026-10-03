@@ -1,4 +1,4 @@
-import { KeyCap } from "./menu-primitives";
+import { PixelKey } from "../pixel/pixel-ui";
 
 const CONTROL_BINDINGS: { action: string; keys: string[] }[] = [
   { action: "Move", keys: ["W", "A", "S", "D"] },
@@ -18,13 +18,13 @@ const CONTROL_BINDINGS: { action: string; keys: string[] }[] = [
 
 export function ControlsList() {
   return (
-    <ul className="grid grid-cols-1 gap-x-8 gap-y-3 text-sm sm:grid-cols-2">
+    <ul className="grid grid-cols-1 gap-x-8 gap-y-3 text-xs sm:grid-cols-2">
       {CONTROL_BINDINGS.map(({ action, keys }) => (
-        <li key={action} className="flex items-center justify-between gap-3">
-          <span className="text-neutral-300">{action}</span>
-          <span className="flex flex-wrap justify-end gap-1">
+        <li key={action} className="flex items-start justify-between gap-3">
+          <span className="pt-0.5 text-[#9a91bd]">{action}</span>
+          <span className="flex flex-wrap justify-end">
             {keys.map((key) => (
-              <KeyCap key={key}>{key}</KeyCap>
+              <PixelKey key={key}>{key}</PixelKey>
             ))}
           </span>
         </li>

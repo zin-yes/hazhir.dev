@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { MenuButton } from "./menu-primitives";
+import { PixelButton, PixelInput } from "../pixel/pixel-ui";
 
 interface MultiplayerPanelProps {
   peerId?: string;
@@ -15,41 +15,44 @@ export function MultiplayerPanel({
   const [hostIdInput, setHostIdInput] = useState("");
 
   return (
-    <div className="flex flex-col gap-4 text-sm">
-      <div className="flex flex-col gap-2">
-        <h3 className="font-bold">Host a game</h3>
+    <div className="flex flex-col gap-5 text-xs">
+      <section className="flex flex-col gap-2">
+        <h3 className="text-sm font-bold uppercase tracking-wider text-[#b6f24a]">
+          Host
+        </h3>
         {peerId ? (
-          <p className="break-all text-neutral-300">
-            Share this ID with friends:{" "}
-            <span className="select-all rounded bg-white px-1.5 py-0.5 text-black">
+          <p className="break-all text-[#9a91bd]">
+            Share this ID:{" "}
+            <span className="select-all bg-[#f1ecff] px-1.5 py-0.5 text-[#171327]">
               {peerId}
             </span>
           </p>
         ) : (
-          <MenuButton onClick={onHost}>Start hosting</MenuButton>
+          <PixelButton onClick={onHost}>Start hosting</PixelButton>
         )}
-      </div>
-      <div className="flex flex-col gap-2">
-        <h3 className="font-bold">Join a game</h3>
+      </section>
+      <section className="flex flex-col gap-2">
+        <h3 className="text-sm font-bold uppercase tracking-wider text-[#b6f24a]">
+          Join
+        </h3>
         <div className="flex gap-2">
-          <input
+          <PixelInput
             type="text"
             placeholder="Host ID"
-            className="min-w-0 grow rounded-md bg-white px-3 py-2 text-black"
             value={hostIdInput}
             onChange={(event) => setHostIdInput(event.target.value)}
           />
-          <MenuButton
+          <PixelButton
             disabled={!hostIdInput.trim()}
             onClick={() => onJoin?.(hostIdInput.trim())}
           >
             Join
-          </MenuButton>
+          </PixelButton>
         </div>
-        <p className="text-xs text-neutral-400">
-          Joining replaces your current world with the host&apos;s world.
+        <p className="text-[#6e6590]">
+          Joining swaps your world for the host&apos;s.
         </p>
-      </div>
+      </section>
     </div>
   );
 }

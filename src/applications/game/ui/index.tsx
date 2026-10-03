@@ -1,10 +1,13 @@
 import { Silkscreen } from "next/font/google";
-import { BlockType, LOADING_SCREEN_TEXTURES } from "../blocks";
+import { useEffect, useState } from "react";
+import { BlockType } from "../blocks";
 import type { StoredWorld } from "../worlds/world-store";
 import { DebugInfo, DebugOverlay } from "./debug-overlay";
 import { Hotbar } from "./hotbar";
 import { Inventory } from "./inventory";
-import { LoadingScreen } from "./menu/loading-screen";
+import { LoadingHud } from "./menu/loading-hud";
+import { PixelSandBackdrop } from "./pixel/pixel-sand-backdrop";
+import { PixelButton } from "./pixel/pixel-ui";
 import { PauseMenu } from "./menu/pause-menu";
 import { TitleMenu } from "./menu/title-menu";
 
@@ -13,11 +16,14 @@ const DEFAULT_UI_FONT = Silkscreen({
   subsets: ["latin"],
 });
 
+const TITLE_PILE_HEIGHT = 0.16;
+
 export type GamePhase = "title" | "loading" | "paused" | "playing";
 
 interface UILayerProps {
   phase: GamePhase;
   loadProgress: number;
+  loadStageLabel: string;
   activeWorldName: string;
   worlds: StoredWorld[];
   isLoadingWorlds: boolean;
@@ -47,6 +53,7 @@ interface UILayerProps {
 export default function UILayer({
   phase,
   loadProgress,
+  loadStageLabel,
   activeWorldName,
   worlds,
   isLoadingWorlds,
@@ -73,6 +80,12 @@ export default function UILayer({
   isMobile,
 }: UILayerProps) {
   const isInWorld = phase === "playing" || phase === "paused";
+  const isOnBackdropScreen = phase === "title" || phase === "loading";
+  const [isBackdropMounted, setIsBackdropMounted] = useState(true);
+
+  useEffect(() => {
+    if (isOnBackdropScreen) setIsBackdropMounted(true);
+  }, [isOnBackdropScreen]);
 
   return (
     <div
@@ -90,7 +103,7 @@ export default function UILayer({
         </div>
       )}
 
-      {isInWorld && (
+      {phase === "playing" && (
         <Hotbar
           selectedSlot={selectedSlot}
           slots={hotbarSlots}
@@ -111,13 +124,25 @@ export default function UILayer({
       )}
 
       {isMobile && phase === "playing" && (
-        <button
-          data-mobile-ui
+        <PixelButton
           onClick={onOpenPauseMenu}
-          className="absolute right-3 top-3 z-30 rounded-md bg-black/50 px-3 py-2 text-xs font-bold"
+          className="absolute right-3 top-3 z-30"
         >
           Menu
-        </button>
+        </PixelButton>
+      )}
+
+      {isBackdropMounted && (
+        <div
+          className={`absolute inset-0 z-30 ${isOnBackdropScreen ? "" : "pointer-events-none"}`}
+        >
+          <PixelSandBackdrop
+            fillTarget={phase === "loading" ? loadProgress : TITLE_PILE_HEIGHT}
+            ambient={phase === "title"}
+            isFinishing={!isOnBackdropScreen}
+            onDissolved={() => setIsBackdropMounted(false)}
+          />
+        </div>
       )}
 
       {phase === "title" && (
@@ -146,10 +171,10 @@ export default function UILayer({
       )}
 
       {phase === "loading" && (
-        <LoadingScreen
+        <LoadingHud
           progress={loadProgress}
+          stageLabel={loadStageLabel}
           worldName={activeWorldName}
-          tileTextures={LOADING_SCREEN_TEXTURES}
         />
       )}
     </div>

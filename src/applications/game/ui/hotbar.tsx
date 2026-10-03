@@ -1,4 +1,3 @@
-import { cn } from "@/components/ui/utils";
 import { BLOCK_ITEM_TEXTURES, BlockType } from "../blocks";
 
 interface HotbarProps {
@@ -9,38 +8,39 @@ interface HotbarProps {
 
 export function Hotbar({ selectedSlot, slots, onSelectSlot }: HotbarProps) {
   return (
-    <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex gap-1 sm:gap-2 p-1.5 sm:p-2 bg-black/50 rounded-lg border border-white/20 max-w-[calc(100vw-1rem)]">
-      {slots.map((block, index) => (
-        <div
-          key={index}
-          data-mobile-ui
-          onClick={() => onSelectSlot?.(index)}
-          className={cn(
-            "w-8 h-8 sm:w-12 sm:h-12 shrink-0 border-2 flex items-center justify-center bg-black/40 transition-all",
-            selectedSlot === index
-              ? "border-white scale-110"
-              : "border-white/20 opacity-70"
-          )}
-        >
-          {block !== BlockType.AIR && (
-            <div
-              className="w-6 h-6 sm:w-8 sm:h-8 bg-cover bg-center"
-              style={{
-                backgroundImage: `url(/game/${getTextureForBlock(block)})`,
-                imageRendering: "pixelated",
-              }}
-            />
-          )}
-          <span className="absolute bottom-0 right-0.5 text-[10px] sm:text-xs text-white/80 font-mono">
-            {index + 1}
-          </span>
-        </div>
-      ))}
+    <div className="absolute bottom-4 left-1/2 flex max-w-[calc(100vw-1rem)] -translate-x-1/2 gap-1 border-4 border-[#0d0b14] bg-[#171327]/90 p-1 sm:gap-1.5 sm:p-1.5">
+      {slots.map((block, index) => {
+        const isSelected = selectedSlot === index;
+        return (
+          <div
+            key={index}
+            data-mobile-ui
+            onClick={() => onSelectSlot?.(index)}
+            className={`relative flex h-9 w-9 shrink-0 items-center justify-center border-4 sm:h-12 sm:w-12 ${
+              isSelected
+                ? "-translate-y-1 border-[#b6f24a] bg-[#2b2447]"
+                : "border-[#3a3358] bg-[#0d0b14]/70"
+            }`}
+          >
+            {block !== BlockType.AIR && (
+              <div
+                className="h-5 w-5 bg-cover bg-center sm:h-7 sm:w-7"
+                style={{
+                  backgroundImage: `url(/game/${BLOCK_ITEM_TEXTURES[block]})`,
+                  imageRendering: "pixelated",
+                }}
+              />
+            )}
+            <span
+              className={`absolute -bottom-1 right-0 text-[9px] sm:text-[10px] ${
+                isSelected ? "text-[#b6f24a]" : "text-[#6e6590]"
+              }`}
+            >
+              {index + 1}
+            </span>
+          </div>
+        );
+      })}
     </div>
   );
-}
-
-function getTextureForBlock(block: BlockType): string {
-  const textureInfo = BLOCK_ITEM_TEXTURES[block];
-  return textureInfo;
 }

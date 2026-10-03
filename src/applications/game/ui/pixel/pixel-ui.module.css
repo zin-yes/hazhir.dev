@@ -1,0 +1,212 @@
+/*
+ * Pixel UI kit for the voxel game menus: hard edges, stepped corners, no
+ * blur, no radius. Colors are custom properties so tones can be swapped per
+ * element.
+ */
+.frame {
+  --pixel: 4px;
+  --edge: #3a3358;
+  --fill: #171327;
+  --notch: polygon(
+    0 var(--pixel),
+    var(--pixel) var(--pixel),
+    var(--pixel) 0,
+    calc(100% - var(--pixel)) 0,
+    calc(100% - var(--pixel)) var(--pixel),
+    100% var(--pixel),
+    100% calc(100% - var(--pixel)),
+    calc(100% - var(--pixel)) calc(100% - var(--pixel)),
+    calc(100% - var(--pixel)) 100%,
+    var(--pixel) 100%,
+    var(--pixel) calc(100% - var(--pixel)),
+    0 calc(100% - var(--pixel))
+  );
+  position: relative;
+  padding: var(--pixel);
+  background: var(--edge);
+  clip-path: var(--notch);
+  color: #f1ecff;
+}
+
+.frameFill {
+  clip-path: var(--notch);
+  background-color: var(--fill);
+  background-image: linear-gradient(
+      45deg,
+      rgba(255, 255, 255, 0.035) 25%,
+      transparent 25%,
+      transparent 75%,
+      rgba(255, 255, 255, 0.035) 75%
+    ),
+    linear-gradient(
+      45deg,
+      rgba(255, 255, 255, 0.035) 25%,
+      transparent 25%,
+      transparent 75%,
+      rgba(255, 255, 255, 0.035) 75%
+    );
+  background-size: 8px 8px;
+  background-position:
+    0 0,
+    4px 4px;
+  height: 100%;
+}
+
+.button {
+  --pixel: 4px;
+  --edge: #0d0b14;
+  --fill: #2b2447;
+  --ink: #f1ecff;
+  --notch: polygon(
+    0 var(--pixel),
+    var(--pixel) var(--pixel),
+    var(--pixel) 0,
+    calc(100% - var(--pixel)) 0,
+    calc(100% - var(--pixel)) var(--pixel),
+    100% var(--pixel),
+    100% calc(100% - var(--pixel)),
+    calc(100% - var(--pixel)) calc(100% - var(--pixel)),
+    calc(100% - var(--pixel)) 100%,
+    var(--pixel) 100%,
+    var(--pixel) calc(100% - var(--pixel)),
+    0 calc(100% - var(--pixel))
+  );
+  display: inline-block;
+  padding: var(--pixel);
+  background: var(--edge);
+  clip-path: var(--notch);
+  cursor: pointer;
+  font: inherit;
+  color: var(--ink);
+  transition: filter 80ms steps(2);
+}
+
+.button > span {
+  display: block;
+  padding: 0.55rem 1rem;
+  background: var(--fill);
+  clip-path: var(--notch);
+  box-shadow:
+    inset 0 4px 0 rgba(255, 255, 255, 0.16),
+    inset 0 -4px 0 rgba(0, 0, 0, 0.32);
+  text-align: center;
+  font-weight: 700;
+  font-size: 0.85rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.button:hover {
+  filter: brightness(1.15);
+}
+
+.button:active {
+  transform: translateY(2px);
+}
+
+.button:active > span {
+  box-shadow:
+    inset 0 4px 0 rgba(0, 0, 0, 0.25),
+    inset 0 -2px 0 rgba(0, 0, 0, 0.2);
+}
+
+.button:focus-visible {
+  --edge: #ffffff;
+  outline: none;
+}
+
+.button:disabled {
+  opacity: 0.4;
+  pointer-events: none;
+}
+
+.primary {
+  --fill: #b6f24a;
+  --ink: #12200a;
+}
+
+.danger {
+  --fill: #ff6b7a;
+  --ink: #2a0a10;
+}
+
+.tab {
+  --fill: #171327;
+  --ink: #9a91bd;
+}
+
+.tabActive {
+  --fill: #f1ecff;
+  --ink: #171327;
+}
+
+.field {
+  width: 100%;
+  min-width: 0;
+  padding: 0.55rem 0.75rem;
+  border: 4px solid #3a3358;
+  border-radius: 0;
+  background: #0d0b14;
+  color: #f1ecff;
+  font: inherit;
+  font-size: 0.85rem;
+  outline: none;
+}
+
+.field::placeholder {
+  color: #6e6590;
+}
+
+.field:focus {
+  border-color: #b6f24a;
+}
+
+.keycap {
+  display: inline-block;
+  padding: 0.1rem 0.5rem;
+  background: #f1ecff;
+  color: #171327;
+  font-size: 0.7rem;
+  font-weight: 700;
+  white-space: nowrap;
+  box-shadow:
+    0 4px 0 #6e6590,
+    4px 0 0 #6e6590;
+  margin: 0 4px 4px 0;
+}
+
+.logo {
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 0.12em;
+  color: #b6f24a;
+  text-shadow:
+    4px 4px 0 #6fa11d,
+    8px 8px 0 #2b4a0a,
+    12px 12px 0 #0d0b14;
+}
+
+.segments {
+  display: grid;
+  grid-template-columns: repeat(20, 1fr);
+  gap: 2px;
+  padding: 4px;
+  background: #0d0b14;
+  border: 4px solid #3a3358;
+}
+
+.segment {
+  height: 14px;
+  background: #1f1a38;
+}
+
+.segmentLit {
+  background: #b6f24a;
+  box-shadow: inset 0 -4px 0 #6fa11d;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .button {
+    transition: none;
+  }
+}

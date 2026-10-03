@@ -1,6 +1,13 @@
 import { useState } from "react";
 import type { StoredWorld } from "../../worlds/world-store";
-import { MenuBackdrop, MenuButton, MenuPanel } from "./menu-primitives";
+import {
+  PixelButton,
+  PixelFrame,
+  PixelInput,
+  PixelLogo,
+} from "../pixel/pixel-ui";
+import { MenuBackdrop } from "./menu-primitives";
+import { WorldAvatar } from "./world-avatar";
 
 interface TitleMenuProps {
   worlds: StoredWorld[];
@@ -60,147 +67,150 @@ export function TitleMenu({
 
   return (
     <MenuBackdrop>
-      <div className="text-center">
-        <h1 className="text-3xl font-bold sm:text-4xl">Voxel</h1>
-        <p className="mt-1 text-sm text-neutral-300">
-          Pick a world to jump into, or start a new one.
+      <div className="mt-2 text-center">
+        <PixelLogo>VOXEL</PixelLogo>
+        <p className="mt-5 text-xs text-[#9a91bd]">
+          Pick a world, or dig a new one.
         </p>
       </div>
 
-      <MenuPanel>
+      <PixelFrame className="w-full max-w-xl" innerClassName="p-5 sm:p-6">
         <div className="mb-4 flex items-center justify-between gap-3">
-          <h2 className="text-lg font-bold">Your worlds</h2>
+          <h2 className="text-sm font-bold uppercase tracking-wider text-[#b6f24a]">
+            Worlds
+          </h2>
           {!isCreating && (
-            <MenuButton variant="primary" onClick={() => setIsCreating(true)}>
-              + New world
-            </MenuButton>
+            <PixelButton tone="primary" onClick={() => setIsCreating(true)}>
+              + New
+            </PixelButton>
           )}
         </div>
 
         {isCreating && (
           <form
-            className="mb-4 flex flex-col gap-2 rounded-lg border border-emerald-400/40 bg-emerald-400/5 p-3"
+            className="mb-4 flex flex-col gap-2 border-4 border-dashed border-[#b6f24a]/50 p-3"
             onSubmit={(event) => {
               event.preventDefault();
               submitNewWorld();
             }}
           >
-            <input
+            <PixelInput
               autoFocus
               type="text"
               maxLength={40}
               placeholder="World name"
-              className="rounded-md bg-white px-3 py-2 text-black"
               value={newWorldName}
               onChange={(event) => setNewWorldName(event.target.value)}
             />
-            <input
+            <PixelInput
               type="text"
-              placeholder="Seed (optional, random if empty)"
-              className="rounded-md bg-white px-3 py-2 text-black"
+              placeholder="Seed (optional)"
               value={newWorldSeed}
               onChange={(event) => setNewWorldSeed(event.target.value)}
             />
             <div className="flex gap-2">
-              <MenuButton type="submit" variant="primary" className="grow">
+              <PixelButton type="submit" tone="primary" className="grow">
                 Create and play
-              </MenuButton>
-              <MenuButton type="button" onClick={() => setIsCreating(false)}>
+              </PixelButton>
+              <PixelButton type="button" onClick={() => setIsCreating(false)}>
                 Cancel
-              </MenuButton>
+              </PixelButton>
             </div>
           </form>
         )}
 
         {isLoadingWorlds ? (
-          <p className="py-6 text-center text-sm text-neutral-400">
-            Loading worlds...
+          <p className="py-6 text-center text-xs text-[#6e6590]">
+            Reading saves...
           </p>
         ) : worlds.length === 0 && !isCreating ? (
-          <p className="py-6 text-center text-sm text-neutral-400">
-            No worlds yet. Create one to get started.
+          <p className="py-6 text-center text-xs text-[#6e6590]">
+            Nothing here yet. Hit + New to start.
           </p>
         ) : (
-          <ul className="flex max-h-[50vh] flex-col gap-2 overflow-y-auto pr-1">
+          <ul className="flex max-h-[44vh] flex-col gap-3 overflow-y-auto pr-1">
             {worlds.map((world) => (
               <li
                 key={world.id}
-                className="flex flex-col gap-3 rounded-lg border border-white/10 bg-white/5 p-3 sm:flex-row sm:items-center"
+                className="flex flex-col gap-3 border-4 border-[#2b2447] bg-[#0d0b14] p-3 sm:flex-row sm:items-center"
               >
-                <div className="min-w-0 grow">
-                  {renamingWorldId === world.id ? (
-                    <form
-                      className="flex gap-2"
-                      onSubmit={(event) => {
-                        event.preventDefault();
-                        submitRename(world.id);
-                      }}
-                    >
-                      <input
-                        autoFocus
-                        type="text"
-                        maxLength={40}
-                        className="min-w-0 grow rounded-md bg-white px-2 py-1 text-black"
-                        value={renameInput}
-                        onChange={(event) => setRenameInput(event.target.value)}
-                        onBlur={() => submitRename(world.id)}
-                      />
-                    </form>
-                  ) : (
-                    <p className="truncate font-bold">{world.name}</p>
-                  )}
-                  <p className="truncate text-xs text-neutral-400">
-                    Played {formatLastPlayed(world.lastPlayedAt)} -{" "}
-                    {countEditedBlocks(world)} edits - seed {world.seed}
-                  </p>
+                <div className="flex min-w-0 grow items-center gap-3">
+                  <WorldAvatar seed={world.seed} />
+                  <div className="min-w-0 grow">
+                    {renamingWorldId === world.id ? (
+                      <form
+                        onSubmit={(event) => {
+                          event.preventDefault();
+                          submitRename(world.id);
+                        }}
+                      >
+                        <PixelInput
+                          autoFocus
+                          type="text"
+                          maxLength={40}
+                          value={renameInput}
+                          onChange={(event) => setRenameInput(event.target.value)}
+                          onBlur={() => submitRename(world.id)}
+                        />
+                      </form>
+                    ) : (
+                      <p className="truncate text-sm font-bold">{world.name}</p>
+                    )}
+                    <p className="text-[0.65rem] leading-relaxed text-[#6e6590]">
+                      {formatLastPlayed(world.lastPlayedAt)}
+                      <br />
+                      {countEditedBlocks(world)} edits - seed {world.seed}
+                    </p>
+                  </div>
                 </div>
                 <div className="flex shrink-0 gap-2">
-                  <MenuButton
-                    variant="primary"
+                  <PixelButton
+                    tone="primary"
                     onClick={() => onPlayWorld(world.id)}
                   >
                     Play
-                  </MenuButton>
-                  <MenuButton
+                  </PixelButton>
+                  <PixelButton
                     onClick={() => {
                       setRenamingWorldId(world.id);
                       setRenameInput(world.name);
                     }}
                   >
-                    Rename
-                  </MenuButton>
+                    Edit
+                  </PixelButton>
                   {worldIdPendingDelete === world.id ? (
-                    <MenuButton
-                      variant="danger"
+                    <PixelButton
+                      tone="danger"
+                      autoFocus
                       onClick={() => {
                         setWorldIdPendingDelete(null);
                         onDeleteWorld(world.id);
                       }}
                       onBlur={() => setWorldIdPendingDelete(null)}
-                      autoFocus
                     >
                       Sure?
-                    </MenuButton>
+                    </PixelButton>
                   ) : (
-                    <MenuButton
-                      variant="danger"
+                    <PixelButton
+                      tone="danger"
                       onClick={() => setWorldIdPendingDelete(world.id)}
                     >
-                      Delete
-                    </MenuButton>
+                      Del
+                    </PixelButton>
                   )}
                 </div>
               </li>
             ))}
           </ul>
         )}
-      </MenuPanel>
+      </PixelFrame>
 
-      <MenuPanel>
-        <h2 className="mb-1 text-lg font-bold">Join a friend</h2>
-        <p className="mb-3 text-xs text-neutral-400">
-          Enter a host ID to jump into their world. Nothing is saved to your
-          worlds.
+      <PixelFrame className="w-full max-w-xl" innerClassName="p-5 sm:p-6">
+        <h2 className="text-sm font-bold uppercase tracking-wider text-[#b6f24a]">
+          Join a friend
+        </h2>
+        <p className="mb-3 mt-1 text-[0.65rem] text-[#6e6590]">
+          Paste a host ID to drop into their world. Nothing is saved to yours.
         </p>
         <form
           className="flex gap-2"
@@ -209,18 +219,17 @@ export function TitleMenu({
             if (hostIdInput.trim()) onJoinHostedWorld(hostIdInput.trim());
           }}
         >
-          <input
+          <PixelInput
             type="text"
             placeholder="Host ID"
-            className="min-w-0 grow rounded-md bg-white px-3 py-2 text-black"
             value={hostIdInput}
             onChange={(event) => setHostIdInput(event.target.value)}
           />
-          <MenuButton type="submit" disabled={!hostIdInput.trim()}>
+          <PixelButton type="submit" disabled={!hostIdInput.trim()}>
             Join
-          </MenuButton>
+          </PixelButton>
         </form>
-      </MenuPanel>
+      </PixelFrame>
     </MenuBackdrop>
   );
 }

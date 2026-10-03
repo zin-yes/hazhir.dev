@@ -1,14 +1,15 @@
 import { useState } from "react";
+import { PixelButton, PixelFrame } from "../pixel/pixel-ui";
 import { ControlsList } from "./controls-list";
-import { MenuBackdrop, MenuButton, MenuPanel } from "./menu-primitives";
+import { MenuBackdrop } from "./menu-primitives";
 import { MultiplayerPanel } from "./multiplayer-panel";
 
 type PauseMenuTab = "game" | "controls" | "multiplayer";
 
 const TAB_LABELS: Record<PauseMenuTab, string> = {
   game: "Game",
-  controls: "Controls",
-  multiplayer: "Multiplayer",
+  controls: "Keys",
+  multiplayer: "Friends",
 };
 
 interface PauseMenuProps {
@@ -35,42 +36,43 @@ export function PauseMenu({
   const [activeTab, setActiveTab] = useState<PauseMenuTab>("game");
 
   return (
-    <MenuBackdrop onBackdropClick={isMobile ? undefined : onResume}>
-      <MenuPanel>
-        <div className="mb-4 text-center">
-          <p className="text-xs uppercase tracking-widest text-neutral-400">
+    <MenuBackdrop withVeil onBackdropClick={isMobile ? undefined : onResume}>
+      <PixelFrame className="w-full max-w-lg" innerClassName="p-5 sm:p-6">
+        <header className="mb-5 text-center">
+          <p className="text-[0.65rem] uppercase tracking-[0.3em] text-[#6e6590]">
             Paused
           </p>
-          <h2 className="truncate text-2xl font-bold">{worldName}</h2>
-        </div>
+          <h2 className="mt-1 truncate text-2xl font-bold text-[#b6f24a]">
+            {worldName}
+          </h2>
+        </header>
 
-        <div className="mb-5 grid grid-cols-3 gap-1 rounded-lg bg-white/5 p-1">
+        <div className="mb-5 grid grid-cols-3 gap-2">
           {(Object.keys(TAB_LABELS) as PauseMenuTab[]).map((tab) => (
-            <button
+            <PixelButton
               key={tab}
-              data-mobile-ui
+              tone={activeTab === tab ? "tabActive" : "tab"}
               onClick={() => setActiveTab(tab)}
-              className={`rounded-md px-2 py-2 text-xs font-bold transition sm:text-sm ${
-                activeTab === tab
-                  ? "bg-white text-black"
-                  : "text-neutral-300 hover:bg-white/10"
-              }`}
             >
               {TAB_LABELS[tab]}
-            </button>
+            </PixelButton>
           ))}
         </div>
 
         {activeTab === "game" && (
-          <div className="flex flex-col gap-2">
-            <MenuButton variant="primary" className="py-3 text-base" onClick={onResume}>
+          <div className="flex flex-col gap-3">
+            <PixelButton tone="primary" className="w-full" onClick={onResume}>
               {isMobile ? "Tap to resume" : "Click to resume"}
-            </MenuButton>
-            <MenuButton onClick={onSaveNow}>Save now</MenuButton>
-            <MenuButton onClick={onExitToWorlds}>Save and switch world</MenuButton>
-            <p className="mt-2 text-center text-xs text-neutral-400">
-              Your world autosaves whenever you pause. The game is frozen while
-              this menu is open.
+            </PixelButton>
+            <PixelButton className="w-full" onClick={onSaveNow}>
+              Save now
+            </PixelButton>
+            <PixelButton className="w-full" onClick={onExitToWorlds}>
+              Save and switch world
+            </PixelButton>
+            <p className="pt-1 text-center text-[0.65rem] leading-relaxed text-[#6e6590]">
+              Autosaves every time you pause. The world is frozen while this
+              menu is open.
             </p>
           </div>
         )}
@@ -78,7 +80,7 @@ export function PauseMenu({
         {activeTab === "multiplayer" && (
           <MultiplayerPanel peerId={peerId} onHost={onHost} onJoin={onJoin} />
         )}
-      </MenuPanel>
+      </PixelFrame>
     </MenuBackdrop>
   );
 }
