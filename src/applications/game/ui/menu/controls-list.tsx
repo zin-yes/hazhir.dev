@@ -2,14 +2,18 @@ import { KeyCap } from "./menu-primitives";
 
 const CONTROL_BINDINGS: { action: string; keys: string[] }[] = [
   { action: "Move", keys: ["W", "A", "S", "D"] },
-  { action: "Jump / fly up", keys: ["SPACE"] },
+  { action: "Move (alternate)", keys: ["ARROWS"] },
   { action: "Look around", keys: ["MOUSE"] },
+  { action: "Jump / swim up / fly up", keys: ["SPACE"] },
+  { action: "Sneak / swim down / fly down", keys: ["SHIFT"] },
+  { action: "Toggle flying", keys: ["V"] },
   { action: "Break block", keys: ["LEFT CLICK"] },
   { action: "Place block", keys: ["RIGHT CLICK"] },
-  { action: "Pick hotbar slot", keys: ["1-9", "SCROLL"] },
+  { action: "Pick hotbar slot", keys: ["1-9"] },
+  { action: "Cycle hotbar", keys: ["SCROLL"] },
   { action: "Inventory", keys: ["E"] },
-  { action: "Pause menu", keys: ["ESC"] },
   { action: "Debug info", keys: ["F3"] },
+  { action: "Pause menu", keys: ["ESC"] },
 ];
 
 export function ControlsList() {
