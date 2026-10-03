@@ -3,7 +3,7 @@
 // rugged mountain belts along ridge lines, arid plateaus, volcanoes, islands,
 // then rivers and lakes carved last.
 
-import { createClimateField } from "./climate";
+import { createClimateField, type ClimateSample } from "./climate";
 import { createAridLandforms, computeAridity } from "./landforms/arid-landforms";
 import { continentalElevation } from "./landforms/continental-profile";
 import { createIslandField } from "./landforms/islands";
@@ -17,6 +17,7 @@ import type { TerrainSample } from "./terrain-types";
 
 export interface TerrainModel {
   sample(x: number, z: number): TerrainSample;
+  sampleClimate(x: number, z: number): ClimateSample;
 }
 
 export function createTerrainModel(seed: number): TerrainModel {
@@ -108,6 +109,7 @@ export function createTerrainModel(seed: number): TerrainModel {
   });
 
   return {
+    sampleClimate,
     sample(x, z) {
       const terrain = sampleWithoutLakes(x, z);
       const lake = carveLakes(x, z, terrain.height);

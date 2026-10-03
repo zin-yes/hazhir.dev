@@ -5,6 +5,7 @@
 import { CHUNK_LENGTH, CHUNK_WIDTH } from "@/applications/game/config";
 import { BIOME_DEFINITIONS, type BiomeDefinition } from "./biomes";
 import { selectBiome, describeBiomeContext } from "./biomes/biome-selection";
+import { createBiomeBlender, type BiomeBlender } from "./biomes/biome-blend";
 import { createTerrainModel, type TerrainModel } from "./terrain-model";
 import type { TerrainSample } from "./terrain-types";
 
@@ -39,6 +40,7 @@ function buildColumn(
   worldZ: number,
   sample: TerrainSample,
   neighborHeights: readonly [number, number, number, number],
+  blendBiomes: BiomeBlender,
 ): ColumnInfo {
   let steepestDrop = 0;
   let lowestNeighborHeight = sample.height;
@@ -46,14 +48,15 @@ function buildColumn(
     steepestDrop = Math.max(steepestDrop, Math.abs(sample.height - neighborHeight));
     lowestNeighborHeight = Math.min(lowestNeighborHeight, neighborHeight);
   }
-  const context = describeBiomeContext(sample);
+  const blendedSample = blendBiomes(worldX, worldZ, sample);
+  const context = describeBiomeContext(blendedSample);
   const groundTopY = Math.floor(sample.height);
   const isSubmerged = sample.waterLevel > groundTopY + 1;
   return {
     worldX,
     worldZ,
     sample,
-    biome: BIOME_DEFINITIONS[selectBiome(sample, steepestDrop)],
+    biome: BIOME_DEFINITIONS[selectBiome(blendedSample, steepestDrop)],
     groundTopY,
     waterLevel: sample.waterLevel,
     isSubmerged,
@@ -74,6 +77,7 @@ export class ChunkColumnGrid implements ColumnLookup {
 
   constructor(
     private readonly terrain: TerrainModel,
+    private readonly blendBiomes: BiomeBlender,
     chunkX: number,
     chunkZ: number,
   ) {
@@ -106,6 +110,7 @@ export class ChunkColumnGrid implements ColumnLookup {
           this.samples[index - 1].height,
           this.samples[index + 1].height,
         ],
+        this.blendBiomes,
       );
       this.columns[index] = column;
     }
@@ -126,7 +131,7 @@ export class ChunkColumnGrid implements ColumnLookup {
         this.outsideSample(worldX + 1, worldZ).height,
         this.outsideSample(worldX, worldZ - 1).height,
         this.outsideSample(worldX, worldZ + 1).height,
-      ]);
+      ], this.blendBiomes);
       this.outsideColumns.set(key, column);
     }
     return column;
@@ -156,6 +161,7 @@ export class ChunkColumnGrid implements ColumnLookup {
 interface SeedCache {
   seed: number;
   terrain: TerrainModel;
+  blendBiomes: BiomeBlender;
   grids: Map<string, ChunkColumnGrid>;
 }
 
@@ -163,7 +169,13 @@ let activeCache: SeedCache | undefined;
 
 function cacheForSeed(seed: number): SeedCache {
   if (activeCache?.seed !== seed) {
-    activeCache = { seed, terrain: createTerrainModel(seed), grids: new Map() };
+    const terrain = createTerrainModel(seed);
+    activeCache = {
+      seed,
+      terrain,
+      blendBiomes: createBiomeBlender(seed, terrain.sampleClimate),
+      grids: new Map(),
+    };
   }
   return activeCache;
 }
@@ -177,7 +189,7 @@ export function getChunkColumnGrid(seed: number, chunkX: number, chunkZ: number)
   const key = `${chunkX},${chunkZ}`;
   let grid = cache.grids.get(key);
   if (!grid) {
-    grid = new ChunkColumnGrid(cache.terrain, chunkX, chunkZ);
+    grid = new ChunkColumnGrid(cache.terrain, cache.blendBiomes, chunkX, chunkZ);
     cache.grids.set(key, grid);
     if (cache.grids.size > MAX_CACHED_GRIDS) {
       const oldestKey = cache.grids.keys().next().value as string;
