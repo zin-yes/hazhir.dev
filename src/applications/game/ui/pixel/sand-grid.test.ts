@@ -71,3 +71,37 @@ describe("SandGrid", () => {
     expect(countFilledCells(grid)).toBe(grid.grainCount);
   });
 });
+
+describe("SandGrid.resized", () => {
+  function buildPile() {
+    const grid = new SandGrid(40, 60, palette);
+    for (let batch = 0; batch < 40; batch++) {
+      grid.spawnGrains(40);
+      grid.step();
+    }
+    settle(grid);
+    return grid;
+  }
+
+  test("growing keeps every grain, anchored to the bottom", () => {
+    const grid = buildPile();
+    const resized = SandGrid.resized(grid, 70, 90, palette);
+    expect(resized.grainCount).toBe(grid.grainCount);
+    expect(countFilledCells(resized)).toBe(grid.grainCount);
+    const lowestGrainRowBefore = grid.rows - 1;
+    const lowestGrainRowAfter = resized.rows - 1;
+    for (let column = 0; column < grid.columns; column++) {
+      expect(resized.cells[lowestGrainRowAfter * resized.columns + column]).toBe(
+        grid.cells[lowestGrainRowBefore * grid.columns + column],
+      );
+    }
+  });
+
+  test("shrinking drops only what no longer fits and keeps the count honest", () => {
+    const grid = buildPile();
+    const resized = SandGrid.resized(grid, 25, 20, palette);
+    expect(resized.grainCount).toBe(countFilledCells(resized));
+    expect(resized.grainCount).toBeGreaterThan(0);
+    expect(resized.grainCount).toBeLessThan(grid.grainCount);
+  });
+});

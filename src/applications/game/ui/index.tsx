@@ -1,6 +1,7 @@
 import { Silkscreen } from "next/font/google";
 import { useEffect, useState } from "react";
 import { BlockType } from "../blocks";
+import type { LoadStageStatus } from "../load-progress";
 import type { StoredWorld } from "../worlds/world-store";
 import { DebugInfo, DebugOverlay } from "./debug-overlay";
 import { Hotbar } from "./hotbar";
@@ -24,6 +25,7 @@ interface UILayerProps {
   phase: GamePhase;
   loadProgress: number;
   loadStageLabel: string;
+  loadStages: LoadStageStatus[];
   activeWorldName: string;
   worlds: StoredWorld[];
   isLoadingWorlds: boolean;
@@ -54,6 +56,7 @@ export default function UILayer({
   phase,
   loadProgress,
   loadStageLabel,
+  loadStages,
   activeWorldName,
   worlds,
   isLoadingWorlds,
@@ -174,6 +177,7 @@ export default function UILayer({
         <LoadingHud
           progress={loadProgress}
           stageLabel={loadStageLabel}
+          stages={loadStages}
           worldName={activeWorldName}
         />
       )}

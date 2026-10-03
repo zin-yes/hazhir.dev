@@ -210,3 +210,34 @@
     transition: none;
   }
 }
+
+.stageMarker {
+  width: 10px;
+  height: 10px;
+  flex-shrink: 0;
+  background: #1f1a38;
+}
+
+.stageMarkerDone {
+  background: #b6f24a;
+}
+
+.stageMarkerActive {
+  background: #b6f24a;
+  animation: stageBlink 700ms steps(2, jump-none) infinite;
+}
+
+@keyframes stageBlink {
+  0% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0.25;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .stageMarkerActive {
+    animation: none;
+  }
+}

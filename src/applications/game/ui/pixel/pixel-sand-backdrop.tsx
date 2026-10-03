@@ -72,6 +72,8 @@ export function PixelSandBackdrop({
     let frameCounter = 0;
     let palette: Awaited<ReturnType<typeof loadGrainPalette>> | null = null;
 
+    let redrawNow: (() => void) | null = null;
+
     const rebuildGrid = () => {
       const columns = Math.max(
         8,
@@ -85,7 +87,15 @@ export function PixelSandBackdrop({
       canvas.height = rows;
       image = context.createImageData(columns, rows);
       pixels = new Uint32Array(image.data.buffer);
-      grid = palette ? new SandGrid(columns, rows, palette) : null;
+      if (!palette) {
+        grid = null;
+      } else if (grid) {
+        grid = SandGrid.resized(grid, columns, rows, palette);
+      } else {
+        grid = new SandGrid(columns, rows, palette);
+      }
+      // Resizing a canvas clears it, so repaint before the browser does.
+      redrawNow?.();
     };
 
     const resizeObserver = new ResizeObserver(rebuildGrid);
@@ -183,6 +193,8 @@ export function PixelSandBackdrop({
       }
       context.putImageData(image, 0, 0);
     };
+
+    redrawNow = () => draw(performance.now());
 
     const frame = (now: number) => {
       if (isDisposed) return;

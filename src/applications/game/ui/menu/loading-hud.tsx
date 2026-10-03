@@ -1,12 +1,25 @@
-import { PixelFrame, PixelSegmentBar } from "../pixel/pixel-ui";
+import type { LoadStageStatus } from "../../load-progress";
+import {
+  PixelFrame,
+  PixelSegmentBar,
+  PixelStageMarker,
+} from "../pixel/pixel-ui";
 
 interface LoadingHudProps {
   progress: number;
   stageLabel: string;
+  stages: LoadStageStatus[];
   worldName: string;
 }
 
-export function LoadingHud({ progress, stageLabel, worldName }: LoadingHudProps) {
+export function LoadingHud({
+  progress,
+  stageLabel,
+  stages,
+  worldName,
+}: LoadingHudProps) {
+  const activeStageIndex = stages.findIndex((stage) => stage.fraction < 1);
+
   return (
     <div
       data-mobile-ui
@@ -22,8 +35,35 @@ export function LoadingHud({ progress, stageLabel, worldName }: LoadingHudProps)
         <PixelSegmentBar progress={progress} />
         <div className="mt-3 flex items-center justify-between text-xs">
           <span className="text-[#9a91bd]">{stageLabel}...</span>
-          <span className="tabular-nums">{Math.round(progress * 100)}%</span>
+          <span className="tabular-nums">{Math.floor(progress * 100)}%</span>
         </div>
+
+        <ul className="mt-4 flex flex-col gap-1.5 text-[0.65rem]">
+          {stages.map((stage, index) => {
+            const state =
+              stage.fraction >= 1
+                ? "done"
+                : stage.fraction > 0 || index === activeStageIndex
+                  ? "active"
+                  : "pending";
+            return (
+              <li
+                key={stage.id}
+                className={`flex items-center gap-2 ${
+                  state === "pending" ? "text-[#6e6590]" : "text-[#f1ecff]"
+                }`}
+              >
+                <PixelStageMarker state={state} />
+                <span className="grow">{stage.label}</span>
+                {state === "active" && (
+                  <span className="tabular-nums text-[#b6f24a]">
+                    {Math.floor(stage.fraction * 100)}%
+                  </span>
+                )}
+              </li>
+            );
+          })}
+        </ul>
       </PixelFrame>
     </div>
   );

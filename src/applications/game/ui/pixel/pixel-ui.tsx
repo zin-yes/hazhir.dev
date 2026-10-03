@@ -79,3 +79,17 @@ export function PixelSegmentBar({ progress }: { progress: number }) {
     </div>
   );
 }
+
+type StageState = "done" | "active" | "pending";
+
+const STAGE_MARKER_CLASS: Record<StageState, string> = {
+  done: styles.stageMarkerDone,
+  active: styles.stageMarkerActive,
+  pending: "",
+};
+
+export function PixelStageMarker({ state }: { state: StageState }) {
+  return (
+    <span className={`${styles.stageMarker} ${STAGE_MARKER_CLASS[state]}`} />
+  );
+}

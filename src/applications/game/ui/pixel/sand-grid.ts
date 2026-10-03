@@ -18,6 +18,33 @@ export class SandGrid {
     this.cells = new Uint32Array(columns * rows);
   }
 
+  /**
+   * Carries a pile over to a new size, anchored to the bottom-left corner,
+   * so resizing keeps the sand instead of starting over.
+   */
+  static resized(
+    previous: SandGrid,
+    columns: number,
+    rows: number,
+    palette: GrainPalette,
+  ): SandGrid {
+    const next = new SandGrid(columns, rows, palette);
+    next.frame = previous.frame;
+    const copiedColumns = Math.min(previous.columns, columns);
+    const copiedRows = Math.min(previous.rows, rows);
+    for (let rowFromBottom = 0; rowFromBottom < copiedRows; rowFromBottom++) {
+      const previousRow = previous.rows - 1 - rowFromBottom;
+      const nextRow = rows - 1 - rowFromBottom;
+      for (let column = 0; column < copiedColumns; column++) {
+        const color = previous.cells[previousRow * previous.columns + column];
+        if (color === EMPTY_CELL) continue;
+        next.cells[nextRow * columns + column] = color;
+        next.grainCount++;
+      }
+    }
+    return next;
+  }
+
   get capacity() {
     return this.columns * this.rows;
   }

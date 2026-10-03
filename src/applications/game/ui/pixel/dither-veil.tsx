@@ -35,6 +35,7 @@ export function DitherVeil({ coverage = 0.5 }: DitherVeilProps) {
       if (!startedAt) startedAt = now;
       const columns = Math.ceil(container.clientWidth / VEIL_CELL_SIZE_PIXELS);
       const rows = Math.ceil(container.clientHeight / VEIL_CELL_SIZE_PIXELS);
+      if (columns < 1 || rows < 1) return;
       if (canvas.width !== columns || canvas.height !== rows) {
         canvas.width = columns;
         canvas.height = rows;
@@ -57,8 +58,7 @@ export function DitherVeil({ coverage = 0.5 }: DitherVeilProps) {
 
     const resizeObserver = new ResizeObserver(() => {
       cancelAnimationFrame(animationFrameId);
-      startedAt = 1;
-      animationFrameId = requestAnimationFrame(render);
+      render(performance.now());
     });
     resizeObserver.observe(container);
 
