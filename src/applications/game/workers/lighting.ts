@@ -156,6 +156,19 @@ export function initializeChunkLight(
   return { light, queue: Uint32Array.from(queue), isFullySunlit };
 }
 
+const X_STRIDE = 1 << (CHUNK_SHIFT * 2);
+const Y_STRIDE = 1 << CHUNK_SHIFT;
+
+/** True when the open cell at index is below the sky light a cell next to it could pass on. */
+function isDimmerThan(
+  chunk: Uint8Array,
+  light: Uint8Array,
+  index: number,
+  reachableSky: number,
+): boolean {
+  return IS_TRANSPARENT[chunk[index]] === 1 && light[index] >> 4 < reachableSky;
+}
+
 /**
  * A full sky light cell matters to the flood fill only if it touches a cell it
  * could brighten, or the edge of the chunk (where the neighbor is unknown).
@@ -178,25 +191,14 @@ function isSkyFrontierCell(
     return true;
   }
   const index = getIndex(x, y, z);
-  const neighborIndices = [
-    index + (1 << (CHUNK_SHIFT * 2)),
-    index - (1 << (CHUNK_SHIFT * 2)),
-    index + 1,
-    index - 1,
-    index - (1 << CHUNK_SHIFT),
-  ];
-  for (const neighborIndex of neighborIndices) {
-    // Sideways light reaches 14, falling light keeps 15.
-    const reachedSky =
-      neighborIndex === index - (1 << CHUNK_SHIFT) ? MAX_LIGHT : MAX_LIGHT - 1;
-    if (
-      IS_TRANSPARENT[chunk[neighborIndex]] &&
-      light[neighborIndex] >> 4 < reachedSky
-    ) {
-      return true;
-    }
-  }
-  return false;
+  // Sideways light reaches 14, falling light keeps 15.
+  return (
+    isDimmerThan(chunk, light, index + X_STRIDE, MAX_LIGHT - 1) ||
+    isDimmerThan(chunk, light, index - X_STRIDE, MAX_LIGHT - 1) ||
+    isDimmerThan(chunk, light, index + 1, MAX_LIGHT - 1) ||
+    isDimmerThan(chunk, light, index - 1, MAX_LIGHT - 1) ||
+    isDimmerThan(chunk, light, index - Y_STRIDE, MAX_LIGHT)
+  );
 }
 
 // Where a cell that left the chunk by at most one axis lives. Slot 0 is the chunk itself.
@@ -231,6 +233,50 @@ function slotOf(x: number, y: number, z: number): number {
 const DIRECTION_X = [1, -1, 0, 0, 0, 0];
 const DIRECTION_Y = [0, 0, 1, -1, 0, 0];
 const DIRECTION_Z = [0, 0, 0, 0, 1, -1];
+
+// For each face slot: the chunk's own boundary cells and the matching cells of the neighbor beyond.
+const FACE_CENTER_INDICES: Int32Array[] = [];
+const FACE_NEIGHBOR_INDICES: Int32Array[] = [];
+(function buildFaceTables() {
+  const last = CHUNK_WIDTH - 1;
+  for (let slot = 0; slot < SLOT_COUNT; slot++) {
+    const centerIndices = new Int32Array(CHUNK_WIDTH * CHUNK_HEIGHT);
+    const neighborIndices = new Int32Array(CHUNK_WIDTH * CHUNK_HEIGHT);
+    for (let first = 0; first < CHUNK_WIDTH; first++) {
+      for (let second = 0; second < CHUNK_HEIGHT; second++) {
+        const position = first * CHUNK_HEIGHT + second;
+        switch (slot) {
+          case SLOT_NEGATIVE_X:
+            centerIndices[position] = getIndex(0, first, second);
+            neighborIndices[position] = getIndex(last, first, second);
+            break;
+          case SLOT_POSITIVE_X:
+            centerIndices[position] = getIndex(last, first, second);
+            neighborIndices[position] = getIndex(0, first, second);
+            break;
+          case SLOT_NEGATIVE_Y:
+            centerIndices[position] = getIndex(first, 0, second);
+            neighborIndices[position] = getIndex(first, last, second);
+            break;
+          case SLOT_POSITIVE_Y:
+            centerIndices[position] = getIndex(first, last, second);
+            neighborIndices[position] = getIndex(first, 0, second);
+            break;
+          case SLOT_NEGATIVE_Z:
+            centerIndices[position] = getIndex(first, second, 0);
+            neighborIndices[position] = getIndex(first, second, last);
+            break;
+          case SLOT_POSITIVE_Z:
+            centerIndices[position] = getIndex(first, second, last);
+            neighborIndices[position] = getIndex(first, second, 0);
+            break;
+        }
+      }
+    }
+    FACE_CENTER_INDICES.push(centerIndices);
+    FACE_NEIGHBOR_INDICES.push(neighborIndices);
+  }
+})();
 
 /**
  * Propagates light within a chunk and into/from its neighbors.
@@ -311,80 +357,40 @@ export function propagateChunkLight(
   // chunk, pull in what the neighbor beyond it holds.
   startWorkerSection("seedFromNeighborBorders");
   const seedFromFace = (slot: number, isFromAbove: boolean) => {
-    if (!blocksBySlot[slot] || !lightBySlot[slot]) return;
-    const neighborLight = lightBySlot[slot]!;
-    for (let first = 0; first < CHUNK_WIDTH; first++) {
-      for (let second = 0; second < CHUNK_HEIGHT; second++) {
-        let x: number;
-        let y: number;
-        let z: number;
-        let neighborX: number;
-        let neighborY: number;
-        let neighborZ: number;
-        switch (slot) {
-          case SLOT_NEGATIVE_X:
-            [x, y, z] = [0, first, second];
-            [neighborX, neighborY, neighborZ] = [
-              CHUNK_WIDTH - 1,
-              first,
-              second,
-            ];
-            break;
-          case SLOT_POSITIVE_X:
-            [x, y, z] = [CHUNK_WIDTH - 1, first, second];
-            [neighborX, neighborY, neighborZ] = [0, first, second];
-            break;
-          case SLOT_NEGATIVE_Y:
-            [x, y, z] = [first, 0, second];
-            [neighborX, neighborY, neighborZ] = [
-              first,
-              CHUNK_HEIGHT - 1,
-              second,
-            ];
-            break;
-          case SLOT_POSITIVE_Y:
-            [x, y, z] = [first, CHUNK_HEIGHT - 1, second];
-            [neighborX, neighborY, neighborZ] = [first, 0, second];
-            break;
-          case SLOT_NEGATIVE_Z:
-            [x, y, z] = [first, second, 0];
-            [neighborX, neighborY, neighborZ] = [
-              first,
-              second,
-              CHUNK_LENGTH - 1,
-            ];
-            break;
-          default:
-            [x, y, z] = [first, second, CHUNK_LENGTH - 1];
-            [neighborX, neighborY, neighborZ] = [first, second, 0];
-        }
-        const index = getIndex(x, y, z);
-        if (!IS_TRANSPARENT[centerChunk[index]]) continue;
+    const neighborLight = lightBySlot[slot];
+    if (!blocksBySlot[slot] || !neighborLight) return;
+    const centerIndices = FACE_CENTER_INDICES[slot];
+    const neighborIndices = FACE_NEIGHBOR_INDICES[slot];
+    for (let position = 0; position < centerIndices.length; position++) {
+      const index = centerIndices[position];
+      if (!IS_TRANSPARENT[centerChunk[index]]) continue;
 
-        const neighborValue =
-          neighborLight[getIndex(neighborX, neighborY, neighborZ)];
-        const neighborSky = neighborValue >> 4;
-        const neighborBlock = neighborValue & 0xf;
-        if (neighborSky === 0 && neighborBlock === 0) continue;
+      const neighborValue = neighborLight[neighborIndices[position]];
+      if (neighborValue === 0) continue;
+      const neighborSky = neighborValue >> 4;
+      const neighborBlock = neighborValue & 0xf;
 
-        // Horizontal and upward spread always decays; full sky light falls from above undimmed.
-        const newSky =
-          isFromAbove && neighborSky === MAX_LIGHT
-            ? MAX_LIGHT
-            : neighborSky > 0
-              ? neighborSky - 1
-              : 0;
-        const newBlock = neighborBlock > 0 ? neighborBlock - 1 : 0;
+      // Horizontal and upward spread always decays; full sky light falls from above undimmed.
+      const newSky =
+        isFromAbove && neighborSky === MAX_LIGHT
+          ? MAX_LIGHT
+          : neighborSky > 0
+            ? neighborSky - 1
+            : 0;
+      const newBlock = neighborBlock > 0 ? neighborBlock - 1 : 0;
 
-        const current = centerLight[index];
-        const currentSky = current >> 4;
-        const currentBlock = current & 0xf;
-        if (newSky > currentSky || newBlock > currentBlock) {
-          centerLight[index] =
-            (Math.max(newSky, currentSky) << 4) |
-            Math.max(newBlock, currentBlock);
-          pushCell(x, y, z);
-        }
+      const current = centerLight[index];
+      const currentSky = current >> 4;
+      const currentBlock = current & 0xf;
+      if (newSky > currentSky || newBlock > currentBlock) {
+        centerLight[index] =
+          (Math.max(newSky, currentSky) << 4) |
+          Math.max(newBlock, currentBlock);
+        pushCell(
+          index >> (CHUNK_SHIFT * 2),
+          (index >> CHUNK_SHIFT) & CHUNK_MASK,
+          index & CHUNK_MASK,
+        );
       }
     }
   };
