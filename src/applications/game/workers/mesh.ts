@@ -25,6 +25,14 @@ import FastNoiseLite from "fastnoise-lite";
 
 import { calculateOffset } from "../utils";
 
+const NON_OCCLUDING_BLOCKS = new Set<BlockType>([
+  BlockType.AIR,
+  ...TRANSPARENT_BLOCKS,
+  ...TRANSLUCENT_BLOCKS,
+]);
+
+const FULLY_LIT_AMBIENT_OCCLUSION = 3;
+
 export function generateMesh(
   _chunk: ArrayBuffer,
   _lightBuffer: ArrayBuffer,
@@ -56,6 +64,7 @@ export function generateMesh(
     uvs: ArrayBuffer;
     textureIndices: ArrayBuffer;
     lightLevels: ArrayBuffer;
+    ambientOcclusion: ArrayBuffer;
   };
   transparent: {
     positions: ArrayBuffer;
@@ -64,6 +73,7 @@ export function generateMesh(
     uvs: ArrayBuffer;
     textureIndices: ArrayBuffer;
     lightLevels: ArrayBuffer;
+    ambientOcclusion: ArrayBuffer;
   };
 } {
   const opaque = {
@@ -73,6 +83,7 @@ export function generateMesh(
     uvs: [] as number[],
     textureIndices: [] as number[],
     lightLevels: [] as number[],
+    ambientOcclusion: [] as number[],
   };
 
   const transparent = {
@@ -82,6 +93,7 @@ export function generateMesh(
     uvs: [] as number[],
     textureIndices: [] as number[],
     lightLevels: [] as number[],
+    ambientOcclusion: [] as number[],
   };
 
   const chunk = new Uint8Array(_chunk);
@@ -154,12 +166,50 @@ export function generateMesh(
     return false;
   };
 
+  // Neighbor chunks only supply face slabs, so samples diagonal across a
+  // chunk edge (out of range on two axes) are treated as open air.
+  const isOccludingBlock = (lx: number, ly: number, lz: number) => {
+    const isOutLeft = lx < 0;
+    const isOutRight = lx >= CHUNK_WIDTH;
+    const isOutBottom = ly < 0;
+    const isOutTop = ly >= CHUNK_HEIGHT;
+    const isOutBack = lz < 0;
+    const isOutFront = lz >= CHUNK_LENGTH;
+    const outOfRangeAxisCount =
+      Number(isOutLeft || isOutRight) +
+      Number(isOutBottom || isOutTop) +
+      Number(isOutBack || isOutFront);
+    if (outOfRangeAxisCount > 1) return false;
+
+    let sampledBlock: BlockType | undefined;
+    if (isOutLeft) sampledBlock = leftBorder?.[ly * CHUNK_LENGTH + lz];
+    else if (isOutRight) sampledBlock = rightBorder?.[ly * CHUNK_LENGTH + lz];
+    else if (isOutBottom) sampledBlock = bottomBorder?.[lx * CHUNK_LENGTH + lz];
+    else if (isOutTop) sampledBlock = topBorder?.[lx * CHUNK_LENGTH + lz];
+    else if (isOutBack) sampledBlock = backBorder?.[lx * CHUNK_HEIGHT + ly];
+    else if (isOutFront) sampledBlock = frontBorder?.[lx * CHUNK_HEIGHT + ly];
+    else sampledBlock = chunk[calculateOffset(lx, ly, lz)];
+
+    return sampledBlock !== undefined && !NON_OCCLUDING_BLOCKS.has(sampledBlock);
+  };
+
+  const padAmbientOcclusion = (mesh: typeof opaque) => {
+    const vertexCount = mesh.positions.length / 3;
+    while (mesh.ambientOcclusion.length < vertexCount) {
+      mesh.ambientOcclusion.push(FULLY_LIT_AMBIENT_OCCLUSION);
+    }
+  };
+
   for (let x = 0; x < CHUNK_WIDTH; x++) {
     for (let y = 0; y < CHUNK_HEIGHT; y++) {
       for (let z = 0; z < CHUNK_LENGTH; z++) {
         const block = chunk[calculateOffset(x, y, z)];
 
         if (block === BlockType.AIR) continue;
+
+        // Cross blocks and stairs emit vertices without AO of their own.
+        padAmbientOcclusion(opaque);
+        padAmbientOcclusion(transparent);
 
         const rawLight = lightMap[calculateOffset(x, y, z)];
         const currentLight = Math.max((rawLight >> 4) & 0xf, rawLight & 0xf);
@@ -254,6 +304,65 @@ export function generateMesh(
 
         const isTranslucent = TRANSLUCENT_BLOCKS.includes(block);
         const target = isTranslucent ? transparent : opaque;
+        const receivesAmbientOcclusion = !isTranslucent && !isSlab(block);
+
+        // Pushes one AO value per quad vertex (3 = open, 0 = fully boxed in)
+        // and flips the quad diagonal so a dark corner does not streak.
+        const pushFaceAmbientOcclusion = (
+          normal: number[],
+          vertexOffsets: number[][]
+        ) => {
+          const values = vertexOffsets.map((offset) => {
+            if (!receivesAmbientOcclusion) return FULLY_LIT_AMBIENT_OCCLUSION;
+            const [firstTangent, secondTangent] = [0, 1, 2].filter(
+              (axis) => normal[axis] === 0
+            );
+            const origin = [x + normal[0], y + normal[1], z + normal[2]];
+            const firstStep = [0, 0, 0];
+            firstStep[firstTangent] = offset[firstTangent] === 1 ? 1 : -1;
+            const secondStep = [0, 0, 0];
+            secondStep[secondTangent] = offset[secondTangent] === 1 ? 1 : -1;
+
+            const isFirstSideBlocked = isOccludingBlock(
+              origin[0] + firstStep[0],
+              origin[1] + firstStep[1],
+              origin[2] + firstStep[2]
+            );
+            const isSecondSideBlocked = isOccludingBlock(
+              origin[0] + secondStep[0],
+              origin[1] + secondStep[1],
+              origin[2] + secondStep[2]
+            );
+            const isCornerBlocked = isOccludingBlock(
+              origin[0] + firstStep[0] + secondStep[0],
+              origin[1] + firstStep[1] + secondStep[1],
+              origin[2] + firstStep[2] + secondStep[2]
+            );
+
+            if (isFirstSideBlocked && isSecondSideBlocked) return 0;
+            return (
+              FULLY_LIT_AMBIENT_OCCLUSION -
+              Number(isFirstSideBlocked) -
+              Number(isSecondSideBlocked) -
+              Number(isCornerBlocked)
+            );
+          });
+          target.ambientOcclusion.push(...values);
+
+          if (values[0] + values[3] > values[1] + values[2]) {
+            const quadStart = target.indices[target.indices.length - 6];
+            target.indices.splice(
+              -6,
+              6,
+              quadStart,
+              quadStart + 1,
+              quadStart + 3,
+              quadStart,
+              quadStart + 3,
+              quadStart + 2
+            );
+          }
+        };
 
         const isLeftEdge = x === 0;
         const isRightEdge = x === CHUNK_WIDTH - 1;
@@ -1130,6 +1239,7 @@ export function generateMesh(
           }
           const l = getLight(x, y + 1, z);
           target.lightLevels.push(l, l, l, l);
+          pushFaceAmbientOcclusion([0, 1, 0], [[0, 1, 1], [1, 1, 1], [0, 1, 0], [1, 1, 0]]);
         }
         if (!shouldCull(block, blockBelow, "DOWN")) {
           const index = target.positions.length / 3;
@@ -1175,6 +1285,7 @@ export function generateMesh(
           }
           const l = getLight(x, y - 1, z);
           target.lightLevels.push(l, l, l, l);
+          pushFaceAmbientOcclusion([0, -1, 0], [[1, 0, 1], [0, 0, 1], [1, 0, 0], [0, 0, 0]]);
         }
 
         if (!shouldCull(block, blockInfront, "SIDE")) {
@@ -1230,6 +1341,7 @@ export function generateMesh(
           }
           const l = getLight(x, y, z + 1);
           target.lightLevels.push(l, l, l, l);
+          pushFaceAmbientOcclusion([0, 0, 1], [[0, 0, 1], [1, 0, 1], [0, 1, 1], [1, 1, 1]]);
         }
 
         if (!shouldCull(block, blockBehind, "SIDE")) {
@@ -1272,6 +1384,7 @@ export function generateMesh(
           }
           const l = getLight(x, y, z - 1);
           target.lightLevels.push(l, l, l, l);
+          pushFaceAmbientOcclusion([0, 0, -1], [[1, 0, 0], [0, 0, 0], [1, 1, 0], [0, 1, 0]]);
         }
 
         if (!shouldCull(block, blockToTheLeft, "SIDE")) {
@@ -1314,6 +1427,7 @@ export function generateMesh(
           }
           const l = getLight(x - 1, y, z);
           target.lightLevels.push(l, l, l, l);
+          pushFaceAmbientOcclusion([-1, 0, 0], [[0, 1, 0], [0, 0, 0], [0, 1, 1], [0, 0, 1]]);
         }
 
         if (!shouldCull(block, blockToTheRight, "SIDE")) {
@@ -1369,10 +1483,14 @@ export function generateMesh(
           }
           const l = getLight(x + 1, y, z);
           target.lightLevels.push(l, l, l, l);
+          pushFaceAmbientOcclusion([1, 0, 0], [[1, 1, 1], [1, 0, 1], [1, 1, 0], [1, 0, 0]]);
         }
       }
     }
   }
+
+  padAmbientOcclusion(opaque);
+  padAmbientOcclusion(transparent);
 
   return {
     opaque: {
@@ -1382,6 +1500,7 @@ export function generateMesh(
       uvs: new Float32Array(opaque.uvs).buffer,
       textureIndices: new Int32Array(opaque.textureIndices).buffer,
       lightLevels: new Float32Array(opaque.lightLevels).buffer,
+      ambientOcclusion: new Float32Array(opaque.ambientOcclusion).buffer,
     },
     transparent: {
       positions: new Float32Array(transparent.positions).buffer,
@@ -1390,6 +1509,7 @@ export function generateMesh(
       uvs: new Float32Array(transparent.uvs).buffer,
       textureIndices: new Int32Array(transparent.textureIndices).buffer,
       lightLevels: new Float32Array(transparent.lightLevels).buffer,
+      ambientOcclusion: new Float32Array(transparent.ambientOcclusion).buffer,
     },
   };
 }

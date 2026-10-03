@@ -521,6 +521,7 @@ export default function Game() {
                 uvs: ArrayBuffer;
                 textureIndices: ArrayBuffer;
                 lightLevels: ArrayBuffer;
+                ambientOcclusion: ArrayBuffer;
               };
               transparent: {
                 positions: ArrayBuffer;
@@ -529,6 +530,7 @@ export default function Game() {
                 uvs: ArrayBuffer;
                 textureIndices: ArrayBuffer;
                 lightLevels: ArrayBuffer;
+                ambientOcclusion: ArrayBuffer;
               };
             }) => {
               addChunkMesh(opaque, transparent, chunkName, x, y, z);
@@ -1156,6 +1158,7 @@ export default function Game() {
                 uvs: ArrayBuffer;
                 textureIndices: ArrayBuffer;
                 lightLevels: ArrayBuffer;
+                ambientOcclusion: ArrayBuffer;
               };
               transparent: {
                 positions: ArrayBuffer;
@@ -1164,6 +1167,7 @@ export default function Game() {
                 uvs: ArrayBuffer;
                 textureIndices: ArrayBuffer;
                 lightLevels: ArrayBuffer;
+                ambientOcclusion: ArrayBuffer;
               };
             }) => {
               addChunkMesh(
@@ -1454,6 +1458,7 @@ export default function Game() {
       uvs: ArrayBuffer;
       textureIndices: ArrayBuffer;
       lightLevels: ArrayBuffer;
+      ambientOcclusion: ArrayBuffer;
     },
     transparent: {
       positions: ArrayBuffer;
@@ -1462,6 +1467,7 @@ export default function Game() {
       uvs: ArrayBuffer;
       textureIndices: ArrayBuffer;
       lightLevels: ArrayBuffer;
+      ambientOcclusion: ArrayBuffer;
     },
     chunkName: string,
     chunkX: number,
@@ -1492,6 +1498,10 @@ export default function Game() {
     opaqueGeometry.setAttribute(
       "lightLevel",
       new THREE.Float32BufferAttribute(opaque.lightLevels, 1),
+    );
+    opaqueGeometry.setAttribute(
+      "ambientOcclusion",
+      new THREE.Float32BufferAttribute(opaque.ambientOcclusion, 1),
     );
     opaqueGeometry.setIndex(new THREE.Uint32BufferAttribute(opaque.indices, 1));
     const opaqueMesh = new THREE.Mesh(
@@ -1529,6 +1539,10 @@ export default function Game() {
     transparentGeometry.setAttribute(
       "lightLevel",
       new THREE.Float32BufferAttribute(transparent.lightLevels, 1),
+    );
+    transparentGeometry.setAttribute(
+      "ambientOcclusion",
+      new THREE.Float32BufferAttribute(transparent.ambientOcclusion, 1),
     );
     transparentGeometry.setIndex(
       new THREE.Uint32BufferAttribute(transparent.indices, 1),
@@ -2085,6 +2099,7 @@ export default function Game() {
               uvs: ArrayBuffer;
               textureIndices: ArrayBuffer;
               lightLevels: ArrayBuffer;
+              ambientOcclusion: ArrayBuffer;
             };
             transparent: {
               positions: ArrayBuffer;
@@ -2093,6 +2108,7 @@ export default function Game() {
               uvs: ArrayBuffer;
               textureIndices: ArrayBuffer;
               lightLevels: ArrayBuffer;
+              ambientOcclusion: ArrayBuffer;
             };
           }) => {
             if (chunkVersions.current[chunkName] === currentVersion) {

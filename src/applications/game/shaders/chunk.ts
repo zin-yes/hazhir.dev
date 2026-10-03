@@ -1,16 +1,19 @@
 export const VERTEX_SHADER = `
 attribute int textureIndex;
 attribute float lightLevel;
+attribute float ambientOcclusion;
 
 varying vec3 Normal;
 varying vec2 TextureCoordinates;
 varying float vLightLevel;
+varying float vAmbientOcclusion;
 flat out int TextureIndex;
 
 void main() {
   TextureIndex = textureIndex;
   Normal = normal;
   vLightLevel = lightLevel;
+  vAmbientOcclusion = ambientOcclusion;
 
   TextureCoordinates = uv;
 
@@ -23,6 +26,7 @@ export const FRAGMENT_SHADER = `
 varying vec3 Normal;
 varying vec2 TextureCoordinates;
 varying float vLightLevel;
+varying float vAmbientOcclusion;
 flat in int TextureIndex;
 
 uniform sampler2DArray Texture;
@@ -33,7 +37,8 @@ void main() {
   vec3 diffuse = vec3(diff) + vec3(0.25);
   
   float lightIntensity = pow(0.8, 15.0 - vLightLevel);
-  vec3 lighting = vec3(1.0) * lightIntensity;
+  float ambientOcclusionFactor = 0.55 + 0.15 * vAmbientOcclusion;
+  vec3 lighting = vec3(1.0) * lightIntensity * ambientOcclusionFactor;
   lighting = max(lighting, vec3(0.05));
 
   vec4 textureColor = texture(Texture, vec3(TextureCoordinates, TextureIndex));
