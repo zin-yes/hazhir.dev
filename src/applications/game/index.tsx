@@ -77,7 +77,11 @@ import {
   listWorldRecords,
   saveWorldRecord,
 } from "./worlds/world-store";
-import { calculateOffset, getSurfaceHeightFromSeed } from "./utils";
+import {
+  calculateOffset,
+  getSpawnPointFromSeed,
+  getSurfaceHeightFromSeed,
+} from "./utils";
 import { updateWater } from "./water-physics";
 import {
   estimateTransferBytes,
@@ -494,19 +498,24 @@ export default function Game() {
 
     const chunksToGenerate: { x: number; y: number; z: number }[] = [];
 
+    const spawnPosition = playerControlsRef.current?.controls.object.position;
+    const centerChunkX = Math.round((spawnPosition?.x ?? 0) / CHUNK_WIDTH);
+    const centerChunkY = Math.round((spawnPosition?.y ?? 0) / CHUNK_HEIGHT);
+    const centerChunkZ = Math.round((spawnPosition?.z ?? 0) / CHUNK_LENGTH);
+
     for (
-      let chunkX = -NEGATIVE_X_RENDER_DISTANCE;
-      chunkX < POSITIVE_X_RENDER_DISTANCE;
+      let chunkX = centerChunkX - NEGATIVE_X_RENDER_DISTANCE;
+      chunkX < centerChunkX + POSITIVE_X_RENDER_DISTANCE;
       chunkX++
     ) {
       for (
-        let chunkY = POSITIVE_Y_RENDER_DISTANCE;
-        chunkY > -NEGATIVE_Y_RENDER_DISTANCE;
+        let chunkY = centerChunkY + POSITIVE_Y_RENDER_DISTANCE;
+        chunkY > centerChunkY - NEGATIVE_Y_RENDER_DISTANCE;
         chunkY--
       ) {
         for (
-          let chunkZ = -NEGATIVE_Z_RENDER_DISTANCE;
-          chunkZ < POSITIVE_Z_RENDER_DISTANCE;
+          let chunkZ = centerChunkZ - NEGATIVE_Z_RENDER_DISTANCE;
+          chunkZ < centerChunkZ + POSITIVE_Z_RENDER_DISTANCE;
           chunkZ++
         ) {
           chunksToGenerate.push({ x: chunkX, y: chunkY, z: chunkZ });
@@ -1015,7 +1024,10 @@ export default function Game() {
           textureArrayWorkerPool.terminate();
         });
 
-      camera.position.y = getSurfaceHeightFromSeed(seedRef.current, 0, 0) + 2;
+      {
+        const spawnPoint = getSpawnPointFromSeed(seedRef.current);
+        camera.position.set(spawnPoint.x, spawnPoint.y, spawnPoint.z);
+      }
       //camera.position.y = 3;
 
       const onKeyUp = function (event: KeyboardEvent) {
@@ -1125,11 +1137,8 @@ export default function Game() {
         if (data.type === "HANDSHAKE") {
           seedRef.current = data.seed;
           if (phaseRef.current === "loading" && !activeWorldRef.current) {
-            camera.position.set(
-              0,
-              getSurfaceHeightFromSeed(data.seed, 0, 0) + 2,
-              0,
-            );
+            const spawnPoint = getSpawnPointFromSeed(data.seed);
+            camera.position.set(spawnPoint.x, spawnPoint.y, spawnPoint.z);
           }
           startWorldGeneration(data.seed);
         } else if (data.type === "PLAYER_UPDATE") {
@@ -2430,11 +2439,8 @@ export default function Game() {
           world.rotation.z,
         );
       } else {
-        playerObject.position.set(
-          0,
-          getSurfaceHeightFromSeed(world.seed, 0, 0) + 2,
-          0,
-        );
+        const spawnPoint = getSpawnPointFromSeed(world.seed);
+        playerObject.position.set(spawnPoint.x, spawnPoint.y, spawnPoint.z);
         playerObject.rotation.set(0, 0, 0);
       }
     }
