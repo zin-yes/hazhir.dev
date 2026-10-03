@@ -2,9 +2,15 @@ import { generateChunk } from "./generation";
 import { initializeChunkLight, propagateChunkLight } from "./lighting";
 import { generateMesh } from "./mesh";
 import { loadTextureArray } from "./texture-array";
+import {
+  beginWorkerTask,
+  finishWorkerTask,
+} from "../profiler/worker-recorder";
 
 addEventListener("message", async (event: MessageEvent) => {
   const { id, method, params } = event.data;
+  const isProfiling = event.data.profile === true;
+  beginWorkerTask(isProfiling);
   try {
     let result;
     if (method === "ping") {
@@ -63,12 +69,22 @@ addEventListener("message", async (event: MessageEvent) => {
     } else {
       throw new Error(`Unknown method: ${method}`);
     }
-    postMessage({ id, result });
+    const profile = finishWorkerTask();
+    const postStartedAtMs = performance.now();
+    postMessage({ id, result, profile });
+    if (isProfiling) {
+      postMessage({
+        id,
+        resultTail: { resultPostMs: performance.now() - postStartedAtMs },
+      });
+    }
   } catch (error) {
     console.error("Worker Error:", error);
+    const profile = finishWorkerTask();
     postMessage({
       id,
       error: error instanceof Error ? error.message : String(error),
+      profile,
     });
   }
 });

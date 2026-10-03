@@ -1,4 +1,16 @@
+import {
+  estimateTransferBytes,
+  ingestWorkerTask,
+  profiler,
+  type WorkerTaskRecord,
+} from "./profiler";
+import type { WorkerResponseMessage } from "./profiler/worker-recorder";
+
 const WARM_UP_MESSAGE_ID = -1;
+
+function currentEpochMs() {
+  return performance.timeOrigin + performance.now();
+}
 
 export class WorkerPool {
   private workers: Worker[] = [];
@@ -8,6 +20,8 @@ export class WorkerPool {
     resolve: (value: any) => void;
     reject: (reason: any) => void;
     onProgress?: (fraction: number) => void;
+    enqueuedAtMs: number;
+    queueDepthAtEnqueue: number;
   }[] = [];
   private activeWorkers: Map<
     Worker,
@@ -16,17 +30,28 @@ export class WorkerPool {
       reject: (reason: any) => void;
       onProgress?: (fraction: number) => void;
       id: number;
+      method: string;
+      isProfiled: boolean;
+      enqueuedAtMs: number;
+      queueDepthAtEnqueue: number;
+      dispatchedAtMs: number;
+      postedToWorkerAtEpochMs: number;
+      paramBytes: number;
     }
   > = new Map();
+  private recordsAwaitingResultTail: Map<number, WorkerTaskRecord> = new Map();
   private workersAwaitingWarmUp: Map<Worker, () => void> = new Map();
   private workerReadiness: Map<Worker, Promise<void>> = new Map();
   private workerFactory: () => Worker;
   private maxWorkers: number;
   private currentId = 0;
+  private name: string;
 
-  constructor(workerFactory: () => Worker, maxWorkers: number) {
+  constructor(workerFactory: () => Worker, maxWorkers: number, name = "pool") {
     this.workerFactory = workerFactory;
     this.maxWorkers = maxWorkers;
+    this.name = name;
+    profiler.registerWorkerPool(name, maxWorkers);
   }
 
   exec(
@@ -35,7 +60,16 @@ export class WorkerPool {
     onProgress?: (fraction: number) => void,
   ): Promise<any> {
     return new Promise((resolve, reject) => {
-      this.queue.push({ method, params, resolve, reject, onProgress });
+      const isProfiling = profiler.enabled;
+      this.queue.push({
+        method,
+        params,
+        resolve,
+        reject,
+        onProgress,
+        enqueuedAtMs: isProfiling ? performance.now() : 0,
+        queueDepthAtEnqueue: this.countTasksWaitingForWorker(),
+      });
       this.processQueue();
     });
   }
@@ -58,6 +92,12 @@ export class WorkerPool {
       return readiness.then(() => onWorkerReady?.());
     });
     return Promise.all(warmUps).then(() => undefined);
+  }
+
+  /** Tasks already waiting, plus this one when every worker is busy. */
+  private countTasksWaitingForWorker(): number {
+    const isWorkerAvailable = this.activeWorkers.size < this.maxWorkers;
+    return this.queue.length + (isWorkerAvailable ? 0 : 1);
   }
 
   private spawnWorker(): Worker {
@@ -83,27 +123,58 @@ export class WorkerPool {
       const task = this.queue.shift();
       if (task) {
         const id = this.currentId++;
+        const isProfiled = profiler.enabled;
+        const dispatchedAtMs = isProfiled ? performance.now() : 0;
+        const paramBytes = isProfiled ? estimateTransferBytes(task.params) : 0;
         this.activeWorkers.set(availableWorker, {
           resolve: task.resolve,
           reject: task.reject,
           onProgress: task.onProgress,
           id,
-        });
-        availableWorker.postMessage({
-          id,
           method: task.method,
-          params: task.params,
+          isProfiled,
+          enqueuedAtMs: task.enqueuedAtMs || dispatchedAtMs,
+          queueDepthAtEnqueue: task.queueDepthAtEnqueue,
+          dispatchedAtMs,
+          postedToWorkerAtEpochMs: 0,
+          paramBytes,
         });
+        const activeTask = this.activeWorkers.get(availableWorker)!;
+        if (isProfiled) {
+          const postScope = profiler.begin(
+            `main.workerPost.${this.name}.${task.method}`,
+          );
+          availableWorker.postMessage({
+            id,
+            method: task.method,
+            params: task.params,
+            profile: true,
+          });
+          profiler.end(postScope);
+          activeTask.postedToWorkerAtEpochMs = currentEpochMs();
+        } else {
+          availableWorker.postMessage({
+            id,
+            method: task.method,
+            params: task.params,
+          });
+        }
       }
     }
   }
 
   private handleMessage(worker: Worker, event: MessageEvent) {
-    const { id, result, error, progress } = event.data;
+    const { id, result, error, progress, profile, resultTail } =
+      event.data as WorkerResponseMessage;
 
     if (id === WARM_UP_MESSAGE_ID) {
       this.workersAwaitingWarmUp.get(worker)?.();
       this.workersAwaitingWarmUp.delete(worker);
+      return;
+    }
+
+    if (resultTail) {
+      this.finishRecordWithResultTail(id, resultTail.resultPostMs);
       return;
     }
 
@@ -115,6 +186,10 @@ export class WorkerPool {
     }
 
     if (task && task.id === id) {
+      const receivedFromWorkerAtEpochMs = task.isProfiled ? currentEpochMs() : 0;
+      const resultScope = task.isProfiled
+        ? profiler.begin(`main.workerResult.${this.name}.${task.method}`)
+        : 0;
       this.activeWorkers.delete(worker);
       if (error) {
         task.reject(error);
@@ -122,7 +197,47 @@ export class WorkerPool {
         task.resolve(result);
       }
       this.processQueue();
+      profiler.end(resultScope);
+
+      if (task.isProfiled) {
+        const record: WorkerTaskRecord = {
+          poolName: this.name,
+          method: task.method,
+          enqueuedAtMs: task.enqueuedAtMs,
+          dispatchedAtMs: task.dispatchedAtMs,
+          completedAtMs: performance.now(),
+          postedToWorkerAtEpochMs: task.postedToWorkerAtEpochMs,
+          receivedFromWorkerAtEpochMs,
+          paramBytes: task.paramBytes,
+          resultBytes: error ? 0 : estimateTransferBytes(result),
+          failed: Boolean(error),
+          queueDepthAtEnqueue: task.queueDepthAtEnqueue,
+          workerProfile: profile ?? null,
+          workerResultPostMs: null,
+        };
+        const isTailExpected = profile && !error;
+        if (isTailExpected) {
+          this.recordsAwaitingResultTail.set(id, record);
+        } else {
+          ingestWorkerTask(profiler, record);
+        }
+      }
     }
+  }
+
+  private finishRecordWithResultTail(taskId: number, resultPostMs: number) {
+    const record = this.recordsAwaitingResultTail.get(taskId);
+    if (!record) return;
+    this.recordsAwaitingResultTail.delete(taskId);
+    record.workerResultPostMs = resultPostMs;
+    ingestWorkerTask(profiler, record);
+  }
+
+  private flushRecordsAwaitingResultTail() {
+    this.recordsAwaitingResultTail.forEach((record) =>
+      ingestWorkerTask(profiler, record),
+    );
+    this.recordsAwaitingResultTail.clear();
   }
 
   private handleError(worker: Worker, error: ErrorEvent) {
@@ -130,11 +245,29 @@ export class WorkerPool {
     if (task) {
       this.activeWorkers.delete(worker);
       task.reject(error);
+      if (task.isProfiled) {
+        ingestWorkerTask(profiler, {
+          poolName: this.name,
+          method: task.method,
+          enqueuedAtMs: task.enqueuedAtMs,
+          dispatchedAtMs: task.dispatchedAtMs,
+          completedAtMs: performance.now(),
+          postedToWorkerAtEpochMs: task.postedToWorkerAtEpochMs,
+          receivedFromWorkerAtEpochMs: currentEpochMs(),
+          paramBytes: task.paramBytes,
+          resultBytes: 0,
+          failed: true,
+          queueDepthAtEnqueue: task.queueDepthAtEnqueue,
+          workerProfile: null,
+          workerResultPostMs: null,
+        });
+      }
       this.processQueue();
     }
   }
 
   terminate() {
+    this.flushRecordsAwaitingResultTail();
     this.workers.forEach((w) => w.terminate());
     this.workers = [];
     this.activeWorkers.clear();

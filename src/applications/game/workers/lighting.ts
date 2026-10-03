@@ -9,6 +9,11 @@ import {
   CHUNK_WIDTH,
 } from "@/applications/game/config";
 import { getSurfaceHeight } from "./generation";
+import {
+  addWorkerCounter,
+  endWorkerSection,
+  startWorkerSection,
+} from "../profiler/worker-recorder";
 // @ts-ignore
 import FastNoiseLite from "fastnoise-lite";
 
@@ -34,9 +39,11 @@ export function initializeChunkLight(
   const light = new Uint8Array(CHUNK_WIDTH * CHUNK_HEIGHT * CHUNK_LENGTH);
   const queue: number[] = [];
   const noise = new FastNoiseLite(seed);
+  let columnsExposed = 0;
 
   // 1. Sunlight Initialization (Vertical Raycast)
   // We assume sunlight comes from the top.
+  startWorkerSection("sunlightColumns");
   for (let x = 0; x < CHUNK_WIDTH; x++) {
     for (let z = 0; z < CHUNK_LENGTH; z++) {
       const worldX = chunkX * CHUNK_WIDTH + x;
@@ -82,6 +89,7 @@ export function initializeChunkLight(
           if (isExposed) {
             light[index] = (light[index] & 0x0f) | (15 << 4);
             queue.push(index);
+            columnsExposed++;
           }
         } else {
           isExposed = false;
@@ -89,16 +97,25 @@ export function initializeChunkLight(
       }
     }
   }
+  endWorkerSection();
 
   // 2. Block Light Sources
+  startWorkerSection("blockLightScan");
+  let lightSourcesFound = 0;
   for (let i = 0; i < chunk.length; i++) {
     const block = chunk[i];
     const emission = getBlockLightLevel(block);
     if (emission > 0) {
       light[i] = (light[i] & 0xf0) | emission;
       queue.push(i);
+      lightSourcesFound++;
     }
   }
+  endWorkerSection();
+
+  addWorkerCounter("columnsExposed", columnsExposed);
+  addWorkerCounter("lightSourcesFound", lightSourcesFound);
+  addWorkerCounter("queueLength", queue.length);
 
   return { light, queue };
 }
@@ -306,6 +323,7 @@ export function propagateChunkLight(
   ];
 
   // Convert initial index queue to coordinate queue
+  startWorkerSection("seedFromQueue");
   const coordQueue: number[] = []; // x, y, z, x, y, z...
   for (const idx of queue) {
     const z = idx % CHUNK_HEIGHT;
@@ -314,12 +332,14 @@ export function propagateChunkLight(
 
     coordQueue.push(x, y, z);
   }
+  endWorkerSection();
 
   // Seed queue with light from neighbors
   // We check the boundary layers of the center chunk.
   // If a neighbor has light that should flow in, we add it to the queue.
 
   // Left (-1, 0, 0) -> Check x=0 against x=-1
+  startWorkerSection("seedFromNeighborBorders");
   if (neighbors["-1,0,0"] && neighborLights["-1,0,0"]) {
     for (let y = 0; y < CHUNK_HEIGHT; y++) {
       for (let z = 0; z < CHUNK_LENGTH; z++) {
@@ -489,6 +509,10 @@ export function propagateChunkLight(
     }
   }
 
+  endWorkerSection();
+
+  startWorkerSection("bfsFlood");
+  let lightValuesChanged = 0;
   let head = 0;
   while (head < coordQueue.length) {
     const x = coordQueue[head++];
@@ -560,9 +584,15 @@ export function propagateChunkLight(
       if (changed) {
         setLight(nx, ny, nz, (newSky << 4) | newBlockLight);
         coordQueue.push(nx, ny, nz);
+        lightValuesChanged++;
       }
     }
   }
+  endWorkerSection();
+
+  addWorkerCounter("bfsNodesVisited", head / 3);
+  addWorkerCounter("lightValuesChanged", lightValuesChanged);
+  addWorkerCounter("neighborBordersUpdated", Object.keys(neighborUpdates).length);
 
   return { centerLight, neighborLightUpdates: neighborUpdates };
 }

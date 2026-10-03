@@ -9,6 +9,11 @@ import {
 //@ts-ignore
 import FastNoiseLite from "fastnoise-lite";
 import { calculateOffset } from "../utils";
+import {
+  addWorkerCounter,
+  endWorkerSection,
+  startWorkerSection,
+} from "../profiler/worker-recorder";
 
 function getDirtHeight(
   noiseGenerator: typeof FastNoiseLite,
@@ -519,21 +524,32 @@ export function generateChunk(
     CHUNK_WIDTH * CHUNK_HEIGHT * CHUNK_LENGTH
   );
 
+  let solidBlocks = 0;
+  let floraPlaced = 0;
+  let treesPlaced = 0;
+
+  startWorkerSection("terrainNoise");
   for (let x = 0; x < CHUNK_WIDTH; x++) {
     for (let y = 0; y < CHUNK_HEIGHT; y++) {
       for (let z = 0; z < CHUNK_LENGTH; z++) {
-        chunk[
-          calculateOffset(x % CHUNK_WIDTH, y % CHUNK_HEIGHT, z % CHUNK_LENGTH)
-        ] = generateBlock(
+        const generatedBlock = generateBlock(
           noiseGenerator,
           x + CHUNK_WIDTH * chunkX,
           y + CHUNK_HEIGHT * chunkY,
           z + CHUNK_LENGTH * chunkZ
         );
+        chunk[
+          calculateOffset(x % CHUNK_WIDTH, y % CHUNK_HEIGHT, z % CHUNK_LENGTH)
+        ] = generatedBlock;
+        if (generatedBlock !== BlockType.AIR && generatedBlock !== BlockType.WATER) {
+          solidBlocks++;
+        }
       }
     }
   }
+  endWorkerSection();
 
+  startWorkerSection("floraPlacement");
   for (let x = 0; x < CHUNK_WIDTH; x++) {
     for (let z = 0; z < CHUNK_LENGTH; z++) {
       const globalX = x + CHUNK_WIDTH * chunkX;
@@ -556,6 +572,7 @@ export function generateChunk(
             const index = calculateOffset(x, localY, z);
             if (chunk[index] === BlockType.AIR) {
               chunk[index] = BlockType.TALL_GRASS;
+              floraPlaced++;
             }
           }
         }
@@ -581,6 +598,7 @@ export function generateChunk(
                 } else {
                   chunk[index] = BlockType.FORGETMENOTS_FLOWER;
                 }
+                floraPlaced++;
               }
             }
           }
@@ -589,6 +607,9 @@ export function generateChunk(
     }
   }
 
+  endWorkerSection();
+
+  startWorkerSection("treePlacement");
   const treeRadius = 2;
   for (let x = -treeRadius; x < CHUNK_WIDTH + treeRadius; x++) {
     for (let z = -treeRadius; z < CHUNK_LENGTH + treeRadius; z++) {
@@ -614,6 +635,7 @@ export function generateChunk(
         );
 
         if (potentialGrass === BlockType.GRASS) {
+          treesPlaced++;
           placeTreeInChunk(
             chunk,
             chunkX,
@@ -628,6 +650,13 @@ export function generateChunk(
       }
     }
   }
+
+  endWorkerSection();
+
+  addWorkerCounter("blocksGenerated", chunk.length);
+  addWorkerCounter("solidBlocks", solidBlocks);
+  addWorkerCounter("treesPlaced", treesPlaced);
+  addWorkerCounter("floraPlaced", floraPlaced);
 
   return new Uint8Array(chunk).buffer;
 }

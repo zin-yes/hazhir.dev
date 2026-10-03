@@ -22,6 +22,11 @@ import FastNoiseLite from "fastnoise-lite";
 
 import { calculateOffset } from "../utils";
 import { emitPlantVoxels, isPlantVoxelBlock } from "./plant-voxels";
+import {
+  addWorkerCounter,
+  endWorkerSection,
+  startWorkerSection,
+} from "../profiler/worker-recorder";
 
 const NON_OCCLUDING_BLOCKS = new Set<BlockType>([
   BlockType.AIR,
@@ -94,6 +99,7 @@ export function generateMesh(
     ambientOcclusion: [] as number[],
   };
 
+  startWorkerSection("unpackInputs");
   const chunk = new Uint8Array(_chunk);
   const lightMap = new Uint8Array(_lightBuffer);
 
@@ -128,8 +134,15 @@ export function generateMesh(
     : undefined;
 
   const noise = new FastNoiseLite(seed);
+  endWorkerSection();
 
-  const shouldCull = (
+  let solidBlocksVisited = 0;
+  let facesCulled = 0;
+  let aoSamples = 0;
+  let plantVoxelsEmitted = 0;
+  let plantQuadsEmitted = 0;
+
+  const shouldCullUncounted = (
     block: BlockType,
     neighbor: BlockType,
     face: "UP" | "DOWN" | "SIDE"
@@ -164,9 +177,20 @@ export function generateMesh(
     return false;
   };
 
+  const shouldCull = (
+    block: BlockType,
+    neighbor: BlockType,
+    face: "UP" | "DOWN" | "SIDE"
+  ) => {
+    const isCulled = shouldCullUncounted(block, neighbor, face);
+    if (isCulled) facesCulled++;
+    return isCulled;
+  };
+
   // Neighbor chunks only supply face slabs, so samples diagonal across a
   // chunk edge (out of range on two axes) are treated as open air.
   const isOccludingBlock = (lx: number, ly: number, lz: number) => {
+    aoSamples++;
     const isOutLeft = lx < 0;
     const isOutRight = lx >= CHUNK_WIDTH;
     const isOutBottom = ly < 0;
@@ -198,12 +222,14 @@ export function generateMesh(
     }
   };
 
+  startWorkerSection("faceGeneration");
   for (let x = 0; x < CHUNK_WIDTH; x++) {
     for (let y = 0; y < CHUNK_HEIGHT; y++) {
       for (let z = 0; z < CHUNK_LENGTH; z++) {
         const block = chunk[calculateOffset(x, y, z)];
 
         if (block === BlockType.AIR) continue;
+        solidBlocksVisited++;
 
         // Plant voxels and stairs emit vertices without AO of their own.
         padAmbientOcclusion(opaque);
@@ -447,6 +473,7 @@ export function generateMesh(
         const textureIndexRight = BLOCK_TEXTURES[block].RIGHT_FACE;
 
         if (isPlantVoxelBlock(block)) {
+          const indexCountBeforePlant = opaque.indices.length;
           emitPlantVoxels(
             opaque,
             block,
@@ -456,6 +483,8 @@ export function generateMesh(
             textureIndexDefault,
             currentLight
           );
+          plantVoxelsEmitted++;
+          plantQuadsEmitted += (opaque.indices.length - indexCountBeforePlant) / 6;
           continue;
         }
 
@@ -1159,10 +1188,15 @@ export function generateMesh(
     }
   }
 
+  endWorkerSection();
+
+  startWorkerSection("ambientOcclusionPadding");
   padAmbientOcclusion(opaque);
   padAmbientOcclusion(transparent);
+  endWorkerSection();
 
-  return {
+  startWorkerSection("packTypedArrays");
+  const packedMesh = {
     opaque: {
       positions: new Float32Array(opaque.positions).buffer,
       normals: new Float32Array(opaque.normals).buffer,
@@ -1182,4 +1216,20 @@ export function generateMesh(
       ambientOcclusion: new Float32Array(transparent.ambientOcclusion).buffer,
     },
   };
+  endWorkerSection();
+
+  addWorkerCounter("blocksScanned", CHUNK_WIDTH * CHUNK_HEIGHT * CHUNK_LENGTH);
+  addWorkerCounter("solidBlocksVisited", solidBlocksVisited);
+  addWorkerCounter(
+    "facesEmitted",
+    (opaque.indices.length + transparent.indices.length) / 6
+  );
+  addWorkerCounter("facesCulled", facesCulled);
+  addWorkerCounter("opaqueVertices", opaque.positions.length / 3);
+  addWorkerCounter("transparentVertices", transparent.positions.length / 3);
+  addWorkerCounter("aoSamples", aoSamples);
+  addWorkerCounter("plantVoxelsEmitted", plantVoxelsEmitted);
+  addWorkerCounter("plantQuadsEmitted", plantQuadsEmitted);
+
+  return packedMesh;
 }
