@@ -4,7 +4,7 @@
  * A mesh vertex is two uint32 words (8 bytes):
  *   position word: x | y << 10 | z << 20, each in 1/16 block units
  *   surface word:  u | v << 6 | texture << 12 | ambientOcclusion << 20 | light << 22
- *                  (u and v in 1/32 texture units)
+ *                  (u and v in 1/32 texture units, light in 1/4 levels)
  * Normals are not stored: the fragment shader never uses them.
  *
  * A plant instance is one uint32:
@@ -33,6 +33,9 @@ export const SURFACE_OCCLUSION_BITS = 2;
 export const SURFACE_LIGHT_SHIFT =
   SURFACE_OCCLUSION_SHIFT + SURFACE_OCCLUSION_BITS;
 export const SURFACE_LIGHT_BITS = 4;
+/** Vertex light is averaged across neighboring cells, so it carries quarter levels. */
+export const LIGHT_STEPS_PER_LEVEL = 4;
+export const SURFACE_LIGHT_STEP_BITS = SURFACE_LIGHT_BITS + 2;
 
 export const PLANT_INSTANCE_COORDINATE_BITS = 5;
 export const PLANT_INSTANCE_Y_SHIFT = PLANT_INSTANCE_COORDINATE_BITS;
@@ -67,14 +70,14 @@ export function packSurfaceWord(
   v32: number,
   textureIndex: number,
   ambientOcclusion: number,
-  light: number,
+  lightSteps: number,
 ): number {
   return (
     u32 |
     (v32 << SURFACE_V_SHIFT) |
     (textureIndex << SURFACE_TEXTURE_SHIFT) |
     (ambientOcclusion << SURFACE_OCCLUSION_SHIFT) |
-    (light << SURFACE_LIGHT_SHIFT)
+    (lightSteps << SURFACE_LIGHT_SHIFT)
   );
 }
 
@@ -129,6 +132,8 @@ export function unpackVertex(
       (surfaceWord >>> SURFACE_OCCLUSION_SHIFT) &
       ((1 << SURFACE_OCCLUSION_BITS) - 1),
     light:
-      (surfaceWord >>> SURFACE_LIGHT_SHIFT) & ((1 << SURFACE_LIGHT_BITS) - 1),
+      ((surfaceWord >>> SURFACE_LIGHT_SHIFT) &
+        ((1 << SURFACE_LIGHT_STEP_BITS) - 1)) /
+      LIGHT_STEPS_PER_LEVEL,
   };
 }

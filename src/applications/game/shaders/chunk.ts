@@ -8,8 +8,10 @@ import {
   POSITION_UNITS_PER_BLOCK,
   POSITION_Y_SHIFT,
   POSITION_Z_SHIFT,
+  LIGHT_STEPS_PER_LEVEL,
   SURFACE_LIGHT_BITS,
   SURFACE_LIGHT_SHIFT,
+  SURFACE_LIGHT_STEP_BITS,
   SURFACE_OCCLUSION_BITS,
   SURFACE_OCCLUSION_SHIFT,
   SURFACE_TEXTURE_BITS,
@@ -46,7 +48,7 @@ float shadeFor(float lightLevel, float ambientOcclusion) {
 }
 
 float decodeLight(uint surfaceWord) {
-  return float((surfaceWord >> ${SURFACE_LIGHT_SHIFT}u) & ${mask(SURFACE_LIGHT_BITS)});
+  return float((surfaceWord >> ${SURFACE_LIGHT_SHIFT}u) & ${mask(SURFACE_LIGHT_STEP_BITS)}) / ${LIGHT_STEPS_PER_LEVEL}.0;
 }
 
 float decodeAmbientOcclusion(uint surfaceWord) {

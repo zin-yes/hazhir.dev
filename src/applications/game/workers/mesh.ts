@@ -27,6 +27,7 @@ import {
 } from "../profiler/worker-recorder";
 import {
   PLANT_NEIGHBOR_DIRECTIONS,
+  LIGHT_STEPS_PER_LEVEL,
   POSITION_UNITS_PER_BLOCK,
   UV_UNITS_PER_TEXTURE,
   packPlantInstance,
@@ -140,9 +141,10 @@ function paddedDelta(dx: number, dy: number, dz: number): number {
 
 const FACE_NEIGHBOR_DELTAS = FACE_NORMALS.map(([dx, dy, dz]) => paddedDelta(dx, dy, dz));
 
-// For each face and corner, the paddedDelta of the two side blocks and the corner block
-// that darken that vertex (0 = fully boxed in, 3 = open).
-const AMBIENT_OCCLUSION_SAMPLE_DELTAS = FACE_NORMALS.map((normal, face) =>
+// For each face and corner, the offsets of the two side blocks and the corner block
+// that darken that vertex (0 = fully boxed in, 3 = open). The same cells are averaged
+// into the vertex light so brightness changes smoothly across a face.
+const VERTEX_SAMPLE_OFFSETS = FACE_NORMALS.map((normal, face) =>
   FACE_CORNERS[face].map((corner) => {
     const [firstTangent, secondTangent] = [0, 1, 2].filter((axis) => normal[axis] === 0);
     const firstStep = [0, 0, 0];
@@ -150,24 +152,28 @@ const AMBIENT_OCCLUSION_SAMPLE_DELTAS = FACE_NORMALS.map((normal, face) =>
     const secondStep = [0, 0, 0];
     secondStep[secondTangent] = corner[secondTangent] === 1 ? 1 : -1;
     return [
-      paddedDelta(
-        normal[0] + firstStep[0],
-        normal[1] + firstStep[1],
-        normal[2] + firstStep[2]
-      ),
-      paddedDelta(
-        normal[0] + secondStep[0],
-        normal[1] + secondStep[1],
-        normal[2] + secondStep[2]
-      ),
-      paddedDelta(
+      [normal[0] + firstStep[0], normal[1] + firstStep[1], normal[2] + firstStep[2]],
+      [normal[0] + secondStep[0], normal[1] + secondStep[1], normal[2] + secondStep[2]],
+      [
         normal[0] + firstStep[0] + secondStep[0],
         normal[1] + firstStep[1] + secondStep[1],
-        normal[2] + firstStep[2] + secondStep[2]
-      ),
+        normal[2] + firstStep[2] + secondStep[2],
+      ],
     ];
   })
 );
+
+const AMBIENT_OCCLUSION_SAMPLE_DELTAS = VERTEX_SAMPLE_OFFSETS.map((faceOffsets) =>
+  faceOffsets.map((cornerOffsets) =>
+    cornerOffsets.map(([dx, dy, dz]) => paddedDelta(dx, dy, dz))
+  )
+);
+
+const FACE_BY_AXIS_AND_DIRECTION = [0, 1, 2].map((axis) => {
+  const faceFor = (direction: number) =>
+    FACE_NORMALS.findIndex((normal) => normal[axis] === direction);
+  return { negative: faceFor(-1), positive: faceFor(1) };
+});
 
 const PLANT_NEIGHBOR_DELTAS = PLANT_NEIGHBOR_DIRECTIONS.map(([dx, dy, dz]) =>
   paddedDelta(dx, dy, dz)
@@ -372,6 +378,26 @@ export function generateMesh(
   const cornerSurfaceWords = new Int32Array(4);
   const cornerOcclusion = new Int32Array(4);
 
+  // Light cells diagonal across a chunk edge are not stored, and slabs of unloaded
+  // neighbors are empty, so those cells say nothing about the real light.
+  const isLightCellKnown = (x: number, y: number, z: number, offset: number[]) => {
+    const cell = [x + offset[0], y + offset[1], z + offset[2]];
+    const limits = [CHUNK_WIDTH, CHUNK_HEIGHT, CHUNK_LENGTH];
+    let outsideAxisCount = 0;
+    let outsideFace = -1;
+    for (let axis = 0; axis < 3; axis++) {
+      if (cell[axis] < 0) {
+        outsideAxisCount++;
+        outsideFace = FACE_BY_AXIS_AND_DIRECTION[axis].negative;
+      } else if (cell[axis] >= limits[axis]) {
+        outsideAxisCount++;
+        outsideFace = FACE_BY_AXIS_AND_DIRECTION[axis].positive;
+      }
+    }
+    if (outsideAxisCount === 0) return true;
+    return outsideAxisCount === 1 && hasLightBorderForFace[outsideFace];
+  };
+
   startWorkerSection("faceGeneration");
   for (let x = 0; x < CHUNK_WIDTH; x++) {
     for (let y = 0; y < CHUNK_HEIGHT; y++) {
@@ -487,6 +513,22 @@ export function generateMesh(
             }
             cornerOcclusion[corner] = occlusion;
 
+            let lightSum = faceLight;
+            let lightCellCount = 1;
+            const sampleDeltas = AMBIENT_OCCLUSION_SAMPLE_DELTAS[face][corner];
+            for (let sample = 0; sample < 3; sample++) {
+              if (OCCLUDES_AMBIENT_LIGHT[paddedBlocks[paddedBase + sampleDeltas[sample]]]) continue;
+              if (
+                isOnChunkEdge &&
+                !isLightCellKnown(x, y, z, VERTEX_SAMPLE_OFFSETS[face][corner][sample])
+              ) {
+                continue;
+              }
+              lightSum += paddedLight[paddedBase + sampleDeltas[sample]];
+              lightCellCount++;
+            }
+            const vertexLightSteps = Math.round((lightSum * LIGHT_STEPS_PER_LEVEL) / lightCellCount);
+
             const uvCode = uvCodes[corner];
             cornerSurfaceWords[corner] = packSurfaceWord(
               uvCode[0] === UV_ONE ? UV_UNITS_PER_TEXTURE : 0,
@@ -499,7 +541,7 @@ export function generateMesh(
                 : 0,
               textureIndex,
               occlusion,
-              faceLight
+              vertexLightSteps
             );
           }
           if (receivesAmbientOcclusion) aoQuads++;
@@ -608,7 +650,7 @@ function emitStairs(
         uv[index * 2 + 1] * UV_UNITS_PER_TEXTURE,
         textureIndex,
         FULLY_LIT_AMBIENT_OCCLUSION,
-        light
+        light * LIGHT_STEPS_PER_LEVEL
       )
     );
     target.pushQuad(

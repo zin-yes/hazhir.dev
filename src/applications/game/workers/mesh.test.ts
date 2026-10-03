@@ -85,6 +85,31 @@ describe("generateMesh ambient occlusion", () => {
   });
 });
 
+describe("generateMesh smooth light", () => {
+  test("a top face between dim and bright air blends light across its vertices", () => {
+    const chunk = new Uint8Array(CHUNK_WIDTH * CHUNK_HEIGHT * CHUNK_LENGTH);
+    const lightMap = new Uint8Array(chunk.length).fill(FULL_LIGHT);
+    for (let x = 3; x <= 7; x++) {
+      for (let z = 3; z <= 7; z++) {
+        chunk[calculateOffset(x, 4, z)] = BlockType.STONE;
+        if (x <= 4) lightMap[calculateOffset(x, 5, z)] = 0x44;
+      }
+    }
+    const mesh = generateMesh(chunk.buffer, lightMap.buffer);
+
+    const topFaceOfBlock = meshVertices(mesh.opaque).filter(
+      (vertex) => vertex.y === 5 && vertex.x >= 4 && vertex.x <= 5 && vertex.z >= 5 && vertex.z <= 6
+    );
+    const lightByX = new Map<number, number>();
+    for (const vertex of topFaceOfBlock) lightByX.set(vertex.x, vertex.light);
+
+    expect(lightByX.get(4)).toBe(4);
+    expect(lightByX.get(5)).toBeGreaterThan(4);
+    expect(lightByX.get(5)).toBeLessThan(15);
+    expect(Number.isInteger(lightByX.get(5)! * 4)).toBe(true);
+  });
+});
+
 describe("generateMesh plants", () => {
   function meshWithSaplingOnStone(light: number) {
     const chunk = new Uint8Array(CHUNK_WIDTH * CHUNK_HEIGHT * CHUNK_LENGTH);
