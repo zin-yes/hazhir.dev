@@ -29,9 +29,16 @@ const WORLD_STAGE_IDS: LoadStageId[] = [
   "meshing",
 ];
 
+export interface LoadStageStatus {
+  id: LoadStageId;
+  label: string;
+  fraction: number;
+}
+
 export interface LoadSnapshot {
   progress: number;
   label: string;
+  stages: LoadStageStatus[];
 }
 
 /**
@@ -57,6 +64,14 @@ export class LoadTracker {
     this.onChange(this.snapshot());
   }
 
+  /** The world is on screen, so nothing can still be pending. */
+  finish() {
+    LOAD_STAGES.forEach((stage) => {
+      this.fractions[stage.id] = 1;
+    });
+    this.onChange(this.snapshot());
+  }
+
   resetWorldStages() {
     WORLD_STAGE_IDS.forEach((stageId) => {
       this.fractions[stageId] = 0;
@@ -75,6 +90,14 @@ export class LoadTracker {
         foundActiveStage = true;
       }
     }
-    return { progress: Math.min(1, progress), label };
+    return {
+      progress: Math.min(1, progress),
+      label,
+      stages: LOAD_STAGES.map((stage) => ({
+        id: stage.id,
+        label: stage.label,
+        fraction: this.fractions[stage.id],
+      })),
+    };
   }
 }

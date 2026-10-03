@@ -36,7 +36,7 @@ import { HOTBAR_SIZE, normalizeHotbar } from "./constants";
 import { NetworkManager } from "./network/NetworkManager";
 import { RemotePlayer } from "./network/RemotePlayer";
 import { PhysicsEngine } from "./physics-engine";
-import { LoadTracker } from "./load-progress";
+import { LoadTracker, type LoadStageStatus } from "./load-progress";
 import { PlayerControls } from "./player-controls";
 import { FRAGMENT_SHADER, VERTEX_SHADER } from "./shaders/chunk";
 import { MobileControls } from "./ui/mobile-controls";
@@ -195,10 +195,12 @@ export default function Game() {
   const phaseRef = useRef<GamePhase>("title");
   const [loadProgress, setLoadProgress] = useState(0);
   const [loadStageLabel, setLoadStageLabel] = useState("Starting threads");
+  const [loadStages, setLoadStages] = useState<LoadStageStatus[]>([]);
   const loadProgressRef = useRef(0);
   const loadTracker = useMemo(
     () =>
-      new LoadTracker(({ progress, label }) => {
+      new LoadTracker(({ progress, label, stages }) => {
+        setLoadStages(stages);
         loadProgressRef.current = progress;
         setLoadProgress(progress);
         setLoadStageLabel(label);
@@ -534,6 +536,7 @@ export default function Game() {
               tasksDone++;
 
               loadTracker.report("meshing", tasksDone / initialLoadTasks);
+              if (tasksDone >= initialLoadTasks) loadTracker.finish();
             },
           )
           .catch((err) => {
@@ -994,6 +997,7 @@ export default function Game() {
         resizeObserver.disconnect();
 
         generationWorkerPool.terminate();
+        lightingWorkerPool.terminate();
         meshWorkerPool.terminate();
         textureArrayWorkerPool.terminate();
 
@@ -2676,6 +2680,7 @@ export default function Game() {
         phase={phase}
         loadProgress={loadProgress}
         loadStageLabel={loadStageLabel}
+        loadStages={loadStages}
         activeWorldName={activeWorldName}
         worlds={worlds}
         isLoadingWorlds={isLoadingWorlds}

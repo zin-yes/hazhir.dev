@@ -19,6 +19,7 @@ export class WorkerPool {
     }
   > = new Map();
   private workersAwaitingWarmUp: Map<Worker, () => void> = new Map();
+  private workerReadiness: Map<Worker, Promise<void>> = new Map();
   private workerFactory: () => Worker;
   private maxWorkers: number;
   private currentId = 0;
@@ -44,19 +45,18 @@ export class WorkerPool {
    * script, calling onWorkerReady as each one comes online.
    */
   warmUp(onWorkerReady?: () => void): Promise<void> {
-    const warmUps: Promise<void>[] = [];
-    while (this.workers.length < this.maxWorkers) {
-      const worker = this.spawnWorker();
-      warmUps.push(
-        new Promise<void>((resolve) => {
-          this.workersAwaitingWarmUp.set(worker, () => {
-            onWorkerReady?.();
-            resolve();
-          });
+    while (this.workers.length < this.maxWorkers) this.spawnWorker();
+    const warmUps = this.workers.map((worker) => {
+      let readiness = this.workerReadiness.get(worker);
+      if (!readiness) {
+        readiness = new Promise<void>((resolve) => {
+          this.workersAwaitingWarmUp.set(worker, resolve);
           worker.postMessage({ id: WARM_UP_MESSAGE_ID, method: "ping" });
-        }),
-      );
-    }
+        });
+        this.workerReadiness.set(worker, readiness);
+      }
+      return readiness.then(() => onWorkerReady?.());
+    });
     return Promise.all(warmUps).then(() => undefined);
   }
 
@@ -139,6 +139,7 @@ export class WorkerPool {
     this.workers = [];
     this.activeWorkers.clear();
     this.workersAwaitingWarmUp.clear();
+    this.workerReadiness.clear();
     this.queue = [];
   }
 }
