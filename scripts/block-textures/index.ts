@@ -9,6 +9,7 @@ import { foliageTextures } from "./foliage";
 import { plantTextures } from "./plants";
 import { coralTextures } from "./coral";
 import { cactusTextures } from "./cactus";
+import { gradeTexture } from "./grade";
 
 const OUTPUT_DIRECTORY = path.join(process.cwd(), "public/game");
 
@@ -28,7 +29,7 @@ async function generateBlockTextures(): Promise<void> {
   );
   for (const definition of selected) {
     const texture = await definition.draw();
-    await texture.savePng(path.join(OUTPUT_DIRECTORY, definition.fileName));
+    await gradeTexture(definition.fileName, texture).savePng(path.join(OUTPUT_DIRECTORY, definition.fileName));
   }
   console.log(`Wrote ${selected.length} block textures to ${OUTPUT_DIRECTORY}`);
 }
