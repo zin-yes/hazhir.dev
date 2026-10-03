@@ -448,7 +448,7 @@ export function generateMesh(
 
         if (isPlantVoxelBlock(block)) {
           emitPlantVoxels(
-            transparent,
+            opaque,
             block,
             x,
             y,

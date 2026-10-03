@@ -76,3 +76,14 @@ describe("generateMesh ambient occlusion", () => {
     );
   });
 });
+
+describe("generateMesh plant voxels", () => {
+  test("plants go in the depth-writing opaque mesh so they never draw over nearer geometry", () => {
+    const chunk = new Uint8Array(CHUNK_WIDTH * CHUNK_HEIGHT * CHUNK_LENGTH);
+    chunk[calculateOffset(5, 5, 5)] = BlockType.SAPLING;
+    const lightMap = new Uint8Array(chunk.length).fill(FULL_LIGHT);
+    const mesh = generateMesh(chunk.buffer, lightMap.buffer);
+    expect(new Float32Array(mesh.opaque.positions).length).toBeGreaterThan(0);
+    expect(new Float32Array(mesh.transparent.positions).length).toBe(0);
+  });
+});
