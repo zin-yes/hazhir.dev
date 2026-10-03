@@ -58,6 +58,11 @@ import {
 } from "./shaders/chunk";
 import { TickableBlockIndex, pickTickedBlocks } from "./random-tick";
 import { type BorderFace, extractBorderSlab } from "./chunk-borders";
+import {
+  type ChunkCoordinate,
+  type LightChunkSource,
+  relightAfterBlockChange,
+} from "./light-engine";
 import { LightEditTrace, classifyLightEdit } from "./profiler/light-trace";
 import { castVoxelRay } from "./voxel-ray";
 import type { ChunkMeshResult } from "./workers/mesh-types";
@@ -397,6 +402,12 @@ export default function Game() {
   }>({});
   const chunkMeshesRef = useRef(new Map<string, THREE.Mesh[]>());
   const plantDetailRef = useRef(new Map<string, PlantDetailMeshes>());
+  const lightChunkSource: LightChunkSource = {
+    getBlocks: (chunkX, chunkY, chunkZ) =>
+      chunks.current[generateChunkName(chunkX, chunkY, chunkZ)],
+    getLight: (chunkX, chunkY, chunkZ) =>
+      lightChunks.current[generateChunkName(chunkX, chunkY, chunkZ)],
+  };
   const pendingLightEditsRef = useRef(0);
   const lightIdleResolversRef = useRef<Array<() => void>>([]);
   const queuedMeshRequestsRef = useRef(new Map<string, Promise<void>>());
@@ -1127,8 +1138,18 @@ export default function Game() {
             modifiedChunks.current.get(chunkName)!.set(index, b.blockType);
 
             if (chunks.current[chunkName]) {
+              const previousBlock = chunks.current[chunkName][index];
               chunks.current[chunkName][index] = b.blockType;
               chunksToUpdate.add(chunkName);
+              relightAfterBlockChange(
+                lightChunkSource,
+                b.x,
+                b.y,
+                b.z,
+                previousBlock,
+              ).chunksToRemesh.forEach((chunk) =>
+                chunksToUpdate.add(generateChunkName(chunk.x, chunk.y, chunk.z)),
+              );
 
               if (blockChunkX === 0)
                 chunksToUpdate.add(
@@ -1834,298 +1855,6 @@ export default function Game() {
     return () => clearInterval(interval);
   }, []);
 
-  function traceStage<Result>(
-    trace: LightEditTrace | undefined,
-    stageName: string,
-    work: () => Result | Promise<Result>,
-  ): Promise<Result> {
-    return trace ? trace.stage(stageName, work) : Promise.resolve(work());
-  }
-
-  async function updateChunkLightAndMesh(
-    chunkX: number,
-    chunkY: number,
-    chunkZ: number,
-    trace?: LightEditTrace,
-  ) {
-    const chunkName = generateChunkName(chunkX, chunkY, chunkZ);
-    const chunk = chunks.current[chunkName];
-    if (!chunk) return;
-    profiler.addCounter("game.light.updates");
-
-    const topChunkName = generateChunkName(chunkX, chunkY + 1, chunkZ);
-    const topChunk = chunks.current[topChunkName]?.buffer;
-    const topChunkLight = lightChunks.current[topChunkName]?.buffer;
-
-    const { light, queue } = await traceStage(trace, "initializeLight", () =>
-      lightingWorkerPool.exec("initializeChunkLight", [
-        chunk.buffer,
-        seedRef.current,
-        chunkX,
-        chunkY,
-        chunkZ,
-        topChunk,
-        topChunkLight,
-      ]),
-    );
-    lightChunks.current[chunkName] = light;
-
-    const neighbors = {
-      "-1,0,0":
-        chunks.current[generateChunkName(chunkX - 1, chunkY, chunkZ)]?.buffer,
-      "1,0,0":
-        chunks.current[generateChunkName(chunkX + 1, chunkY, chunkZ)]?.buffer,
-      "0,1,0":
-        chunks.current[generateChunkName(chunkX, chunkY + 1, chunkZ)]?.buffer,
-      "0,-1,0":
-        chunks.current[generateChunkName(chunkX, chunkY - 1, chunkZ)]?.buffer,
-      "0,0,1":
-        chunks.current[generateChunkName(chunkX, chunkY, chunkZ + 1)]?.buffer,
-      "0,0,-1":
-        chunks.current[generateChunkName(chunkX, chunkY, chunkZ - 1)]?.buffer,
-    };
-
-    const neighborLights = {
-      "-1,0,0":
-        lightChunks.current[generateChunkName(chunkX - 1, chunkY, chunkZ)]
-          ?.buffer,
-      "1,0,0":
-        lightChunks.current[generateChunkName(chunkX + 1, chunkY, chunkZ)]
-          ?.buffer,
-      "0,1,0":
-        lightChunks.current[generateChunkName(chunkX, chunkY + 1, chunkZ)]
-          ?.buffer,
-      "0,-1,0":
-        lightChunks.current[generateChunkName(chunkX, chunkY - 1, chunkZ)]
-          ?.buffer,
-      "0,0,1":
-        lightChunks.current[generateChunkName(chunkX, chunkY, chunkZ + 1)]
-          ?.buffer,
-      "0,0,-1":
-        lightChunks.current[generateChunkName(chunkX, chunkY, chunkZ - 1)]
-          ?.buffer,
-    };
-
-    const { centerLight, neighborLightUpdates } = await traceStage(
-      trace,
-      "propagateLight",
-      () =>
-        lightingWorkerPool.exec("propagateChunkLight", [
-          chunk.buffer,
-          lightChunks.current[chunkName].buffer,
-          neighbors,
-          neighborLights,
-          queue,
-        ]),
-    );
-    lightChunks.current[chunkName] = centerLight;
-
-    // Apply neighbor updates
-    const mergeNeighborToken = profiler.begin("main.light.mergeNeighbor");
-    if (neighborLightUpdates) {
-      Object.entries(neighborLightUpdates).forEach(([key, update]) => {
-        const [dx, dy, dz] = key.split(",").map(Number);
-        const neighborName = generateChunkName(
-          chunkX + dx,
-          chunkY + dy,
-          chunkZ + dz,
-        );
-        if (lightChunks.current[neighborName]) {
-          const current = lightChunks.current[neighborName];
-          const u = update as Uint8Array;
-          for (let i = 0; i < current.length; i++) {
-            current[i] = Math.max(current[i], u[i]);
-          }
-          // Regenerate neighbor mesh if light changed
-          trace?.trackMesh(
-            regenerateChunkMesh(chunkX + dx, chunkY + dy, chunkZ + dz),
-          );
-        }
-      });
-    }
-    profiler.end(mergeNeighborToken);
-
-    const ownMeshApplied = regenerateChunkMesh(chunkX, chunkY, chunkZ);
-    trace?.trackMesh(ownMeshApplied);
-    trace?.count("chunksRelit");
-  }
-
-  async function updateLightForRegion(
-    cx: number,
-    cy: number,
-    cz: number,
-    trace?: LightEditTrace,
-  ) {
-    profiler.addCounter("game.light.updates");
-    const chunksToUpdate: { x: number; y: number; z: number }[] = [];
-    for (let x = -1; x <= 1; x++) {
-      for (let y = -1; y <= 1; y++) {
-        for (let z = -1; z <= 1; z++) {
-          if (chunks.current[generateChunkName(cx + x, cy + y, cz + z)]) {
-            chunksToUpdate.push({ x: cx + x, y: cy + y, z: cz + z });
-          }
-        }
-      }
-    }
-
-    // 1. Initialize (Top-Down)
-    const queues: { [key: string]: number[] } = {};
-    const chunksByY: { [y: number]: { x: number; z: number }[] } = {};
-    chunksToUpdate.forEach(({ x, y, z }) => {
-      if (!chunksByY[y]) chunksByY[y] = [];
-      chunksByY[y].push({ x, z });
-    });
-
-    const sortedYs = Object.keys(chunksByY)
-      .map(Number)
-      .sort((a, b) => b - a);
-
-    trace?.count("chunksRelit", chunksToUpdate.length);
-    await traceStage(trace, "initializeLight", async () => {
-    for (const y of sortedYs) {
-      await Promise.all(
-        chunksByY[y].map(async ({ x, z }) => {
-          const chunkName = generateChunkName(x, y, z);
-          const chunk = chunks.current[chunkName];
-
-          const topChunkName = generateChunkName(x, y + 1, z);
-          const topChunk = chunks.current[topChunkName]?.buffer;
-          const topChunkLight = lightChunks.current[topChunkName]?.buffer;
-
-          const { light, queue } = await lightingWorkerPool.exec(
-            "initializeChunkLight",
-            [chunk.buffer, seedRef.current, x, y, z, topChunk, topChunkLight],
-          );
-          lightChunks.current[chunkName] = light;
-          queues[chunkName] = queue;
-        }),
-      );
-    }
-    });
-
-    // 2. Propagate Center
-    const centerName = generateChunkName(cx, cy, cz);
-    if (lightChunks.current[centerName]) {
-      const neighbors = {
-        "-1,0,0": chunks.current[generateChunkName(cx - 1, cy, cz)]?.buffer,
-        "1,0,0": chunks.current[generateChunkName(cx + 1, cy, cz)]?.buffer,
-        "0,1,0": chunks.current[generateChunkName(cx, cy + 1, cz)]?.buffer,
-        "0,-1,0": chunks.current[generateChunkName(cx, cy - 1, cz)]?.buffer,
-        "0,0,1": chunks.current[generateChunkName(cx, cy, cz + 1)]?.buffer,
-        "0,0,-1": chunks.current[generateChunkName(cx, cy, cz - 1)]?.buffer,
-      };
-
-      const neighborLights = {
-        "-1,0,0":
-          lightChunks.current[generateChunkName(cx - 1, cy, cz)]?.buffer,
-        "1,0,0": lightChunks.current[generateChunkName(cx + 1, cy, cz)]?.buffer,
-        "0,1,0": lightChunks.current[generateChunkName(cx, cy + 1, cz)]?.buffer,
-        "0,-1,0":
-          lightChunks.current[generateChunkName(cx, cy - 1, cz)]?.buffer,
-        "0,0,1": lightChunks.current[generateChunkName(cx, cy, cz + 1)]?.buffer,
-        "0,0,-1":
-          lightChunks.current[generateChunkName(cx, cy, cz - 1)]?.buffer,
-      };
-
-      const { centerLight, neighborLightUpdates } = await traceStage(
-        trace,
-        "propagateCenter",
-        () =>
-          lightingWorkerPool.exec("propagateChunkLight", [
-            chunks.current[centerName].buffer,
-            lightChunks.current[centerName].buffer,
-            neighbors,
-            neighborLights,
-            queues[centerName],
-          ]),
-      );
-      lightChunks.current[centerName] = centerLight;
-
-      // Apply updates to neighbors
-      const mergeCenterToken = profiler.begin("main.light.mergeNeighbor");
-      if (neighborLightUpdates) {
-        Object.entries(neighborLightUpdates).forEach(([key, update]) => {
-          const [dx, dy, dz] = key.split(",").map(Number);
-          const neighborName = generateChunkName(cx + dx, cy + dy, cz + dz);
-          if (lightChunks.current[neighborName]) {
-            const current = lightChunks.current[neighborName];
-            const u = update as Uint8Array;
-            for (let i = 0; i < current.length; i++) {
-              current[i] = Math.max(current[i], u[i]);
-            }
-          }
-        });
-      }
-      profiler.end(mergeCenterToken);
-    }
-
-    // 3. Propagate Neighbors
-    const neighborsToPropagate = chunksToUpdate.filter(
-      (c) => c.x !== cx || c.y !== cy || c.z !== cz,
-    );
-
-    await traceStage(trace, "propagateNeighbors", () =>
-    Promise.all(
-      neighborsToPropagate.map(async ({ x, y, z }) => {
-        const chunkName = generateChunkName(x, y, z);
-        const chunk = chunks.current[chunkName];
-        const light = lightChunks.current[chunkName];
-        const queue = queues[chunkName];
-
-        const neighbors = {
-          "-1,0,0": chunks.current[generateChunkName(x - 1, y, z)]?.buffer,
-          "1,0,0": chunks.current[generateChunkName(x + 1, y, z)]?.buffer,
-          "0,1,0": chunks.current[generateChunkName(x, y + 1, z)]?.buffer,
-          "0,-1,0": chunks.current[generateChunkName(x, y - 1, z)]?.buffer,
-          "0,0,1": chunks.current[generateChunkName(x, y, z + 1)]?.buffer,
-          "0,0,-1": chunks.current[generateChunkName(x, y, z - 1)]?.buffer,
-        };
-
-        const neighborLights = {
-          "-1,0,0": lightChunks.current[generateChunkName(x - 1, y, z)]?.buffer,
-          "1,0,0": lightChunks.current[generateChunkName(x + 1, y, z)]?.buffer,
-          "0,1,0": lightChunks.current[generateChunkName(x, y + 1, z)]?.buffer,
-          "0,-1,0": lightChunks.current[generateChunkName(x, y - 1, z)]?.buffer,
-          "0,0,1": lightChunks.current[generateChunkName(x, y, z + 1)]?.buffer,
-          "0,0,-1": lightChunks.current[generateChunkName(x, y, z - 1)]?.buffer,
-        };
-
-        const { centerLight, neighborLightUpdates } =
-          await lightingWorkerPool.exec("propagateChunkLight", [
-            chunk.buffer,
-            light.buffer,
-            neighbors,
-            neighborLights,
-            queue,
-          ]);
-        lightChunks.current[chunkName] = centerLight;
-
-        // Apply updates (though mostly redundant if we don't iterate further)
-        const mergeSpreadToken = profiler.begin("main.light.mergeNeighbor");
-        if (neighborLightUpdates) {
-          Object.entries(neighborLightUpdates).forEach(([key, update]) => {
-            const [dx, dy, dz] = key.split(",").map(Number);
-            const neighborName = generateChunkName(x + dx, y + dy, z + dz);
-            if (lightChunks.current[neighborName]) {
-              const current = lightChunks.current[neighborName];
-              const u = update as Uint8Array;
-              for (let i = 0; i < current.length; i++) {
-                current[i] = Math.max(current[i], u[i]);
-              }
-            }
-          });
-        }
-        profiler.end(mergeSpreadToken);
-      }),
-    ));
-
-    // 4. Mesh
-    trace?.markRelit();
-    chunksToUpdate.forEach((c) =>
-      trace?.trackMesh(regenerateChunkMesh(c.x, c.y, c.z)),
-    );
-  }
-
   function setBlock(
     x: number,
     y: number,
@@ -2189,7 +1918,7 @@ export default function Game() {
     if (!chunkVersions.current[chunkName]) chunkVersions.current[chunkName] = 0;
     chunkVersions.current[chunkName]++;
 
-    // Update Lighting asynchronously
+    // Light is patched in place around the edit, then only the chunks it touched are re-meshed.
     const trace = new LightEditTrace(
       profiler,
       classifyLightEdit(
@@ -2201,33 +1930,49 @@ export default function Game() {
     pendingLightEditsRef.current++;
     (async () => {
       try {
-        // Check if the block being placed/removed is a light source
-        const isLightChange =
-          getBlockLightLevel(type) > 0 || getBlockLightLevel(oldBlock) > 0;
-
-        if (isLightChange) {
-          await updateLightForRegion(chunkX, chunkY, chunkZ, trace);
-        } else {
-          await updateChunkLightAndMesh(chunkX, chunkY, chunkZ, trace);
-
-          // Also update the chunk below if it exists, as sky light might have changed
-          const bottomChunkName = generateChunkName(chunkX, chunkY - 1, chunkZ);
-          if (chunks.current[bottomChunkName]) {
-            await updateChunkLightAndMesh(chunkX, chunkY - 1, chunkZ, trace);
-          }
-
-          // Only regenerate neighbors if block is on chunk edge
-          const regenerateNeighbor = (dx: number, dy: number, dz: number) =>
-            trace.trackMesh(
-              regenerateChunkMesh(chunkX + dx, chunkY + dy, chunkZ + dz),
+        const relight = await trace.stage("relight", () => {
+          const relightToken = profiler.begin("main.light.relight");
+          try {
+            return relightAfterBlockChange(
+              lightChunkSource,
+              x,
+              y,
+              z,
+              oldBlock,
             );
-          if (blockChunkX === 0) regenerateNeighbor(-1, 0, 0);
-          if (blockChunkX === CHUNK_WIDTH - 1) regenerateNeighbor(1, 0, 0);
-          if (blockChunkY === 0) regenerateNeighbor(0, -1, 0);
-          if (blockChunkY === CHUNK_HEIGHT - 1) regenerateNeighbor(0, 1, 0);
-          if (blockChunkZ === 0) regenerateNeighbor(0, 0, -1);
-          if (blockChunkZ === CHUNK_LENGTH - 1) regenerateNeighbor(0, 0, 1);
-        }
+          } finally {
+            profiler.end(relightToken);
+          }
+        });
+        trace.markRelit();
+        trace.count("cellsRemoved", relight.stats.cellsRemoved);
+        trace.count("cellsLit", relight.stats.cellsLit);
+        trace.count("cellsVisited", relight.stats.cellsVisited);
+        trace.count("chunksRelit", relight.chunksToRemesh.length);
+        profiler.addCounter("game.light.cellsVisited", relight.stats.cellsVisited);
+
+        // The edited chunk goes first so the change shows up as soon as possible.
+        const chunksToRemesh = new Map<string, ChunkCoordinate>();
+        const requestRemesh = (chunk: ChunkCoordinate) =>
+          chunksToRemesh.set(generateChunkName(chunk.x, chunk.y, chunk.z), chunk);
+        requestRemesh({ x: chunkX, y: chunkY, z: chunkZ });
+        // Block data next to a chunk edge is part of the neighbor's mesh too.
+        if (blockChunkX === 0) requestRemesh({ x: chunkX - 1, y: chunkY, z: chunkZ });
+        if (blockChunkX === CHUNK_WIDTH - 1)
+          requestRemesh({ x: chunkX + 1, y: chunkY, z: chunkZ });
+        if (blockChunkY === 0) requestRemesh({ x: chunkX, y: chunkY - 1, z: chunkZ });
+        if (blockChunkY === CHUNK_HEIGHT - 1)
+          requestRemesh({ x: chunkX, y: chunkY + 1, z: chunkZ });
+        if (blockChunkZ === 0) requestRemesh({ x: chunkX, y: chunkY, z: chunkZ - 1 });
+        if (blockChunkZ === CHUNK_LENGTH - 1)
+          requestRemesh({ x: chunkX, y: chunkY, z: chunkZ + 1 });
+        relight.chunksToRemesh.forEach(requestRemesh);
+
+        await trace.stage("queueMeshes", () => {
+          chunksToRemesh.forEach((chunk) =>
+            trace.trackMesh(regenerateChunkMesh(chunk.x, chunk.y, chunk.z)),
+          );
+        });
         await trace.finish();
       } finally {
         pendingLightEditsRef.current--;
