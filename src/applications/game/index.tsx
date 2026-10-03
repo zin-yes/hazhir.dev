@@ -56,6 +56,7 @@ import {
   PLANT_VERTEX_SHADER,
   VERTEX_SHADER,
 } from "./shaders/chunk";
+import { TickableBlockIndex, pickTickedBlocks } from "./random-tick";
 import { castVoxelRay } from "./voxel-ray";
 import type { ChunkMeshResult } from "./workers/mesh-types";
 import { MobileControls } from "./ui/mobile-controls";
@@ -94,6 +95,7 @@ import {
 import { sampleSceneMemory } from "./profiler/scene-memory-sampler";
 
 const FLYING_SPEED = 10;
+const RANDOM_TICKS_PER_CHUNK = 100;
 const AUTOSAVE_INTERVAL_MILLISECONDS = 30000;
 const JOIN_TIMEOUT_MILLISECONDS = 15000;
 const BENCHMARK_LOAD_TIMEOUT_MILLISECONDS = 180000;
@@ -379,6 +381,7 @@ export default function Game() {
   }>({});
   const chunkMeshesRef = useRef(new Map<string, THREE.Mesh[]>());
   const queuedMeshRequestsRef = useRef(new Set<string>());
+  const tickableBlocksRef = useRef(new TickableBlockIndex());
 
   function startWorldGeneration(currentSeed: number) {
     if (intervalRef.current) clearInterval(intervalRef.current);
@@ -2488,25 +2491,39 @@ export default function Game() {
     }
   }
 
+  function reactsToRandomTicks(block: number) {
+    return block === BlockType.SAPLING || block === BlockType.GRASS;
+  }
+
   function tickChunks() {
     if (connectedToHostRef.current) return;
     if (profiler.enabled) {
       profiler.addCounter(
         "game.randomTicks",
-        Object.keys(chunks.current).length * 100,
+        Object.keys(chunks.current).length * RANDOM_TICKS_PER_CHUNK,
       );
     }
     Object.keys(chunks.current).forEach((chunkName) => {
-      if (!chunks.current[chunkName]) return;
+      const chunk = chunks.current[chunkName];
+      if (!chunk) return;
+      const tickableIndices = tickableBlocksRef.current.indicesFor(
+        chunk,
+        chunkVersions.current[chunkName] ?? 0,
+        reactsToRandomTicks,
+      );
+      const tickedIndices = pickTickedBlocks(
+        tickableIndices,
+        chunk.length,
+        RANDOM_TICKS_PER_CHUNK,
+      );
+      if (tickedIndices.length === 0) return;
+
       const [chunkX, chunkY, chunkZ] = chunkName.split(",").map(Number);
-
-      // 30 random ticks per chunk
-      for (let i = 0; i < 100; i++) {
-        const x = Math.floor(Math.random() * CHUNK_WIDTH);
-        const y = Math.floor(Math.random() * CHUNK_HEIGHT);
-        const z = Math.floor(Math.random() * CHUNK_LENGTH);
-
-        const block = chunks.current[chunkName][calculateOffset(x, y, z)];
+      for (const blockIndex of tickedIndices) {
+        const z = blockIndex % CHUNK_HEIGHT;
+        const y = Math.floor(blockIndex / CHUNK_HEIGHT) % CHUNK_HEIGHT;
+        const x = Math.floor(blockIndex / (CHUNK_WIDTH * CHUNK_HEIGHT));
+        const block = chunk[blockIndex];
 
         const globalX = chunkX * CHUNK_WIDTH + x;
         const globalY = chunkY * CHUNK_HEIGHT + y;
