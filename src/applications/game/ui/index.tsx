@@ -132,8 +132,8 @@ export default function UILayer({
                   To start playing...
                 </h2>
                 <p>
-                  Focus the window by clicking, then press escape to start playing
-                  (and do the same if you want to have your mouse back).
+                  Click anywhere on the game to start playing. Press Escape to get your
+                  mouse back.
                 </p>
               </div>
             </>

@@ -731,18 +731,6 @@ export default function Game() {
           case "Escape":
             if (isInventoryOpenRef.current) {
               setIsInventoryOpen(false);
-              playerControlsRef.current?.controls.lock();
-              break;
-            }
-
-            if (
-              initialLoadCompletion === 1 &&
-              !playerControlsRef.current?.controls.isLocked
-            ) {
-              playerControlsRef.current?.controls.lock();
-              setIsInventoryOpen(false);
-            } else {
-              playerControlsRef.current?.controls.unlock();
             }
             break;
         }
@@ -753,7 +741,17 @@ export default function Game() {
       };
 
       const onMouseDown = (event: MouseEvent) => {
-        if (!playerControlsRef.current?.controls.isLocked) return;
+        const controls = playerControlsRef.current?.controls;
+        if (!controls) return;
+        if (!controls.isLocked) {
+          const canStartPlaying =
+            event.button === 0 &&
+            initialLoadCompletion === 1 &&
+            !isInventoryOpenRef.current &&
+            !playerControlsRef.current?.isMobile;
+          if (canStartPlaying) controls.lock();
+          return;
+        }
         if (event.button === 0) {
           breakBlock();
         } else if (event.button === 2) {
