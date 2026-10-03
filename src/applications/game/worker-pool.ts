@@ -8,21 +8,30 @@ import type { WorkerResponseMessage } from "./profiler/worker-recorder";
 
 const WARM_UP_MESSAGE_ID = -1;
 
+export interface WorkerRequest {
+  params: any[];
+  /** Buffers the worker takes ownership of instead of copying. */
+  transfer?: Transferable[];
+}
+
+interface QueuedTask {
+  method: string;
+  /** Built when a worker is free, so it reads the newest state. Returns null to skip the task. */
+  buildRequest: () => WorkerRequest | null;
+  resolve: (value: any) => void;
+  reject: (reason: any) => void;
+  onProgress?: (fraction: number) => void;
+  enqueuedAtMs: number;
+  queueDepthAtEnqueue: number;
+}
+
 function currentEpochMs() {
   return performance.timeOrigin + performance.now();
 }
 
 export class WorkerPool {
   private workers: Worker[] = [];
-  private queue: {
-    method: string;
-    params: any[];
-    resolve: (value: any) => void;
-    reject: (reason: any) => void;
-    onProgress?: (fraction: number) => void;
-    enqueuedAtMs: number;
-    queueDepthAtEnqueue: number;
-  }[] = [];
+  private queue: QueuedTask[] = [];
   private activeWorkers: Map<
     Worker,
     {
@@ -59,11 +68,31 @@ export class WorkerPool {
     params: any[],
     onProgress?: (fraction: number) => void,
   ): Promise<any> {
+    return this.enqueue(method, () => ({ params }), onProgress);
+  }
+
+  /**
+   * Queues work whose parameters are built just before it runs, so it reads the
+   * newest state however long it waited. Resolves to null when buildRequest
+   * returns null.
+   */
+  execLazy(
+    method: string,
+    buildRequest: () => WorkerRequest | null,
+  ): Promise<any> {
+    return this.enqueue(method, buildRequest);
+  }
+
+  private enqueue(
+    method: string,
+    buildRequest: () => WorkerRequest | null,
+    onProgress?: (fraction: number) => void,
+  ): Promise<any> {
     return new Promise((resolve, reject) => {
       const isProfiling = profiler.enabled;
       this.queue.push({
         method,
-        params,
+        buildRequest,
         resolve,
         reject,
         onProgress,
@@ -109,57 +138,61 @@ export class WorkerPool {
   }
 
   private processQueue() {
-    if (this.queue.length === 0) return;
-
-    if (this.workers.length < this.maxWorkers) {
-      this.spawnWorker();
-    }
-
-    const availableWorker = this.workers.find(
-      (w) => !this.activeWorkers.has(w)
-    );
-
-    if (availableWorker) {
-      const task = this.queue.shift();
-      if (task) {
-        const id = this.currentId++;
-        const isProfiled = profiler.enabled;
-        const dispatchedAtMs = isProfiled ? performance.now() : 0;
-        const paramBytes = isProfiled ? estimateTransferBytes(task.params) : 0;
-        this.activeWorkers.set(availableWorker, {
-          resolve: task.resolve,
-          reject: task.reject,
-          onProgress: task.onProgress,
-          id,
-          method: task.method,
-          isProfiled,
-          enqueuedAtMs: task.enqueuedAtMs || dispatchedAtMs,
-          queueDepthAtEnqueue: task.queueDepthAtEnqueue,
-          dispatchedAtMs,
-          postedToWorkerAtEpochMs: 0,
-          paramBytes,
-        });
-        const activeTask = this.activeWorkers.get(availableWorker)!;
-        if (isProfiled) {
-          const postScope = profiler.begin(
-            `main.workerPost.${this.name}.${task.method}`,
-          );
-          availableWorker.postMessage({
-            id,
-            method: task.method,
-            params: task.params,
-            profile: true,
-          });
-          profiler.end(postScope);
-          activeTask.postedToWorkerAtEpochMs = currentEpochMs();
-        } else {
-          availableWorker.postMessage({
-            id,
-            method: task.method,
-            params: task.params,
-          });
-        }
+    while (this.queue.length > 0) {
+      if (this.workers.length < this.maxWorkers) {
+        this.spawnWorker();
       }
+
+      const availableWorker = this.workers.find(
+        (w) => !this.activeWorkers.has(w)
+      );
+      if (!availableWorker) return;
+
+      const task = this.queue.shift()!;
+      const request = task.buildRequest();
+      if (!request) {
+        task.resolve(null);
+        continue;
+      }
+      this.dispatch(availableWorker, task, request);
+    }
+  }
+
+  private dispatch(worker: Worker, task: QueuedTask, request: WorkerRequest) {
+    const id = this.currentId++;
+    const isProfiled = profiler.enabled;
+    const dispatchedAtMs = isProfiled ? performance.now() : 0;
+    const paramBytes = isProfiled ? estimateTransferBytes(request.params) : 0;
+    const activeTask = {
+      resolve: task.resolve,
+      reject: task.reject,
+      onProgress: task.onProgress,
+      id,
+      method: task.method,
+      isProfiled,
+      enqueuedAtMs: task.enqueuedAtMs || dispatchedAtMs,
+      queueDepthAtEnqueue: task.queueDepthAtEnqueue,
+      dispatchedAtMs,
+      postedToWorkerAtEpochMs: 0,
+      paramBytes,
+    };
+    this.activeWorkers.set(worker, activeTask);
+    const transfer = request.transfer ?? [];
+    if (isProfiled) {
+      const postScope = profiler.begin(
+        `main.workerPost.${this.name}.${task.method}`,
+      );
+      worker.postMessage(
+        { id, method: task.method, params: request.params, profile: true },
+        transfer,
+      );
+      profiler.end(postScope);
+      activeTask.postedToWorkerAtEpochMs = currentEpochMs();
+    } else {
+      worker.postMessage(
+        { id, method: task.method, params: request.params },
+        transfer,
+      );
     }
   }
 

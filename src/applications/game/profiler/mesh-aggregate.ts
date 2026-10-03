@@ -1,7 +1,8 @@
 import { RollingStat } from "./rolling-stat";
-import type { HeaviestMesh, MeshAggregate, MeshGeometryStats } from "./types";
+import type { HeaviestMesh, MeshAggregate, MeshGeometryStats, MeshKind } from "./types";
 
 const HEAVIEST_MESH_COUNT = 10;
+const MESH_KINDS: MeshKind[] = ["opaque", "transparent", "plants"];
 
 interface LiveMesh {
   chunkName: string;
@@ -25,8 +26,7 @@ export class MeshRegistry {
   }
 
   remove(chunkName: string) {
-    this.liveMeshes.delete(meshKey(chunkName, "opaque"));
-    this.liveMeshes.delete(meshKey(chunkName, "transparent"));
+    for (const kind of MESH_KINDS) this.liveMeshes.delete(meshKey(chunkName, kind));
   }
 
   clearLive() {
@@ -87,6 +87,6 @@ export class MeshRegistry {
   }
 }
 
-function meshKey(chunkName: string, kind: "opaque" | "transparent") {
+function meshKey(chunkName: string, kind: MeshKind) {
   return `${chunkName}|${kind}`;
 }

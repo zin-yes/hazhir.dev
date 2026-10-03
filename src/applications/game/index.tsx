@@ -45,7 +45,19 @@ import { RemotePlayer } from "./network/RemotePlayer";
 import { PhysicsEngine } from "./physics-engine";
 import { LoadTracker, type LoadStageStatus } from "./load-progress";
 import { PlayerControls } from "./player-controls";
-import { FRAGMENT_SHADER, VERTEX_SHADER } from "./shaders/chunk";
+import {
+  createChunkSurfaceGeometry,
+  createPlantInstanceGeometry,
+  plantTemplateVertexCount,
+  releaseChunkGeometry,
+} from "./chunk-geometry";
+import {
+  FRAGMENT_SHADER,
+  PLANT_VERTEX_SHADER,
+  VERTEX_SHADER,
+} from "./shaders/chunk";
+import { castVoxelRay } from "./voxel-ray";
+import type { ChunkMeshResult } from "./workers/mesh-types";
 import { MobileControls } from "./ui/mobile-controls";
 import UILayer, { type GamePhase } from "./ui/index";
 import {
@@ -363,7 +375,10 @@ export default function Game() {
   const materialsRef = useRef<{
     opaque?: THREE.ShaderMaterial;
     transparent?: THREE.ShaderMaterial;
+    plants?: THREE.ShaderMaterial;
   }>({});
+  const chunkMeshesRef = useRef(new Map<string, THREE.Mesh[]>());
+  const queuedMeshRequestsRef = useRef(new Set<string>());
 
   function startWorldGeneration(currentSeed: number) {
     if (intervalRef.current) clearInterval(intervalRef.current);
@@ -601,30 +616,9 @@ export default function Game() {
             z,
           ])
           .then(
-            ({
-              opaque,
-              transparent,
-            }: {
-              opaque: {
-                positions: ArrayBuffer;
-                normals: ArrayBuffer;
-                indices: ArrayBuffer;
-                uvs: ArrayBuffer;
-                textureIndices: ArrayBuffer;
-                lightLevels: ArrayBuffer;
-                ambientOcclusion: ArrayBuffer;
-              };
-              transparent: {
-                positions: ArrayBuffer;
-                normals: ArrayBuffer;
-                indices: ArrayBuffer;
-                uvs: ArrayBuffer;
-                textureIndices: ArrayBuffer;
-                lightLevels: ArrayBuffer;
-                ambientOcclusion: ArrayBuffer;
-              };
-            }) => {
-              addChunkMesh(opaque, transparent, chunkName, x, y, z);
+            (meshResult: ChunkMeshResult | null) => {
+              if (!meshResult) return;
+              addChunkMesh(meshResult, chunkName, x, y, z);
 
               profiler.recordTimer(
                 "chunk.pipeline.mesh",
@@ -912,6 +906,23 @@ export default function Game() {
               blendSrcAlpha: THREE.OneFactor,
               transparent: true,
               depthWrite: false,
+            });
+
+            materialsRef.current.plants = new THREE.ShaderMaterial({
+              uniforms: {
+                Texture: {
+                  value: textureArray,
+                },
+                waterTextureIndex: {
+                  value: waterTextureIndex,
+                },
+              },
+              vertexShader: PLANT_VERTEX_SHADER,
+              fragmentShader: FRAGMENT_SHADER,
+              blending: THREE.NormalBlending,
+              blendSrcAlpha: THREE.OneFactor,
+              transparent: false,
+              depthWrite: true,
             });
 
             loadTracker.report("textures", 1);
@@ -1349,33 +1360,9 @@ export default function Game() {
             chunkZ,
           ])
           .then(
-            ({
-              opaque,
-              transparent,
-            }: {
-              opaque: {
-                positions: ArrayBuffer;
-                normals: ArrayBuffer;
-                indices: ArrayBuffer;
-                uvs: ArrayBuffer;
-                textureIndices: ArrayBuffer;
-                lightLevels: ArrayBuffer;
-                ambientOcclusion: ArrayBuffer;
-              };
-              transparent: {
-                positions: ArrayBuffer;
-                normals: ArrayBuffer;
-                indices: ArrayBuffer;
-                uvs: ArrayBuffer;
-                textureIndices: ArrayBuffer;
-                lightLevels: ArrayBuffer;
-                ambientOcclusion: ArrayBuffer;
-              };
-            }) => {
-              addChunkMesh(
-                opaque,
-                transparent,
-                chunkName,
+            (meshResult: ChunkMeshResult | null) => {
+              if (!meshResult) return;
+              addChunkMesh(meshResult, chunkName,
                 chunkX,
                 chunkY,
                 chunkZ,
@@ -1416,54 +1403,53 @@ export default function Game() {
     }
   }
 
-  function updateIndicatorUnprofiled() {
-    if (playerControlsRef.current?.controls.isLocked || playerControlsRef.current?.isMobile) {
-      let cameraDirection: THREE.Vector3 = new THREE.Vector3();
-      camera.getWorldDirection(cameraDirection);
-      cameraDirection.normalize();
-      cameraDirection.multiplyScalar(0.02);
+  const MAX_REACH_IN_BLOCKS = 5;
+  const rayDirection = new THREE.Vector3();
 
-      let currentPoint = new THREE.Vector3(
-        camera.position.x,
-        camera.position.y,
-        camera.position.z,
-      );
-
-      for (let step = 0; step < 5 * 50; step++) {
-        raycastStepsRef.current++;
-        const x = Math.round(currentPoint.x);
-        const y = Math.round(currentPoint.y);
-        const z = Math.round(currentPoint.z);
-
-        currentPoint = currentPoint.add(
-          new THREE.Vector3(
-            cameraDirection.x,
-            cameraDirection.y,
-            cameraDirection.z,
-          ),
-        );
-        if (getBlock(x, y, z) !== BlockType.AIR && getBlock(x, y, z) !== null) {
-          const indicator = scene.getObjectByName(
-            "indicator",
-          ) as THREE.LineSegments;
-          const blockType = getBlock(x, y, z) as BlockType;
-
-          const { scale, offset } = getBoundingBox(blockType);
-
-          indicator.position.x = x + offset[0];
-          indicator.position.y = y + offset[1];
-          indicator.position.z = z + offset[2];
-          indicator.scale.set(scale[0], scale[1], scale[2]);
-          indicator.visible = true;
-          return;
-        }
-      }
-      scene.getObjectByName("indicator")!.visible = false;
-    }
+  interface VoxelRayHit {
+    x: number;
+    y: number;
+    z: number;
+    normal: THREE.Vector3;
+    point: THREE.Vector3;
   }
 
-  const raycaster = new THREE.Raycaster();
-  const pointer = new THREE.Vector2(0.5 * 2 - 1, -0.5 * 2 + 1);
+  function castCameraRay(): VoxelRayHit | null {
+    camera.getWorldDirection(rayDirection);
+    const hit = castVoxelRay(
+      [camera.position.x, camera.position.y, camera.position.z],
+      [rayDirection.x, rayDirection.y, rayDirection.z],
+      (x, y, z) => {
+        const block = getBlock(x, y, z);
+        return block !== null && block !== BlockType.AIR;
+      },
+      MAX_REACH_IN_BLOCKS,
+      () => raycastStepsRef.current++,
+    );
+    if (!hit) return null;
+    return {
+      x: hit.cell[0],
+      y: hit.cell[1],
+      z: hit.cell[2],
+      normal: new THREE.Vector3(...hit.faceNormal),
+      point: new THREE.Vector3(...hit.point),
+    };
+  }
+
+  function updateIndicatorUnprofiled() {
+    if (playerControlsRef.current?.controls.isLocked || playerControlsRef.current?.isMobile) {
+      const indicator = scene.getObjectByName("indicator") as THREE.LineSegments;
+      const hit = castCameraRay();
+      if (!hit) {
+        indicator.visible = false;
+        return;
+      }
+      const { scale, offset } = getBoundingBox(getBlock(hit.x, hit.y, hit.z) as BlockType);
+      indicator.position.set(hit.x + offset[0], hit.y + offset[1], hit.z + offset[2]);
+      indicator.scale.set(scale[0], scale[1], scale[2]);
+      indicator.visible = true;
+    }
+  }
 
   function placeBlock(type: BlockType) {
     const scopeToken = profiler.begin("main.edit.placeBlock");
@@ -1477,182 +1463,144 @@ export default function Game() {
 
   function placeBlockUnprofiled(type: BlockType) {
     if (playerControlsRef.current?.controls.isLocked || playerControlsRef.current?.isMobile) {
-      raycaster.setFromCamera(pointer, camera);
+      const hit = castCameraRay();
+      if (!hit) return;
+      const { x, y, z } = hit;
+      const faceNormal = hit.normal;
+      const hitBlock = getBlock(x, y, z);
 
-      const intersections = raycaster.intersectObjects(
-        scene.children.filter((obj) => obj.name !== "indicator"),
+      let newBlockX = x + faceNormal.x;
+      let newBlockY = y + faceNormal.y;
+      let newBlockZ = z + faceNormal.z;
+
+      if (hitBlock && isReplaceable(hitBlock)) {
+        newBlockX = x;
+        newBlockY = y;
+        newBlockZ = z;
+      }
+
+      if (
+        getBlock(newBlockX, newBlockY, newBlockZ) !== BlockType.AIR &&
+        !isReplaceable(getBlock(newBlockX, newBlockY, newBlockZ)!)
+      )
+        return;
+
+      const blockBox = new THREE.Box3(
+        new THREE.Vector3(
+          newBlockX - 0.5,
+          newBlockY - 0.5,
+          newBlockZ - 0.5,
+        ),
+        new THREE.Vector3(
+          newBlockX + 0.5,
+          newBlockY + 0.5,
+          newBlockZ + 0.5,
+        ),
       );
 
-      let faceNormal = new THREE.Vector3();
-      if (intersections && intersections.length > 0) {
-        faceNormal = intersections[0].face!.normal;
-      } else {
+      const playerBox = playerControlsRef.current!.getPlayerBox().clone();
+
+      const blockBelow = getBlock(newBlockX, newBlockY - 1, newBlockZ);
+      const isBlockBelowCollidable =
+        blockBelow !== null && !NON_COLLIDABLE_BLOCKS.includes(blockBelow);
+
+      if (!isBlockBelowCollidable) {
+        // Shrink box for placement check to allow placing blocks while on edge
+        playerBox.min.x += 0.2;
+        playerBox.max.x -= 0.2;
+        playerBox.min.z += 0.2;
+        playerBox.max.z -= 0.2;
+        playerBox.min.y += 0.1;
+        playerBox.max.y -= 0.1;
+      }
+
+      if (blockBox.intersectsBox(playerBox)) return;
+
+      // Handle slab stacking
+      const targetBlock = getBlock(x, y, z);
+      if (
+        targetBlock === type &&
+        (type === BlockType.PLANKS_SLAB ||
+          type === BlockType.COBBLESTONE_SLAB ||
+          type === BlockType.STONE_SLAB)
+      ) {
+        if (faceNormal.y === 1) {
+          // Stacking on top of a slab -> Full block
+          let fullBlockType = BlockType.PLANKS;
+          if (type === BlockType.COBBLESTONE_SLAB)
+            fullBlockType = BlockType.COBBLESTONE;
+          if (type === BlockType.STONE_SLAB)
+            fullBlockType = BlockType.STONE;
+
+          setBlock(x, y, z, fullBlockType);
+          updateIndicator();
+          return;
+        }
+      }
+
+      // Handle top slab placement
+      if (
+        type === BlockType.PLANKS_SLAB ||
+        type === BlockType.COBBLESTONE_SLAB ||
+        type === BlockType.STONE_SLAB
+      ) {
+        // Check if we are placing on the top half of a block
+        const point = hit.point;
+        // Calculate relative Y position within the block
+        // The block center is at x, y, z. The block bounds are [y-0.5, y+0.5]
+        // But wait, x,y,z are integers.
+        // If we clicked on a face, we need to know which block we clicked.
+        // intersections[0].point is in world coordinates.
+
+        // If we clicked on the side of a block
+        if (faceNormal.y === 0) {
+          const relativeY = point.y - (y - 0.5);
+          if (relativeY > 0.5) {
+            if (type === BlockType.PLANKS_SLAB)
+              type = BlockType.PLANKS_SLAB_TOP;
+            if (type === BlockType.COBBLESTONE_SLAB)
+              type = BlockType.COBBLESTONE_SLAB_TOP;
+            if (type === BlockType.STONE_SLAB)
+              type = BlockType.STONE_SLAB_TOP;
+          }
+        } else if (faceNormal.y === -1) {
+          // Clicking on the bottom face of a block -> Top Slab
+          if (type === BlockType.PLANKS_SLAB)
+            type = BlockType.PLANKS_SLAB_TOP;
+          if (type === BlockType.COBBLESTONE_SLAB)
+            type = BlockType.COBBLESTONE_SLAB_TOP;
+          if (type === BlockType.STONE_SLAB)
+            type = BlockType.STONE_SLAB_TOP;
+        }
+      }
+
+      // Handle stacking for top slabs (placing a bottom slab on a top slab)
+      const targetBlockForTopSlab = getBlock(
+        newBlockX,
+        newBlockY,
+        newBlockZ,
+      );
+      if (
+        (targetBlockForTopSlab === BlockType.PLANKS_SLAB_TOP &&
+          type === BlockType.PLANKS_SLAB) ||
+        (targetBlockForTopSlab === BlockType.COBBLESTONE_SLAB_TOP &&
+          type === BlockType.COBBLESTONE_SLAB) ||
+        (targetBlockForTopSlab === BlockType.STONE_SLAB_TOP &&
+          type === BlockType.STONE_SLAB)
+      ) {
+        let fullBlockType = BlockType.PLANKS;
+        if (type === BlockType.COBBLESTONE_SLAB)
+          fullBlockType = BlockType.COBBLESTONE;
+        if (type === BlockType.STONE_SLAB) fullBlockType = BlockType.STONE;
+
+        setBlock(newBlockX, newBlockY, newBlockZ, fullBlockType);
+        updateIndicator();
         return;
       }
 
-      let cameraDirection: THREE.Vector3 = new THREE.Vector3();
-      camera.getWorldDirection(cameraDirection);
-      cameraDirection.normalize();
-      cameraDirection.multiplyScalar(0.02);
+      setBlock(newBlockX, newBlockY, newBlockZ, type);
 
-      let currentPoint = new THREE.Vector3(
-        camera.position.x,
-        camera.position.y,
-        camera.position.z,
-      );
-      let x = 0;
-      let y = 0;
-      let z = 0;
-      for (let step = 0; step < 5 * 50; step++) {
-        raycastStepsRef.current++;
-        x = Math.round(currentPoint.x);
-        y = Math.round(currentPoint.y);
-        z = Math.round(currentPoint.z);
-
-        currentPoint = currentPoint.add(
-          new THREE.Vector3(
-            cameraDirection.x,
-            cameraDirection.y,
-            cameraDirection.z,
-          ),
-        );
-        const hitBlock = getBlock(x, y, z);
-        if (hitBlock !== BlockType.AIR) {
-          let newBlockX = x + faceNormal.x;
-          let newBlockY = y + faceNormal.y;
-          let newBlockZ = z + faceNormal.z;
-
-          if (hitBlock && isReplaceable(hitBlock)) {
-            newBlockX = x;
-            newBlockY = y;
-            newBlockZ = z;
-          }
-
-          if (
-            getBlock(newBlockX, newBlockY, newBlockZ) !== BlockType.AIR &&
-            !isReplaceable(getBlock(newBlockX, newBlockY, newBlockZ)!)
-          )
-            return;
-
-          const blockBox = new THREE.Box3(
-            new THREE.Vector3(
-              newBlockX - 0.5,
-              newBlockY - 0.5,
-              newBlockZ - 0.5,
-            ),
-            new THREE.Vector3(
-              newBlockX + 0.5,
-              newBlockY + 0.5,
-              newBlockZ + 0.5,
-            ),
-          );
-
-          const playerBox = playerControlsRef.current!.getPlayerBox().clone();
-
-          const blockBelow = getBlock(newBlockX, newBlockY - 1, newBlockZ);
-          const isBlockBelowCollidable =
-            blockBelow !== null && !NON_COLLIDABLE_BLOCKS.includes(blockBelow);
-
-          if (!isBlockBelowCollidable) {
-            // Shrink box for placement check to allow placing blocks while on edge
-            playerBox.min.x += 0.2;
-            playerBox.max.x -= 0.2;
-            playerBox.min.z += 0.2;
-            playerBox.max.z -= 0.2;
-            playerBox.min.y += 0.1;
-            playerBox.max.y -= 0.1;
-          }
-
-          if (blockBox.intersectsBox(playerBox)) return;
-
-          // Handle slab stacking
-          const targetBlock = getBlock(x, y, z);
-          if (
-            targetBlock === type &&
-            (type === BlockType.PLANKS_SLAB ||
-              type === BlockType.COBBLESTONE_SLAB ||
-              type === BlockType.STONE_SLAB)
-          ) {
-            if (faceNormal.y === 1) {
-              // Stacking on top of a slab -> Full block
-              let fullBlockType = BlockType.PLANKS;
-              if (type === BlockType.COBBLESTONE_SLAB)
-                fullBlockType = BlockType.COBBLESTONE;
-              if (type === BlockType.STONE_SLAB)
-                fullBlockType = BlockType.STONE;
-
-              setBlock(x, y, z, fullBlockType);
-              updateIndicator();
-              return;
-            }
-          }
-
-          // Handle top slab placement
-          if (
-            type === BlockType.PLANKS_SLAB ||
-            type === BlockType.COBBLESTONE_SLAB ||
-            type === BlockType.STONE_SLAB
-          ) {
-            // Check if we are placing on the top half of a block
-            const point = intersections[0].point;
-            // Calculate relative Y position within the block
-            // The block center is at x, y, z. The block bounds are [y-0.5, y+0.5]
-            // But wait, x,y,z are integers.
-            // If we clicked on a face, we need to know which block we clicked.
-            // intersections[0].point is in world coordinates.
-
-            // If we clicked on the side of a block
-            if (faceNormal.y === 0) {
-              const relativeY = point.y - (y - 0.5);
-              if (relativeY > 0.5) {
-                if (type === BlockType.PLANKS_SLAB)
-                  type = BlockType.PLANKS_SLAB_TOP;
-                if (type === BlockType.COBBLESTONE_SLAB)
-                  type = BlockType.COBBLESTONE_SLAB_TOP;
-                if (type === BlockType.STONE_SLAB)
-                  type = BlockType.STONE_SLAB_TOP;
-              }
-            } else if (faceNormal.y === -1) {
-              // Clicking on the bottom face of a block -> Top Slab
-              if (type === BlockType.PLANKS_SLAB)
-                type = BlockType.PLANKS_SLAB_TOP;
-              if (type === BlockType.COBBLESTONE_SLAB)
-                type = BlockType.COBBLESTONE_SLAB_TOP;
-              if (type === BlockType.STONE_SLAB)
-                type = BlockType.STONE_SLAB_TOP;
-            }
-          }
-
-          // Handle stacking for top slabs (placing a bottom slab on a top slab)
-          const targetBlockForTopSlab = getBlock(
-            newBlockX,
-            newBlockY,
-            newBlockZ,
-          );
-          if (
-            (targetBlockForTopSlab === BlockType.PLANKS_SLAB_TOP &&
-              type === BlockType.PLANKS_SLAB) ||
-            (targetBlockForTopSlab === BlockType.COBBLESTONE_SLAB_TOP &&
-              type === BlockType.COBBLESTONE_SLAB) ||
-            (targetBlockForTopSlab === BlockType.STONE_SLAB_TOP &&
-              type === BlockType.STONE_SLAB)
-          ) {
-            let fullBlockType = BlockType.PLANKS;
-            if (type === BlockType.COBBLESTONE_SLAB)
-              fullBlockType = BlockType.COBBLESTONE;
-            if (type === BlockType.STONE_SLAB) fullBlockType = BlockType.STONE;
-
-            setBlock(newBlockX, newBlockY, newBlockZ, fullBlockType);
-            updateIndicator();
-            return;
-          }
-
-          setBlock(newBlockX, newBlockY, newBlockZ, type);
-
-          updateIndicator();
-          break;
-        }
-      }
+      updateIndicator();
     }
   }
 
@@ -1668,193 +1616,133 @@ export default function Game() {
 
   function breakBlockUnprofiled() {
     if (playerControlsRef.current?.controls.isLocked || playerControlsRef.current?.isMobile) {
-      let cameraDirection: THREE.Vector3 = new THREE.Vector3();
-      camera.getWorldDirection(cameraDirection);
-      cameraDirection.normalize();
-      cameraDirection.multiplyScalar(0.02);
-
-      let currentPoint = new THREE.Vector3(
-        camera.position.x,
-        camera.position.y,
-        camera.position.z,
-      );
-
-      for (let step = 0; step < 5 * 50; step++) {
-        raycastStepsRef.current++;
-        const x = Math.round(currentPoint.x);
-        const y = Math.round(currentPoint.y);
-        const z = Math.round(currentPoint.z);
-
-        currentPoint = currentPoint.add(
-          new THREE.Vector3(
-            cameraDirection.x,
-            cameraDirection.y,
-            cameraDirection.z,
-          ),
-        );
-        if (getBlock(x, y, z) !== BlockType.AIR) {
-          setBlock(x, y, z, BlockType.AIR);
-          break;
-        }
-      }
+      const hit = castCameraRay();
+      if (hit) setBlock(hit.x, hit.y, hit.z, BlockType.AIR);
     }
-  }
-
-  function addMeshToScene(mesh: THREE.Mesh) {
-    const scopeToken = profiler.begin("main.chunk.sceneAdd");
-    scene.add(mesh);
-    profiler.end(scopeToken);
   }
 
   function recordChunkGeometryStats(
     chunkName: string,
-    kind: "opaque" | "transparent",
-    geometry: {
-      positions: ArrayBuffer;
-      normals: ArrayBuffer;
-      indices: ArrayBuffer;
-      uvs: ArrayBuffer;
-      textureIndices: ArrayBuffer;
-      lightLevels: ArrayBuffer;
-      ambientOcclusion: ArrayBuffer;
+    kind: "opaque" | "transparent" | "plants",
+    stats: {
+      vertexCount: number;
+      bytesByAttribute: { [attribute: string]: number };
     },
   ) {
     if (!profiler.enabled) return;
-    const bytesByAttribute = {
-      positions: geometry.positions.byteLength,
-      normals: geometry.normals.byteLength,
-      uvs: geometry.uvs.byteLength,
-      textureIndices: geometry.textureIndices.byteLength,
-      lightLevels: geometry.lightLevels.byteLength,
-      ambientOcclusion: geometry.ambientOcclusion.byteLength,
-      indices: geometry.indices.byteLength,
-    };
     profiler.recordMesh(chunkName, {
       kind,
-      vertexCount: geometry.positions.byteLength / 12,
-      triangleCount: geometry.indices.byteLength / 12,
-      bytesByAttribute,
+      vertexCount: stats.vertexCount,
+      triangleCount: stats.vertexCount / 2,
+      bytesByAttribute: stats.bytesByAttribute,
     });
     profiler.recordBytes(
       "bytes.geometry.toGpu",
-      Object.values(bytesByAttribute).reduce((sum, bytes) => sum + bytes, 0),
+      Object.values(stats.bytesByAttribute).reduce((sum, bytes) => sum + bytes, 0),
     );
   }
 
+  function placeChunkMesh(
+    geometry: THREE.BufferGeometry,
+    material: THREE.ShaderMaterial,
+    name: string,
+    renderOrder: number,
+    chunkX: number,
+    chunkY: number,
+    chunkZ: number,
+  ): THREE.Mesh {
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.position.set(
+      chunkX * CHUNK_WIDTH - 0.5,
+      chunkY * CHUNK_HEIGHT - 0.5,
+      chunkZ * CHUNK_LENGTH - 0.5,
+    );
+    mesh.matrixAutoUpdate = false;
+    mesh.updateMatrix();
+    mesh.frustumCulled = true;
+    mesh.name = name;
+    mesh.renderOrder = renderOrder;
+    const sceneAddToken = profiler.begin("main.chunk.sceneAdd");
+    scene.add(mesh);
+    profiler.end(sceneAddToken);
+    return mesh;
+  }
+
   function addChunkMesh(
-    opaque: {
-      positions: ArrayBuffer;
-      normals: ArrayBuffer;
-      indices: ArrayBuffer;
-      uvs: ArrayBuffer;
-      textureIndices: ArrayBuffer;
-      lightLevels: ArrayBuffer;
-      ambientOcclusion: ArrayBuffer;
-    },
-    transparent: {
-      positions: ArrayBuffer;
-      normals: ArrayBuffer;
-      indices: ArrayBuffer;
-      uvs: ArrayBuffer;
-      textureIndices: ArrayBuffer;
-      lightLevels: ArrayBuffer;
-      ambientOcclusion: ArrayBuffer;
-    },
+    meshResult: ChunkMeshResult,
     chunkName: string,
     chunkX: number,
     chunkY: number,
     chunkZ: number,
   ) {
-    if (!materialsRef.current.opaque || !materialsRef.current.transparent)
-      return;
+    const { opaque, transparent, plants } = materialsRef.current;
+    if (!opaque || !transparent || !plants) return;
 
+    pruneChunkMesh(chunkName);
     const buildGeometryToken = profiler.begin("main.chunk.buildGeometry");
-    recordChunkGeometryStats(chunkName, "opaque", opaque);
-    recordChunkGeometryStats(chunkName, "transparent", transparent);
+    const meshes: THREE.Mesh[] = [];
 
-    // Opaque Mesh
-    const opaqueGeometry = new THREE.BufferGeometry();
-    opaqueGeometry.setAttribute(
-      "position",
-      new THREE.Float32BufferAttribute(opaque.positions, 3),
-    );
-    opaqueGeometry.setAttribute(
-      "normal",
-      new THREE.Float32BufferAttribute(opaque.normals, 3),
-    );
-    opaqueGeometry.setAttribute(
-      "uv",
-      new THREE.Float32BufferAttribute(opaque.uvs, 2),
-    );
-    opaqueGeometry.setAttribute(
-      "textureIndex",
-      new THREE.Int32BufferAttribute(opaque.textureIndices, 1),
-    );
-    opaqueGeometry.setAttribute(
-      "lightLevel",
-      new THREE.Float32BufferAttribute(opaque.lightLevels, 1),
-    );
-    opaqueGeometry.setAttribute(
-      "ambientOcclusion",
-      new THREE.Float32BufferAttribute(opaque.ambientOcclusion, 1),
-    );
-    opaqueGeometry.setIndex(new THREE.Uint32BufferAttribute(opaque.indices, 1));
-    const opaqueMesh = new THREE.Mesh(
-      opaqueGeometry,
-      materialsRef.current.opaque,
-    );
-    opaqueMesh.translateX(chunkX * CHUNK_WIDTH - 0.5);
-    opaqueMesh.translateY(chunkY * CHUNK_HEIGHT - 0.5);
-    opaqueMesh.translateZ(chunkZ * CHUNK_LENGTH - 0.5);
+    const opaqueGeometry = createChunkSurfaceGeometry(meshResult.opaque);
+    if (opaqueGeometry) {
+      recordChunkGeometryStats(chunkName, "opaque", {
+        vertexCount: meshResult.opaque.byteLength / 8,
+        bytesByAttribute: { packedVertices: meshResult.opaque.byteLength },
+      });
+      meshes.push(
+        placeChunkMesh(opaqueGeometry, opaque, chunkName, 0, chunkX, chunkY, chunkZ),
+      );
+    }
 
-    opaqueMesh.frustumCulled = true;
-    opaqueMesh.name = chunkName;
-    opaqueMesh.renderOrder = 0;
+    const transparentGeometry = createChunkSurfaceGeometry(meshResult.transparent);
+    if (transparentGeometry) {
+      recordChunkGeometryStats(chunkName, "transparent", {
+        vertexCount: meshResult.transparent.byteLength / 8,
+        bytesByAttribute: { packedVertices: meshResult.transparent.byteLength },
+      });
+      meshes.push(
+        placeChunkMesh(
+          transparentGeometry,
+          transparent,
+          chunkName + "_transparent",
+          1,
+          chunkX,
+          chunkY,
+          chunkZ,
+        ),
+      );
+    }
 
-    addMeshToScene(opaqueMesh);
+    let plantVertexCount = 0;
+    let plantInstanceBytes = 0;
+    for (const batch of meshResult.plants) {
+      const plantGeometry = createPlantInstanceGeometry(
+        batch.blockType,
+        batch.instances,
+      );
+      if (!plantGeometry) continue;
+      plantVertexCount +=
+        (batch.instances.byteLength / 4) * plantTemplateVertexCount(batch.blockType);
+      plantInstanceBytes += batch.instances.byteLength;
+      meshes.push(
+        placeChunkMesh(
+          plantGeometry,
+          plants,
+          `${chunkName}_plant_${batch.blockType}`,
+          0,
+          chunkX,
+          chunkY,
+          chunkZ,
+        ),
+      );
+    }
+    if (plantInstanceBytes > 0) {
+      recordChunkGeometryStats(chunkName, "plants", {
+        vertexCount: plantVertexCount,
+        bytesByAttribute: { plantInstances: plantInstanceBytes },
+      });
+    }
 
-    // Transparent Mesh
-    const transparentGeometry = new THREE.BufferGeometry();
-    transparentGeometry.setAttribute(
-      "position",
-      new THREE.Float32BufferAttribute(transparent.positions, 3),
-    );
-    transparentGeometry.setAttribute(
-      "normal",
-      new THREE.Float32BufferAttribute(transparent.normals, 3),
-    );
-    transparentGeometry.setAttribute(
-      "uv",
-      new THREE.Float32BufferAttribute(transparent.uvs, 2),
-    );
-    transparentGeometry.setAttribute(
-      "textureIndex",
-      new THREE.Int32BufferAttribute(transparent.textureIndices, 1),
-    );
-    transparentGeometry.setAttribute(
-      "lightLevel",
-      new THREE.Float32BufferAttribute(transparent.lightLevels, 1),
-    );
-    transparentGeometry.setAttribute(
-      "ambientOcclusion",
-      new THREE.Float32BufferAttribute(transparent.ambientOcclusion, 1),
-    );
-    transparentGeometry.setIndex(
-      new THREE.Uint32BufferAttribute(transparent.indices, 1),
-    );
-    const transparentMesh = new THREE.Mesh(
-      transparentGeometry,
-      materialsRef.current.transparent,
-    );
-    transparentMesh.translateX(chunkX * CHUNK_WIDTH - 0.5);
-    transparentMesh.translateY(chunkY * CHUNK_HEIGHT - 0.5);
-    transparentMesh.translateZ(chunkZ * CHUNK_LENGTH - 0.5);
-
-    transparentMesh.frustumCulled = true;
-    transparentMesh.name = chunkName + "_transparent";
-    transparentMesh.renderOrder = 1;
-
-    addMeshToScene(transparentMesh);
+    chunkMeshesRef.current.set(chunkName, meshes);
     profiler.end(buildGeometryToken);
   }
 
@@ -2401,80 +2289,70 @@ export default function Game() {
     return { borders, borderLights };
   }
 
+  function collectBorderBuffers(
+    ...borderGroups: { [face: string]: ArrayBuffer | undefined }[]
+  ): ArrayBuffer[] {
+    return borderGroups.flatMap((group) =>
+      Object.values(group).filter((buffer): buffer is ArrayBuffer => !!buffer),
+    );
+  }
+
+  // Several neighbors finishing in a row each ask for a re-mesh of the same chunk.
+  // Only one request waits per chunk, and it reads the newest data when a worker is free.
   function regenerateChunkMesh(chunkX: number, chunkY: number, chunkZ: number) {
-    if (materialsRef.current.opaque && materialsRef.current.transparent) {
-      const chunkName = generateChunkName(chunkX, chunkY, chunkZ);
-      const currentVersion = chunkVersions.current[chunkName];
-
-      if (!lightChunks.current[chunkName]) return;
-
-      profiler.addCounter("game.mesh.regenerations");
-      const regenerateToken = profiler.begin("main.chunk.regenerateBookkeeping");
-      const { borders, borderLights } = getChunkBorders(chunkX, chunkY, chunkZ);
-
-      meshWorkerPool
-        .exec("generateMesh", [
-          chunks.current[chunkName],
-          lightChunks.current[chunkName].buffer,
-          borders,
-          borderLights,
-          seedRef.current,
-          chunkX,
-          chunkY,
-          chunkZ,
-        ])
-        .then(
-          ({
-            opaque,
-            transparent,
-          }: {
-            opaque: {
-              positions: ArrayBuffer;
-              normals: ArrayBuffer;
-              indices: ArrayBuffer;
-              uvs: ArrayBuffer;
-              textureIndices: ArrayBuffer;
-              lightLevels: ArrayBuffer;
-              ambientOcclusion: ArrayBuffer;
-            };
-            transparent: {
-              positions: ArrayBuffer;
-              normals: ArrayBuffer;
-              indices: ArrayBuffer;
-              uvs: ArrayBuffer;
-              textureIndices: ArrayBuffer;
-              lightLevels: ArrayBuffer;
-              ambientOcclusion: ArrayBuffer;
-            };
-          }) => {
-            if (chunkVersions.current[chunkName] === currentVersion) {
-              pruneChunkMesh(chunkName);
-              addChunkMesh(
-                opaque,
-                transparent,
-                chunkName,
-                chunkX,
-                chunkY,
-                chunkZ,
-              );
-              const editStartedAtMs =
-                pendingEditStartedAtRef.current.get(chunkName);
-              if (editStartedAtMs !== undefined) {
-                pendingEditStartedAtRef.current.delete(chunkName);
-                profiler.recordTimer(
-                  "chunk.pipeline.edit",
-                  profiler.now() - editStartedAtMs,
-                  "latency",
-                );
-              }
-            }
-          },
-        )
-        .catch((err) => {
-          console.error(err);
-        });
-      profiler.end(regenerateToken);
+    if (!materialsRef.current.opaque || !materialsRef.current.transparent) return;
+    const chunkName = generateChunkName(chunkX, chunkY, chunkZ);
+    if (!lightChunks.current[chunkName]) return;
+    if (queuedMeshRequestsRef.current.has(chunkName)) {
+      profiler.addCounter("game.mesh.regenerationsMerged");
+      return;
     }
+    queuedMeshRequestsRef.current.add(chunkName);
+    profiler.addCounter("game.mesh.regenerations");
+
+    let versionAtDispatch = chunkVersions.current[chunkName];
+    meshWorkerPool
+      .execLazy("generateMesh", () => {
+        queuedMeshRequestsRef.current.delete(chunkName);
+        const chunk = chunks.current[chunkName];
+        const light = lightChunks.current[chunkName];
+        if (!chunk || !light) return null;
+
+        versionAtDispatch = chunkVersions.current[chunkName];
+        const regenerateToken = profiler.begin("main.chunk.regenerateBookkeeping");
+        const { borders, borderLights } = getChunkBorders(chunkX, chunkY, chunkZ);
+        profiler.end(regenerateToken);
+        return {
+          params: [
+            chunk,
+            light.buffer,
+            borders,
+            borderLights,
+            seedRef.current,
+            chunkX,
+            chunkY,
+            chunkZ,
+          ],
+          transfer: collectBorderBuffers(borders, borderLights),
+        };
+      })
+      .then((meshResult: ChunkMeshResult | null) => {
+        if (!meshResult) return;
+        if (chunkVersions.current[chunkName] !== versionAtDispatch) return;
+        addChunkMesh(meshResult, chunkName, chunkX, chunkY, chunkZ);
+        const editStartedAtMs = pendingEditStartedAtRef.current.get(chunkName);
+        if (editStartedAtMs !== undefined) {
+          pendingEditStartedAtRef.current.delete(chunkName);
+          profiler.recordTimer(
+            "chunk.pipeline.edit",
+            profiler.now() - editStartedAtMs,
+            "latency",
+          );
+        }
+      })
+      .catch((err) => {
+        console.error(err);
+      });
   }
 
   function generateChunkName(chunkX: number, chunkY: number, chunkZ: number) {
@@ -2486,22 +2364,13 @@ export default function Game() {
   function pruneChunkMesh(chunkName: string) {
     const disposeToken = profiler.begin("main.chunk.dispose");
     profiler.removeMesh(chunkName);
-    let mesh = scene.getObjectByName(chunkName) as THREE.Mesh;
-    while (mesh) {
-      mesh.geometry.dispose();
-      mesh.removeFromParent();
-      mesh = scene.getObjectByName(chunkName) as THREE.Mesh;
-    }
-
-    let transparentMesh = scene.getObjectByName(
-      chunkName + "_transparent",
-    ) as THREE.Mesh;
-    while (transparentMesh) {
-      transparentMesh.geometry.dispose();
-      transparentMesh.removeFromParent();
-      transparentMesh = scene.getObjectByName(
-        chunkName + "_transparent",
-      ) as THREE.Mesh;
+    const meshes = chunkMeshesRef.current.get(chunkName);
+    if (meshes) {
+      for (const mesh of meshes) {
+        releaseChunkGeometry(mesh.geometry);
+        mesh.removeFromParent();
+      }
+      chunkMeshesRef.current.delete(chunkName);
     }
     profiler.end(disposeToken);
   }

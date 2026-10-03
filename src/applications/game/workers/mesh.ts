@@ -16,1221 +16,750 @@ import {
   CHUNK_WIDTH,
 } from "@/applications/game/config";
 
-import { getSurfaceHeight } from "./generation";
-// @ts-ignore
-import FastNoiseLite from "fastnoise-lite";
+import { createSurfaceHeightSampler } from "./generation";
 
 import { calculateOffset } from "../utils";
-import { emitPlantVoxels, isPlantVoxelBlock } from "./plant-voxels";
+import { isPlantVoxelBlock } from "./plant-voxels";
 import {
   addWorkerCounter,
   endWorkerSection,
   startWorkerSection,
 } from "../profiler/worker-recorder";
-
-const NON_OCCLUDING_BLOCKS = new Set<BlockType>([
-  BlockType.AIR,
-  ...TRANSPARENT_BLOCKS,
-  ...TRANSLUCENT_BLOCKS,
-]);
+import {
+  PLANT_NEIGHBOR_DIRECTIONS,
+  POSITION_UNITS_PER_BLOCK,
+  UV_UNITS_PER_TEXTURE,
+  packPlantInstance,
+  packPositionWord,
+  packSurfaceWord,
+} from "../vertex-format";
+import type { ChunkFaceBuffers, ChunkMeshResult, PlantInstanceBatch } from "./mesh-types";
+import { VertexStream } from "./vertex-stream";
 
 const FULLY_LIT_AMBIENT_OCCLUSION = 3;
+const BLOCK_ID_COUNT = 256;
+
+function buildBlockLookup(isMember: (block: BlockType) => boolean): Uint8Array {
+  const lookup = new Uint8Array(BLOCK_ID_COUNT);
+  for (let block = 0; block < BLOCK_ID_COUNT; block++) lookup[block] = isMember(block) ? 1 : 0;
+  return lookup;
+}
+
+const IS_TRANSPARENT = buildBlockLookup((block) => TRANSPARENT_BLOCKS.includes(block));
+const IS_TRANSLUCENT = buildBlockLookup((block) => TRANSLUCENT_BLOCKS.includes(block));
+const IS_SLAB = buildBlockLookup(isSlab);
+const IS_TOP_SLAB = buildBlockLookup(isTopSlab);
+const IS_WATER = buildBlockLookup(isWater);
+const OCCLUDES_AMBIENT_LIGHT = buildBlockLookup(
+  (block) =>
+    block !== BlockType.AIR && !TRANSPARENT_BLOCKS.includes(block) && !TRANSLUCENT_BLOCKS.includes(block)
+);
+const RECEIVES_AMBIENT_OCCLUSION = buildBlockLookup(
+  (block) => !TRANSLUCENT_BLOCKS.includes(block) && !isSlab(block)
+);
+
+// A texture index of 0 is the invalid texture, so a falsy face texture falls back
+// to the side texture and then the default, as the face tables always did.
+function buildFaceTextureLookup(faceKey: "TOP_FACE" | "BOTTOM_FACE" | "FRONT_FACE" | "BACK_FACE" | "LEFT_FACE" | "RIGHT_FACE", fallsBackToSides: boolean): Uint8Array {
+  const lookup = new Uint8Array(BLOCK_ID_COUNT);
+  for (let block = 0; block < BLOCK_ID_COUNT; block++) {
+    const textures = BLOCK_TEXTURES[block];
+    if (!textures) continue;
+    const defaultTexture = textures.DEFAULT ?? 0;
+    const faceTexture = textures[faceKey];
+    if (faceTexture) lookup[block] = faceTexture;
+    else if (fallsBackToSides && textures.SIDES) lookup[block] = textures.SIDES;
+    else lookup[block] = defaultTexture;
+  }
+  return lookup;
+}
+
+// Face order: up, down, front (+z), back (-z), left (-x), right (+x).
+const FACE_UP = 0;
+const FACE_DOWN = 1;
+const FACE_COUNT = 6;
+const FACE_TEXTURES = [
+  buildFaceTextureLookup("TOP_FACE", false),
+  buildFaceTextureLookup("BOTTOM_FACE", false),
+  buildFaceTextureLookup("FRONT_FACE", true),
+  buildFaceTextureLookup("BACK_FACE", true),
+  buildFaceTextureLookup("LEFT_FACE", true),
+  buildFaceTextureLookup("RIGHT_FACE", true),
+];
+const FACE_NORMALS: number[][] = [
+  [0, 1, 0],
+  [0, -1, 0],
+  [0, 0, 1],
+  [0, 0, -1],
+  [-1, 0, 0],
+  [1, 0, 0],
+];
+
+// Corner flags per face: x, y (0 = bottom of the block, 1 = top), z.
+const FACE_CORNERS: number[][][] = [
+  [[0, 1, 1], [1, 1, 1], [0, 1, 0], [1, 1, 0]],
+  [[1, 0, 1], [0, 0, 1], [1, 0, 0], [0, 0, 0]],
+  [[0, 0, 1], [1, 0, 1], [0, 1, 1], [1, 1, 1]],
+  [[1, 0, 0], [0, 0, 0], [1, 1, 0], [0, 1, 0]],
+  [[0, 1, 0], [0, 0, 0], [0, 1, 1], [0, 0, 1]],
+  [[1, 1, 1], [1, 0, 1], [1, 1, 0], [1, 0, 0]],
+];
+
+// UV codes: 0 and 1 are the texture edges, 2 is the block's top row, 3 its bottom row.
+const UV_ZERO = 0;
+const UV_ONE = 1;
+const UV_ROW_TOP = 2;
+const UV_ROW_BOTTOM = 3;
+const FACE_UV_CODES: number[][][] = [
+  [[UV_ONE, UV_ONE], [UV_ZERO, UV_ONE], [UV_ONE, UV_ZERO], [UV_ZERO, UV_ZERO]],
+  [[UV_ONE, UV_ZERO], [UV_ZERO, UV_ZERO], [UV_ONE, UV_ONE], [UV_ZERO, UV_ONE]],
+  [[UV_ONE, UV_ROW_BOTTOM], [UV_ZERO, UV_ROW_BOTTOM], [UV_ONE, UV_ROW_TOP], [UV_ZERO, UV_ROW_TOP]],
+  [[UV_ONE, UV_ROW_BOTTOM], [UV_ZERO, UV_ROW_BOTTOM], [UV_ONE, UV_ROW_TOP], [UV_ZERO, UV_ROW_TOP]],
+  [[UV_ZERO, UV_ROW_TOP], [UV_ZERO, UV_ROW_BOTTOM], [UV_ONE, UV_ROW_TOP], [UV_ONE, UV_ROW_BOTTOM]],
+  [[UV_ZERO, UV_ROW_TOP], [UV_ZERO, UV_ROW_BOTTOM], [UV_ONE, UV_ROW_TOP], [UV_ONE, UV_ROW_BOTTOM]],
+];
+
+// The block grid is copied into an array padded by one block on every side so
+// every neighbor and ambient occlusion sample is a plain index, with no bounds
+// branches. Only face slabs of neighbor chunks exist, so cells diagonal across a
+// chunk edge stay empty and read as open air.
+const PADDED_WIDTH = CHUNK_WIDTH + 2;
+const PADDED_HEIGHT = CHUNK_HEIGHT + 2;
+const PADDED_LENGTH = CHUNK_LENGTH + 2;
+const STRIDE_X = PADDED_HEIGHT * PADDED_LENGTH;
+const STRIDE_Y = PADDED_LENGTH;
+const PADDED_VOLUME = PADDED_WIDTH * STRIDE_X;
+
+function paddedIndex(x: number, y: number, z: number): number {
+  return (x + 1) * STRIDE_X + (y + 1) * STRIDE_Y + (z + 1);
+}
+
+function paddedDelta(dx: number, dy: number, dz: number): number {
+  return dx * STRIDE_X + dy * STRIDE_Y + dz;
+}
+
+const FACE_NEIGHBOR_DELTAS = FACE_NORMALS.map(([dx, dy, dz]) => paddedDelta(dx, dy, dz));
+
+// For each face and corner, the paddedDelta of the two side blocks and the corner block
+// that darken that vertex (0 = fully boxed in, 3 = open).
+const AMBIENT_OCCLUSION_SAMPLE_DELTAS = FACE_NORMALS.map((normal, face) =>
+  FACE_CORNERS[face].map((corner) => {
+    const [firstTangent, secondTangent] = [0, 1, 2].filter((axis) => normal[axis] === 0);
+    const firstStep = [0, 0, 0];
+    firstStep[firstTangent] = corner[firstTangent] === 1 ? 1 : -1;
+    const secondStep = [0, 0, 0];
+    secondStep[secondTangent] = corner[secondTangent] === 1 ? 1 : -1;
+    return [
+      paddedDelta(
+        normal[0] + firstStep[0],
+        normal[1] + firstStep[1],
+        normal[2] + firstStep[2]
+      ),
+      paddedDelta(
+        normal[0] + secondStep[0],
+        normal[1] + secondStep[1],
+        normal[2] + secondStep[2]
+      ),
+      paddedDelta(
+        normal[0] + firstStep[0] + secondStep[0],
+        normal[1] + firstStep[1] + secondStep[1],
+        normal[2] + firstStep[2] + secondStep[2]
+      ),
+    ];
+  })
+);
+
+const PLANT_NEIGHBOR_DELTAS = PLANT_NEIGHBOR_DIRECTIONS.map(([dx, dy, dz]) =>
+  paddedDelta(dx, dy, dz)
+);
+
+const FACE_KIND_UP = 0;
+const FACE_KIND_DOWN = 1;
+const FACE_KIND_SIDE = 2;
+const FACE_KINDS = [FACE_KIND_UP, FACE_KIND_DOWN, FACE_KIND_SIDE, FACE_KIND_SIDE, FACE_KIND_SIDE, FACE_KIND_SIDE];
+
+function isFaceCulled(block: number, neighbor: number, faceKind: number): boolean {
+  if (neighbor === BlockType.AIR) return false;
+
+  // If I am a bottom slab, my top face is never covered by the block above
+  if (faceKind === FACE_KIND_UP && IS_SLAB[block] && !IS_TOP_SLAB[block]) return false;
+
+  // If I am a top slab, my bottom face is never covered by the block below
+  if (faceKind === FACE_KIND_DOWN && IS_TOP_SLAB[block]) return false;
+
+  // If the neighbor below is a bottom slab, it never covers my bottom face
+  if (faceKind === FACE_KIND_DOWN && IS_SLAB[neighbor] && !IS_TOP_SLAB[neighbor]) return false;
+
+  // If the neighbor above is a top slab, it never covers my top face
+  if (faceKind === FACE_KIND_UP && IS_TOP_SLAB[neighbor]) return false;
+
+  if (!IS_TRANSPARENT[neighbor]) return true;
+
+  if (IS_SLAB[block] && IS_SLAB[neighbor]) {
+    // Slabs only cull each other on the sides if they are the same type (both top or both bottom)
+    if (faceKind === FACE_KIND_SIDE) {
+      return IS_TOP_SLAB[block] === IS_TOP_SLAB[neighbor];
+    }
+  }
+
+  if (IS_WATER[block] && IS_WATER[neighbor]) return true;
+  if (block === BlockType.GLASS && neighbor === BlockType.GLASS) return true;
+
+  return false;
+}
+
+function fillPaddedBlocks(
+  paddedBlocks: Uint8Array,
+  chunk: Uint8Array,
+  borders: ChunkFaceBuffers
+) {
+  for (let x = 0; x < CHUNK_WIDTH; x++) {
+    for (let y = 0; y < CHUNK_HEIGHT; y++) {
+      const chunkRowStart = calculateOffset(x, y, 0);
+      paddedBlocks.set(
+        chunk.subarray(chunkRowStart, chunkRowStart + CHUNK_LENGTH),
+        paddedIndex(x, y, 0)
+      );
+    }
+  }
+  copyBorderSlabs(paddedBlocks, borders);
+}
+
+// Border layouts: top and bottom are [x * length + z], left and right are
+// [y * length + z], back and front are [x * height + y].
+function copyBorderSlabs(
+  target: Uint8Array,
+  borders: ChunkFaceBuffers,
+  valueMap?: Uint8Array
+) {
+  const left = borders.left ? new Uint8Array(borders.left) : undefined;
+  const right = borders.right ? new Uint8Array(borders.right) : undefined;
+  const bottom = borders.bottom ? new Uint8Array(borders.bottom) : undefined;
+  const top = borders.top ? new Uint8Array(borders.top) : undefined;
+  const back = borders.back ? new Uint8Array(borders.back) : undefined;
+  const front = borders.front ? new Uint8Array(borders.front) : undefined;
+  const map = (value: number) => (valueMap ? valueMap[value] : value);
+
+  if (left || right) {
+    for (let y = 0; y < CHUNK_HEIGHT; y++) {
+      for (let z = 0; z < CHUNK_LENGTH; z++) {
+        if (left) target[paddedIndex(-1, y, z)] = map(left[y * CHUNK_LENGTH + z]);
+        if (right) target[paddedIndex(CHUNK_WIDTH, y, z)] = map(right[y * CHUNK_LENGTH + z]);
+      }
+    }
+  }
+  if (bottom || top) {
+    for (let x = 0; x < CHUNK_WIDTH; x++) {
+      for (let z = 0; z < CHUNK_LENGTH; z++) {
+        if (bottom) target[paddedIndex(x, -1, z)] = map(bottom[x * CHUNK_LENGTH + z]);
+        if (top) target[paddedIndex(x, CHUNK_HEIGHT, z)] = map(top[x * CHUNK_LENGTH + z]);
+      }
+    }
+  }
+  if (back || front) {
+    for (let x = 0; x < CHUNK_WIDTH; x++) {
+      for (let y = 0; y < CHUNK_HEIGHT; y++) {
+        if (back) target[paddedIndex(x, y, -1)] = map(back[x * CHUNK_HEIGHT + y]);
+        if (front) target[paddedIndex(x, y, CHUNK_LENGTH)] = map(front[x * CHUNK_HEIGHT + y]);
+      }
+    }
+  }
+}
+
+const LIGHT_LEVEL_OF_PACKED_LIGHT = (() => {
+  const lookup = new Uint8Array(BLOCK_ID_COUNT);
+  for (let packed = 0; packed < BLOCK_ID_COUNT; packed++) {
+    lookup[packed] = Math.max((packed >> 4) & 0xf, packed & 0xf);
+  }
+  return lookup;
+})();
+
+// Same layout as fillPaddedBlocks, holding max(sky, block) light per cell.
+function fillPaddedLightLevels(
+  paddedLight: Uint8Array,
+  lightMap: Uint8Array,
+  borderLights: ChunkFaceBuffers
+) {
+  for (let x = 0; x < CHUNK_WIDTH; x++) {
+    for (let y = 0; y < CHUNK_HEIGHT; y++) {
+      const rowStart = calculateOffset(x, y, 0);
+      const paddedRowStart = paddedIndex(x, y, 0);
+      for (let z = 0; z < CHUNK_LENGTH; z++) {
+        paddedLight[paddedRowStart + z] = LIGHT_LEVEL_OF_PACKED_LIGHT[lightMap[rowStart + z]];
+      }
+    }
+  }
+  copyBorderSlabs(paddedLight, borderLights, LIGHT_LEVEL_OF_PACKED_LIGHT);
+}
+
+const EMPTY_RESULT = (): ChunkMeshResult => ({
+  opaque: new ArrayBuffer(0),
+  transparent: new ArrayBuffer(0),
+  plants: [],
+});
 
 export function generateMesh(
   _chunk: ArrayBuffer,
   _lightBuffer: ArrayBuffer,
-  borders: {
-    top?: ArrayBuffer;
-    bottom?: ArrayBuffer;
-    left?: ArrayBuffer;
-    right?: ArrayBuffer;
-    front?: ArrayBuffer;
-    back?: ArrayBuffer;
-  } = {},
-  borderLights: {
-    top?: ArrayBuffer;
-    bottom?: ArrayBuffer;
-    left?: ArrayBuffer;
-    right?: ArrayBuffer;
-    front?: ArrayBuffer;
-    back?: ArrayBuffer;
-  } = {},
+  borders: ChunkFaceBuffers = {},
+  borderLights: ChunkFaceBuffers = {},
   seed: number = 0,
   chunkX: number = 0,
   chunkY: number = 0,
   chunkZ: number = 0
-): {
-  opaque: {
-    positions: ArrayBuffer;
-    normals: ArrayBuffer;
-    indices: ArrayBuffer;
-    uvs: ArrayBuffer;
-    textureIndices: ArrayBuffer;
-    lightLevels: ArrayBuffer;
-    ambientOcclusion: ArrayBuffer;
-  };
-  transparent: {
-    positions: ArrayBuffer;
-    normals: ArrayBuffer;
-    indices: ArrayBuffer;
-    uvs: ArrayBuffer;
-    textureIndices: ArrayBuffer;
-    lightLevels: ArrayBuffer;
-    ambientOcclusion: ArrayBuffer;
-  };
-} {
-  const opaque = {
-    positions: [] as number[],
-    normals: [] as number[],
-    indices: [] as number[],
-    uvs: [] as number[],
-    textureIndices: [] as number[],
-    lightLevels: [] as number[],
-    ambientOcclusion: [] as number[],
-  };
-
-  const transparent = {
-    positions: [] as number[],
-    normals: [] as number[],
-    indices: [] as number[],
-    uvs: [] as number[],
-    textureIndices: [] as number[],
-    lightLevels: [] as number[],
-    ambientOcclusion: [] as number[],
-  };
-
+): ChunkMeshResult {
   startWorkerSection("unpackInputs");
   const chunk = new Uint8Array(_chunk);
   const lightMap = new Uint8Array(_lightBuffer);
 
-  // Convert ArrayBuffer borders to Uint8Array before passing to lighting
-  const topBorder = borders.top ? new Uint8Array(borders.top) : undefined;
-  const bottomBorder = borders.bottom
-    ? new Uint8Array(borders.bottom)
-    : undefined;
-  const leftBorder = borders.left ? new Uint8Array(borders.left) : undefined;
-  const rightBorder = borders.right ? new Uint8Array(borders.right) : undefined;
-  const frontBorder = borders.front ? new Uint8Array(borders.front) : undefined;
-  const backBorder = borders.back ? new Uint8Array(borders.back) : undefined;
+  let hasAnyBlock = false;
+  for (let index = 0; index < chunk.length; index++) {
+    if (chunk[index] !== BlockType.AIR) {
+      hasAnyBlock = true;
+      break;
+    }
+  }
+  if (!hasAnyBlock) {
+    endWorkerSection();
+    addWorkerCounter("blocksScanned", CHUNK_WIDTH * CHUNK_HEIGHT * CHUNK_LENGTH);
+    addWorkerCounter("emptyChunksSkipped", 1);
+    return EMPTY_RESULT();
+  }
 
-  // Convert ArrayBuffer borderLights to Uint8Array
-  const topBorderLight = borderLights.top
-    ? new Uint8Array(borderLights.top)
-    : undefined;
-  const bottomBorderLight = borderLights.bottom
-    ? new Uint8Array(borderLights.bottom)
-    : undefined;
-  const leftBorderLight = borderLights.left
-    ? new Uint8Array(borderLights.left)
-    : undefined;
-  const rightBorderLight = borderLights.right
-    ? new Uint8Array(borderLights.right)
-    : undefined;
-  const frontBorderLight = borderLights.front
-    ? new Uint8Array(borderLights.front)
-    : undefined;
-  const backBorderLight = borderLights.back
-    ? new Uint8Array(borderLights.back)
-    : undefined;
-
-  const noise = new FastNoiseLite(seed);
+  const paddedBlocks = new Uint8Array(PADDED_VOLUME);
+  fillPaddedBlocks(paddedBlocks, chunk, borders);
+  const paddedLight = new Uint8Array(PADDED_VOLUME);
+  fillPaddedLightLevels(paddedLight, lightMap, borderLights);
+  // Order matches FACE_NORMALS: up, down, front, back, left, right.
+  const hasLightBorderForFace = [
+    Boolean(borderLights.top),
+    Boolean(borderLights.bottom),
+    Boolean(borderLights.front),
+    Boolean(borderLights.back),
+    Boolean(borderLights.left),
+    Boolean(borderLights.right),
+  ];
   endWorkerSection();
+
+  const opaque = new VertexStream();
+  const transparent = new VertexStream();
+  const plantInstancesByBlock = new Map<number, number[]>();
 
   let solidBlocksVisited = 0;
   let facesCulled = 0;
-  let aoSamples = 0;
-  let plantVoxelsEmitted = 0;
-  let plantQuadsEmitted = 0;
+  let facesEmitted = 0;
+  let aoQuads = 0;
+  let plantInstancesEmitted = 0;
 
-  const shouldCullUncounted = (
-    block: BlockType,
-    neighbor: BlockType,
-    face: "UP" | "DOWN" | "SIDE"
+  let lookUpSurfaceHeight: ((x: number, z: number) => number) | undefined;
+  // Light for a face whose neighbor chunk is not loaded: sky above the terrain, else dimmed own light.
+  const estimateUnloadedLight = (
+    neighborX: number,
+    neighborY: number,
+    neighborZ: number,
+    ownLight: number
   ) => {
-    if (neighbor === BlockType.AIR) return false;
-
-    // If I am a bottom slab, my top face is never covered by the block above
-    if (face === "UP" && isSlab(block) && !isTopSlab(block)) return false;
-
-    // If I am a top slab, my bottom face is never covered by the block below
-    if (face === "DOWN" && isTopSlab(block)) return false;
-
-    // If the neighbor below is a bottom slab, it never covers my bottom face
-    if (face === "DOWN" && isSlab(neighbor) && !isTopSlab(neighbor))
-      return false;
-
-    // If the neighbor above is a top slab, it never covers my top face
-    if (face === "UP" && isTopSlab(neighbor)) return false;
-
-    if (!TRANSPARENT_BLOCKS.includes(neighbor)) return true;
-
-    if (isSlab(block) && isSlab(neighbor)) {
-      // Slabs only cull each other on the sides if they are the same type (both top or both bottom)
-      if (face === "SIDE") {
-        return isTopSlab(block) === isTopSlab(neighbor);
-      }
-    }
-
-    if (isWater(block) && isWater(neighbor)) return true;
-    if (block === BlockType.GLASS && neighbor === BlockType.GLASS) return true;
-
-    return false;
+    lookUpSurfaceHeight ??= createSurfaceHeightSampler(seed);
+    const surfaceY = lookUpSurfaceHeight(
+      chunkX * CHUNK_WIDTH + neighborX,
+      chunkZ * CHUNK_LENGTH + neighborZ
+    );
+    const heuristic = chunkY * CHUNK_HEIGHT + neighborY > surfaceY ? 15 : 0;
+    return Math.max(heuristic, ownLight - 1);
   };
 
-  const shouldCull = (
-    block: BlockType,
-    neighbor: BlockType,
-    face: "UP" | "DOWN" | "SIDE"
-  ) => {
-    const isCulled = shouldCullUncounted(block, neighbor, face);
-    if (isCulled) facesCulled++;
-    return isCulled;
-  };
-
-  // Neighbor chunks only supply face slabs, so samples diagonal across a
-  // chunk edge (out of range on two axes) are treated as open air.
-  const isOccludingBlock = (lx: number, ly: number, lz: number) => {
-    aoSamples++;
-    const isOutLeft = lx < 0;
-    const isOutRight = lx >= CHUNK_WIDTH;
-    const isOutBottom = ly < 0;
-    const isOutTop = ly >= CHUNK_HEIGHT;
-    const isOutBack = lz < 0;
-    const isOutFront = lz >= CHUNK_LENGTH;
-    const outOfRangeAxisCount =
-      Number(isOutLeft || isOutRight) +
-      Number(isOutBottom || isOutTop) +
-      Number(isOutBack || isOutFront);
-    if (outOfRangeAxisCount > 1) return false;
-
-    let sampledBlock: BlockType | undefined;
-    if (isOutLeft) sampledBlock = leftBorder?.[ly * CHUNK_LENGTH + lz];
-    else if (isOutRight) sampledBlock = rightBorder?.[ly * CHUNK_LENGTH + lz];
-    else if (isOutBottom) sampledBlock = bottomBorder?.[lx * CHUNK_LENGTH + lz];
-    else if (isOutTop) sampledBlock = topBorder?.[lx * CHUNK_LENGTH + lz];
-    else if (isOutBack) sampledBlock = backBorder?.[lx * CHUNK_HEIGHT + ly];
-    else if (isOutFront) sampledBlock = frontBorder?.[lx * CHUNK_HEIGHT + ly];
-    else sampledBlock = chunk[calculateOffset(lx, ly, lz)];
-
-    return sampledBlock !== undefined && !NON_OCCLUDING_BLOCKS.has(sampledBlock);
-  };
-
-  const padAmbientOcclusion = (mesh: typeof opaque) => {
-    const vertexCount = mesh.positions.length / 3;
-    while (mesh.ambientOcclusion.length < vertexCount) {
-      mesh.ambientOcclusion.push(FULLY_LIT_AMBIENT_OCCLUSION);
-    }
-  };
+  const cornerPositionWords = new Int32Array(4);
+  const cornerSurfaceWords = new Int32Array(4);
+  const cornerOcclusion = new Int32Array(4);
 
   startWorkerSection("faceGeneration");
   for (let x = 0; x < CHUNK_WIDTH; x++) {
     for (let y = 0; y < CHUNK_HEIGHT; y++) {
       for (let z = 0; z < CHUNK_LENGTH; z++) {
         const block = chunk[calculateOffset(x, y, z)];
-
         if (block === BlockType.AIR) continue;
         solidBlocksVisited++;
 
-        // Stairs emit vertices without AO of their own.
-        padAmbientOcclusion(opaque);
-        padAmbientOcclusion(transparent);
-
-        const rawLight = lightMap[calculateOffset(x, y, z)];
-        const currentLight = Math.max((rawLight >> 4) & 0xf, rawLight & 0xf);
-
-        const getLight = (lx: number, ly: number, lz: number) => {
-          if (lx < 0) {
-            if (
-              leftBorderLight &&
-              ly >= 0 &&
-              ly < CHUNK_HEIGHT &&
-              lz >= 0 &&
-              lz < CHUNK_LENGTH
-            ) {
-              const val = leftBorderLight[ly * CHUNK_LENGTH + lz];
-              return Math.max((val >> 4) & 0xf, val & 0xf);
-            }
-          } else if (lx >= CHUNK_WIDTH) {
-            if (
-              rightBorderLight &&
-              ly >= 0 &&
-              ly < CHUNK_HEIGHT &&
-              lz >= 0 &&
-              lz < CHUNK_LENGTH
-            ) {
-              const val = rightBorderLight[ly * CHUNK_LENGTH + lz];
-              return Math.max((val >> 4) & 0xf, val & 0xf);
-            }
-          } else if (ly < 0) {
-            if (
-              bottomBorderLight &&
-              lx >= 0 &&
-              lx < CHUNK_WIDTH &&
-              lz >= 0 &&
-              lz < CHUNK_LENGTH
-            ) {
-              const val = bottomBorderLight[lx * CHUNK_LENGTH + lz];
-              return Math.max((val >> 4) & 0xf, val & 0xf);
-            }
-          } else if (ly >= CHUNK_HEIGHT) {
-            if (
-              topBorderLight &&
-              lx >= 0 &&
-              lx < CHUNK_WIDTH &&
-              lz >= 0 &&
-              lz < CHUNK_LENGTH
-            ) {
-              const val = topBorderLight[lx * CHUNK_LENGTH + lz];
-              return Math.max((val >> 4) & 0xf, val & 0xf);
-            }
-          } else if (lz < 0) {
-            if (
-              backBorderLight &&
-              lx >= 0 &&
-              lx < CHUNK_WIDTH &&
-              ly >= 0 &&
-              ly < CHUNK_HEIGHT
-            ) {
-              const val = backBorderLight[lx * CHUNK_HEIGHT + ly];
-              return Math.max((val >> 4) & 0xf, val & 0xf);
-            }
-          } else if (lz >= CHUNK_LENGTH) {
-            if (
-              frontBorderLight &&
-              lx >= 0 &&
-              lx < CHUNK_WIDTH &&
-              ly >= 0 &&
-              ly < CHUNK_HEIGHT
-            ) {
-              const val = frontBorderLight[lx * CHUNK_HEIGHT + ly];
-              return Math.max((val >> 4) & 0xf, val & 0xf);
-            }
-          } else if (
-            lx >= 0 &&
-            lx < CHUNK_WIDTH &&
-            ly >= 0 &&
-            ly < CHUNK_HEIGHT &&
-            lz >= 0 &&
-            lz < CHUNK_LENGTH
-          ) {
-            const val = lightMap[calculateOffset(lx, ly, lz)];
-            return Math.max((val >> 4) & 0xf, val & 0xf);
-          }
-
-          const nWorldX = chunkX * CHUNK_WIDTH + lx;
-          const nWorldY = chunkY * CHUNK_HEIGHT + ly;
-          const nWorldZ = chunkZ * CHUNK_LENGTH + lz;
-
-          const sY = getSurfaceHeight(noise, nWorldX, nWorldZ);
-          const heuristic = nWorldY > sY ? 15 : 0;
-          return Math.max(heuristic, currentLight - 1);
-        };
-
-        const isTranslucent = TRANSLUCENT_BLOCKS.includes(block);
-        const target = isTranslucent ? transparent : opaque;
-        const receivesAmbientOcclusion = !isTranslucent && !isSlab(block);
-
-        // Pushes one AO value per quad vertex (3 = open, 0 = fully boxed in)
-        // and flips the quad diagonal so a dark corner does not streak.
-        const pushFaceAmbientOcclusion = (
-          normal: number[],
-          vertexOffsets: number[][]
-        ) => {
-          const values = vertexOffsets.map((offset) => {
-            if (!receivesAmbientOcclusion) return FULLY_LIT_AMBIENT_OCCLUSION;
-            const [firstTangent, secondTangent] = [0, 1, 2].filter(
-              (axis) => normal[axis] === 0
-            );
-            const origin = [x + normal[0], y + normal[1], z + normal[2]];
-            const firstStep = [0, 0, 0];
-            firstStep[firstTangent] = offset[firstTangent] === 1 ? 1 : -1;
-            const secondStep = [0, 0, 0];
-            secondStep[secondTangent] = offset[secondTangent] === 1 ? 1 : -1;
-
-            const isFirstSideBlocked = isOccludingBlock(
-              origin[0] + firstStep[0],
-              origin[1] + firstStep[1],
-              origin[2] + firstStep[2]
-            );
-            const isSecondSideBlocked = isOccludingBlock(
-              origin[0] + secondStep[0],
-              origin[1] + secondStep[1],
-              origin[2] + secondStep[2]
-            );
-            const isCornerBlocked = isOccludingBlock(
-              origin[0] + firstStep[0] + secondStep[0],
-              origin[1] + firstStep[1] + secondStep[1],
-              origin[2] + firstStep[2] + secondStep[2]
-            );
-
-            if (isFirstSideBlocked && isSecondSideBlocked) return 0;
-            return (
-              FULLY_LIT_AMBIENT_OCCLUSION -
-              Number(isFirstSideBlocked) -
-              Number(isSecondSideBlocked) -
-              Number(isCornerBlocked)
-            );
-          });
-          target.ambientOcclusion.push(...values);
-
-          if (values[0] + values[3] > values[1] + values[2]) {
-            const quadStart = target.indices[target.indices.length - 6];
-            target.indices.splice(
-              -6,
-              6,
-              quadStart,
-              quadStart + 1,
-              quadStart + 3,
-              quadStart,
-              quadStart + 3,
-              quadStart + 2
-            );
-          }
-        };
-
-        const isLeftEdge = x === 0;
-        const isRightEdge = x === CHUNK_WIDTH - 1;
-        const isBottomEdge = y === 0;
-        const isTopEdge = y === CHUNK_HEIGHT - 1;
-        const isBackEdge = z === 0;
-        const isFrontEdge = z === CHUNK_LENGTH - 1;
-
-        let blockAbove;
-        if (!isTopEdge) {
-          blockAbove = chunk[calculateOffset(x, y + 1, z)];
-        } else if (topBorder) {
-          // Top border corresponds to y=0 of the chunk above.
-          // The border array is flattened: x * CHUNK_LENGTH + z
-          blockAbove = topBorder[x * CHUNK_LENGTH + z];
-        } else {
-          blockAbove = BlockType.AIR;
-        }
-
-        let blockBelow;
-        if (!isBottomEdge) {
-          blockBelow = chunk[calculateOffset(x, y - 1, z)];
-        } else if (bottomBorder) {
-          // Bottom border corresponds to y=MAX of the chunk below.
-          blockBelow = bottomBorder[x * CHUNK_LENGTH + z];
-        } else {
-          blockBelow = BlockType.AIR;
-        }
-
-        let blockBehind;
-        if (!isBackEdge) {
-          blockBehind = chunk[calculateOffset(x, y, z - 1)];
-        } else if (backBorder) {
-          // Back border corresponds to z=MAX of the chunk behind.
-          // Flattened: x * CHUNK_HEIGHT + y
-          blockBehind = backBorder[x * CHUNK_HEIGHT + y];
-        } else {
-          blockBehind = BlockType.AIR;
-        }
-
-        let blockInfront;
-        if (!isFrontEdge) {
-          blockInfront = chunk[calculateOffset(x, y, z + 1)];
-        } else if (frontBorder) {
-          // Front border corresponds to z=0 of the chunk in front.
-          blockInfront = frontBorder[x * CHUNK_HEIGHT + y];
-        } else {
-          blockInfront = BlockType.AIR;
-        }
-
-        let blockToTheLeft;
-        if (!isLeftEdge) {
-          blockToTheLeft = chunk[calculateOffset(x - 1, y, z)];
-        } else if (leftBorder) {
-          // Left border corresponds to x=MAX of the chunk to the left.
-          // Flattened: y * CHUNK_LENGTH + z
-          // Wait, left border is a slice of the chunk.
-          // If we extracted it as a subarray, it keeps the original structure?
-          // No, we will extract it into a dense array.
-          // Let's assume we extract it as y * CHUNK_LENGTH + z
-          blockToTheLeft = leftBorder[y * CHUNK_LENGTH + z];
-        } else {
-          blockToTheLeft = BlockType.AIR;
-        }
-
-        let blockToTheRight;
-        if (!isRightEdge) {
-          blockToTheRight = chunk[calculateOffset(x + 1, y, z)];
-        } else if (rightBorder) {
-          // Right border corresponds to x=0 of the chunk to the right.
-          blockToTheRight = rightBorder[y * CHUNK_LENGTH + z];
-        } else {
-          blockToTheRight = BlockType.AIR;
-        }
-
-        const textureIndexDefault = BLOCK_TEXTURES[block].DEFAULT ?? 0;
-        const textureIndexSides = BLOCK_TEXTURES[block].SIDES;
-
-        const textureIndexFront = BLOCK_TEXTURES[block].FRONT_FACE;
-        const textureIndexBack = BLOCK_TEXTURES[block].BACK_FACE;
-        const textureIndexTop = BLOCK_TEXTURES[block].TOP_FACE;
-        const textureIndexBottom = BLOCK_TEXTURES[block].BOTTOM_FACE;
-        const textureIndexLeft = BLOCK_TEXTURES[block].LEFT_FACE;
-        const textureIndexRight = BLOCK_TEXTURES[block].RIGHT_FACE;
+        const paddedBase = paddedIndex(x, y, z);
+        const ownLight = paddedLight[paddedBase];
 
         if (isPlantVoxelBlock(block)) {
-          const indexCountBeforePlant = opaque.indices.length;
-          emitPlantVoxels(
-            opaque,
-            block,
-            x,
-            y,
-            z,
-            textureIndexDefault,
-            currentLight,
-            isOccludingBlock
-          );
-          plantVoxelsEmitted++;
-          plantQuadsEmitted += (opaque.indices.length - indexCountBeforePlant) / 6;
+          let neighborMask = 0;
+          for (let direction = 0; direction < PLANT_NEIGHBOR_DELTAS.length; direction++) {
+            if (OCCLUDES_AMBIENT_LIGHT[paddedBlocks[paddedBase + PLANT_NEIGHBOR_DELTAS[direction]]]) {
+              neighborMask |= 1 << direction;
+            }
+          }
+          let instances = plantInstancesByBlock.get(block);
+          if (!instances) {
+            instances = [];
+            plantInstancesByBlock.set(block, instances);
+          }
+          instances.push(packPlantInstance(x, y, z, ownLight, neighborMask));
+          plantInstancesEmitted++;
           continue;
         }
 
         if (isStairs(block)) {
-          const direction = getDirection(block);
-
-          const pushQuad = (
-            p1: number[],
-            p2: number[],
-            p3: number[],
-            p4: number[],
-            n: number[],
-            uv: number[],
-            tex: number
-          ) => {
-            const index = target.positions.length / 3;
-            target.positions.push(...p1, ...p2, ...p3, ...p4);
-            target.normals.push(...n, ...n, ...n, ...n);
-            target.uvs.push(...uv);
-            target.textureIndices.push(tex, tex, tex, tex);
-            target.lightLevels.push(
-              currentLight,
-              currentLight,
-              currentLight,
-              currentLight
-            );
-            target.indices.push(
-              index,
-              index + 1,
-              index + 2,
-              index + 2,
-              index + 1,
-              index + 3
-            );
-          };
-
-          // Bottom Face (y=0)
-          if (!shouldCull(block, blockBelow, "DOWN")) {
-            // Normal (0, -1, 0). Winding: p1(TR), p2(TL), p3(BR), p4(BL) relative to bottom view?
-            // Standard cube bottom: (x+1, z+1), (x, z+1), (x+1, z), (x, z)
-            // p1(1,1), p2(0,1), p3(1,0), p4(0,0)
-            // Tri 1: p1, p2, p3 -> (1,1), (0,1), (1,0). (v2-v1)=(-1,0), (v3-v1)=(0,-1). Cross = (0,0,1).
-            // Wait, standard cube bottom normal is (0, -1, 0).
-            // Let's copy standard cube bottom winding exactly.
-            // Standard: p1(x+1, z+1), p2(x, z+1), p3(x+1, z), p4(x, z)
-            pushQuad(
-              [x + 1, y, z + 1],
-              [x, y, z + 1],
-              [x + 1, y, z],
-              [x, y, z],
-              [0, -1, 0],
-              [1, 0, 0, 0, 1, 1, 0, 1],
-              textureIndexBottom ?? textureIndexDefault
-            );
-          }
-
-          // Top Face of Bottom Slab (y=0.5)
-          let exposedMinX = 0,
-            exposedMaxX = 1,
-            exposedMinZ = 0,
-            exposedMaxZ = 1;
-          if (direction === "NORTH") exposedMinZ = 0.5;
-          else if (direction === "SOUTH") exposedMaxZ = 0.5;
-          else if (direction === "EAST") exposedMaxX = 0.5;
-          else if (direction === "WEST") exposedMinX = 0.5;
-
-          // Normal (0, 1, 0). Standard cube top: (x, z+1), (x+1, z+1), (x, z), (x+1, z)
-          // p1(0,1), p2(1,1), p3(0,0), p4(1,0)
-          pushQuad(
-            [x + exposedMinX, y + 0.5, z + exposedMaxZ],
-            [x + exposedMaxX, y + 0.5, z + exposedMaxZ],
-            [x + exposedMinX, y + 0.5, z + exposedMinZ],
-            [x + exposedMaxX, y + 0.5, z + exposedMinZ],
-            [0, 1, 0],
-            [
-              1 - exposedMinX,
-              exposedMaxZ,
-              1 - exposedMaxX,
-              exposedMaxZ,
-              1 - exposedMinX,
-              exposedMinZ,
-              1 - exposedMaxX,
-              exposedMinZ,
-            ],
-            textureIndexTop ?? textureIndexDefault
-          );
-
-          // Top Face of Top Slab (y=1)
-          let topMinX = 0,
-            topMaxX = 1,
-            topMinZ = 0,
-            topMaxZ = 1;
-          if (direction === "NORTH") topMaxZ = 0.5;
-          else if (direction === "SOUTH") topMinZ = 0.5;
-          else if (direction === "EAST") topMinX = 0.5;
-          else if (direction === "WEST") topMaxX = 0.5;
-
-          if (!shouldCull(block, blockAbove, "UP")) {
-            pushQuad(
-              [x + topMinX, y + 1, z + topMaxZ],
-              [x + topMaxX, y + 1, z + topMaxZ],
-              [x + topMinX, y + 1, z + topMinZ],
-              [x + topMaxX, y + 1, z + topMinZ],
-              [0, 1, 0],
-              [
-                1 - topMinX,
-                topMaxZ,
-                1 - topMaxX,
-                topMaxZ,
-                1 - topMinX,
-                topMinZ,
-                1 - topMaxX,
-                topMinZ,
-              ],
-              textureIndexTop ?? textureIndexDefault
-            );
-          }
-
-          // Vertical Step Face
-          if (direction === "NORTH") {
-            // Face at Z=0.5, facing South (+Z). Normal (0, 0, 1).
-            // Standard Front: (x, z+1), (x+1, z+1), (x, z+1), (x+1, z+1) ... wait standard front uses y.
-            // Standard Front: p1(0,0), p2(1,0), p3(0,1), p4(1,1) -> (x, yl, z+1), (x+1, yl, z+1), (x, yh, z+1), (x+1, yh, z+1)
-            // Tri 1: p1, p2, p3 -> (0,0), (1,0), (0,1). (1,0)x(0,1) = (0,0,1). Correct.
-            // So p1=BL, p2=BR, p3=TL, p4=TR.
-            pushQuad(
-              [x, y + 0.5, z + 0.5],
-              [x + 1, y + 0.5, z + 0.5],
-              [x, y + 1, z + 0.5],
-              [x + 1, y + 1, z + 0.5],
-              [0, 0, 1],
-              [1, 0.5, 0, 0.5, 1, 1, 0, 1], // UVs need to be checked. 0.5 to 1 in V?
-              textureIndexSides ?? textureIndexDefault
-            );
-          } else if (direction === "SOUTH") {
-            // Face at Z=0.5, facing North (-Z). Normal (0, 0, -1).
-            // Standard Back: p1(x+1, yl, z), p2(x, yl, z), p3(x+1, yh, z), p4(x, yh, z)
-            // p1(1,0), p2(0,0), p3(1,1). (-1,0)x(0,1) = (0,0,-1). Correct.
-            pushQuad(
-              [x + 1, y + 0.5, z + 0.5],
-              [x, y + 0.5, z + 0.5],
-              [x + 1, y + 1, z + 0.5],
-              [x, y + 1, z + 0.5],
-              [0, 0, -1],
-              [1, 0.5, 0, 0.5, 1, 1, 0, 1],
-              textureIndexSides ?? textureIndexDefault
-            );
-          } else if (direction === "EAST") {
-            // Face at X=0.5, facing West (-X). Normal (-1, 0, 0).
-            // Standard Left: p1(x, yl, z), p2(x, yl, z+1), p3(x, yh, z), p4(x, yh, z+1)
-            // p1(0,0,0), p2(0,0,1), p3(0,1,0). (0,0,1)x(0,1,0) = (-1,0,0). Correct.
-            pushQuad(
-              [x + 0.5, y + 0.5, z],
-              [x + 0.5, y + 0.5, z + 1],
-              [x + 0.5, y + 1, z],
-              [x + 0.5, y + 1, z + 1],
-              [-1, 0, 0],
-              [1, 0.5, 0, 0.5, 1, 1, 0, 1],
-              textureIndexSides ?? textureIndexDefault
-            );
-          } else if (direction === "WEST") {
-            // Face at X=0.5, facing East (+X). Normal (1, 0, 0).
-            // Standard Right: p1(x+1, yl, z+1), p2(x+1, yl, z), p3(x+1, yh, z+1), p4(x+1, yh, z)
-            // p1(1,0,1), p2(1,0,0), p3(1,1,1). (0,0,-1)x(0,1,0) = (1,0,0). Correct.
-            pushQuad(
-              [x + 0.5, y + 0.5, z + 1],
-              [x + 0.5, y + 0.5, z],
-              [x + 0.5, y + 1, z + 1],
-              [x + 0.5, y + 1, z],
-              [1, 0, 0],
-              [1, 0.5, 0, 0.5, 1, 1, 0, 1],
-              textureIndexSides ?? textureIndexDefault
-            );
-          }
-
-          // Front (z=1)
-          if (!shouldCull(block, blockInfront, "SIDE")) {
-            // Standard Front: p1(BL), p2(BR), p3(TL), p4(TR)
-            // Bottom half (y=0..0.5)
-            pushQuad(
-              [x, y, z + 1],
-              [x + 1, y, z + 1],
-              [x, y + 0.5, z + 1],
-              [x + 1, y + 0.5, z + 1],
-              [0, 0, 1],
-              [1, 0, 0, 0, 1, 0.5, 0, 0.5],
-              textureIndexFront ?? textureIndexSides ?? textureIndexDefault
-            );
-
-            // Top half (y=0.5..1)
-            if (direction === "SOUTH") {
-              // Full face
-              pushQuad(
-                [x, y + 0.5, z + 1],
-                [x + 1, y + 0.5, z + 1],
-                [x, y + 1, z + 1],
-                [x + 1, y + 1, z + 1],
-                [0, 0, 1],
-                [1, 0.5, 0, 0.5, 1, 1, 0, 1],
-                textureIndexFront ?? textureIndexSides ?? textureIndexDefault
-              );
-            } else if (direction === "EAST") {
-              // Right half (x=0.5..1)
-              pushQuad(
-                [x + 0.5, y + 0.5, z + 1],
-                [x + 1, y + 0.5, z + 1],
-                [x + 0.5, y + 1, z + 1],
-                [x + 1, y + 1, z + 1],
-                [0, 0, 1],
-                [0.5, 0.5, 0, 0.5, 0.5, 1, 0, 1],
-                textureIndexFront ?? textureIndexSides ?? textureIndexDefault
-              );
-            } else if (direction === "WEST") {
-              // Left half (x=0..0.5)
-              pushQuad(
-                [x, y + 0.5, z + 1],
-                [x + 0.5, y + 0.5, z + 1],
-                [x, y + 1, z + 1],
-                [x + 0.5, y + 1, z + 1],
-                [0, 0, 1],
-                [1, 0.5, 0.5, 0.5, 1, 1, 0.5, 1],
-                textureIndexFront ?? textureIndexSides ?? textureIndexDefault
-              );
-            }
-          }
-
-          // Back (z=0)
-          if (!shouldCull(block, blockBehind, "SIDE")) {
-            // Standard Back: p1(BR), p2(BL), p3(TR), p4(TL) (looking from back)
-            // p1(x+1, yl, z), p2(x, yl, z), p3(x+1, yh, z), p4(x, yh, z)
-
-            // Bottom half
-            pushQuad(
-              [x + 1, y, z],
-              [x, y, z],
-              [x + 1, y + 0.5, z],
-              [x, y + 0.5, z],
-              [0, 0, -1],
-              [1, 0, 0, 0, 1, 0.5, 0, 0.5],
-              textureIndexBack ?? textureIndexSides ?? textureIndexDefault
-            );
-
-            // Top half
-            if (direction === "NORTH") {
-              // Full face
-              pushQuad(
-                [x + 1, y + 0.5, z],
-                [x, y + 0.5, z],
-                [x + 1, y + 1, z],
-                [x, y + 1, z],
-                [0, 0, -1],
-                [1, 0.5, 0, 0.5, 1, 1, 0, 1],
-                textureIndexBack ?? textureIndexSides ?? textureIndexDefault
-              );
-            } else if (direction === "EAST") {
-              // Right half (x=0.5..1) (Looking from back, x is inverted? No, x is world x)
-              // Back face is at z=0. x goes 0->1.
-              // EAST top step is at x=0.5..1.
-              pushQuad(
-                [x + 1, y + 0.5, z],
-                [x + 0.5, y + 0.5, z],
-                [x + 1, y + 1, z],
-                [x + 0.5, y + 1, z],
-                [0, 0, -1],
-                [1, 0.5, 0.5, 0.5, 1, 1, 0.5, 1],
-                textureIndexBack ?? textureIndexSides ?? textureIndexDefault
-              );
-            } else if (direction === "WEST") {
-              // Left half (x=0..0.5)
-              pushQuad(
-                [x + 0.5, y + 0.5, z],
-                [x, y + 0.5, z],
-                [x + 0.5, y + 1, z],
-                [x, y + 1, z],
-                [0, 0, -1],
-                [0.5, 0.5, 0, 0.5, 0.5, 1, 0, 1],
-                textureIndexBack ?? textureIndexSides ?? textureIndexDefault
-              );
-            }
-          }
-
-          // Left (x=0)
-          if (!shouldCull(block, blockToTheLeft, "SIDE")) {
-            // Standard Left: p1(x, yl, z), p2(x, yl, z+1), p3(x, yh, z), p4(x, yh, z+1)
-
-            // Bottom half
-            pushQuad(
-              [x, y, z],
-              [x, y, z + 1],
-              [x, y + 0.5, z],
-              [x, y + 0.5, z + 1],
-              [-1, 0, 0],
-              [1, 0, 0, 0, 1, 0.5, 0, 0.5],
-              textureIndexLeft ?? textureIndexSides ?? textureIndexDefault
-            );
-
-            // Top half
-            if (direction === "WEST") {
-              // Full face
-              pushQuad(
-                [x, y + 0.5, z],
-                [x, y + 0.5, z + 1],
-                [x, y + 1, z],
-                [x, y + 1, z + 1],
-                [-1, 0, 0],
-                [1, 0.5, 0, 0.5, 1, 1, 0, 1],
-                textureIndexLeft ?? textureIndexSides ?? textureIndexDefault
-              );
-            } else if (direction === "NORTH") {
-              // Back half (z=0..0.5)
-              pushQuad(
-                [x, y + 0.5, z],
-                [x, y + 0.5, z + 0.5],
-                [x, y + 1, z],
-                [x, y + 1, z + 0.5],
-                [-1, 0, 0],
-                [1, 0.5, 0.5, 0.5, 1, 1, 0.5, 1],
-                textureIndexLeft ?? textureIndexSides ?? textureIndexDefault
-              );
-            } else if (direction === "SOUTH") {
-              // Front half (z=0.5..1)
-              pushQuad(
-                [x, y + 0.5, z + 0.5],
-                [x, y + 0.5, z + 1],
-                [x, y + 1, z + 0.5],
-                [x, y + 1, z + 1],
-                [-1, 0, 0],
-                [0.5, 0.5, 0, 0.5, 0.5, 1, 0, 1],
-                textureIndexLeft ?? textureIndexSides ?? textureIndexDefault
-              );
-            }
-          }
-
-          // Right (x=1)
-          if (!shouldCull(block, blockToTheRight, "SIDE")) {
-            // Standard Right: p1(x+1, yl, z+1), p2(x+1, yl, z), p3(x+1, yh, z+1), p4(x+1, yh, z)
-
-            // Bottom half
-            pushQuad(
-              [x + 1, y, z + 1],
-              [x + 1, y, z],
-              [x + 1, y + 0.5, z + 1],
-              [x + 1, y + 0.5, z],
-              [1, 0, 0],
-              [1, 0, 0, 0, 1, 0.5, 0, 0.5],
-              textureIndexRight ?? textureIndexSides ?? textureIndexDefault
-            );
-
-            // Top half
-            if (direction === "EAST") {
-              // Full face
-              pushQuad(
-                [x + 1, y + 0.5, z + 1],
-                [x + 1, y + 0.5, z],
-                [x + 1, y + 1, z + 1],
-                [x + 1, y + 1, z],
-                [1, 0, 0],
-                [1, 0.5, 0, 0.5, 1, 1, 0, 1],
-                textureIndexRight ?? textureIndexSides ?? textureIndexDefault
-              );
-            } else if (direction === "NORTH") {
-              // Back half (z=0..0.5)
-              pushQuad(
-                [x + 1, y + 0.5, z + 0.5],
-                [x + 1, y + 0.5, z],
-                [x + 1, y + 1, z + 0.5],
-                [x + 1, y + 1, z],
-                [1, 0, 0],
-                [0.5, 0.5, 0, 0.5, 0.5, 1, 0, 1],
-                textureIndexRight ?? textureIndexSides ?? textureIndexDefault
-              );
-            } else if (direction === "SOUTH") {
-              // Front half (z=0.5..1)
-              pushQuad(
-                [x + 1, y + 0.5, z + 1],
-                [x + 1, y + 0.5, z + 0.5],
-                [x + 1, y + 1, z + 1],
-                [x + 1, y + 1, z + 0.5],
-                [1, 0, 0],
-                [1, 0.5, 0.5, 0.5, 1, 1, 0.5, 1],
-                textureIndexRight ?? textureIndexSides ?? textureIndexDefault
-              );
-            }
-          }
-
+          emitStairs(opaque, block, x, y, z, ownLight, paddedBlocks, paddedBase);
           continue;
         }
 
-        const blockHeight = isSlab(block)
-          ? 0.5
-          : isWater(block) && !isWater(blockAbove)
-          ? getWaterLevel(block) / 9
-          : 1;
+        const isTranslucent = IS_TRANSLUCENT[block] === 1;
+        const target = isTranslucent ? transparent : opaque;
+        const receivesAmbientOcclusion = RECEIVES_AMBIENT_OCCLUSION[block] === 1;
 
-        const yOffset = isTopSlab(block) ? 0.5 : 0;
-        const yh = y + blockHeight + yOffset;
-        const yl = y + yOffset;
+        const isSlabBlock = IS_SLAB[block] === 1;
+        const blockAbove = paddedBlocks[paddedBase + FACE_NEIGHBOR_DELTAS[FACE_UP]];
+        const blockHeight16 = isSlabBlock
+          ? POSITION_UNITS_PER_BLOCK / 2
+          : IS_WATER[block] && !IS_WATER[blockAbove]
+          ? Math.round((getWaterLevel(block) / 9) * POSITION_UNITS_PER_BLOCK)
+          : POSITION_UNITS_PER_BLOCK;
+        const yOffset16 = IS_TOP_SLAB[block] ? POSITION_UNITS_PER_BLOCK / 2 : 0;
+        const bottomY16 = y * POSITION_UNITS_PER_BLOCK + yOffset16;
+        const topY16 = bottomY16 + blockHeight16;
 
-        let vRowTop = 0;
-        let vRowBottom = 1;
-
-        if (isSlab(block)) {
-          if (isTopSlab(block)) {
-            vRowBottom = 0.5;
-          } else {
-            vRowTop = 0.5;
-          }
+        let rowTopV = 0;
+        let rowBottomV = UV_UNITS_PER_TEXTURE;
+        if (isSlabBlock) {
+          if (IS_TOP_SLAB[block]) rowBottomV = UV_UNITS_PER_TEXTURE / 2;
+          else rowTopV = UV_UNITS_PER_TEXTURE / 2;
         }
 
-        if (!shouldCull(block, blockAbove, "UP")) {
-          const index = target.positions.length / 3;
-          target.indices.push(
-            index,
-            index + 1,
-            index + 2,
-            index + 2,
-            index + 1,
-            index + 3
-          );
+        const isOnChunkEdge =
+          x === 0 ||
+          x === CHUNK_WIDTH - 1 ||
+          y === 0 ||
+          y === CHUNK_HEIGHT - 1 ||
+          z === 0 ||
+          z === CHUNK_LENGTH - 1;
 
-          target.positions.push(
-            x,
-            yh,
-            1 + z,
-            1 + x,
-            yh,
-            1 + z,
-            x,
-            yh,
-            z,
-            1 + x,
-            yh,
-            z
-          );
-          target.normals.push(0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0);
-          target.uvs.push(1, 1, 0, 1, 1, 0, 0, 0);
-          if (textureIndexTop) {
-            target.textureIndices.push(
-              textureIndexTop,
-              textureIndexTop,
-              textureIndexTop,
-              textureIndexTop
-            );
-          } else {
-            target.textureIndices.push(
-              textureIndexDefault,
-              textureIndexDefault,
-              textureIndexDefault,
-              textureIndexDefault
-            );
+        for (let face = 0; face < FACE_COUNT; face++) {
+          const neighbor = paddedBlocks[paddedBase + FACE_NEIGHBOR_DELTAS[face]];
+          if (isFaceCulled(block, neighbor, FACE_KINDS[face])) {
+            facesCulled++;
+            continue;
           }
-          const l = getLight(x, y + 1, z);
-          target.lightLevels.push(l, l, l, l);
-          pushFaceAmbientOcclusion([0, 1, 0], [[0, 1, 1], [1, 1, 1], [0, 1, 0], [1, 1, 0]]);
-        }
-        if (!shouldCull(block, blockBelow, "DOWN")) {
-          const index = target.positions.length / 3;
-          target.indices.push(
-            index,
-            index + 1,
-            index + 2,
-            index + 2,
-            index + 1,
-            index + 3
-          );
 
-          target.positions.push(
-            x + 1,
-            yl,
-            z + 1,
-            x,
-            yl,
-            z + 1,
-            x + 1,
-            yl,
-            z,
-            x,
-            yl,
-            z
-          );
-          target.normals.push(0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0);
-          target.uvs.push(1, 0, 0, 0, 1, 1, 0, 1);
-          if (textureIndexBottom) {
-            target.textureIndices.push(
-              textureIndexBottom,
-              textureIndexBottom,
-              textureIndexBottom,
-              textureIndexBottom
-            );
-          } else {
-            target.textureIndices.push(
-              textureIndexDefault,
-              textureIndexDefault,
-              textureIndexDefault,
-              textureIndexDefault
-            );
-          }
-          const l = getLight(x, y - 1, z);
-          target.lightLevels.push(l, l, l, l);
-          pushFaceAmbientOcclusion([0, -1, 0], [[1, 0, 1], [0, 0, 1], [1, 0, 0], [0, 0, 0]]);
-        }
-
-        if (!shouldCull(block, blockInfront, "SIDE")) {
-          const index = target.positions.length / 3;
-          target.indices.push(
-            index,
-            index + 1,
-            index + 2,
-            index + 2,
-            index + 1,
-            index + 3
-          );
-
-          target.positions.push(
-            x,
-            yl,
-            1 + z,
-            1 + x,
-            yl,
-            1 + z,
-            x,
-            yh,
-            1 + z,
-            1 + x,
-            yh,
-            1 + z
-          );
-          target.normals.push(0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1);
-          target.uvs.push(1, vRowBottom, 0, vRowBottom, 1, vRowTop, 0, vRowTop);
-          if (textureIndexFront) {
-            target.textureIndices.push(
-              textureIndexFront,
-              textureIndexFront,
-              textureIndexFront,
-              textureIndexFront
-            );
-          } else {
-            if (textureIndexSides) {
-              target.textureIndices.push(
-                textureIndexSides,
-                textureIndexSides,
-                textureIndexSides,
-                textureIndexSides
-              );
-            } else {
-              target.textureIndices.push(
-                textureIndexDefault,
-                textureIndexDefault,
-                textureIndexDefault,
-                textureIndexDefault
-              );
+          let faceLight = paddedLight[paddedBase + FACE_NEIGHBOR_DELTAS[face]];
+          if (isOnChunkEdge && !hasLightBorderForFace[face]) {
+            const normal = FACE_NORMALS[face];
+            const neighborX = x + normal[0];
+            const neighborY = y + normal[1];
+            const neighborZ = z + normal[2];
+            const isNeighborOutside =
+              neighborX < 0 ||
+              neighborX >= CHUNK_WIDTH ||
+              neighborY < 0 ||
+              neighborY >= CHUNK_HEIGHT ||
+              neighborZ < 0 ||
+              neighborZ >= CHUNK_LENGTH;
+            if (isNeighborOutside) {
+              faceLight = estimateUnloadedLight(neighborX, neighborY, neighborZ, ownLight);
             }
           }
-          const l = getLight(x, y, z + 1);
-          target.lightLevels.push(l, l, l, l);
-          pushFaceAmbientOcclusion([0, 0, 1], [[0, 0, 1], [1, 0, 1], [0, 1, 1], [1, 1, 1]]);
-        }
 
-        if (!shouldCull(block, blockBehind, "SIDE")) {
-          const index = target.positions.length / 3;
-          target.indices.push(
-            index,
-            index + 1,
-            index + 2,
-            index + 2,
-            index + 1,
-            index + 3
-          );
-
-          target.positions.push(1 + x, yl, z, x, yl, z, 1 + x, yh, z, x, yh, z);
-          target.normals.push(0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1);
-          target.uvs.push(1, vRowBottom, 0, vRowBottom, 1, vRowTop, 0, vRowTop);
-          if (textureIndexBack) {
-            target.textureIndices.push(
-              textureIndexBack,
-              textureIndexBack,
-              textureIndexBack,
-              textureIndexBack
+          const textureIndex = FACE_TEXTURES[face][block];
+          const corners = FACE_CORNERS[face];
+          const uvCodes = FACE_UV_CODES[face];
+          for (let corner = 0; corner < 4; corner++) {
+            const cornerFlags = corners[corner];
+            cornerPositionWords[corner] = packPositionWord(
+              (x + cornerFlags[0]) * POSITION_UNITS_PER_BLOCK,
+              cornerFlags[1] ? topY16 : bottomY16,
+              (z + cornerFlags[2]) * POSITION_UNITS_PER_BLOCK
             );
-          } else {
-            if (textureIndexSides) {
-              target.textureIndices.push(
-                textureIndexSides,
-                textureIndexSides,
-                textureIndexSides,
-                textureIndexSides
-              );
-            } else {
-              target.textureIndices.push(
-                textureIndexDefault,
-                textureIndexDefault,
-                textureIndexDefault,
-                textureIndexDefault
-              );
+
+            let occlusion = FULLY_LIT_AMBIENT_OCCLUSION;
+            if (receivesAmbientOcclusion) {
+              const sampleDeltas = AMBIENT_OCCLUSION_SAMPLE_DELTAS[face][corner];
+              const isFirstSideBlocked = OCCLUDES_AMBIENT_LIGHT[paddedBlocks[paddedBase + sampleDeltas[0]]];
+              const isSecondSideBlocked = OCCLUDES_AMBIENT_LIGHT[paddedBlocks[paddedBase + sampleDeltas[1]]];
+              const isCornerBlocked = OCCLUDES_AMBIENT_LIGHT[paddedBlocks[paddedBase + sampleDeltas[2]]];
+              occlusion =
+                isFirstSideBlocked && isSecondSideBlocked
+                  ? 0
+                  : FULLY_LIT_AMBIENT_OCCLUSION -
+                    isFirstSideBlocked -
+                    isSecondSideBlocked -
+                    isCornerBlocked;
             }
-          }
-          const l = getLight(x, y, z - 1);
-          target.lightLevels.push(l, l, l, l);
-          pushFaceAmbientOcclusion([0, 0, -1], [[1, 0, 0], [0, 0, 0], [1, 1, 0], [0, 1, 0]]);
-        }
+            cornerOcclusion[corner] = occlusion;
 
-        if (!shouldCull(block, blockToTheLeft, "SIDE")) {
-          const index = target.positions.length / 3;
-          target.indices.push(
-            index,
-            index + 1,
-            index + 2,
-            index + 2,
-            index + 1,
-            index + 3
-          );
-
-          target.positions.push(x, yh, z, x, yl, z, x, yh, 1 + z, x, yl, 1 + z);
-          target.normals.push(-1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0);
-          target.uvs.push(0, vRowTop, 0, vRowBottom, 1, vRowTop, 1, vRowBottom);
-          if (textureIndexLeft) {
-            target.textureIndices.push(
-              textureIndexLeft,
-              textureIndexLeft,
-              textureIndexLeft,
-              textureIndexLeft
+            const uvCode = uvCodes[corner];
+            cornerSurfaceWords[corner] = packSurfaceWord(
+              uvCode[0] === UV_ONE ? UV_UNITS_PER_TEXTURE : 0,
+              uvCode[1] === UV_ONE
+                ? UV_UNITS_PER_TEXTURE
+                : uvCode[1] === UV_ROW_TOP
+                ? rowTopV
+                : uvCode[1] === UV_ROW_BOTTOM
+                ? rowBottomV
+                : 0,
+              textureIndex,
+              occlusion,
+              faceLight
             );
-          } else {
-            if (textureIndexSides) {
-              target.textureIndices.push(
-                textureIndexSides,
-                textureIndexSides,
-                textureIndexSides,
-                textureIndexSides
-              );
-            } else {
-              target.textureIndices.push(
-                textureIndexDefault,
-                textureIndexDefault,
-                textureIndexDefault,
-                textureIndexDefault
-              );
-            }
           }
-          const l = getLight(x - 1, y, z);
-          target.lightLevels.push(l, l, l, l);
-          pushFaceAmbientOcclusion([-1, 0, 0], [[0, 1, 0], [0, 0, 0], [0, 1, 1], [0, 0, 1]]);
-        }
+          if (receivesAmbientOcclusion) aoQuads++;
 
-        if (!shouldCull(block, blockToTheRight, "SIDE")) {
-          const index = target.positions.length / 3;
-          target.indices.push(
-            index,
-            index + 1,
-            index + 2,
-            index + 2,
-            index + 1,
-            index + 3
+          // Split along the brighter diagonal so a dark corner does not streak.
+          target.pushQuad(
+            cornerPositionWords[0],
+            cornerSurfaceWords[0],
+            cornerPositionWords[1],
+            cornerSurfaceWords[1],
+            cornerPositionWords[2],
+            cornerSurfaceWords[2],
+            cornerPositionWords[3],
+            cornerSurfaceWords[3],
+            cornerOcclusion[0] + cornerOcclusion[3] > cornerOcclusion[1] + cornerOcclusion[2]
           );
-
-          target.positions.push(
-            1 + x,
-            yh,
-            1 + z,
-            1 + x,
-            yl,
-            1 + z,
-            1 + x,
-            yh,
-            z,
-            1 + x,
-            yl,
-            z
-          );
-          target.normals.push(1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0);
-          target.uvs.push(0, vRowTop, 0, vRowBottom, 1, vRowTop, 1, vRowBottom);
-          if (textureIndexRight) {
-            target.textureIndices.push(
-              textureIndexRight,
-              textureIndexRight,
-              textureIndexRight,
-              textureIndexRight
-            );
-          } else {
-            if (textureIndexSides) {
-              target.textureIndices.push(
-                textureIndexSides,
-                textureIndexSides,
-                textureIndexSides,
-                textureIndexSides
-              );
-            } else {
-              target.textureIndices.push(
-                textureIndexDefault,
-                textureIndexDefault,
-                textureIndexDefault,
-                textureIndexDefault
-              );
-            }
-          }
-          const l = getLight(x + 1, y, z);
-          target.lightLevels.push(l, l, l, l);
-          pushFaceAmbientOcclusion([1, 0, 0], [[1, 1, 1], [1, 0, 1], [1, 1, 0], [1, 0, 0]]);
+          facesEmitted++;
         }
       }
     }
   }
-
   endWorkerSection();
 
-  startWorkerSection("ambientOcclusionPadding");
-  padAmbientOcclusion(opaque);
-  padAmbientOcclusion(transparent);
-  endWorkerSection();
-
-  startWorkerSection("packTypedArrays");
-  const packedMesh = {
-    opaque: {
-      positions: new Float32Array(opaque.positions).buffer,
-      normals: new Float32Array(opaque.normals).buffer,
-      indices: new Uint32Array(opaque.indices).buffer,
-      uvs: new Float32Array(opaque.uvs).buffer,
-      textureIndices: new Int32Array(opaque.textureIndices).buffer,
-      lightLevels: new Float32Array(opaque.lightLevels).buffer,
-      ambientOcclusion: new Float32Array(opaque.ambientOcclusion).buffer,
-    },
-    transparent: {
-      positions: new Float32Array(transparent.positions).buffer,
-      normals: new Float32Array(transparent.normals).buffer,
-      indices: new Uint32Array(transparent.indices).buffer,
-      uvs: new Float32Array(transparent.uvs).buffer,
-      textureIndices: new Int32Array(transparent.textureIndices).buffer,
-      lightLevels: new Float32Array(transparent.lightLevels).buffer,
-      ambientOcclusion: new Float32Array(transparent.ambientOcclusion).buffer,
-    },
+  startWorkerSection("packResult");
+  const plants: PlantInstanceBatch[] = [];
+  plantInstancesByBlock.forEach((instanceWords, blockType) => {
+    plants.push({ blockType, instances: new Uint32Array(instanceWords).buffer });
+  });
+  const result: ChunkMeshResult = {
+    opaque: opaque.toBuffer(),
+    transparent: transparent.toBuffer(),
+    plants,
   };
   endWorkerSection();
 
   addWorkerCounter("blocksScanned", CHUNK_WIDTH * CHUNK_HEIGHT * CHUNK_LENGTH);
   addWorkerCounter("solidBlocksVisited", solidBlocksVisited);
-  addWorkerCounter(
-    "facesEmitted",
-    (opaque.indices.length + transparent.indices.length) / 6
-  );
+  addWorkerCounter("facesEmitted", facesEmitted);
   addWorkerCounter("facesCulled", facesCulled);
-  addWorkerCounter("opaqueVertices", opaque.positions.length / 3);
-  addWorkerCounter("transparentVertices", transparent.positions.length / 3);
-  addWorkerCounter("aoSamples", aoSamples);
-  addWorkerCounter("plantVoxelsEmitted", plantVoxelsEmitted);
-  addWorkerCounter("plantQuadsEmitted", plantQuadsEmitted);
+  addWorkerCounter("opaqueVertices", opaque.vertexCount);
+  addWorkerCounter("transparentVertices", transparent.vertexCount);
+  addWorkerCounter("aoSamples", aoQuads * 12);
+  addWorkerCounter("plantInstancesEmitted", plantInstancesEmitted);
 
-  return packedMesh;
+  return result;
+}
+
+export function listTransferables(result: ChunkMeshResult): ArrayBuffer[] {
+  return [
+    result.opaque,
+    result.transparent,
+    ...result.plants.map((batch) => batch.instances),
+  ];
+}
+
+type Corner = [number, number, number];
+
+// Stairs are rare, so they are written as explicit quads rather than driven by the face tables.
+function emitStairs(
+  target: VertexStream,
+  block: BlockType,
+  x: number,
+  y: number,
+  z: number,
+  light: number,
+  paddedBlocks: Uint8Array,
+  paddedBase: number
+) {
+  const direction = getDirection(block);
+  const textures = BLOCK_TEXTURES[block];
+  const textureIndexDefault = textures.DEFAULT ?? 0;
+  const textureIndexSides = textures.SIDES;
+  const textureIndexFront = textures.FRONT_FACE;
+  const textureIndexBack = textures.BACK_FACE;
+  const textureIndexTop = textures.TOP_FACE;
+  const textureIndexBottom = textures.BOTTOM_FACE;
+  const textureIndexLeft = textures.LEFT_FACE;
+  const textureIndexRight = textures.RIGHT_FACE;
+
+  const blockAbove = paddedBlocks[paddedBase + FACE_NEIGHBOR_DELTAS[FACE_UP]];
+  const blockBelow = paddedBlocks[paddedBase + FACE_NEIGHBOR_DELTAS[FACE_DOWN]];
+  const blockInfront = paddedBlocks[paddedBase + paddedDelta(0, 0, 1)];
+  const blockBehind = paddedBlocks[paddedBase + paddedDelta(0, 0, -1)];
+  const blockToTheLeft = paddedBlocks[paddedBase + paddedDelta(-1, 0, 0)];
+  const blockToTheRight = paddedBlocks[paddedBase + paddedDelta(1, 0, 0)];
+
+  const pushQuad = (
+    p1: Corner,
+    p2: Corner,
+    p3: Corner,
+    p4: Corner,
+    uv: number[],
+    textureIndex: number
+  ) => {
+    const corners = [p1, p2, p3, p4];
+    const positionWords = corners.map((corner) =>
+      packPositionWord(
+        corner[0] * POSITION_UNITS_PER_BLOCK,
+        corner[1] * POSITION_UNITS_PER_BLOCK,
+        corner[2] * POSITION_UNITS_PER_BLOCK
+      )
+    );
+    const surfaceWords = corners.map((_, index) =>
+      packSurfaceWord(
+        uv[index * 2] * UV_UNITS_PER_TEXTURE,
+        uv[index * 2 + 1] * UV_UNITS_PER_TEXTURE,
+        textureIndex,
+        FULLY_LIT_AMBIENT_OCCLUSION,
+        light
+      )
+    );
+    target.pushQuad(
+      positionWords[0],
+      surfaceWords[0],
+      positionWords[1],
+      surfaceWords[1],
+      positionWords[2],
+      surfaceWords[2],
+      positionWords[3],
+      surfaceWords[3],
+      false
+    );
+  };
+
+  const sideTexture = (faceTexture: number | undefined) =>
+    faceTexture ?? textureIndexSides ?? textureIndexDefault;
+
+  // Bottom Face (y=0)
+  if (!isFaceCulled(block, blockBelow, FACE_KIND_DOWN)) {
+    pushQuad(
+      [x + 1, y, z + 1],
+      [x, y, z + 1],
+      [x + 1, y, z],
+      [x, y, z],
+      [1, 0, 0, 0, 1, 1, 0, 1],
+      textureIndexBottom ?? textureIndexDefault
+    );
+  }
+
+  // Top Face of Bottom Slab (y=0.5)
+  let exposedMinX = 0,
+    exposedMaxX = 1,
+    exposedMinZ = 0,
+    exposedMaxZ = 1;
+  if (direction === "NORTH") exposedMinZ = 0.5;
+  else if (direction === "SOUTH") exposedMaxZ = 0.5;
+  else if (direction === "EAST") exposedMaxX = 0.5;
+  else if (direction === "WEST") exposedMinX = 0.5;
+
+  pushQuad(
+    [x + exposedMinX, y + 0.5, z + exposedMaxZ],
+    [x + exposedMaxX, y + 0.5, z + exposedMaxZ],
+    [x + exposedMinX, y + 0.5, z + exposedMinZ],
+    [x + exposedMaxX, y + 0.5, z + exposedMinZ],
+    [
+      1 - exposedMinX,
+      exposedMaxZ,
+      1 - exposedMaxX,
+      exposedMaxZ,
+      1 - exposedMinX,
+      exposedMinZ,
+      1 - exposedMaxX,
+      exposedMinZ,
+    ],
+    textureIndexTop ?? textureIndexDefault
+  );
+
+  // Top Face of Top Slab (y=1)
+  let topMinX = 0,
+    topMaxX = 1,
+    topMinZ = 0,
+    topMaxZ = 1;
+  if (direction === "NORTH") topMaxZ = 0.5;
+  else if (direction === "SOUTH") topMinZ = 0.5;
+  else if (direction === "EAST") topMinX = 0.5;
+  else if (direction === "WEST") topMaxX = 0.5;
+
+  if (!isFaceCulled(block, blockAbove, FACE_KIND_UP)) {
+    pushQuad(
+      [x + topMinX, y + 1, z + topMaxZ],
+      [x + topMaxX, y + 1, z + topMaxZ],
+      [x + topMinX, y + 1, z + topMinZ],
+      [x + topMaxX, y + 1, z + topMinZ],
+      [
+        1 - topMinX,
+        topMaxZ,
+        1 - topMaxX,
+        topMaxZ,
+        1 - topMinX,
+        topMinZ,
+        1 - topMaxX,
+        topMinZ,
+      ],
+      textureIndexTop ?? textureIndexDefault
+    );
+  }
+
+  // Vertical Step Face
+  const stepUv = [1, 0.5, 0, 0.5, 1, 1, 0, 1];
+  if (direction === "NORTH") {
+    pushQuad([x, y + 0.5, z + 0.5], [x + 1, y + 0.5, z + 0.5], [x, y + 1, z + 0.5], [x + 1, y + 1, z + 0.5], stepUv, sideTexture(undefined));
+  } else if (direction === "SOUTH") {
+    pushQuad([x + 1, y + 0.5, z + 0.5], [x, y + 0.5, z + 0.5], [x + 1, y + 1, z + 0.5], [x, y + 1, z + 0.5], stepUv, sideTexture(undefined));
+  } else if (direction === "EAST") {
+    pushQuad([x + 0.5, y + 0.5, z], [x + 0.5, y + 0.5, z + 1], [x + 0.5, y + 1, z], [x + 0.5, y + 1, z + 1], stepUv, sideTexture(undefined));
+  } else if (direction === "WEST") {
+    pushQuad([x + 0.5, y + 0.5, z + 1], [x + 0.5, y + 0.5, z], [x + 0.5, y + 1, z + 1], [x + 0.5, y + 1, z], stepUv, sideTexture(undefined));
+  }
+
+  const lowerHalfUv = [1, 0, 0, 0, 1, 0.5, 0, 0.5];
+
+  // Front (z=1)
+  if (!isFaceCulled(block, blockInfront, FACE_KIND_SIDE)) {
+    const texture = sideTexture(textureIndexFront);
+    pushQuad([x, y, z + 1], [x + 1, y, z + 1], [x, y + 0.5, z + 1], [x + 1, y + 0.5, z + 1], lowerHalfUv, texture);
+    if (direction === "SOUTH") {
+      pushQuad([x, y + 0.5, z + 1], [x + 1, y + 0.5, z + 1], [x, y + 1, z + 1], [x + 1, y + 1, z + 1], [1, 0.5, 0, 0.5, 1, 1, 0, 1], texture);
+    } else if (direction === "EAST") {
+      pushQuad([x + 0.5, y + 0.5, z + 1], [x + 1, y + 0.5, z + 1], [x + 0.5, y + 1, z + 1], [x + 1, y + 1, z + 1], [0.5, 0.5, 0, 0.5, 0.5, 1, 0, 1], texture);
+    } else if (direction === "WEST") {
+      pushQuad([x, y + 0.5, z + 1], [x + 0.5, y + 0.5, z + 1], [x, y + 1, z + 1], [x + 0.5, y + 1, z + 1], [1, 0.5, 0.5, 0.5, 1, 1, 0.5, 1], texture);
+    }
+  }
+
+  // Back (z=0)
+  if (!isFaceCulled(block, blockBehind, FACE_KIND_SIDE)) {
+    const texture = sideTexture(textureIndexBack);
+    pushQuad([x + 1, y, z], [x, y, z], [x + 1, y + 0.5, z], [x, y + 0.5, z], lowerHalfUv, texture);
+    if (direction === "NORTH") {
+      pushQuad([x + 1, y + 0.5, z], [x, y + 0.5, z], [x + 1, y + 1, z], [x, y + 1, z], [1, 0.5, 0, 0.5, 1, 1, 0, 1], texture);
+    } else if (direction === "EAST") {
+      pushQuad([x + 1, y + 0.5, z], [x + 0.5, y + 0.5, z], [x + 1, y + 1, z], [x + 0.5, y + 1, z], [1, 0.5, 0.5, 0.5, 1, 1, 0.5, 1], texture);
+    } else if (direction === "WEST") {
+      pushQuad([x + 0.5, y + 0.5, z], [x, y + 0.5, z], [x + 0.5, y + 1, z], [x, y + 1, z], [0.5, 0.5, 0, 0.5, 0.5, 1, 0, 1], texture);
+    }
+  }
+
+  // Left (x=0)
+  if (!isFaceCulled(block, blockToTheLeft, FACE_KIND_SIDE)) {
+    const texture = sideTexture(textureIndexLeft);
+    pushQuad([x, y, z], [x, y, z + 1], [x, y + 0.5, z], [x, y + 0.5, z + 1], lowerHalfUv, texture);
+    if (direction === "WEST") {
+      pushQuad([x, y + 0.5, z], [x, y + 0.5, z + 1], [x, y + 1, z], [x, y + 1, z + 1], [1, 0.5, 0, 0.5, 1, 1, 0, 1], texture);
+    } else if (direction === "NORTH") {
+      pushQuad([x, y + 0.5, z], [x, y + 0.5, z + 0.5], [x, y + 1, z], [x, y + 1, z + 0.5], [1, 0.5, 0.5, 0.5, 1, 1, 0.5, 1], texture);
+    } else if (direction === "SOUTH") {
+      pushQuad([x, y + 0.5, z + 0.5], [x, y + 0.5, z + 1], [x, y + 1, z + 0.5], [x, y + 1, z + 1], [0.5, 0.5, 0, 0.5, 0.5, 1, 0, 1], texture);
+    }
+  }
+
+  // Right (x=1)
+  if (!isFaceCulled(block, blockToTheRight, FACE_KIND_SIDE)) {
+    const texture = sideTexture(textureIndexRight);
+    pushQuad([x + 1, y, z + 1], [x + 1, y, z], [x + 1, y + 0.5, z + 1], [x + 1, y + 0.5, z], lowerHalfUv, texture);
+    if (direction === "EAST") {
+      pushQuad([x + 1, y + 0.5, z + 1], [x + 1, y + 0.5, z], [x + 1, y + 1, z + 1], [x + 1, y + 1, z], [1, 0.5, 0, 0.5, 1, 1, 0, 1], texture);
+    } else if (direction === "NORTH") {
+      pushQuad([x + 1, y + 0.5, z + 0.5], [x + 1, y + 0.5, z], [x + 1, y + 1, z + 0.5], [x + 1, y + 1, z], [0.5, 0.5, 0, 0.5, 0.5, 1, 0, 1], texture);
+    } else if (direction === "SOUTH") {
+      pushQuad([x + 1, y + 0.5, z + 1], [x + 1, y + 0.5, z + 0.5], [x + 1, y + 1, z + 1], [x + 1, y + 1, z + 0.5], [1, 0.5, 0.5, 0.5, 1, 1, 0.5, 1], texture);
+    }
+  }
 }

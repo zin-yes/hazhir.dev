@@ -260,6 +260,11 @@ const BLOCK_LAYERS: BlockLayer[] = [
 
 const WATER_LEVEL = 80;
 
+export function createSurfaceHeightSampler(seed: number): (x: number, z: number) => number {
+  const sampler = createTerrainSampler(seed);
+  return (x, z) => sampler.surfaceHeightAt(x, z);
+}
+
 // Highest a tree leaf can sit above the grass it grows from.
 const TREE_CANOPY_REACH = 10;
 const TREE_COLUMN_MARGIN = 2;
@@ -320,7 +325,7 @@ function createTerrainSampler(seed: number): TerrainSampler {
       const key = columnKey(x, z);
       let porousness = porousnessValues.get(key);
       if (porousness === undefined) {
-        porousness = porousnessNoise.GetNoise(x, 0, z);
+        porousness = porousnessNoise.GetNoise(x, 0, z) as number;
         porousnessValues.set(key, porousness);
       }
       return porousness;
@@ -571,7 +576,7 @@ export function generateChunk(
 ): ArrayBuffer {
   const sampler = createTerrainSampler(seed);
 
-  const chunk: Uint8Array = new Uint8Array(
+  const chunk = new Uint8Array(
     CHUNK_WIDTH * CHUNK_HEIGHT * CHUNK_LENGTH
   );
 

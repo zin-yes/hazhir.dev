@@ -1,11 +1,15 @@
 import { generateChunk } from "./generation";
 import { initializeChunkLight, propagateChunkLight } from "./lighting";
-import { generateMesh } from "./mesh";
+import { generateMesh, listTransferables } from "./mesh";
 import { loadTextureArray } from "./texture-array";
 import {
   beginWorkerTask,
   finishWorkerTask,
 } from "../profiler/worker-recorder";
+
+const workerScope = self as unknown as {
+  postMessage(message: unknown, transfer?: Transferable[]): void;
+};
 
 addEventListener("message", async (event: MessageEvent) => {
   const { id, method, params } = event.data;
@@ -13,10 +17,13 @@ addEventListener("message", async (event: MessageEvent) => {
   beginWorkerTask(isProfiling);
   try {
     let result;
+    let transfer: Transferable[] = [];
     if (method === "ping") {
       result = true;
     } else if (method === "generateChunk") {
-      result = generateChunk(params[0], params[1], params[2], params[3]);
+      const chunkBuffer = generateChunk(params[0], params[1], params[2], params[3]);
+      result = chunkBuffer;
+      transfer = [chunkBuffer];
     } else if (method === "generateMesh") {
       result = generateMesh(
         params[0],
@@ -28,6 +35,7 @@ addEventListener("message", async (event: MessageEvent) => {
         params[6],
         params[7]
       );
+      transfer = listTransferables(result);
     } else if (method === "loadTextureArray") {
       result = await loadTextureArray(params[0], (fraction) =>
         postMessage({ id, progress: fraction }),
@@ -42,6 +50,7 @@ addEventListener("message", async (event: MessageEvent) => {
         params[5] ? new Uint8Array(params[5]) : undefined,
         params[6] ? new Uint8Array(params[6]) : undefined
       );
+      transfer = [result.light.buffer];
     } else if (method === "propagateChunkLight") {
       // neighbors and neighborLights are objects with ArrayBuffers
       const neighbors: { [key: string]: Uint8Array } = {};
@@ -66,12 +75,16 @@ addEventListener("message", async (event: MessageEvent) => {
         neighborLights,
         params[4]
       );
+      transfer = [
+        result.centerLight.buffer,
+        ...Object.values(result.neighborLightUpdates).map((update) => update.buffer),
+      ];
     } else {
       throw new Error(`Unknown method: ${method}`);
     }
     const profile = finishWorkerTask();
     const postStartedAtMs = performance.now();
-    postMessage({ id, result, profile });
+    workerScope.postMessage({ id, result, profile }, transfer);
     if (isProfiling) {
       postMessage({
         id,

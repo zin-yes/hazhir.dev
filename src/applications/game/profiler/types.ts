@@ -121,8 +121,10 @@ export interface FrameSummary {
   worst: WorstFrame[];
 }
 
+export type MeshKind = "opaque" | "transparent" | "plants";
+
 export interface MeshGeometryStats {
-  kind: "opaque" | "transparent";
+  kind: MeshKind;
   vertexCount: number;
   triangleCount: number;
   bytesByAttribute: { [attribute: string]: number };
@@ -130,7 +132,7 @@ export interface MeshGeometryStats {
 
 export interface HeaviestMesh {
   chunkName: string;
-  kind: "opaque" | "transparent";
+  kind: MeshKind;
   vertexCount: number;
   triangleCount: number;
   totalBytes: number;

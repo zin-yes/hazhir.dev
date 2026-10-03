@@ -4,7 +4,8 @@ import sharp from "sharp";
 import { BLOCK_TEXTURES, BlockType, Texture } from "../blocks";
 import { TEXTURE_SIZE } from "../config";
 import { PLANT_PIXEL_MASKS } from "../data/plant-pixel-masks";
-import { type IsWorldBlockOccluding, type PlantMeshBuffers, emitPlantVoxels } from "./plant-voxels";
+import { WORDS_PER_VERTEX, unpackVertex } from "../vertex-format";
+import { buildPlantTemplate } from "./plant-voxels";
 
 const PLANT_BLOCKS = [
   BlockType.TALL_GRASS,
@@ -24,21 +25,14 @@ const SHEET_CROSSING_COLUMNS: Partial<Record<BlockType, number[]>> = {
   [BlockType.FORGETMENOTS_FLOWER]: [5, 10],
 };
 
-function meshPlant(
-  block: BlockType,
-  isWorldBlockOccluding: IsWorldBlockOccluding = () => false
-): PlantMeshBuffers {
-  const mesh: PlantMeshBuffers = {
-    positions: [],
-    normals: [],
-    indices: [],
-    uvs: [],
-    textureIndices: [],
-    lightLevels: [],
-    ambientOcclusion: [],
-  };
-  emitPlantVoxels(mesh, block, 0, 0, 0, BLOCK_TEXTURES[block].DEFAULT, 15, isWorldBlockOccluding);
-  return mesh;
+function templateVertices(block: BlockType) {
+  const template = buildPlantTemplate(block);
+  const words = new Uint32Array(template.vertexBuffer);
+  const vertices = [];
+  for (let vertex = 0; vertex < words.length / WORDS_PER_VERTEX; vertex++) {
+    vertices.push(unpackVertex(words[vertex * 2], words[vertex * 2 + 1]));
+  }
+  return { template, vertices };
 }
 
 function opaquePixelsOf(block: BlockType): Set<string> {
@@ -52,11 +46,11 @@ function opaquePixelsOf(block: BlockType): Set<string> {
   return opaque;
 }
 
-function sampledPixels(mesh: PlantMeshBuffers): Set<string> {
+function sampledPixels(vertices: ReturnType<typeof templateVertices>["vertices"]): Set<string> {
   const sampled = new Set<string>();
-  for (let vertex = 0; vertex < mesh.uvs.length / 2; vertex++) {
-    const column = mesh.uvs[vertex * 2] * TEXTURE_SIZE - 0.5;
-    const row = mesh.uvs[vertex * 2 + 1] * TEXTURE_SIZE - 0.5;
+  for (const vertex of vertices) {
+    const column = vertex.u * TEXTURE_SIZE - 0.5;
+    const row = vertex.v * TEXTURE_SIZE - 0.5;
     sampled.add(`${column},${row}`);
   }
   return sampled;
@@ -79,15 +73,15 @@ describe("plant pixel masks", () => {
   });
 });
 
-describe("emitPlantVoxels", () => {
+describe("buildPlantTemplate", () => {
   for (const block of PLANT_BLOCKS) {
     describe(BlockType[block], () => {
-      const mesh = meshPlant(block);
+      const { template, vertices } = templateVertices(block);
       const opaquePixels = opaquePixelsOf(block);
 
       test("only opaque pixels become voxels, and none are lost outside sheet crossings", () => {
         expect(opaquePixels.size).toBeGreaterThan(0);
-        const sampled = sampledPixels(mesh);
+        const sampled = sampledPixels(vertices);
         for (const pixel of sampled) expect(opaquePixels.has(pixel)).toBe(true);
 
         const crossingColumns = SHEET_CROSSING_COLUMNS[block] ?? [];
@@ -98,52 +92,34 @@ describe("emitPlantVoxels", () => {
       });
 
       test("voxels are 1/16 cubes inside the block", () => {
-        for (const coordinate of mesh.positions) {
-          expect(coordinate).toBeGreaterThanOrEqual(0);
-          expect(coordinate).toBeLessThanOrEqual(1);
-          expect(Number.isInteger(coordinate * TEXTURE_SIZE)).toBe(true);
+        for (const vertex of vertices) {
+          for (const coordinate of [vertex.x, vertex.y, vertex.z]) {
+            expect(coordinate).toBeGreaterThanOrEqual(0);
+            expect(coordinate).toBeLessThanOrEqual(1);
+          }
         }
       });
 
-      test("indices stay within the emitted vertices", () => {
-        const vertexCount = mesh.positions.length / 3;
-        expect(Math.max(...mesh.indices)).toBeLessThan(vertexCount);
+      test("every vertex belongs to a whole quad and uses the plant texture", () => {
+        expect(vertices.length).toBe(template.quadCount * 4);
+        for (const vertex of vertices) {
+          expect(vertex.textureIndex).toBe(BLOCK_TEXTURES[block].DEFAULT);
+        }
       });
     });
   }
 
-  test("every vertex gets an AO value, and the stem darkens where it meets solid ground", () => {
-    const openMesh = meshPlant(BlockType.TALL_GRASS);
-    expect(openMesh.ambientOcclusion.length).toBe(openMesh.positions.length / 3);
-    expect(Math.min(...openMesh.ambientOcclusion)).toBeLessThan(3);
-
-    const onGroundMesh = meshPlant(BlockType.TALL_GRASS, (_x, y) => y < 0);
-    const darkenedVertices = onGroundMesh.ambientOcclusion.filter(
-      (value, vertex) => value < openMesh.ambientOcclusion[vertex]
-    );
-    expect(darkenedVertices.length).toBeGreaterThan(0);
-  });
-
-  test("a solid block beside the plant shades the voxels near it but not the far side", () => {
-    const openMesh = meshPlant(BlockType.TALL_GRASS);
-    const besideWallMesh = meshPlant(BlockType.TALL_GRASS, (x) => x < 0);
-
-    let nearWallDarkened = 0;
-    for (let vertex = 0; vertex < openMesh.ambientOcclusion.length; vertex++) {
-      const isDarker = besideWallMesh.ambientOcclusion[vertex] < openMesh.ambientOcclusion[vertex];
-      if (isDarker && besideWallMesh.positions[vertex * 3] <= 0.5) nearWallDarkened++;
-      if (besideWallMesh.positions[vertex * 3] >= 0.5) {
-        expect(besideWallMesh.ambientOcclusion[vertex]).toBe(openMesh.ambientOcclusion[vertex]);
-      }
-    }
-    expect(nearWallDarkened).toBeGreaterThan(100);
-  });
-
-  test("a lone pixel voxel exposes all six faces and shared faces are culled", () => {
-    const sapling = meshPlant(BlockType.SAPLING);
-    const faceCount = sapling.indices.length / 6;
+  test("faces buried between neighboring voxels are culled", () => {
+    const { template } = templateVertices(BlockType.SAPLING);
     const opaqueCount = opaquePixelsOf(BlockType.SAPLING).size;
-    expect(faceCount).toBeLessThan(opaqueCount * 2 * 6);
-    expect(faceCount).toBeGreaterThanOrEqual(opaqueCount * 2);
+    expect(template.quadCount).toBeLessThan(opaqueCount * 2 * 6);
+    expect(template.quadCount).toBeGreaterThanOrEqual(opaqueCount * 2);
+  });
+
+  test("voxels pressed against other voxels are darker than isolated ones", () => {
+    const { vertices } = templateVertices(BlockType.TALL_GRASS);
+    const occlusionValues = new Set(vertices.map((vertex) => vertex.ambientOcclusion));
+    expect(Math.min(...occlusionValues)).toBeLessThan(3);
+    expect(Math.max(...occlusionValues)).toBe(3);
   });
 });

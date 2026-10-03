@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { SHARED_ATTRIBUTE_NAME } from "../chunk-geometry";
 import { profiler } from "./index";
 
 export interface SceneMemoryInputs {
@@ -16,7 +17,7 @@ export interface SceneMemoryGauge {
   unit: "bytes" | "count";
 }
 
-const CHUNK_MESH_NAME_PATTERN = /^-?\d+,-?\d+,-?\d+(_transparent)?$/;
+const CHUNK_MESH_NAME_PATTERN = /^-?\d+,-?\d+,-?\d+(_transparent|_plant_\d+)?$/;
 
 function sum(values: number[]): number {
   let total = 0;
@@ -49,10 +50,11 @@ export function collectMeshAttributeByteLengths(scene: THREE.Scene): number[][] 
     }
     const byteLengths: number[] = [];
     const geometry = object.geometry as THREE.BufferGeometry;
+    // Plant templates and the quad index are shared by every chunk, so they are not a per-mesh cost.
     for (const attribute of Object.values(geometry.attributes)) {
+      if (attribute.name === SHARED_ATTRIBUTE_NAME) continue;
       byteLengths.push((attribute.array as ArrayBufferView).byteLength);
     }
-    if (geometry.index) byteLengths.push((geometry.index.array as ArrayBufferView).byteLength);
     meshes.push(byteLengths);
   }
   return meshes;
