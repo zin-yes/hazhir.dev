@@ -5,9 +5,6 @@ import {
   TRANSPARENT_BLOCKS,
   getDirection,
   getWaterLevel,
-  isCrop,
-  isCrossBlock,
-  isFlatQuad,
   isSlab,
   isStairs,
   isTopSlab,
@@ -24,6 +21,7 @@ import { getSurfaceHeight } from "./generation";
 import FastNoiseLite from "fastnoise-lite";
 
 import { calculateOffset } from "../utils";
+import { emitPlantVoxels, isPlantVoxelBlock } from "./plant-voxels";
 
 const NON_OCCLUDING_BLOCKS = new Set<BlockType>([
   BlockType.AIR,
@@ -207,7 +205,7 @@ export function generateMesh(
 
         if (block === BlockType.AIR) continue;
 
-        // Cross blocks and stairs emit vertices without AO of their own.
+        // Plant voxels and stairs emit vertices without AO of their own.
         padAmbientOcclusion(opaque);
         padAmbientOcclusion(transparent);
 
@@ -448,344 +446,16 @@ export function generateMesh(
         const textureIndexLeft = BLOCK_TEXTURES[block].LEFT_FACE;
         const textureIndexRight = BLOCK_TEXTURES[block].RIGHT_FACE;
 
-        if (isCrossBlock(block)) {
-          const index = transparent.positions.length / 3;
-
-          const height = block === BlockType.TALL_GRASS ? 0.9 : 1;
-
-          // Diagonal 1
-          transparent.positions.push(
+        if (isPlantVoxelBlock(block)) {
+          emitPlantVoxels(
+            transparent,
+            block,
             x,
             y,
             z,
-            x + 1,
-            y,
-            z + 1,
-            x,
-            y + height,
-            z,
-            x + 1,
-            y + height,
-            z + 1
-          );
-          transparent.normals.push(0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0);
-          transparent.uvs.push(1, 1, 0, 1, 1, 0, 0, 0);
-          transparent.textureIndices.push(
             textureIndexDefault,
-            textureIndexDefault,
-            textureIndexDefault,
-            textureIndexDefault
-          );
-          transparent.lightLevels.push(
-            currentLight,
-            currentLight,
-            currentLight,
             currentLight
           );
-
-          transparent.indices.push(
-            index,
-            index + 1,
-            index + 2,
-            index + 2,
-            index + 1,
-            index + 3,
-            index,
-            index + 2,
-            index + 1,
-            index + 2,
-            index + 3,
-            index + 1
-          );
-
-          const index2 = transparent.positions.length / 3;
-
-          // Diagonal 2
-          transparent.positions.push(
-            x,
-            y,
-            z + 1,
-            x + 1,
-            y,
-            z,
-            x,
-            y + height,
-            z + 1,
-            x + 1,
-            y + height,
-            z
-          );
-          transparent.normals.push(0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0);
-          transparent.uvs.push(1, 1, 0, 1, 1, 0, 0, 0);
-          transparent.textureIndices.push(
-            textureIndexDefault,
-            textureIndexDefault,
-            textureIndexDefault,
-            textureIndexDefault
-          );
-          transparent.lightLevels.push(
-            currentLight,
-            currentLight,
-            currentLight,
-            currentLight
-          );
-
-          transparent.indices.push(
-            index2,
-            index2 + 1,
-            index2 + 2,
-            index2 + 2,
-            index2 + 1,
-            index2 + 3,
-            index2,
-            index2 + 2,
-            index2 + 1,
-            index2 + 2,
-            index2 + 3,
-            index2 + 1
-          );
-
-          continue;
-        }
-
-        if (isFlatQuad(block)) {
-          const index = transparent.positions.length / 3;
-          const yOffset = 0.1;
-
-          transparent.positions.push(
-            x,
-            y + yOffset,
-            z + 1,
-            x + 1,
-            y + yOffset,
-            z + 1,
-            x,
-            y + yOffset,
-            z,
-            x + 1,
-            y + yOffset,
-            z
-          );
-          transparent.normals.push(0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0);
-          transparent.uvs.push(1, 1, 0, 1, 1, 0, 0, 0);
-          transparent.textureIndices.push(
-            textureIndexDefault,
-            textureIndexDefault,
-            textureIndexDefault,
-            textureIndexDefault
-          );
-          transparent.lightLevels.push(
-            currentLight,
-            currentLight,
-            currentLight,
-            currentLight
-          );
-
-          transparent.indices.push(
-            index,
-            index + 1,
-            index + 2,
-            index + 2,
-            index + 1,
-            index + 3,
-            index,
-            index + 2,
-            index + 1,
-            index + 2,
-            index + 3,
-            index + 1
-          );
-
-          continue;
-        }
-
-        if (isCrop(block)) {
-          const margin = 0.3;
-          const min = margin;
-          const max = 1 - margin;
-          const height = 1; // Full height? Or maybe slightly less? Let's stick to 1 for now.
-
-          // 4 Quads forming a square box
-          // Front (z = max)
-          let index = transparent.positions.length / 3;
-          transparent.positions.push(
-            x,
-            y,
-            z + max,
-            x + 1,
-            y,
-            z + max,
-            x,
-            y + height,
-            z + max,
-            x + 1,
-            y + height,
-            z + max
-          );
-          transparent.normals.push(0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1);
-          transparent.uvs.push(1, 1, 0, 1, 1, 0, 0, 0);
-          transparent.textureIndices.push(
-            textureIndexDefault,
-            textureIndexDefault,
-            textureIndexDefault,
-            textureIndexDefault
-          );
-          transparent.lightLevels.push(
-            currentLight,
-            currentLight,
-            currentLight,
-            currentLight
-          );
-          transparent.indices.push(
-            index,
-            index + 1,
-            index + 2,
-            index + 2,
-            index + 1,
-            index + 3,
-            index,
-            index + 2,
-            index + 1,
-            index + 2,
-            index + 3,
-            index + 1
-          );
-
-          // Back (z = min)
-          index = transparent.positions.length / 3;
-          transparent.positions.push(
-            x + 1,
-            y,
-            z + min,
-            x,
-            y,
-            z + min,
-            x + 1,
-            y + height,
-            z + min,
-            x,
-            y + height,
-            z + min
-          );
-          transparent.normals.push(0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1);
-          transparent.uvs.push(1, 1, 0, 1, 1, 0, 0, 0);
-          transparent.textureIndices.push(
-            textureIndexDefault,
-            textureIndexDefault,
-            textureIndexDefault,
-            textureIndexDefault
-          );
-          transparent.lightLevels.push(
-            currentLight,
-            currentLight,
-            currentLight,
-            currentLight
-          );
-          transparent.indices.push(
-            index,
-            index + 1,
-            index + 2,
-            index + 2,
-            index + 1,
-            index + 3,
-            index,
-            index + 2,
-            index + 1,
-            index + 2,
-            index + 3,
-            index + 1
-          );
-
-          // Left (x = min)
-          index = transparent.positions.length / 3;
-          transparent.positions.push(
-            x + min,
-            y,
-            z,
-            x + min,
-            y,
-            z + 1,
-            x + min,
-            y + height,
-            z,
-            x + min,
-            y + height,
-            z + 1
-          );
-          transparent.normals.push(-1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0);
-          transparent.uvs.push(1, 1, 0, 1, 1, 0, 0, 0);
-          transparent.textureIndices.push(
-            textureIndexDefault,
-            textureIndexDefault,
-            textureIndexDefault,
-            textureIndexDefault
-          );
-          transparent.lightLevels.push(
-            currentLight,
-            currentLight,
-            currentLight,
-            currentLight
-          );
-          transparent.indices.push(
-            index,
-            index + 1,
-            index + 2,
-            index + 2,
-            index + 1,
-            index + 3,
-            index,
-            index + 2,
-            index + 1,
-            index + 2,
-            index + 3,
-            index + 1
-          );
-
-          // Right (x = max)
-          index = transparent.positions.length / 3;
-          transparent.positions.push(
-            x + max,
-            y,
-            z + 1,
-            x + max,
-            y,
-            z,
-            x + max,
-            y + height,
-            z + 1,
-            x + max,
-            y + height,
-            z
-          );
-          transparent.normals.push(1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0);
-          transparent.uvs.push(1, 1, 0, 1, 1, 0, 0, 0);
-          transparent.textureIndices.push(
-            textureIndexDefault,
-            textureIndexDefault,
-            textureIndexDefault,
-            textureIndexDefault
-          );
-          transparent.lightLevels.push(
-            currentLight,
-            currentLight,
-            currentLight,
-            currentLight
-          );
-          transparent.indices.push(
-            index,
-            index + 1,
-            index + 2,
-            index + 2,
-            index + 1,
-            index + 3,
-            index,
-            index + 2,
-            index + 1,
-            index + 2,
-            index + 3,
-            index + 1
-          );
-
           continue;
         }
 
