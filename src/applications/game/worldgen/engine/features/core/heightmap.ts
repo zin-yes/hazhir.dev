@@ -57,14 +57,17 @@ export interface HeightmapColumnReader {
 export class ChunkHeightmap {
   private readonly firstAvailable = new Int32Array(256);
 
-  /** Primes by scanning the column, or copies `primedFrom` when the column's blocks are known to match it. */
+  /**
+   * Primes by scanning the column, or copies `primedFrom` (another heightmap, or 256 first-available values indexed
+   * localZ * 16 + localX) when the column's blocks are known to match it.
+   */
   constructor(
     readonly type: HeightmapType,
     private readonly column: HeightmapColumnReader,
-    primedFrom?: ChunkHeightmap,
+    primedFrom?: ChunkHeightmap | Int32Array,
   ) {
     if (primedFrom !== undefined) {
-      this.firstAvailable.set(primedFrom.firstAvailable);
+      this.firstAvailable.set(primedFrom instanceof ChunkHeightmap ? primedFrom.firstAvailable : primedFrom);
       return;
     }
     for (let localZ = 0; localZ < 16; localZ++) {

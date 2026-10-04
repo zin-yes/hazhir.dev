@@ -7,7 +7,14 @@
 import { type BlockStateCatalog, type BlockStateInfo, type BlockTagIndex, PaletteBlockInfo, SurvivalRules } from "../../block-state";
 import type { BlockPalette, ChunkBlocks } from "../../chunk";
 import { CarvingMask, type CarvingStep } from "../core/carving-mask";
-import { ChunkHeightmap, HEIGHTMAP_TYPES, type HeightmapColumnReader, type HeightmapType, isWorldgenHeightmap } from "../core/heightmap";
+import {
+  ChunkHeightmap,
+  HEIGHTMAP_TYPES,
+  type HeightmapColumnReader,
+  type HeightmapType,
+  isHeightmapOpaque,
+  isWorldgenHeightmap,
+} from "../core/heightmap";
 import { addFeatureCounter, endDecorationSection, startDecorationSection } from "../profiling/feature-profiling";
 import type { BaseColumnSource } from "./base-column-source";
 import { VOID_AIR_STATE, type WorldGenLevel } from "./world-gen-level";
@@ -21,6 +28,26 @@ const LAYER_SIZE = 256;
  */
 export class BaseHeightmapCache {
   private readonly heightmapsByColumn = new WeakMap<ChunkBlocks, Map<HeightmapType, ChunkHeightmap>>();
+  /** Bit `typeIndex` of HEIGHTMAP_TYPES set where the palette id is opaque for that heightmap; -1 = not classified yet. */
+  private opacityBitsByPaletteId = new Int16Array(64).fill(-1);
+
+  private opacityBitsOf(paletteId: number, paletteInfo: PaletteBlockInfo): number {
+    if (paletteId >= this.opacityBitsByPaletteId.length) {
+      const grown = new Int16Array(Math.max(paletteId + 1, this.opacityBitsByPaletteId.length * 2)).fill(-1);
+      grown.set(this.opacityBitsByPaletteId);
+      this.opacityBitsByPaletteId = grown;
+    }
+    let bits = this.opacityBitsByPaletteId[paletteId]!;
+    if (bits === -1) {
+      const info = paletteInfo.info(paletteId);
+      bits = 0;
+      for (let typeIndex = 0; typeIndex < HEIGHTMAP_TYPES.length; typeIndex++) {
+        if (isHeightmapOpaque(HEIGHTMAP_TYPES[typeIndex]!, info)) bits |= 1 << typeIndex;
+      }
+      this.opacityBitsByPaletteId[paletteId] = bits;
+    }
+    return bits;
+  }
 
   heightmapOf(base: ChunkBlocks, type: HeightmapType, paletteInfo: PaletteBlockInfo): ChunkHeightmap {
     let heightmaps = this.heightmapsByColumn.get(base);
@@ -33,15 +60,36 @@ export class BaseHeightmapCache {
       startDecorationSection("region.heightmap.prime");
       const minY = base.minY;
       const baseBlocks = base.blocks;
-      heightmap = new ChunkHeightmap(type, {
+      const reader: HeightmapColumnReader = {
         minY,
         maxYExclusive: minY + base.height,
         infoAt: (localX, y, localZ) => paletteInfo.info(baseBlocks[(y - minY) * LAYER_SIZE + localZ * 16 + localX]!),
-      });
+      };
+      heightmap = new ChunkHeightmap(type, reader, this.primeFirstAvailable(base, HEIGHTMAP_TYPES.indexOf(type), paletteInfo));
       heightmaps.set(type, heightmap);
       endDecorationSection();
     }
     return heightmap;
+  }
+
+  /** Heightmap priming straight on the palette ids: the highest opaque block + 1 per column, or minY. */
+  private primeFirstAvailable(base: ChunkBlocks, typeIndex: number, paletteInfo: PaletteBlockInfo): Int32Array {
+    const typeBit = 1 << typeIndex;
+    const blocks = base.blocks;
+    const firstAvailable = new Int32Array(LAYER_SIZE);
+    const topLayerStart = (base.height - 1) * LAYER_SIZE;
+    for (let columnIndex = 0; columnIndex < LAYER_SIZE; columnIndex++) {
+      let height = base.minY;
+      for (let index = topLayerStart + columnIndex, y = base.minY + base.height - 1; index >= 0; index -= LAYER_SIZE, y--) {
+        const paletteId = blocks[index]!;
+        if (paletteId !== 0 && (this.opacityBitsOf(paletteId, paletteInfo) & typeBit) !== 0) {
+          height = y + 1;
+          break;
+        }
+      }
+      firstAvailable[columnIndex] = height;
+    }
+    return firstAvailable;
   }
 }
 
