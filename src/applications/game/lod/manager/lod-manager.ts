@@ -167,8 +167,8 @@ class LodManagerImplementation implements LodManager {
     }
     this.materials = createLodMaterials(options.fogColor ?? DEFAULT_FOG_COLOR);
     const sceneUniforms = this.materials.sceneUniforms;
-    sceneUniforms.fogStart.value = Math.max(MINIMUM_FOG_START_BLOCKS, this.radiusBlocks * FOG_START_FRACTION);
-    sceneUniforms.fogEnd.value = this.radiusBlocks;
+    sceneUniforms.hazeStart.value = Math.max(MINIMUM_FOG_START_BLOCKS, this.radiusBlocks * FOG_START_FRACTION);
+    sceneUniforms.hazeEnd.value = this.radiusBlocks;
     sceneUniforms.dissolveStart.value = this.radiusBlocks * DISSOLVE_START_FRACTION;
     sceneUniforms.dissolveEnd.value = this.radiusBlocks;
     this.display = new TileDisplay(this.pass.scene, options.fadeMilliseconds ?? DEFAULT_FADE_MILLISECONDS);
@@ -211,7 +211,7 @@ class LodManagerImplementation implements LodManager {
   }
 
   setFogColor(srgbHex: number): void {
-    this.materials.sceneUniforms.fogColor.value.copy(srgbHexToVector(srgbHex));
+    this.materials.sceneUniforms.hazeColor.value.copy(srgbHexToVector(srgbHex));
   }
 
   onRealChunkLoaded(chunkX: number, chunkY: number, chunkZ: number, blocks: Uint8Array): void {

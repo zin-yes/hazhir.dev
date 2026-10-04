@@ -67,9 +67,9 @@ uniform sampler2D coverageTexture;
 uniform vec2 coverageCenterChunk;
 uniform float coverageSize;
 uniform float tileFade;
-uniform vec3 fogColor;
-uniform float fogStart;
-uniform float fogEnd;
+uniform vec3 hazeColor;
+uniform float hazeStart;
+uniform float hazeEnd;
 uniform float dissolveStart;
 uniform float dissolveEnd;
 uniform float surfaceAlpha;
@@ -101,7 +101,7 @@ void main() {
 
   vec3 lighting = max(vec3(vShade), vec3(0.05));
   vec3 displayColor = linearToOutputTexel(vec4(vColor, 1.0)).rgb * lighting;
-  float fogAmount = smoothstep(fogStart, fogEnd, distanceToCamera);
-  gl_FragColor = vec4(mix(displayColor, fogColor, fogAmount), surfaceAlpha);
+  float hazeAmount = smoothstep(hazeStart, hazeEnd, distanceToCamera);
+  gl_FragColor = vec4(mix(displayColor, hazeColor, hazeAmount), surfaceAlpha);
 }
 `;

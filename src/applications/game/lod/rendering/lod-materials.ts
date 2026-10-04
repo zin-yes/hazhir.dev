@@ -13,9 +13,9 @@ export interface LodSceneUniforms {
   coverageCenterChunk: { value: THREE.Vector2 };
   coverageSize: { value: number };
   /** Output-space (sRGB) colour the far terrain fades towards. */
-  fogColor: { value: THREE.Vector3 };
-  fogStart: { value: number };
-  fogEnd: { value: number };
+  hazeColor: { value: THREE.Vector3 };
+  hazeStart: { value: number };
+  hazeEnd: { value: number };
   dissolveStart: { value: number };
   dissolveEnd: { value: number };
 }
@@ -46,9 +46,9 @@ export function createLodMaterials(fogColorHex: number): LodMaterials {
     coverageTexture: { value: coverageTexture },
     coverageCenterChunk: { value: new THREE.Vector2() },
     coverageSize: { value: COVERAGE_TEXTURE_SIZE },
-    fogColor: { value: srgbHexToVector(fogColorHex) },
-    fogStart: { value: 1e9 },
-    fogEnd: { value: 2e9 },
+    hazeColor: { value: srgbHexToVector(fogColorHex) },
+    hazeStart: { value: 1e9 },
+    hazeEnd: { value: 2e9 },
     dissolveStart: { value: 1e9 },
     dissolveEnd: { value: 2e9 },
   };
