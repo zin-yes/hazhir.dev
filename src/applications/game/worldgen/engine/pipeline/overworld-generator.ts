@@ -44,6 +44,8 @@ export interface OverworldGenerator {
   readonly stages: ColumnStage[];
   /** Noise fill + surface (+ any added stages) for one chunk column. The result is cached: treat it as read-only. */
   generateBaseColumn(chunkX: number, chunkZ: number): ChunkBlocks;
+  /** How many base columns were built so far (cache misses of generateBaseColumn). */
+  readonly baseColumnBuildCount: number;
   rawBiomeAtQuart(quartX: number, quartY: number, quartZ: number): string;
   biomeAt(blockX: number, blockY: number, blockZ: number): string;
   /** The distinct biomes a chunk's sections hold (what decoration's biome set reads). */
@@ -99,6 +101,7 @@ export function createOverworldGenerator(params: OverworldGeneratorParams): Over
   const columnCache = new BoundedLruCache<number, ChunkBlocks>(params.maxCachedColumns ?? MAX_CACHED_COLUMNS);
   const carvingMaskByColumn = new WeakMap<ChunkBlocks, CarvingMask>();
   const motionBlockingByPaletteId: boolean[] = [];
+  let baseColumnBuildCount = 0;
 
   const generateBaseColumn = (chunkX: number, chunkZ: number): ChunkBlocks => {
     const key = packChunkColumnKey(chunkX, chunkZ);
@@ -108,6 +111,7 @@ export function createOverworldGenerator(params: OverworldGeneratorParams): Over
       if (isProfiling) addWorkerCounter("baseColumnCacheHits", 1);
       return cached;
     }
+    baseColumnBuildCount++;
     const column = new ChunkBlocks(chunkX, chunkZ, settings.minY, settings.height, palette);
     const context: ColumnStageContext = {
       chunkX,
@@ -147,6 +151,9 @@ export function createOverworldGenerator(params: OverworldGeneratorParams): Over
     router,
     stages,
     generateBaseColumn,
+    get baseColumnBuildCount() {
+      return baseColumnBuildCount;
+    },
     rawBiomeAtQuart,
     biomeAt,
     chunkBiomes,

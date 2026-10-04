@@ -82,6 +82,9 @@ function createFullWorld(seed: number): FullWorld {
   const { registries, overworldDimension, blockTags } = loadTerralithRegistries();
   const timedSource: OverworldGenerator = {
     ...generator,
+    get baseColumnBuildCount() {
+      return generator.baseColumnBuildCount;
+    },
     generateBaseColumn(chunkX, chunkZ) {
       startWorkerSection("baseColumn");
       try {
