@@ -17,6 +17,9 @@ const COLUMN_KEY_OFFSET = 2 ** 23;
 /** Crossing level of a column that is solid all the way up. */
 const SOLID_TO_THE_TOP = HIGHEST_LEVEL;
 const MAX_UPWARD_STRIDE = 4;
+/** Levels above a found crossing that must be air for it to count as the surface (12, 24 and 48 blocks up). */
+const SKY_PROBE_OFFSETS = [3, 6, 12];
+const MAXIMUM_SKY_PROBE_ROUNDS = 4;
 
 interface LatticeColumn {
   readonly blockX: number;
@@ -72,35 +75,48 @@ export class TerrainSurfaceLattice {
   }
 
   /**
-   * Finds the solid-to-air crossing of a lattice column near `guessY`. Above a solid guess it climbs with strides of up
-   * to MAX_UPWARD_STRIDE levels until it reaches air, then walks back down to the highest solid level; below an air
-   * guess it descends one level at a time, because the shell above a cave can be a single level thick and a larger
-   * stride would fall through it into the cave.
+   * Climbs from a solid level with strides of up to MAX_UPWARD_STRIDE levels until it reaches air, then walks back
+   * down to the highest solid level below that air.
    */
-  private resolveCrossing(column: LatticeColumn, guessY: number): void {
-    if (!Number.isNaN(column.crossingLevel)) return;
-    const guessLevel = Math.max(LOWEST_LEVEL, Math.min(HIGHEST_LEVEL, floorDivide(guessY, LATTICE_SPACING)));
-    if (!this.isSolidAtLevel(column, guessLevel)) {
-      let level = guessLevel - 1;
-      while (level >= LOWEST_LEVEL && !this.isSolidAtLevel(column, level)) level--;
-      column.crossingLevel = level;
-      return;
-    }
-    let solidLevel = guessLevel;
+  private climbToCrossing(column: LatticeColumn, solidStartLevel: number): number {
+    let solidLevel = solidStartLevel;
     let stride = 1;
-    let airLevel = guessLevel + 1;
+    let airLevel = solidStartLevel + 1;
     while (airLevel <= HIGHEST_LEVEL && this.isSolidAtLevel(column, airLevel)) {
       solidLevel = airLevel;
       stride = Math.min(MAX_UPWARD_STRIDE, stride * 2);
       airLevel = Math.min(HIGHEST_LEVEL + 1, airLevel + stride);
     }
-    if (airLevel > HIGHEST_LEVEL) {
-      column.crossingLevel = SOLID_TO_THE_TOP;
-      return;
-    }
+    if (airLevel > HIGHEST_LEVEL) return SOLID_TO_THE_TOP;
     let level = airLevel - 1;
     while (level > solidLevel && !this.isSolidAtLevel(column, level)) level--;
-    column.crossingLevel = level;
+    return level;
+  }
+
+  /**
+   * Finds the solid-to-air crossing of a lattice column near `guessY`. Above a solid guess it climbs; below an air
+   * guess it descends one level at a time, because the shell above a cave can be a single level thick and a larger
+   * stride would fall through it into the cave. Either way the crossing may be a cave ceiling or an overhang floor,
+   * so the open sky above it is probed at a few heights and the climb resumes from any rock found there.
+   */
+  private resolveCrossing(column: LatticeColumn, guessY: number): void {
+    if (!Number.isNaN(column.crossingLevel)) return;
+    const guessLevel = Math.max(LOWEST_LEVEL, Math.min(HIGHEST_LEVEL, floorDivide(guessY, LATTICE_SPACING)));
+    let crossingLevel: number;
+    if (this.isSolidAtLevel(column, guessLevel)) {
+      crossingLevel = this.climbToCrossing(column, guessLevel);
+    } else {
+      crossingLevel = guessLevel - 1;
+      while (crossingLevel >= LOWEST_LEVEL && !this.isSolidAtLevel(column, crossingLevel)) crossingLevel--;
+    }
+    for (let attempt = 0; attempt < MAXIMUM_SKY_PROBE_ROUNDS && crossingLevel < SOLID_TO_THE_TOP; attempt++) {
+      const rockAbove = SKY_PROBE_OFFSETS.map((offset) => crossingLevel + offset).find(
+        (level) => level <= HIGHEST_LEVEL && this.isSolidAtLevel(column, level),
+      );
+      if (rockAbove === undefined) break;
+      crossingLevel = this.climbToCrossing(column, rockAbove);
+    }
+    column.crossingLevel = crossingLevel;
   }
 
   /** Searches the crossing of the lattice column at (blockX, blockZ), both multiples of 4. */
