@@ -16,6 +16,7 @@ import {
   type ColumnStage,
   type OverworldGenerator,
 } from "./engine/pipeline";
+import { TerrainHeightSampler } from "./engine/terrain";
 import { loadTerralithRegistries } from "./terralith/load-terralith-registries";
 
 const MAX_CACHED_SEEDS = 2;
@@ -133,7 +134,10 @@ function createTerrainOnlyGenerator(seed: number): OverworldGenerator {
   });
 }
 
-const generatorsBySeed = new Map<number, { full?: FullWorld; terrainOnly?: OverworldGenerator }>();
+const generatorsBySeed = new Map<
+  number,
+  { full?: FullWorld; terrainOnly?: OverworldGenerator; terrainHeights?: TerrainHeightSampler | null }
+>();
 
 function entryForSeed(seed: number) {
   let entry = generatorsBySeed.get(seed);
@@ -155,4 +159,17 @@ export function getFullWorld(seed: number): FullWorld {
 export function getTerrainOnlyGenerator(seed: number): OverworldGenerator {
   const entry = entryForSeed(seed);
   return (entry.terrainOnly ??= createTerrainOnlyGenerator(seed));
+}
+
+/**
+ * Heightmaps of the terrain-only generator's columns (same values as its `surfaceHeight`) sampled per block column
+ * without filling chunks, or null when the router does not allow it (then use `surfaceHeight`).
+ */
+export function getTerrainHeightSampler(seed: number): TerrainHeightSampler | null {
+  const entry = entryForSeed(seed);
+  if (entry.terrainHeights === undefined) {
+    const generator = (entry.terrainOnly ??= createTerrainOnlyGenerator(seed));
+    entry.terrainHeights = TerrainHeightSampler.create(generator.router, generator.settings) ?? null;
+  }
+  return entry.terrainHeights;
 }

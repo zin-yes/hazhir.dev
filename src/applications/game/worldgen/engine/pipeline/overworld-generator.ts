@@ -7,7 +7,7 @@ import { BiomeManager, MultiNoiseBiomeSource } from "../biome-source";
 import { createCarverSystem } from "../carvers";
 import { BlockPalette, ChunkBlocks, blockNameOf } from "../chunk";
 import { CarvingMask, type CarvingStep } from "../features/core/carving-mask";
-import { createSeededNoiseSources, wireNoiseRouter } from "../density";
+import { createSeededNoiseSources, type NoiseRouter, wireNoiseRouter } from "../density";
 import { createRootRandomFactory } from "../noise";
 import type { JsonObject, TagRegistry, WorldgenRegistries } from "../registry/datapack-loader";
 import { BoundedLruCache, packChunkColumnKey } from "./bounded-lru-cache";
@@ -38,6 +38,8 @@ export interface OverworldGeneratorParams {
 
 export interface OverworldGenerator {
   readonly settings: Pick<OverworldSettings, "minY" | "height" | "seaLevel" | "defaultBlock">;
+  /** The seeded noise router every stage samples (density functions with markers, outside any NoiseChunk). */
+  readonly router: NoiseRouter;
   /** Ordered per-column stages. Mutate before the first generateBaseColumn call (cached columns are not regenerated). */
   readonly stages: ColumnStage[];
   /** Noise fill + surface (+ any added stages) for one chunk column. The result is cached: treat it as read-only. */
@@ -119,6 +121,7 @@ export function createOverworldGenerator(params: OverworldGeneratorParams): Over
 
   return {
     settings: { minY: settings.minY, height: settings.height, seaLevel: settings.seaLevel, defaultBlock: settings.defaultBlock },
+    router,
     stages,
     generateBaseColumn,
     rawBiomeAtQuart,

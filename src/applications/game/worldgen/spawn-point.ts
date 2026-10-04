@@ -2,7 +2,7 @@
 // Candidate columns are pre-filtered by biome (microseconds) so only a few full columns get generated.
 
 import { GAME_Y_OFFSET, SEA_LEVEL } from "./constants";
-import { getTerrainOnlyGenerator } from "./overworld-world";
+import { getTerrainHeightSampler, getTerrainOnlyGenerator } from "./overworld-world";
 
 export interface SpawnPoint {
   x: number;
@@ -23,8 +23,11 @@ const WET_BIOME_PATTERN = /ocean|river|beach|shore|swamp|mangrove|lake|lagoon|re
 export function findSpawnPoint(seed: number): SpawnPoint {
   const generator = getTerrainOnlyGenerator(seed);
   const probeBiomeY = generator.settings.seaLevel + MIN_HEIGHT_ABOVE_SEA;
-  const groundTopGameY = (x: number, z: number) => generator.surfaceHeight(x, z, "OCEAN_FLOOR_WG") - 1 + GAME_Y_OFFSET;
-  const waterTopGameY = (x: number, z: number) => generator.surfaceHeight(x, z, "WORLD_SURFACE_WG") - 1 + GAME_Y_OFFSET;
+  const heights = getTerrainHeightSampler(seed);
+  const groundTopGameY = (x: number, z: number) =>
+    (heights === null ? generator.surfaceHeight(x, z, "OCEAN_FLOOR_WG") : heights.oceanFloorHeight(x, z)) - 1 + GAME_Y_OFFSET;
+  const waterTopGameY = (x: number, z: number) =>
+    (heights === null ? generator.surfaceHeight(x, z, "WORLD_SURFACE_WG") : heights.worldSurfaceHeight(x, z)) - 1 + GAME_Y_OFFSET;
 
   let columnChecks = 0;
   for (let ring = 0; ring <= MAX_SEARCH_RING; ring++) {
