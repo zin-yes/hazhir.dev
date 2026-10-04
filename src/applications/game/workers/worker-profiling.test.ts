@@ -17,6 +17,7 @@ import { buildPlantTemplate } from "./plant-voxels";
 const BLOCKS = CHUNK_WIDTH * CHUNK_HEIGHT * CHUNK_LENGTH;
 const WORLD_SEED = 20240607;
 const FULL_LIGHT = 0xff;
+const SEA_LEVEL_CHUNK_Y = 3;
 
 function recordTask<Result>(run: () => Result): { result: Result; profile: WorkerTaskProfile } {
   beginWorkerTask(true);
@@ -267,7 +268,7 @@ describe("lighting profiling", () => {
 
   test("initializeChunkLight without chunks above reads the chunk alone and never samples terrain", () => {
     const chunk = mixedChunk();
-    const { profile } = recordTask(() => initializeChunkLight(chunk, WORLD_SEED, 0, 0, 0));
+    const { profile } = recordTask(() => initializeChunkLight(chunk, WORLD_SEED, 0, SEA_LEVEL_CHUNK_Y, 0));
 
     expect(nodePaths(profile).some((path) => path.includes("createSurfaceHeightSampler"))).toBe(false);
     expect(profile.counters.columnsExposed).toBe(CHUNK_WIDTH * CHUNK_LENGTH);

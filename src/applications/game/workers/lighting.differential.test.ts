@@ -70,7 +70,7 @@ describe("game lighting against a naive global flood on generated terrain", () =
       expect(solidCells).toBeGreaterThan(BLOCKS * 0.2);
       expect(solidCells).toBeLessThan(BLOCKS * 0.95);
 
-      const pipelineLight = lightWorldLikeTheGame(world, TERRAIN_SEED).get(centerName)!;
+      const pipelineLight = lightWorldLikeTheGame(world).get(centerName)!;
       const exactLight = floodLightFromScratch(world).get(centerName)!;
 
       const litCells = exactLight.filter((value) => value >> 4 === 15).length;
@@ -87,7 +87,7 @@ describe("game lighting against a naive global flood on generated terrain", () =
     () => {
       const world = terrainNeighborhood(spawnChunkX + 1, surfaceChunkY, spawnChunkZ);
       const centerName = chunkName(spawnChunkX + 1, surfaceChunkY, spawnChunkZ);
-      const pipelineLight = lightWorldLikeTheGame(world, TERRAIN_SEED).get(centerName)!;
+      const pipelineLight = lightWorldLikeTheGame(world).get(centerName)!;
       const exactLight = floodLightFromScratch(world).get(centerName)!;
       expect(exactLight.filter((value) => value >> 4 === 15).length).toBeGreaterThan(1000);
       expect(countCellsDifferent(pipelineLight, exactLight)).toBe(0);

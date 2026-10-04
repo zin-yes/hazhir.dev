@@ -76,7 +76,7 @@ function buildTerrainFixture(): TerrainFixture {
   const generatedMs = performance.now() - generationStartedAtMs;
 
   const lightingStartedAtMs = performance.now();
-  for (const [name, light] of lightWorldLikeTheGame(world, BENCH_SEED)) {
+  for (const [name, light] of lightWorldLikeTheGame(world)) {
     world.light.set(name, light);
   }
   console.log(
