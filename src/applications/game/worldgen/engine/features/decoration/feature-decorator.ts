@@ -137,6 +137,7 @@ export class FeatureDecorator {
     addFeatureCounter("decoration.originCacheMisses", 1);
     const region = this.createRegion(chunkX, chunkZ);
     const decoration = this.decorateInRegion(region, trace);
+    region.releaseColumnCopies();
     this.originCache.set(cacheKey, decoration);
     return decoration;
   }

@@ -21,6 +21,9 @@ import { VOID_AIR_STATE, type WorldGenLevel } from "./world-gen-level";
 
 const WRITE_RADIUS = 1;
 const LAYER_SIZE = 256;
+// Written columns get a private copy of their base blocks; regions decorating one origin after another reuse them.
+const MAX_POOLED_COLUMN_COPIES = 16;
+const pooledColumnCopies: Uint16Array[] = [];
 
 /**
  * Heightmaps primed on untouched base columns, shared by every region that reads the same base column: the *_WG
@@ -108,11 +111,25 @@ class RegionColumn {
 
   write(index: number, paletteId: number): void {
     if (!this.copied) {
-      this.blocks = new Uint16Array(this.base.blocks);
+      const pooled = pooledColumnCopies.pop();
+      if (pooled !== undefined && pooled.length === this.base.blocks.length) {
+        pooled.set(this.base.blocks);
+        this.blocks = pooled;
+      } else {
+        this.blocks = new Uint16Array(this.base.blocks);
+      }
       this.copied = true;
     }
     this.blocks[index] = paletteId;
     this.writtenIndices.add(index);
+  }
+
+  /** Hands the private copy back to the pool; the column reads the base blocks again afterwards. */
+  releaseCopy(): void {
+    if (!this.copied) return;
+    if (pooledColumnCopies.length < MAX_POOLED_COLUMN_COPIES) pooledColumnCopies.push(this.blocks);
+    this.blocks = this.base.blocks;
+    this.copied = false;
   }
 
   heightmap(type: HeightmapType): ChunkHeightmap {
@@ -334,6 +351,14 @@ export class DecorationRegion implements WorldGenLevel {
   /** The palette shared by every column (available once any block has been read). */
   get blockPalette(): BlockPalette | undefined {
     return this.palette;
+  }
+
+  /** Recycles the written columns' block copies. The region must not be used afterwards. */
+  releaseColumnCopies(): void {
+    for (const column of this.columns.values()) column.releaseCopy();
+    this.columns.clear();
+    this.lastColumnKey = Number.NaN;
+    this.lastColumn = undefined;
   }
 
   /** Everything written into the writable 3x3 chunks, as final values per position. */
