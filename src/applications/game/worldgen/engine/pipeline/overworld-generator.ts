@@ -1,15 +1,18 @@
 // Base overworld generator: wires the finished engine stages in vanilla order
-// (NoiseBasedChunkGenerator: fill noise -> biomes -> buildSurface). Aquifers, ore veins, carvers and features are
-// later stages that plug into `stages`.
+// (NoiseBasedChunkGenerator: fill noise with aquifers and ore veins -> biomes -> buildSurface -> carvers). Features
+// are a later stage that plugs into `stages`.
 
 import { BiomeManager, MultiNoiseBiomeSource } from "../biome-source";
+import { createCarverSystem } from "../carvers";
 import { BlockPalette, ChunkBlocks, blockNameOf } from "../chunk";
 import { createSeededNoiseSources, wireNoiseRouter } from "../density";
-import type { JsonObject, WorldgenRegistries } from "../registry/datapack-loader";
+import { createRootRandomFactory } from "../noise";
+import type { JsonObject, TagRegistry, WorldgenRegistries } from "../registry/datapack-loader";
 import { BoundedLruCache } from "./bounded-lru-cache";
 import { ChunkBiomeStore } from "./chunk-biome-store";
 import type { ColumnStage, ColumnStageContext } from "./column-stage";
-import { createNoiseFillStage, createSeedSurfaceSystem, createSurfaceStage } from "./default-stages";
+import { createCarverStage, createNoiseFillStage, createSeedSurfaceSystem, createSurfaceStage } from "./default-stages";
+import { createPointBiomeSampler } from "./point-biome-sampler";
 import { readOverworldSettings, type OverworldSettings } from "./noise-settings-reader";
 
 const MAX_CACHED_COLUMNS = 64;
@@ -21,7 +24,9 @@ export interface OverworldGeneratorParams {
   registries: WorldgenRegistries;
   overworldDimension: JsonObject;
   seed: bigint;
-  /** Replaces the default stage list (noise fill, surface); use `generator.stages` to splice instead. */
+  /** Block tags (`#minecraft:...` ids to members) the carvers need; without them the default stage list has no carvers. */
+  blockTags?: TagRegistry;
+  /** Replaces the default stage list (noise fill with aquifers, surface, carvers); use `generator.stages` to splice instead. */
   stages?: ColumnStage[];
   /** Bounded LRU size for generated columns (default 64). */
   maxCachedColumns?: number;
@@ -42,7 +47,7 @@ export interface OverworldGenerator {
 const NON_MOTION_BLOCKING_NAMES = new Set(["minecraft:air", "minecraft:cave_air", "minecraft:void_air", "minecraft:water", "minecraft:lava"]);
 
 export function createOverworldGenerator(params: OverworldGeneratorParams): OverworldGenerator {
-  const { registries, overworldDimension, seed } = params;
+  const { registries, overworldDimension, seed, blockTags } = params;
   const settings = readOverworldSettings(registries, overworldDimension);
   const noiseSettings = registries.noise_settings[settings.noiseSettingsId]!;
   const router = wireNoiseRouter({
@@ -63,8 +68,14 @@ export function createOverworldGenerator(params: OverworldGeneratorParams): Over
   const biomeAt = (blockX: number, blockY: number, blockZ: number) => biomeManager.getBiome(blockX, blockY, blockZ);
 
   const palette = new BlockPalette();
-  const surfaceSystem = createSeedSurfaceSystem({ registries, settings, seed });
-  const stages = params.stages ?? [createNoiseFillStage(), createSurfaceStage(surfaceSystem)];
+  const rootRandomFactory = createRootRandomFactory(seed);
+  const seedSurface = createSeedSurfaceSystem({ registries, settings, randomFactory: rootRandomFactory });
+  const stages = params.stages ?? [createNoiseFillStage({ aquifers: { rootRandomFactory } }), createSurfaceStage(seedSurface.surfaceSystem)];
+  if (params.stages === undefined && blockTags !== undefined) {
+    const carverBiomeSampler = createPointBiomeSampler(router, new MultiNoiseBiomeSource((overworldDimension.generator as JsonObject).biome_source as JsonObject));
+    const carverSystem = createCarverSystem({ registries, blockTags, seed, rawBiomeAtQuart: carverBiomeSampler });
+    stages.push(createCarverStage({ carverSystem, seedSurface, settings, router }));
+  }
   const columnCache = new BoundedLruCache<string, ChunkBlocks>(params.maxCachedColumns ?? MAX_CACHED_COLUMNS);
   const motionBlockingByPaletteId: boolean[] = [];
 
@@ -73,7 +84,7 @@ export function createOverworldGenerator(params: OverworldGeneratorParams): Over
     const cached = columnCache.get(key);
     if (cached !== undefined) return cached;
     const column = new ChunkBlocks(chunkX, chunkZ, settings.minY, settings.height, palette);
-    const context: ColumnStageContext = { chunkX, chunkZ, seed, settings, registries, router, rawBiomeAtQuart, biomeAt };
+    const context: ColumnStageContext = { chunkX, chunkZ, seed, settings, registries, router, aquifer: undefined, rawBiomeAtQuart, biomeAt };
     for (const stage of stages) stage.run(column, context);
     columnCache.set(key, column);
     return column;

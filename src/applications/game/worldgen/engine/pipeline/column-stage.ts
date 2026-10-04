@@ -1,8 +1,9 @@
 // A pipeline stage mutates one 16x16 full-height column in place. Stages run in list order; the default list is
-// the vanilla order NoiseBasedChunkGenerator uses for the base terrain: fill noise, then buildSurface (biomes are
-// resolved lazily through context.rawBiomeAtQuart / context.biomeAt). Later agents splice aquifers, ore veins,
-// carvers and features into this list (see OverworldGenerator.stages).
+// the vanilla order NoiseBasedChunkGenerator uses for the base terrain: fill noise (with aquifers and ore veins), then buildSurface (biomes are
+// resolved lazily through context.rawBiomeAtQuart / context.biomeAt), then the carvers. Features splice into
+// this list later (see OverworldGenerator.stages).
 
+import type { CarverAquifer } from "../carvers";
 import type { ChunkBlocks } from "../chunk";
 import type { NoiseRouter } from "../density";
 import type { WorldgenRegistries } from "../registry/datapack-loader";
@@ -16,6 +17,8 @@ export interface ColumnStageContext {
   readonly registries: WorldgenRegistries;
   /** The seeded, uncached noise router (stages wire their own NoiseChunk caches from it). */
   readonly router: NoiseRouter;
+  /** Set by the noise fill stage when aquifers are enabled, so the carver stage reuses the fill's aquifer for this column. */
+  aquifer?: CarverAquifer;
   rawBiomeAtQuart(quartX: number, quartY: number, quartZ: number): string;
   biomeAt(blockX: number, blockY: number, blockZ: number): string;
 }

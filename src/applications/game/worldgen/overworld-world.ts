@@ -24,10 +24,11 @@ export interface AdditionalStageRegistration {
 export const ADDITIONAL_STAGE_REGISTRATIONS: AdditionalStageRegistration[] = [];
 
 function createFullGenerator(seed: number): OverworldGenerator {
-  const { registries, overworldDimension } = loadTerralithRegistries();
+  const { registries, overworldDimension, blockTags } = loadTerralithRegistries();
   const generator = createOverworldGenerator({
     registries,
     overworldDimension,
+    blockTags,
     seed: BigInt(Math.trunc(seed)),
     maxCachedColumns: FULL_GENERATOR_CACHED_COLUMNS,
   });

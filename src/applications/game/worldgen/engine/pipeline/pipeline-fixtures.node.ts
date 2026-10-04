@@ -177,6 +177,11 @@ const UNDERGROUND_FEATURE_NAMES = new Set([
 ]);
 const STONE_FAMILY_NAMES = new Set(["minecraft:stone", "minecraft:deepslate"]);
 
+/** Ore vein output (ores, raw blocks, granite, tuff) is solid ground that stands in for the stone or deepslate it replaced. */
+function isOreVeinBlock(blockName: string): boolean {
+  return blockName.endsWith("_ore") || blockName.startsWith("minecraft:raw_") || blockName === "minecraft:granite" || blockName === "minecraft:tuff";
+}
+
 /**
  * Compares our generated column with the real chunk on plain-terrain blocks only (see classifyRealBlock).
  * Underground blobs of dirt/gravel/clay/sandstone/moss (features, not terrain) are dropped where ours is stone or
@@ -214,7 +219,8 @@ export function compareChunkTerrain(
         }
         into.blocksCompared++;
         if (insideSurfaceBand) into.surfaceBandCompared++;
-        const matches = realClass.expectedName === null ? !NON_SOLID_NAMES.has(oursName) : oursName === realClass.expectedName;
+        const oursIsVeinSolid = STONE_FAMILY_NAMES.has(realClass.expectedName ?? "") && isOreVeinBlock(oursName);
+        const matches = realClass.expectedName === null ? !NON_SOLID_NAMES.has(oursName) : oursName === realClass.expectedName || oursIsVeinSolid;
         if (matches) {
           into.blocksMatching++;
           if (insideSurfaceBand) into.surfaceBandMatching++;
@@ -234,4 +240,16 @@ export function formatTopPairs(counts: Map<string, number>, limit: number): stri
     .slice(0, limit)
     .map(([pair, count]) => `  ${String(count).padStart(8)}  ${pair}`)
     .join("\n");
+}
+
+const OPEN_BLOCK_NAMES = new Set(["minecraft:air", "minecraft:cave_air", "minecraft:water", "minecraft:lava"]);
+/** Blocks that only structures (mineshafts, strongholds, villages, ruins, dungeons) place; chunks holding them are skipped. */
+const STRUCTURE_BLOCK_MARKERS = ["planks", "fence", "rail", "cobweb", "spawner", "chest", "bricks", "torch", "lantern", "barrel", "bookshelf", "terracotta_"];
+
+export function isOpenBlockName(blockName: string): boolean {
+  return OPEN_BLOCK_NAMES.has(blockName);
+}
+
+export function chunkHoldsStructureBlocks(chunk: FixtureChunk): boolean {
+  return chunk.blockPalette.some((name) => STRUCTURE_BLOCK_MARKERS.some((marker) => name.includes(marker)));
 }

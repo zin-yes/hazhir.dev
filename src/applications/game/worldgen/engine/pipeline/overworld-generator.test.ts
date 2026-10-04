@@ -23,8 +23,8 @@ const DEFAULT_RUN_CHUNK_STRIDE = 50;
 const chunkStride = RUN_INTEGRATION ? 1 : DEFAULT_RUN_CHUNK_STRIDE;
 
 function createGenerator(extra: { stages?: ColumnStage[] } = {}): OverworldGenerator {
-  const { registries, overworldDimension } = loadDatapacks();
-  return createOverworldGenerator({ registries, overworldDimension: overworldDimension!, seed: FIXTURE_SEED, ...extra });
+  const { registries, overworldDimension, blockTags } = loadDatapacks();
+  return createOverworldGenerator({ registries, overworldDimension: overworldDimension!, blockTags, seed: FIXTURE_SEED, ...extra });
 }
 
 function selectChunks(): FixtureChunk[] {
