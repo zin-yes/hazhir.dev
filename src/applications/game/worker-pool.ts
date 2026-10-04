@@ -31,7 +31,7 @@ export interface ExecOptions {
   affinityKey?: number;
 }
 
-const AFFINITY_TILE_SIZE_IN_CHUNKS = 3;
+export const AFFINITY_TILE_SIZE_IN_CHUNKS = 3;
 
 /**
  * Groups chunk columns into square tiles that share a worker, so the neighbor terrain that decoration needs is

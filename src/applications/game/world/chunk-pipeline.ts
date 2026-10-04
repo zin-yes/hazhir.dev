@@ -19,7 +19,7 @@ import {
 import { BlockEditBatch, type BlockEdit } from "../edits/block-edit-batch";
 import type { LightChunkSource } from "../edits/chunk-cluster";
 import { mergeLightReportingFaces } from "../edits/merge-light";
-import { chunkColumnAffinityKey } from "../worker-pool";
+import { AFFINITY_TILE_SIZE_IN_CHUNKS, chunkColumnAffinityKey } from "../worker-pool";
 import { collectSurroundingSlabs, type LitChunkView } from "../workers/region-surroundings";
 import type { RegionLightResult } from "../workers/region-lighting";
 import { AffinityQueues } from "./affinity-queues";
@@ -76,6 +76,36 @@ const MAX_GENERATION_ATTEMPTS = 3;
 const START_AREA_GENERATION_AFFINITY_GAP = 0.75;
 const STREAMING_GENERATION_AFFINITY_GAP = 2;
 const NO_FORWARD: PlannerForwardVector = { x: 0, y: 0, z: 0 };
+
+/**
+ * Generation order once the start area is on screen: every column of an affinity tile shares the priority of the
+ * tile's center and they run in a serpentine through the tile, so a worker generates neighbors back to back and the
+ * worldgen caches (base terrain of the surrounding 16 block columns, decoration origins) serve each next column
+ * instead of being rebuilt. Strict nearest-first order rebuilt about four times the base terrain it needed.
+ */
+export function tileCoherentPriority(
+  chunkX: number,
+  chunkZ: number,
+  priorityOfColumn: (chunkX: number, chunkZ: number) => number,
+): number {
+  const tileSize = AFFINITY_TILE_SIZE_IN_CHUNKS;
+  const tileX = Math.floor(chunkX / tileSize);
+  const tileZ = Math.floor(chunkZ / tileSize);
+  const centerOffset = Math.floor(tileSize / 2);
+  const tilePriority = priorityOfColumn(tileX * tileSize + centerOffset, tileZ * tileSize + centerOffset);
+  const localX = chunkX - tileX * tileSize;
+  const localZ = chunkZ - tileZ * tileSize;
+  const serpentineIndex = localZ * tileSize + (localZ % 2 === 0 ? localX : tileSize - 1 - localX);
+  // Tiles at the same distance must not interleave: a per-tile tie breaker, far larger than the order inside a tile.
+  const tieBreaker =
+    (((tileX * 7919 + tileZ * 104729) % TILE_TIE_BREAKER_BUCKETS) + TILE_TIE_BREAKER_BUCKETS) % TILE_TIE_BREAKER_BUCKETS;
+  return tilePriority + tieBreaker * TILE_TIE_BREAKER_STEP + serpentineIndex * TILE_ORDER_STEP;
+}
+
+/** Orders columns inside a tile; tileSize^2 steps stay below one tie breaker step. */
+const TILE_ORDER_STEP = 1e-6;
+const TILE_TIE_BREAKER_STEP = 1e-4;
+const TILE_TIE_BREAKER_BUCKETS = 1009;
 
 export interface ChunkPipelineOptions {
   renderSettings?: Partial<RenderSettings>;
@@ -384,7 +414,10 @@ export class ChunkPipeline {
 
   private columnPriority(columnKey: number): number {
     const column = unpackColumnKey(columnKey, this.columnScratch);
-    return this.planner.priorityOfChunk(column.chunkX, this.playerChunk.chunkY, column.chunkZ);
+    if (!this.startArea?.isReady) return this.planner.priorityOfChunk(column.chunkX, this.playerChunk.chunkY, column.chunkZ);
+    return tileCoherentPriority(column.chunkX, column.chunkZ, (chunkX, chunkZ) =>
+      this.planner.priorityOfChunk(chunkX, this.playerChunk.chunkY, chunkZ),
+    );
   }
 
   private isInDrawnVolume(record: ChunkRecord): boolean {
