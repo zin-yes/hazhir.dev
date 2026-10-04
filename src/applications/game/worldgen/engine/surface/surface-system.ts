@@ -11,6 +11,7 @@ import {
 } from "@/applications/game/profiler/worker-recorder";
 import type { ChunkBlocks } from "../chunk";
 import { createColumnMemoizedDensity } from "../density/column-memoization";
+import { compileDensityFunction } from "../density/density-codegen";
 import { DensityNode } from "../density/density-function";
 import type { JsonObject } from "../registry/datapack-loader";
 import { generateClayBands, CLAY_BAND_COUNT } from "./clay-bands";
@@ -162,7 +163,12 @@ export class SurfaceSystem {
       this.preliminaryRouter = router;
       this.preliminarySurfaceLevels.clear();
       const density = router.initialDensityWithoutJaggedness;
-      this.preliminaryDensity = density instanceof DensityNode ? createColumnMemoizedDensity(density) : density;
+      if (density instanceof DensityNode) {
+        const evaluate = compileDensityFunction(createColumnMemoizedDensity(density));
+        this.preliminaryDensity = { compute: (point) => evaluate(point.blockX, point.blockY, point.blockZ) };
+      } else {
+        this.preliminaryDensity = density;
+      }
     }
     const quartAlignedX = (blockX >> 2) << 2;
     const quartAlignedZ = (blockZ >> 2) << 2;
