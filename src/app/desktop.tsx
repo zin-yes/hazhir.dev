@@ -1,5 +1,6 @@
 "use client";
 
+import { v4 } from "uuid";
 import {
   ArrowUpDown,
   BookOpen,
@@ -2231,7 +2232,7 @@ export default function Desktop({
                       onClick={() =>
                         addWindow(
                           <TerminalApplicationWindow
-                            identifier={crypto.randomUUID()}
+                            identifier={v4()}
                             initialPath={node!.path}
                           />,
                         )
@@ -2353,7 +2354,7 @@ export default function Desktop({
               onClick={() =>
                 addWindow(
                   <TerminalApplicationWindow
-                    identifier={crypto.randomUUID()}
+                    identifier={v4()}
                     initialPath={desktopRootPath}
                   />,
                 )

@@ -1,4 +1,5 @@
 import { estimateTransferBytes, profiler } from "../profiler";
+import { v4 } from "uuid";
 import { DIMENSIONS } from "../profiler/dimensions";
 
 const DATABASE_NAME = "hazhir-dev-voxel-worlds";
@@ -102,7 +103,7 @@ export function hashTextToSeed(text: string): number {
 export function createWorldRecord(name: string, seed: number): StoredWorld {
   const now = Date.now();
   return {
-    id: crypto.randomUUID(),
+    id: v4(),
     name,
     seed,
     createdAt: now,

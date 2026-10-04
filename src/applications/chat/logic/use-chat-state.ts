@@ -1,6 +1,7 @@
 "use client";
 
 import Peer, { DataConnection } from "peerjs";
+import { v4 } from "uuid";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { useSession } from "@/auth/client";
@@ -610,7 +611,7 @@ export function useChatState() {
   const handleSendMessage = useCallback(() => {
     if (!messageInputValue.trim() || !activeFriendId) return;
 
-    const generatedMessageId = crypto.randomUUID();
+    const generatedMessageId = v4();
     const trimmedContent = messageInputValue.trim();
 
     posthog.capture("chat_message_sent");
