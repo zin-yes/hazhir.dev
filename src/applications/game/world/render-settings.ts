@@ -21,6 +21,8 @@ export interface RenderSettings {
 /** The range the video settings offer for real chunks. */
 export const REAL_RENDER_DISTANCE_MINIMUM_CHUNKS = 2;
 export const REAL_RENDER_DISTANCE_MAXIMUM_CHUNKS = 16;
+export const VERTICAL_RENDER_DISTANCE_MINIMUM_CHUNKS = 1;
+export const VERTICAL_RENDER_DISTANCE_MAXIMUM_CHUNKS = 6;
 export const LOD_RENDER_DISTANCE_MINIMUM_CHUNKS = 32;
 export const LOD_RENDER_DISTANCE_MAXIMUM_CHUNKS = 512;
 

@@ -8,13 +8,26 @@ function memoryStorage() {
 }
 
 describe("render settings storage", () => {
-  test("stored distances come back, clamped, and nothing else is overridden", () => {
+  test("stored chunk range, shape and distances come back, clamped", () => {
     const startedAt = performance.now();
     const storage = memoryStorage();
     storeRenderSettings(storage, { ...DEFAULT_RENDER_SETTINGS, horizontalRadius: 12, lodRenderDistanceChunks: 0, verticalUp: 9 });
-    expect(loadStoredRenderSettings(storage)).toEqual({ horizontalRadius: 12, lodRenderDistanceChunks: 0 });
-    storage.setItem("voxel-game.video-settings", JSON.stringify({ horizontalRadius: 100, lodRenderDistanceChunks: 9000 }));
-    expect(loadStoredRenderSettings(storage)).toEqual({ horizontalRadius: 16, lodRenderDistanceChunks: 512 });
+    expect(loadStoredRenderSettings(storage)).toEqual({
+      horizontalRadius: 12,
+      verticalUp: 6,
+      verticalDown: DEFAULT_RENDER_SETTINGS.verticalDown,
+      shape: DEFAULT_RENDER_SETTINGS.shape,
+      lodRenderDistanceChunks: 0,
+    });
+    storage.setItem(
+      "voxel-game.video-settings",
+      JSON.stringify({ horizontalRadius: 100, verticalDown: 0, shape: "cube", lodRenderDistanceChunks: 9000 }),
+    );
+    expect(loadStoredRenderSettings(storage)).toEqual({
+      horizontalRadius: 16,
+      verticalDown: 1,
+      lodRenderDistanceChunks: 512,
+    });
     console.log(`storage test: ${(performance.now() - startedAt).toFixed(2)} ms`);
   });
 
