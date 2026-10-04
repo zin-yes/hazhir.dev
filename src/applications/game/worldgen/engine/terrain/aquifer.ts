@@ -171,6 +171,43 @@ export class NoiseBasedAquifer {
     return this.fluidAtStatus(originIndex, blockY);
   }
 
+  /**
+   * For a box of blocks: the index of a fluid status shared by every origin cell the box's blocks use, when all of
+   * them are uniform (so every open block above the lava level answers fluidOfStatusAt(index, y)), or -1.
+   */
+  sharedUniformStatusOfBox(minBlockX: number, maxBlockX: number, minBlockY: number, maxBlockY: number, minBlockZ: number, maxBlockZ: number): number {
+    let sharedIndex = -1;
+    for (let originGridY = Math.floor((minBlockY + 1) / Y_SPACING); originGridY <= Math.floor((maxBlockY + 1) / Y_SPACING); originGridY++) {
+      for (let originGridZ = (minBlockZ - 5) >> 4; originGridZ <= (maxBlockZ - 5) >> 4; originGridZ++) {
+        for (let originGridX = (minBlockX - 5) >> 4; originGridX <= (maxBlockX - 5) >> 4; originGridX++) {
+          const originIndex = this.cellIndex(originGridX, originGridY, originGridZ);
+          let uniformity = this.originUniformity[originIndex]!;
+          if (uniformity === 0) {
+            uniformity = this.classifyOrigin(originGridX, originGridY, originGridZ);
+            this.originUniformity[originIndex] = uniformity;
+          }
+          if (uniformity !== ORIGIN_UNIFORM) return -1;
+          if (sharedIndex === -1) {
+            sharedIndex = originIndex;
+          } else if (this.statusLevel[originIndex] !== this.statusLevel[sharedIndex] || this.statusFluid[originIndex] !== this.statusFluid[sharedIndex]) {
+            return -1;
+          }
+        }
+      }
+    }
+    return sharedIndex;
+  }
+
+  /** The fluid a status gives at y (air at and above its level). */
+  fluidOfStatusAt(statusIndex: number, blockY: number): number {
+    return this.fluidAtStatus(statusIndex, blockY);
+  }
+
+  /** True where every open block is lava (the global fluid picker's lava level). */
+  isBelowLavaLevel(blockY: number): boolean {
+    return blockY < this.lavaBelowY;
+  }
+
   /** computeSubstance for a context known to sit at (blockX, blockY, blockZ), skipping its coordinate getters. */
   computeSubstanceAt(context: FunctionContext, density: number, blockX: number, blockY: number, blockZ: number): number {
     if (density > 0) return NULL_SUBSTANCE;

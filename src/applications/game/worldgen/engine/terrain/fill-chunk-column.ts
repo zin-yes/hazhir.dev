@@ -320,6 +320,9 @@ function fillCellWithAquifer(
 ): void {
   const cellWidth = noiseChunk.cellWidth;
   const cellHeight = noiseChunk.cellHeight;
+  if (cellValues !== undefined && fillUniformCell(blocks, cellValues, aquifer, oreVeinifier, cellX, cellY, cellZ, cellWidth, cellHeight, minCellY, minY, chunkMinBlockX, chunkMinBlockZ)) {
+    return;
+  }
   for (let yInCell = cellHeight - 1; yInCell >= 0; yInCell--) {
     const blockY = (minCellY + cellY) * cellHeight + yInCell;
     const rowOffset = (blockY - minY) * 256;
@@ -355,5 +358,61 @@ function fillCellWithAquifer(
         blocks[rowOffset + localZ * 16 + localX] = symbol;
       }
     }
+  }
+}
+
+/**
+ * The two common cells, decided without a per-block aquifer or vein call (same symbols as the block loop): fully
+ * solid cells away from vein heights are the default block, and fully open cells whose origin cells all share one
+ * uniform fluid status hold that status's fluid per row (lava below the lava level). Air needs no write: the block
+ * array starts as air. Returns false for every other cell.
+ */
+function fillUniformCell(
+  blocks: Uint8Array,
+  cellValues: Float64Array,
+  aquifer: NoiseBasedAquifer,
+  oreVeinifier: OreVeinifier | undefined,
+  cellX: number,
+  cellY: number,
+  cellZ: number,
+  cellWidth: number,
+  cellHeight: number,
+  minCellY: number,
+  minY: number,
+  chunkMinBlockX: number,
+  chunkMinBlockZ: number,
+): boolean {
+  let positiveCount = 0;
+  for (let index = 0; index < cellValues.length; index++) if (cellValues[index]! > 0) positiveCount++;
+  const lowestBlockY = (minCellY + cellY) * cellHeight;
+  const highestBlockY = lowestBlockY + cellHeight - 1;
+  const firstLocalX = cellX * cellWidth;
+  const firstLocalZ = cellZ * cellWidth;
+  if (positiveCount === cellValues.length) {
+    if (oreVeinifier !== undefined && (oreVeinifier.mayHoldVeinAt(lowestBlockY) || oreVeinifier.mayHoldVeinAt(highestBlockY))) return false;
+    for (let blockY = lowestBlockY; blockY <= highestBlockY; blockY++) fillCellRow(blocks, (blockY - minY) * 256, firstLocalX, firstLocalZ, cellWidth, BLOCK_DEFAULT_BLOCK);
+    return true;
+  }
+  if (positiveCount !== 0) return false;
+  const statusIndex = aquifer.sharedUniformStatusOfBox(
+    chunkMinBlockX + firstLocalX,
+    chunkMinBlockX + firstLocalX + cellWidth - 1,
+    lowestBlockY,
+    highestBlockY,
+    chunkMinBlockZ + firstLocalZ,
+    chunkMinBlockZ + firstLocalZ + cellWidth - 1,
+  );
+  if (statusIndex === -1) return false;
+  for (let blockY = lowestBlockY; blockY <= highestBlockY; blockY++) {
+    const symbol = aquifer.isBelowLavaLevel(blockY) ? BLOCK_LAVA : aquifer.fluidOfStatusAt(statusIndex, blockY);
+    if (symbol !== BLOCK_AIR) fillCellRow(blocks, (blockY - minY) * 256, firstLocalX, firstLocalZ, cellWidth, symbol);
+  }
+  return true;
+}
+
+function fillCellRow(blocks: Uint8Array, rowOffset: number, firstLocalX: number, firstLocalZ: number, cellWidth: number, symbol: number): void {
+  for (let localZ = firstLocalZ; localZ < firstLocalZ + cellWidth; localZ++) {
+    const lineStart = rowOffset + localZ * 16 + firstLocalX;
+    blocks.fill(symbol, lineStart, lineStart + cellWidth);
   }
 }
