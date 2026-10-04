@@ -31,7 +31,8 @@ export interface ExecOptions {
   affinityKey?: number;
 }
 
-export const AFFINITY_TILE_SIZE_IN_CHUNKS = 3;
+/** 4 measured best filling radius 8 to 12 (15-17 s, against 21 s at 3); 6 and 8 rebuilt more base terrain per column. */
+export const AFFINITY_TILE_SIZE_IN_CHUNKS = 4;
 
 /**
  * Groups chunk columns into square tiles that share a worker, so the neighbor terrain that decoration needs is

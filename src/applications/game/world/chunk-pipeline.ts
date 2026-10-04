@@ -103,6 +103,12 @@ export function tileCoherentPriority(
   return tilePriority + tieBreaker * TILE_TIE_BREAKER_STEP + serpentineIndex * TILE_ORDER_STEP;
 }
 
+/** The affinity tile a column belongs to, as one number. */
+export function affinityTileKeyOf(chunkX: number, chunkZ: number): number {
+  const tileSize = AFFINITY_TILE_SIZE_IN_CHUNKS;
+  return packColumnKey(Math.floor(chunkX / tileSize), Math.floor(chunkZ / tileSize));
+}
+
 /** Orders columns inside a tile; tileSize^2 steps stay below one tie breaker step. */
 const TILE_ORDER_STEP = 1e-6;
 const TILE_TIE_BREAKER_STEP = 1e-4;
@@ -186,10 +192,19 @@ export class ChunkPipeline {
     this.drawnVolume = renderVolumeOf(this.renderSettings);
     this.planner = new ChunkStreamPlanner(streamConfigFor(this.renderSettings, this.surfaceChunkYFor));
     const preferredWorker = options.preferredGenerationWorker ?? chunkColumnAffinityKey;
-    this.generationQueues = new AffinityQueues(options.generation.workerCount, (columnKey) => {
-      const column = unpackColumnKey(columnKey, this.columnScratch);
-      return preferredWorker(column.chunkX, column.chunkZ);
-    }, START_AREA_GENERATION_AFFINITY_GAP);
+    this.generationQueues = new AffinityQueues(
+      options.generation.workerCount,
+      (columnKey) => {
+        const column = unpackColumnKey(columnKey, this.columnScratch);
+        return preferredWorker(column.chunkX, column.chunkZ);
+      },
+      START_AREA_GENERATION_AFFINITY_GAP,
+      (columnKey) => {
+        const column = unpackColumnKey(columnKey, this.columnScratch);
+        return affinityTileKeyOf(column.chunkX, column.chunkZ);
+      },
+    );
+    this.generationQueues.transfersWholeGroups = false;
     this.generationWorkerBusy = new Array(options.generation.workerCount).fill(false);
     this.meshes = new MeshCoordinator(this.store, options.meshing, {
       priorityOf: (key) => this.planner.priorityOfKey(key),
@@ -426,6 +441,7 @@ export class ChunkPipeline {
       (fractions) => this.options.events.onStartAreaProgress?.(fractions),
       () => {
         this.generationQueues.maxPriorityGapForAffinity = STREAMING_GENERATION_AFFINITY_GAP;
+        this.generationQueues.transfersWholeGroups = true;
         profiler.recordTimer("chunk.load.total", profiler.now() - startedAtMs, "latency");
         this.options.events.onStartAreaReady?.();
       },
