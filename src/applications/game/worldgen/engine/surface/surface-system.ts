@@ -247,6 +247,8 @@ export class SurfaceSystem {
     const chunkMinBlockX = chunk.chunkX * 16;
     const chunkMinBlockZ = chunk.chunkZ * 16;
     const minY = chunk.minY;
+    const maxY = chunk.maxY;
+    const blocks = chunk.blocks;
     let ruleEvaluations = 0;
     let solidBlocksScanned = 0;
 
@@ -266,8 +268,9 @@ export class SurfaceSystem {
         let stoneDepthAbove = 0;
         let waterHeight = NO_WATER_HEIGHT;
         let stoneRegionBottom = 2147483647;
+        const columnIndex = localZ * 16 + localX;
         for (let y = startY; y >= minY; y--) {
-          const blockId = access.getBlockId(localX, y, localZ);
+          const blockId = y > maxY ? 0 : blocks[(y - minY) * 256 + columnIndex]!;
           const kind = access.kindOf(blockId);
           if (kind === BLOCK_KIND_AIR) {
             stoneDepthAbove = 0;
@@ -281,7 +284,8 @@ export class SurfaceSystem {
           if (stoneRegionBottom >= y) {
             stoneRegionBottom = WAY_BELOW_MIN_Y;
             for (let belowY = y - 1; belowY >= minY - 1; belowY--) {
-              if (access.kindOf(access.getBlockId(localX, belowY, localZ)) !== BLOCK_KIND_SOLID) {
+              const belowBlockId = belowY < minY ? 0 : blocks[(belowY - minY) * 256 + columnIndex]!;
+              if (access.kindOf(belowBlockId) !== BLOCK_KIND_SOLID) {
                 stoneRegionBottom = belowY + 1;
                 break;
               }
