@@ -103,8 +103,9 @@ export class WorkerPool {
   execLazy(
     method: string,
     buildRequest: () => WorkerRequest | null,
+    options?: ExecOptions,
   ): Promise<any> {
-    return this.enqueue(method, buildRequest);
+    return this.enqueue(method, buildRequest, undefined, options?.affinityKey);
   }
 
   private enqueue(
@@ -173,33 +174,38 @@ export class WorkerPool {
         while (this.workers.length < this.maxWorkers) this.spawnWorker();
       }
 
-      const availableWorker = this.workers.find(
-        (w) => !this.activeWorkers.has(w)
-      );
-      if (!availableWorker) return;
-
-      const task = this.queue.splice(this.indexOfNextTaskFor(availableWorker), 1)[0]!;
+      const idleWorkers = this.workers.filter((worker) => !this.activeWorkers.has(worker));
+      if (idleWorkers.length === 0) return;
+      let chosenWorker = idleWorkers[0]!;
+      let taskIndex = -1;
+      for (const worker of idleWorkers) {
+        taskIndex = this.indexOfOwnTask(worker);
+        if (taskIndex !== -1) {
+          chosenWorker = worker;
+          break;
+        }
+      }
+      const task = this.queue.splice(Math.max(taskIndex, 0), 1)[0]!;
       const request = task.buildRequest();
       if (!request) {
         task.resolve(null);
         continue;
       }
-      this.dispatch(availableWorker, task, request);
+      this.dispatch(chosenWorker, task, request);
     }
   }
 
   /**
-   * The oldest task that prefers this worker or has no preference. A worker with nothing of its own takes the
-   * oldest task of another worker instead of idling.
+   * The oldest task that prefers this worker or has no preference, or -1. An idle worker with nothing of its own
+   * takes the oldest task of a busy worker instead of idling (processQueue falls back to index 0).
    */
-  private indexOfNextTaskFor(worker: Worker): number {
+  private indexOfOwnTask(worker: Worker): number {
     const workerIndex = this.workers.indexOf(worker);
-    const ownTaskIndex = this.queue.findIndex(
+    return this.queue.findIndex(
       (queued) =>
         queued.affinityKey === undefined ||
         mod(queued.affinityKey, this.maxWorkers) === workerIndex,
     );
-    return ownTaskIndex === -1 ? 0 : ownTaskIndex;
   }
 
   private dispatch(worker: Worker, task: QueuedTask, request: WorkerRequest) {

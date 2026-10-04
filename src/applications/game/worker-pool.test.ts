@@ -179,3 +179,19 @@ describe("WorkerPool with the profiler disabled", () => {
     expect(snapshot.bytes).toEqual([]);
   });
 });
+
+describe("WorkerPool affinity", () => {
+  test("a task goes to its preferred worker when that worker is idle, even if another idle worker comes first", () => {
+    const { pool, workers } = createPool(3, "generation");
+    void pool.exec("generateChunkColumn", [], undefined, { affinityKey: 2 });
+    void pool.execLazy("generateChunkColumn", () => ({ params: [] }), { affinityKey: 4 });
+    expect(workers.map((worker) => worker.receivedRequests.length)).toEqual([0, 1, 1]);
+  });
+
+  test("an idle worker takes another worker's task rather than wait when nothing of its own is queued", () => {
+    const { pool, workers } = createPool(2, "generation");
+    void pool.exec("generateChunkColumn", [], undefined, { affinityKey: 1 });
+    void pool.exec("generateChunkColumn", [], undefined, { affinityKey: 1 });
+    expect(workers.map((worker) => worker.receivedRequests.length)).toEqual([1, 1]);
+  });
+});
