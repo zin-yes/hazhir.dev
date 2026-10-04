@@ -2,10 +2,17 @@
  * Shared bit layout for chunk vertices and plant instances.
  *
  * A mesh vertex is two uint32 words (8 bytes):
- *   position word: x | y << 10 | z << 20, each in 1/16 block units
- *   surface word:  u | v << 7 | texture << 14 | ambientOcclusion << 22 | light << 24
+ *   position word: x | y << 10 | z << 20 | edgeNormalAxis << 30, x y z in 1/16 block units
+ *   surface word:  u | v << 7 | texture << 14 | ambientOcclusion << 22 | light << 24 | edgeOutward << 30
  *                  (u and v are 7 bits, light is in 1/4 levels, 6 bits)
  * Normals are not stored: the fragment shader never uses them.
+ *
+ * Edge expansion: greedy merging leaves T-junctions (a small quad's corner on a
+ * big quad's edge), which rasterize with pixel-sized cracks. Cube faces carry
+ * their normal axis plus one (0 = never expand) and, per corner, which way is
+ * outward along the two other axes (bit 0: axis (normal + 1) % 3, bit 1: axis
+ * (normal + 2) % 3, set = towards +). The opaque vertex shader pushes each
+ * corner outward by a sub-pixel amount so neighboring quads overlap.
  *
  * u and v are unwrapped texture coordinates: the texture repeats every whole
  * unit and the fragment shader takes the fraction. Chunk surfaces use half
@@ -45,6 +52,9 @@ export const SURFACE_LIGHT_BITS = 4;
 /** Vertex light is averaged across neighboring cells, so it carries quarter levels. */
 export const LIGHT_STEPS_PER_LEVEL = 4;
 export const SURFACE_LIGHT_STEP_BITS = SURFACE_LIGHT_BITS + 2;
+
+export const EDGE_NORMAL_AXIS_SHIFT = 30;
+export const EDGE_OUTWARD_SHIFT = 30;
 
 export const PLANT_INSTANCE_COORDINATE_BITS = 5;
 export const PLANT_INSTANCE_Y_SHIFT = PLANT_INSTANCE_COORDINATE_BITS;
@@ -104,6 +114,24 @@ export function packPlantInstance(
     (light << PLANT_INSTANCE_LIGHT_SHIFT) |
     (neighborMask << PLANT_INSTANCE_MASK_SHIFT)
   );
+}
+
+/**
+ * The outward direction of a vertex in the plane of its face, as the vertex
+ * shader reads it (each component -1, 0 or 1), or null when it never expands.
+ */
+export function unpackEdgeOutward(
+  positionWord: number,
+  surfaceWord: number,
+): [number, number, number] | null {
+  const normalAxisCode = (positionWord >>> EDGE_NORMAL_AXIS_SHIFT) & 3;
+  if (normalAxisCode === 0) return null;
+  const normalAxis = normalAxisCode - 1;
+  const outward: [number, number, number] = [0, 0, 0];
+  const outwardBits = (surfaceWord >>> EDGE_OUTWARD_SHIFT) & 3;
+  outward[(normalAxis + 1) % 3] = outwardBits & 1 ? 1 : -1;
+  outward[(normalAxis + 2) % 3] = outwardBits & 2 ? 1 : -1;
+  return outward;
 }
 
 export interface UnpackedVertex {

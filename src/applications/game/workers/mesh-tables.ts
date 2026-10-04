@@ -10,6 +10,8 @@ import {
 } from "@/applications/game/blocks";
 import { CHUNK_HEIGHT, CHUNK_LENGTH, CHUNK_WIDTH } from "../config";
 import {
+  EDGE_NORMAL_AXIS_SHIFT,
+  EDGE_OUTWARD_SHIFT,
   LIGHT_STEPS_PER_LEVEL,
   POSITION_AXIS_BITS,
   POSITION_Y_SHIFT,
@@ -158,6 +160,9 @@ export const FACE_CORNER_FLAGS = Uint8Array.from(FACE_CORNERS.flat(2));
 export const CORNER_SIZE_MASKS = new Int32Array(FACE_COUNT * 4);
 export const CORNER_U_AT_FAR_END = new Uint8Array(FACE_COUNT * 4);
 export const CORNER_V_AT_FAR_END = new Uint8Array(FACE_COUNT * 4);
+/** Edge expansion bits of each face corner (see vertex-format.ts), to OR into its position and surface words. */
+export const CORNER_EDGE_POSITION_BITS = new Int32Array(FACE_COUNT * 4);
+export const CORNER_EDGE_SURFACE_BITS = new Int32Array(FACE_COUNT * 4);
 
 export const FACE_U_AXIS = Uint8Array.from([0, 0, 0, 0, 2, 2]);
 export const FACE_U_FORWARD = Uint8Array.from([0, 1, 0, 1, 1, 0]);
@@ -175,6 +180,11 @@ for (let face = 0; face < FACE_COUNT; face++) {
     const isUFlagSet = FACE_CORNER_FLAGS[base + FACE_U_AXIS[face]] === 1;
     CORNER_U_AT_FAR_END[face * 4 + corner] = isUFlagSet === (FACE_U_FORWARD[face] === 1) ? 1 : 0;
     CORNER_V_AT_FAR_END[face * 4 + corner] = FACE_CORNER_FLAGS[base + FACE_V_AXIS[face]];
+    const normalAxis = FACE_NORMALS[face].findIndex((component) => component !== 0);
+    CORNER_EDGE_POSITION_BITS[face * 4 + corner] = (normalAxis + 1) << EDGE_NORMAL_AXIS_SHIFT;
+    CORNER_EDGE_SURFACE_BITS[face * 4 + corner] =
+      (FACE_CORNER_FLAGS[base + ((normalAxis + 1) % 3)] | (FACE_CORNER_FLAGS[base + ((normalAxis + 2) % 3)] << 1)) <<
+      EDGE_OUTWARD_SHIFT;
   }
 }
 

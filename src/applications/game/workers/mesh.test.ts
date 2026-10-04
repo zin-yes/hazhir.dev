@@ -6,7 +6,7 @@ import {
   CHUNK_WIDTH,
 } from "@/applications/game/config";
 import { calculateOffset } from "../utils";
-import { PLANT_NEIGHBOR_DIRECTIONS, WORDS_PER_VERTEX, unpackVertex } from "../vertex-format";
+import { PLANT_NEIGHBOR_DIRECTIONS, WORDS_PER_VERTEX, unpackEdgeOutward, unpackVertex } from "../vertex-format";
 import { generateMesh } from "./mesh";
 import {
   decodeSurfaceQuads,
@@ -157,6 +157,46 @@ describe("generateMesh greedy merging", () => {
       quad.corners.every((corner) => corner.y === 4 + 14 / 16)
     );
     expect(surface.length).toBe(1);
+  });
+});
+
+describe("generateMesh edge expansion", () => {
+  test("every cube face corner points away from its quad inside the face plane, so expanded quads close T-junctions", () => {
+    const chunk = new Uint8Array(CHUNK_WIDTH * CHUNK_HEIGHT * CHUNK_LENGTH);
+    const lightMap = new Uint8Array(chunk.length).fill(FULL_LIGHT);
+    for (let x = 0; x < CHUNK_WIDTH; x++) {
+      for (let z = 0; z < CHUNK_LENGTH; z++) {
+        chunk[calculateOffset(x, 4, z)] = (x * 3 + z) % 7 === 0 ? BlockType.DIRT : BlockType.STONE;
+        lightMap[calculateOffset(x, 5, z)] = x < 12 ? FULL_LIGHT : 0x80;
+      }
+    }
+    for (let y = 5; y < 9; y++) chunk[calculateOffset(9, y, 9)] = BlockType.STONE;
+    chunk[calculateOffset(20, 5, 20)] = BlockType.STONE_SLAB;
+    const mesh = generateMesh(chunk.buffer, lightMap.buffer);
+    const words = new Uint32Array(mesh.opaque);
+    const facesSeen = new Set<string>();
+    let cornersChecked = 0;
+    for (let quadStart = 0; quadStart < words.length; quadStart += 4 * WORDS_PER_VERTEX) {
+      const corners = [0, 1, 2, 3].map((corner) => {
+        const positionWord = words[quadStart + corner * WORDS_PER_VERTEX];
+        const surfaceWord = words[quadStart + corner * WORDS_PER_VERTEX + 1];
+        const vertex = unpackVertex(positionWord, surfaceWord);
+        return { position: [vertex.x, vertex.y, vertex.z], outward: unpackEdgeOutward(positionWord, surfaceWord) };
+      });
+      const centroid = [0, 1, 2].map((axis) => corners.reduce((sum, corner) => sum + corner.position[axis], 0) / 4);
+      const normalAxis = [0, 1, 2].find((axis) => corners.every((corner) => corner.position[axis] === corners[0].position[axis]))!;
+      for (const corner of corners) {
+        expect(corner.outward).not.toBeNull();
+        expect(corner.outward![normalAxis]).toBe(0);
+        for (const axis of [0, 1, 2].filter((candidate) => candidate !== normalAxis)) {
+          expect(corner.outward![axis]).toBe(Math.sign(corner.position[axis] - centroid[axis]));
+        }
+        cornersChecked++;
+      }
+      facesSeen.add(`${normalAxis}:${Math.sign(corners[0].position[normalAxis] - 9)}`);
+    }
+    expect(cornersChecked).toBeGreaterThan(40);
+    expect(facesSeen.size).toBeGreaterThanOrEqual(5);
   });
 });
 

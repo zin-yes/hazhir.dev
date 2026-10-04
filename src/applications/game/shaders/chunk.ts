@@ -19,8 +19,17 @@ import {
   SURFACE_V_SHIFT,
   UV_BITS,
   CHUNK_UV_UNITS_PER_BLOCK,
+  EDGE_NORMAL_AXIS_SHIFT,
+  EDGE_OUTWARD_SHIFT,
   PLANT_UV_UNITS_PER_TEXTURE,
 } from "../vertex-format";
+
+/**
+ * How far the opaque shader pushes a face corner outward, per block of view
+ * depth: about a tenth of a pixel at 1000 pixels of screen height, enough to
+ * close T-junction cracks between merged quads and too little to see.
+ */
+export const EDGE_EXPANSION_PER_DEPTH = 0.00015;
 
 const TILE_EDGE_BIAS = "0.0001";
 const mask = (bits: number) => `${(1 << bits) - 1}u`;
@@ -71,13 +80,26 @@ void decodeSurface(uint surfaceWord, float textureUnitsPerWholeCoordinate) {
 export const VERTEX_SHADER = `
 ${VERTEX_DECODING}
 
+uniform float edgeExpansion;
+
 void main() {
   uint surfaceWord = packedVertex.y;
   decodeSurface(surfaceWord, ${CHUNK_UV_UNITS_PER_BLOCK}.0);
   vShade = shadeFor(decodeLight(surfaceWord), decodeAmbientOcclusion(surfaceWord));
 
   vec3 localPosition = decodeVoxelPosition(packedVertex.x) * ${(1 / POSITION_UNITS_PER_BLOCK).toFixed(6)};
-  gl_Position = projectionMatrix * modelViewMatrix * vec4(localPosition, 1.0);
+  vec4 viewPosition = modelViewMatrix * vec4(localPosition, 1.0);
+  uint normalAxisCode = packedVertex.x >> ${EDGE_NORMAL_AXIS_SHIFT}u;
+  if (normalAxisCode != 0u && edgeExpansion > 0.0) {
+    int normalAxis = int(normalAxisCode) - 1;
+    uint outwardBits = surfaceWord >> ${EDGE_OUTWARD_SHIFT}u;
+    vec3 outward = vec3(0.0);
+    outward[(normalAxis + 1) % 3] = (outwardBits & 1u) != 0u ? 1.0 : -1.0;
+    outward[(normalAxis + 2) % 3] = (outwardBits & 2u) != 0u ? 1.0 : -1.0;
+    localPosition += outward * (max(-viewPosition.z, 0.0) * edgeExpansion);
+    viewPosition = modelViewMatrix * vec4(localPosition, 1.0);
+  }
+  gl_Position = projectionMatrix * viewPosition;
 }
 `;
 

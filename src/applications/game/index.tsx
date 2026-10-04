@@ -50,6 +50,7 @@ import {
   releaseChunkGeometry,
 } from "./chunk-geometry";
 import {
+  EDGE_EXPANSION_PER_DEPTH,
   FRAGMENT_SHADER,
   PLANT_VERTEX_SHADER,
   VERTEX_SHADER,
@@ -820,6 +821,9 @@ export default function Game() {
                 waterTextureIndex: {
                   value: waterTextureIndex,
                 },
+                edgeExpansion: {
+                  value: EDGE_EXPANSION_PER_DEPTH,
+                },
               },
               vertexShader: VERTEX_SHADER,
               fragmentShader: FRAGMENT_SHADER,
@@ -836,6 +840,9 @@ export default function Game() {
                 },
                 waterTextureIndex: {
                   value: waterTextureIndex,
+                },
+                edgeExpansion: {
+                  value: 0,
                 },
               },
               vertexShader: VERTEX_SHADER,

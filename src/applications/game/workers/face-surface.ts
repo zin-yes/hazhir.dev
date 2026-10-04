@@ -7,6 +7,8 @@ import {
 } from "../vertex-format";
 import {
   CELL_AXIS_CORNER_PAIRS,
+  CORNER_EDGE_POSITION_BITS,
+  CORNER_EDGE_SURFACE_BITS,
   CORNER_EXTRA_CELLS_BY_EXCLUDED_MASK,
   CORNER_OCCLUSION_BY_BLOCKED_MASK,
   CORNER_RING_INDICES,
@@ -186,8 +188,9 @@ export function emitFaceQuad(
   const faceBase = face * 4;
   for (let corner = 0; corner < 4; corner++) {
     const cornerIndex = faceBase + corner;
-    positionWords[corner] = minimumWord + (sizeWord & CORNER_SIZE_MASKS[cornerIndex]);
+    positionWords[corner] = (minimumWord + (sizeWord & CORNER_SIZE_MASKS[cornerIndex])) | CORNER_EDGE_POSITION_BITS[cornerIndex];
     surfaceWords[corner] =
+      CORNER_EDGE_SURFACE_BITS[cornerIndex] |
       (CORNER_U_AT_FAR_END[cornerIndex] === 1 ? uExtent : 0) |
       ((CORNER_V_AT_FAR_END[cornerIndex] === 1 ? vAtFlagOne : vAtFlagZero) << SURFACE_V_SHIFT) |
       textureBits |
