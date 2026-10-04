@@ -96,7 +96,7 @@ void main() {
   if (tileFade >= 0.0) {
     if (dither >= min(tileFade, farVisibility)) discard;
   } else {
-    if (dither < -tileFade || dither >= farVisibility) discard;
+    if (dither < -tileFade - 1.0 || dither >= farVisibility) discard;
   }
 
   vec3 lighting = max(vec3(vShade), vec3(0.05));

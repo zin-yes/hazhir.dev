@@ -40,7 +40,7 @@ export class TileDisplay {
   }
 
   private applyFade(tile: DisplayedTile): void {
-    tile.tileMesh.fade = tile.isEntering ? (tile.progress >= 1 ? 1 : tile.progress) : -tile.progress;
+    tile.tileMesh.fade = tile.isEntering ? tile.progress : -1 - tile.progress;
   }
 
   /**

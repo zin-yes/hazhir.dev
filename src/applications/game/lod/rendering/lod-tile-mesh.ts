@@ -21,7 +21,7 @@ export interface TileGeometryBuffers {
 export interface LodTileMesh {
   readonly mesh: THREE.Mesh;
   readonly geometryBytes: number;
-  /** 1 = fully shown; 0..1 = fading in; -1..0 = fading out (see the fragment shader). */
+  /** Entering: 0..1, the fraction of pixels drawn (1 = fully shown). Leaving: -1 - progress, so -1 is still fully shown and -2 gone. */
   fade: number;
   dispose(): void;
 }
