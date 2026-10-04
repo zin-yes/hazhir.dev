@@ -110,11 +110,13 @@ front of the hit face (24 block reach; without a hit, 24 blocks in front of the 
 repaints solid blocks, Alt only fills air. Holding a button keeps drawing, at most one sphere per frame and only after
 the center moved a quarter radius. A wireframe sphere (`brush-preview.ts`, one mesh for the session) shows the target.
 
-Every sphere goes through `applySphere` (one relight, one deduplicated rebuild per chunk). Saved edits and water
+A brush sphere is split into one piece per chunk (`edit-slicing.ts`), nearest to the center first, and the pieces
+run through the bulk edit path under an 8 ms budget per frame (one piece always runs), so a big sphere spreads over a
+few frames instead of stalling one; `applySphere` from scripts still applies a sphere in one batch. Saved edits and water
 wakeups run through `edit-side-effects.ts`, peers get one `BLOCK_BATCH` packet of y runs
 (`network/block-batch-codec.ts`, about 190 KB for a radius 64 sphere). `window.__voxelWorld.setBrush` / `getBrush`
 drive it from scripts; `getBrush().lastEdit` holds the last sphere's `onScreenMilliseconds`.
 
-Measured (Apple M5, real radius 8, stone, click to all rebuilt chunks on screen): radius 8 about 16 ms, 16 about
-25-45 ms, 32 about 85-110 ms (about 45 ms of it on the main thread: relight 20-25 ms, saved edits 13 ms), 64 (one
-million blocks) 0.5-0.6 s.
+Measured (Apple M5, real radius 8, click to all rebuilt chunks on screen, worst frame interval): radius 8 7-24 ms
+(19 ms), 16 12-19 ms (18 ms), 32 about 100 ms (25 ms; one unsliced batch stalled a frame about 60 ms); `applySphere`
+radius 64 (one million blocks) 0.5-0.6 s.

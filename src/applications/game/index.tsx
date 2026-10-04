@@ -99,6 +99,7 @@ import {
   type SavedEditTarget,
 } from "./edits/edit-side-effects";
 import { decodeBlockRuns, encodeBlockRuns } from "./network/block-batch-codec";
+import { splitBatchByChunk } from "./edits/edit-slicing";
 import { GameLodBridge } from "./lod/game-lod-bridge";
 import type { ChunkMeshResult } from "./workers/mesh-types";
 import { MobileControls } from "./ui/mobile-controls";
@@ -159,6 +160,8 @@ const PLANT_VOXEL_DETAIL_DISTANCE = 72;
 const PLANT_DETAIL_UPDATE_INTERVAL_MS = 250;
 /** A held chunk is shown anyway after this long, so a neighbor that never meshes cannot hide it for good. */
 const HELD_CHUNK_TIMEOUT_MS = 1500;
+/** Main-thread time per frame for brush pieces (one piece always runs). */
+const BRUSH_FRAME_BUDGET_MS = 8;
 /**
  * Chunks whose centers are farther than this draw no plants: a plant there is a few pixels tall, and each plant type
  * of each chunk costs a draw call (about a third of all draws at a 12 chunk render distance).
@@ -349,6 +352,16 @@ export default function Game() {
   } | null>(null);
   const brushPreviewRef = useRef<BrushPreview | null>(null);
   const lastBrushEditRef = useRef<WorldEditSummary | null>(null);
+  const pendingBrushStrokesRef = useRef<
+    Array<{
+      pieces: BlockEditBatch[];
+      startedAtMs: number;
+      meshesApplied: Promise<void>[];
+      blocksChanged: number;
+      relightMilliseconds: number;
+      chunksRebuilt: Set<string>;
+    }>
+  >([]);
   const [brushHud, setBrushHud] = useState<BrushSettings>({ enabled: false, radius: BRUSH_DEFAULT_RADIUS });
   const [isDebugVisible, setIsDebugVisible] = useState(false);
   const isDebugVisibleRef = useRef(false);
@@ -2322,13 +2335,53 @@ export default function Game() {
     }
   }
 
-  /** One brush sphere through the bulk edit path; the summary lands in lastBrushEditRef for the API and tests. */
+  /**
+   * Queues one brush sphere as a piece per chunk, nearest to the center first; `applyPendingBrushEdits` runs them
+   * under a per-frame budget, so a big sphere never stalls a frame for its whole relight.
+   */
   function applyBrushSphere(center: BlockPosition, radius: number, block: number, mode: BrushMode) {
-    const startedAtMs = performance.now();
-    const result = applySphere(center, radius, block, mode);
-    void summarizeEdit(result, startedAtMs).then((summary) => {
-      lastBrushEditRef.current = summary;
+    const pieces = splitBatchByChunk(sphereEdits(center, radius, block, mode), center);
+    pendingBrushStrokesRef.current.push({
+      pieces,
+      startedAtMs: performance.now(),
+      meshesApplied: [],
+      blocksChanged: 0,
+      relightMilliseconds: 0,
+      chunksRebuilt: new Set(),
     });
+  }
+
+  function applyPendingBrushEdits() {
+    const strokes = pendingBrushStrokesRef.current;
+    if (strokes.length === 0) return;
+    const frameStartedAtMs = performance.now();
+    let appliedPieces = 0;
+    while (strokes.length > 0 && (appliedPieces === 0 || performance.now() - frameStartedAtMs < BRUSH_FRAME_BUDGET_MS)) {
+      const stroke = strokes[0]!;
+      const piece = stroke.pieces.shift();
+      if (piece) {
+        const result = applyBlockEditBatch(piece);
+        appliedPieces++;
+        if (result) {
+          stroke.meshesApplied.push(...result.meshesApplied);
+          stroke.blocksChanged += result.stats.blocksChanged;
+          stroke.relightMilliseconds +=
+            result.stats.millisecondsWritingBlocks + result.stats.millisecondsRemovingLight +
+            result.stats.millisecondsRefillingLight + result.stats.millisecondsCollecting;
+          for (const chunk of result.chunksToRemesh) stroke.chunksRebuilt.add(`${chunk.x},${chunk.y},${chunk.z}`);
+        }
+      }
+      if (stroke.pieces.length > 0) continue;
+      strokes.shift();
+      void Promise.all(stroke.meshesApplied).then(() => {
+        lastBrushEditRef.current = {
+          blocksChanged: stroke.blocksChanged,
+          chunksRebuilt: stroke.chunksRebuilt.size,
+          relightMilliseconds: stroke.relightMilliseconds,
+          onScreenMilliseconds: performance.now() - stroke.startedAtMs,
+        };
+      });
+    }
   }
 
   let lastPlantDetailUpdateMs = 0;
@@ -2362,6 +2415,7 @@ export default function Game() {
 
     updateIndicator();
     updateBrush();
+    applyPendingBrushEdits();
 
     if (time - lastPlantDetailUpdateMs >= PLANT_DETAIL_UPDATE_INTERVAL_MS) {
       lastPlantDetailUpdateMs = time;
