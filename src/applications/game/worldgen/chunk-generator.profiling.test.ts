@@ -83,10 +83,14 @@ describe("profiled base column generation", () => {
 
   test("terrain cost drivers are counted: density nodes, cells, aquifer, biome search, surface rules", () => {
     const densityNodeUnits = new Map(breakdownEntries(profile, DIMENSIONS.worldgenDensityNode).map((entry) => [entry.key, entry.units]));
-    for (const nodeType of ["interpolated", "flat_cache", "spline", "noise", "add"]) {
+    // Interpolated values are read straight from the noise chunk's cell caches since the compiled fast path, so their
+    // cost shows as cellsInterpolated below; the nodes still evaluated through the tree are counted per type.
+    for (const nodeType of ["flat_cache", "spline", "noise", "add"]) {
       expect(densityNodeUnits.get(nodeType) ?? 0).toBeGreaterThan(0);
     }
-    expect(profile.counters.densityEvaluations).toBeGreaterThan(densityNodeUnits.get("interpolated")!);
+    const countedUnits = [...densityNodeUnits.values()].reduce((sum, units) => sum + units, 0);
+    expect(profile.counters.densityEvaluations).toBe(countedUnits);
+    expect(profile.counters.densityEvaluations).toBeGreaterThan(densityNodeUnits.get("flat_cache")!);
     expect(profile.counters["densityCacheHits.flat_cache"]).toBeGreaterThan(0);
     expect(profile.counters["densityCacheMisses.flat_cache"]).toBeGreaterThanOrEqual(0);
     expect(profile.counters.cellsInterpolated).toBeGreaterThan(1000);
