@@ -10,7 +10,7 @@ import {
   startWorkerSection,
 } from "@/applications/game/profiler/worker-recorder";
 import { createColumnMemoizedDensity } from "../density/column-memoization";
-import type { DensityNode } from "../density/density-function";
+import { compileDensityFunction, type CompiledDensityFunction } from "../density/density-codegen";
 import type { NoiseRouter } from "../density/router-wiring";
 
 const INITIAL_DENSITY_SURFACE_THRESHOLD = 0.390625;
@@ -20,8 +20,7 @@ const QUART_COLUMN_KEY_STRIDE = 67108864;
 
 export class PreliminarySurfaceLevelCache {
   private readonly levelsByColumn = new Map<number, number>();
-  private readonly initialDensity: DensityNode;
-  private readonly probe = { blockX: 0, blockY: 0, blockZ: 0 };
+  private readonly evaluateInitialDensity: CompiledDensityFunction;
 
   constructor(
     router: NoiseRouter,
@@ -29,7 +28,7 @@ export class PreliminarySurfaceLevelCache {
     private readonly height: number,
     private readonly cellHeight: number,
   ) {
-    this.initialDensity = createColumnMemoizedDensity(router.initialDensityWithoutJaggedness);
+    this.evaluateInitialDensity = compileDensityFunction(createColumnMemoizedDensity(router.initialDensityWithoutJaggedness));
   }
 
   get(blockX: number, blockZ: number): number {
@@ -47,13 +46,10 @@ export class PreliminarySurfaceLevelCache {
     let level = NO_SURFACE_LEVEL;
     let densityProbes = 0;
     if (isProfiling) startWorkerSection("terrain.preliminarySurfaceLevel");
-    const probe = this.probe;
-    probe.blockX = alignedX;
-    probe.blockZ = alignedZ;
+    const evaluateInitialDensity = this.evaluateInitialDensity;
     for (let blockY = this.minY + this.height; blockY >= this.minY; blockY -= this.cellHeight) {
       densityProbes++;
-      probe.blockY = blockY;
-      if (this.initialDensity.compute(probe) > INITIAL_DENSITY_SURFACE_THRESHOLD) {
+      if (evaluateInitialDensity(alignedX, blockY, alignedZ) > INITIAL_DENSITY_SURFACE_THRESHOLD) {
         level = blockY;
         break;
       }

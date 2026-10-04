@@ -7,6 +7,7 @@
 // (OCEAN_FLOOR_WG: highest solid block + 1; WORLD_SURFACE_WG: also counts the fluid below sea level).
 
 import { createColumnMemoizedDensity } from "../density/column-memoization";
+import { compileDensityFunction, type CompiledDensityFunction } from "../density/density-codegen";
 import type { DensityNode } from "../density/density-function";
 import type { NoiseRouter } from "../density/router-wiring";
 import type { CompiledCellFill } from "./cell-fill-compiler";
@@ -48,9 +49,8 @@ export class TerrainHeightSampler {
   private readonly cellCountY: number;
   private readonly interpolatorCount: number;
   /** One memoized density per interpolator and corner slot, so alternating corners keep their own column caches. */
-  private readonly cornerDensities: DensityNode[][];
+  private readonly cornerDensities: CompiledDensityFunction[][];
   private readonly cornerPositions = new Map<number, CornerPosition>();
-  private readonly probe = { blockX: 0, blockY: 0, blockZ: 0 };
   private readonly corners: Float64Array;
   private readonly cellValues = new Float64Array(CELL_WIDTH * CELL_WIDTH * CELL_HEIGHT);
   private readonly cellCorners: CornerPosition[] = [];
@@ -64,7 +64,7 @@ export class TerrainHeightSampler {
     this.cellCountY = Math.floor(settings.height / CELL_HEIGHT);
     this.interpolatorCount = interpolatorTemplates.length;
     this.cornerDensities = interpolatorTemplates.map((template) =>
-      Array.from({ length: CORNER_SLOTS }, () => createColumnMemoizedDensity(template)),
+      Array.from({ length: CORNER_SLOTS }, () => compileDensityFunction(createColumnMemoizedDensity(template))),
     );
     this.corners = new Float64Array(this.interpolatorCount * CORNERS_PER_INTERPOLATOR);
   }
@@ -145,13 +145,9 @@ export class TerrainHeightSampler {
     const values = position.valuesByInterpolator[interpolatorIndex]!;
     const lowestFilledIndex = position.lowestFilledIndexByInterpolator[interpolatorIndex]!;
     if (lowestFilledIndex > cellY) {
-      const density = this.cornerDensities[interpolatorIndex]![cornerSlot]!;
-      const probe = this.probe;
-      probe.blockX = position.blockX;
-      probe.blockZ = position.blockZ;
+      const evaluateDensity = this.cornerDensities[interpolatorIndex]![cornerSlot]!;
       for (let index = lowestFilledIndex - 1; index >= cellY; index--) {
-        probe.blockY = (index + this.cellNoiseMinY) * CELL_HEIGHT;
-        values[index] = density.compute(probe);
+        values[index] = evaluateDensity(position.blockX, (index + this.cellNoiseMinY) * CELL_HEIGHT, position.blockZ);
       }
       position.lowestFilledIndexByInterpolator[interpolatorIndex] = cellY;
     }

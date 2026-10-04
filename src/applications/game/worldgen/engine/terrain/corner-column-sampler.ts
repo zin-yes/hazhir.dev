@@ -5,10 +5,11 @@
 // flat_cache and cache_2d only wrap y-independent functions (and corners are quart aligned), cache_once is keyed on
 // counters that advance with every corner sample, and no interpolator is nested in another. So a corner column is a
 // pure function of the corner position, and evaluating the template subtree point by point (with its y-independent
-// parts computed once per column) gives the same doubles. Columns on chunk borders are shared by up to four chunks,
+// parts computed once per column, compiled to straight-line code) gives the same doubles. Columns on chunk borders are shared by up to four chunks,
 // so they are kept in a bounded cache. `isCornerSamplingExact` guards the assumptions per subtree.
 
 import { BlockYDependence, createColumnMemoizedDensity } from "../density/column-memoization";
+import { compileDensityFunction, type CompiledDensityFunction } from "../density/density-codegen";
 import type { DensityNode } from "../density/density-function";
 import { MarkerNode } from "../density/nodes/structural-nodes";
 import { BoundedLruCache } from "../pipeline/bounded-lru-cache";
@@ -36,8 +37,7 @@ export function isCornerSamplingExact(root: DensityNode): boolean {
 }
 
 export class CornerColumnSampler {
-  private readonly density: DensityNode;
-  private readonly probe = { blockX: 0, blockY: 0, blockZ: 0 };
+  private readonly evaluateDensity: CompiledDensityFunction;
   private readonly borderColumns = new BoundedLruCache<number, Float64Array>(MAX_CACHED_BORDER_COLUMNS);
 
   constructor(
@@ -46,7 +46,7 @@ export class CornerColumnSampler {
     private readonly cellHeight: number,
     private readonly sampleCount: number,
   ) {
-    this.density = createColumnMemoizedDensity(templateWrapped);
+    this.evaluateDensity = compileDensityFunction(createColumnMemoizedDensity(templateWrapped));
   }
 
   /** Writes the corner samples at (cornerBlockX, cornerBlockZ), bottom cell first, into `values`. */
@@ -67,12 +67,9 @@ export class CornerColumnSampler {
   }
 
   private evaluate(values: Float64Array, cornerBlockX: number, cornerBlockZ: number): void {
-    const probe = this.probe;
-    probe.blockX = cornerBlockX;
-    probe.blockZ = cornerBlockZ;
+    const evaluateDensity = this.evaluateDensity;
     for (let index = 0; index < this.sampleCount; index++) {
-      probe.blockY = (index + this.cellNoiseMinY) * this.cellHeight;
-      values[index] = this.density.compute(probe);
+      values[index] = evaluateDensity(cornerBlockX, (index + this.cellNoiseMinY) * this.cellHeight, cornerBlockZ);
     }
   }
 }
