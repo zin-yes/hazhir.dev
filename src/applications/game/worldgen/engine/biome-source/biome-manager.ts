@@ -47,6 +47,11 @@ export class BiomeManager {
   private readonly cubeZ = new Int32Array(1 << CUBE_CACHE_BITS);
   private readonly cubeState = new Uint8Array(1 << CUBE_CACHE_BITS);
   private readonly cubeBiome: string[] = new Array<string>(1 << CUBE_CACHE_BITS).fill("");
+  /** The last uniform cube answered (consecutive blocks of a column usually share it). */
+  private lastUniformCubeX = Number.NaN;
+  private lastUniformCubeY = Number.NaN;
+  private lastUniformCubeZ = Number.NaN;
+  private lastUniformCubeBiome = "";
 
   /** @param seed the WORLD seed; it is obfuscated here exactly as vanilla callers do before constructing BiomeManager. */
   /**
@@ -131,8 +136,17 @@ export class BiomeManager {
     const baseQuartX = shiftedX >> 2;
     const baseQuartY = shiftedY >> 2;
     const baseQuartZ = shiftedZ >> 2;
+    if (baseQuartX === this.lastUniformCubeX && baseQuartY === this.lastUniformCubeY && baseQuartZ === this.lastUniformCubeZ) {
+      return this.lastUniformCubeBiome;
+    }
     const uniformBiome = this.uniformCubeBiome(baseQuartX, baseQuartY, baseQuartZ);
-    if (uniformBiome !== undefined) return uniformBiome;
+    if (uniformBiome !== undefined) {
+      this.lastUniformCubeX = baseQuartX;
+      this.lastUniformCubeY = baseQuartY;
+      this.lastUniformCubeZ = baseQuartZ;
+      this.lastUniformCubeBiome = uniformBiome;
+      return uniformBiome;
+    }
     const fractionX = (shiftedX & 3) / 4;
     const fractionY = (shiftedY & 3) / 4;
     const fractionZ = (shiftedZ & 3) / 4;
