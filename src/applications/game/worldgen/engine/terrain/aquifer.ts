@@ -14,6 +14,7 @@ import {
 import { type FunctionContext, SinglePointContext } from "../density/density-function";
 import type { DensityNode } from "../density/density-function";
 import type { PositionalRandomFactory } from "../random";
+import { transientRandomAt } from "../random/xoroshiro-random-source";
 import { BLOCK_AIR, BLOCK_DEFAULT_FLUID, BLOCK_LAVA } from "./terrain-blocks";
 
 /** Aquifer.computeSubstance returning null: the block is not decided by the aquifer. */
@@ -293,7 +294,7 @@ export class NoiseBasedAquifer {
 
   private ensureLocation(index: number, gridX: number, gridY: number, gridZ: number): void {
     if (this.locationKnown[index] !== 0) return;
-    const random = this.params.positionalRandomFactory.at(gridX, gridY, gridZ);
+    const random = transientRandomAt(this.params.positionalRandomFactory, gridX, gridY, gridZ);
     this.locationX[index] = gridX * X_SPACING + random.nextIntBounded(X_RANGE);
     this.locationY[index] = gridY * Y_SPACING + random.nextIntBounded(Y_RANGE);
     this.locationZ[index] = gridZ * Z_SPACING + random.nextIntBounded(Z_RANGE);

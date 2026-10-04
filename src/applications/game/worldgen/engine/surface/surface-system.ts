@@ -11,6 +11,7 @@ import {
 } from "@/applications/game/profiler/worker-recorder";
 import type { ChunkBlocks } from "../chunk";
 import { createColumnMemoizedDensity } from "../density/column-memoization";
+import { transientRandomAt } from "../random/xoroshiro-random-source";
 import { compileDensityFunction } from "../density/density-codegen";
 import { DensityNode } from "../density/density-function";
 import type { JsonObject } from "../registry/datapack-loader";
@@ -149,7 +150,7 @@ export class SurfaceSystem {
 
   getSurfaceDepth(blockX: number, blockZ: number): number {
     const noiseValue = this.surfaceNoise.getValue(blockX, 0, blockZ);
-    const jitter = this.config.randomFactory.at(blockX, 0, blockZ).nextDouble();
+    const jitter = transientRandomAt(this.config.randomFactory, blockX, 0, blockZ).nextDouble();
     return Math.trunc(noiseValue * 2.75 + 3 + jitter * 0.25);
   }
 

@@ -5,6 +5,7 @@
 
 import type { JsonObject, JsonValue } from "../registry/datapack-loader";
 import { formatBlockState } from "../chunk";
+import { transientRandomAt } from "../random/xoroshiro-random-source";
 import { NO_WATER_HEIGHT, type SurfaceRuleContext } from "./surface-rule-context";
 import type { SurfaceRule, SurfaceRuleCompilerInputs } from "./surface-rule-compiler";
 import { withDefaultNamespace, type SurfaceNoiseSource, type SurfacePositionalRandomFactory } from "./surface-types";
@@ -126,7 +127,7 @@ class SurfaceRuleCodeWriter {
           if (context.blockY >= falseAtAndAbove) return false;
           gradientFactory ??= this.inputs.randomFactory.fromHashOf(randomName).forkPositional();
           const probability = 1 + ((context.blockY - trueAtAndBelow) / (falseAtAndAbove - trueAtAndBelow)) * (0 - 1);
-          return gradientFactory.at(context.blockX, context.blockY, context.blockZ).nextFloat() < probability;
+          return transientRandomAt(gradientFactory, context.blockX, context.blockY, context.blockZ).nextFloat() < probability;
         };
         return `${this.helper(condition)}(context)`;
       }
