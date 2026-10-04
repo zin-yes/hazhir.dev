@@ -104,15 +104,10 @@ describe("generateMesh profiling", () => {
     expect(rootPaths(profile).sort()).toEqual(["faceGeneration", "packResult", "unpackInputs"]);
     for (const expectedPath of [
       "unpackInputs>emptyScan",
-      "unpackInputs>allocatePaddedGrids",
-      "unpackInputs>fillPaddedBlocks>copyChunkRows",
-      "unpackInputs>fillPaddedLight>mapChunkLight",
-      "faceGeneration>cubeBlock>emitFace>cornerPositions",
-      "faceGeneration>cubeBlock>emitFace>ambientOcclusion",
-      "faceGeneration>cubeBlock>emitFace>vertexLightAndSurface",
-      "faceGeneration>cubeBlock>emitFace>pushQuad",
-      "faceGeneration>plantInstance",
-      "faceGeneration>stairBlock",
+      "unpackInputs>fillPaddedBlocks",
+      "unpackInputs>fillPaddedLight",
+      "unpackInputs>buildRowOccupancy",
+      "faceGeneration>greedyMerge",
       "packResult>opaqueBuffer",
       "packResult>transparentBuffer",
       "packResult>plantInstanceBuffers",
@@ -130,42 +125,44 @@ describe("generateMesh profiling", () => {
     }
   });
 
-  test("section call counts match the work counters", () => {
-    const { profile } = recordTask(() => generateMesh(...meshInputs()));
+  test("work counters add up", () => {
+    const { result, profile } = recordTask(() => generateMesh(...meshInputs()));
     const { counters } = profile;
-    const cubeFaces = counters.facesEmitted - counters.stairQuadsEmitted;
+    const emittedQuads =
+      (new Uint32Array(result.opaque).length + new Uint32Array(result.transparent).length) /
+      (VERTICES_PER_QUAD * 2);
 
-    expect(callsAt(profile, "faceGeneration>cubeBlock>emitFace")).toBe(cubeFaces);
-    expect(callsAt(profile, "faceGeneration>cubeBlock>emitFace>pushQuad")).toBe(cubeFaces);
-    expect(callsAt(profile, "faceGeneration>plantInstance")).toBe(counters.plantInstancesEmitted);
-    expect(callsAt(profile, "faceGeneration>stairBlock")).toBe(counters.stairBlocksVisited);
-    expect(callsAt(profile, "faceGeneration>cubeBlock")).toBe(
-      counters.solidBlocksVisited - counters.plantInstancesEmitted - counters.stairBlocksVisited,
-    );
+    expect(callsAt(profile, "faceGeneration>greedyMerge")).toBe(1);
+    expect(counters.quadsEmitted).toBe(emittedQuads);
+    expect(counters.quadsEmitted).toBeLessThan(counters.facesEmitted);
+    expect(counters.mergedQuads).toBeGreaterThan(0);
+    expect(counters.mergedQuads).toBeLessThan(counters.mergeableFaces);
     expect(counters.stairBlocksVisited).toBe(5);
     expect(counters.plantInstancesEmitted).toBe(4);
-    expect(counters.transparentBlocksVisited).toBeGreaterThan(0);
+    expect(counters.solidBlocksVisited).toBeGreaterThanOrEqual(
+      counters.plantInstancesEmitted + counters.stairBlocksVisited,
+    );
     expect(counters.translucentBlocksVisited).toBeGreaterThan(0);
   });
 
-  test("faces per block type sum to the faces emitted counter and match the vertex output", () => {
+  test("faces per block type sum to the faces emitted counter, and merging leaves fewer quads", () => {
     const { result, profile } = recordTask(() => generateMesh(...meshInputs()));
     const facesByBlock = unitsOf(profile, DIMENSIONS.meshBlockFaces);
     const totalFaces = sum(Object.values(facesByBlock));
-    const vertexFaces =
+    const emittedQuads =
       (new Uint32Array(result.opaque).length + new Uint32Array(result.transparent).length) /
       (VERTICES_PER_QUAD * 2);
 
     expect(totalFaces).toBeGreaterThan(1000);
     expect(totalFaces).toBe(profile.counters.facesEmitted);
-    expect(totalFaces).toBe(vertexFaces);
+    expect(emittedQuads).toBeLessThan(totalFaces);
     for (const blockName of ["STONE", "GRASS", "DIRT", "WATER", "GLASS", "PLANKS_STAIRS_NORTH", "STONE_SLAB"]) {
       expect(facesByBlock[blockName]).toBeGreaterThan(0);
     }
     expect(facesByBlock.TALL_GRASS).toBeUndefined();
 
     const partUnits = unitsOf(profile, DIMENSIONS.meshPart);
-    expect(partUnits.opaque + partUnits.transparent + partUnits.stairs).toBe(totalFaces);
+    expect(partUnits.opaque + partUnits.transparent + partUnits.stairs).toBe(emittedQuads);
     expect(partUnits.plants).toBe(profile.counters.plantInstancesEmitted);
   });
 
