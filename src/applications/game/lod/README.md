@@ -94,35 +94,34 @@ Everything goes through `createLodManager` from `./lod` (see `manager/lod-manage
    clear again (hence `autoClear = false`). Pass CSS pixels (`clientHeight`) so detail does not double on high-DPI
    screens.
 
-4. **Chunk data.** Right after `chunks.current[chunkName] = chunk; applySavedEditsToChunk(chunkName, chunk);` (both
-   places: the initial load and streaming):
+4. **Chunk data.** In the `ChunkPipeline` events created in `startWorldGeneration` (blocks are final, saved edits
+   applied):
 
    ```ts
-   lodManagerRef.current?.onRealChunkLoaded(x, y, z, chunk);
+   onChunkGenerated: (record) =>
+     lodManagerRef.current?.onRealChunkLoaded(record.chunkX, record.chunkY, record.chunkZ, record.blocks!),
    ```
 
-5. **Chunk meshes.** At the end of `addChunkMesh(meshResult, chunkName, chunkX, chunkY, chunkZ)`, after the meshes are
-   placed (also when the chunk produced no faces):
+5. **Chunk meshes.** In the `onMeshReady` event (it fires with `mesh === null` when the chunk draws nothing), after
+   `addChunkMesh` / `pruneChunkMesh`:
 
    ```ts
-   lodManagerRef.current?.onRealChunkMeshed(chunkX, chunkY, chunkZ);
+   lodManagerRef.current?.onRealChunkMeshed(record.chunkX, record.chunkY, record.chunkZ);
    ```
 
-   and in `pruneChunkMesh(chunkName)`:
+   and in `onChunkUnloaded`:
 
    ```ts
-   const [chunkX, chunkY, chunkZ] = chunkName.split(",").map(Number);
-   lodManagerRef.current?.onRealChunkUnloaded(chunkX, chunkY, chunkZ);
+   lodManagerRef.current?.onRealChunkUnloaded(record.chunkX, record.chunkY, record.chunkZ);
    ```
 
-   `addChunkMesh` calls `pruneChunkMesh` first; the unload and the re-mesh happen before the next `update`, so the
-   coverage never flickers.
+   A rebuilt mesh replaces the old one inside the same event, so the coverage never flickers.
 
-6. **Edits.** After `chunk[blockIndex] = type` in `setBlockUnprofiled`, and after network block updates write
-   `chunks.current[chunkName][index]`:
+6. **Edits.** In `applyBlockEditBatch`, after `pipeline.applyBlockEdits` returns, for each chunk in
+   `result.changedChunks` whose blocks changed:
 
    ```ts
-   lodManagerRef.current?.onBlocksEdited(chunkX, chunkY, chunkZ, chunk);
+   lodManagerRef.current?.onBlocksEdited(chunk.x, chunk.y, chunk.z, pipeline.store.get(chunk.x, chunk.y, chunk.z)!.blocks!);
    ```
 
    Summaries are cheap (one top-down scan per column), re-assembly is batched (8 columns per frame) and tiles refresh
