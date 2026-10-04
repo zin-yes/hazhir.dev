@@ -1,7 +1,9 @@
 import { BlockType } from "../blocks";
+import { initializeChunkLight, propagateChunkLight } from "../workers/lighting";
 import { CELLS_PER_CHUNK, CHUNK_MASK, CHUNK_SHIFT } from "./chunk-cluster";
 import type { LightChunkSource } from "./chunk-cluster";
 import { EMISSION, IS_TRANSPARENT, MAX_LIGHT } from "./light-tables";
+import { mergeLightUpdatesInPlace } from "./merge-light";
 
 const CHUNK_SIZE = CHUNK_MASK + 1;
 const NEIGHBOR_STEPS: [number, number, number][] = [
@@ -11,6 +13,15 @@ const NEIGHBOR_STEPS: [number, number, number][] = [
   [0, -1, 0],
   [0, 0, 1],
   [0, 0, -1],
+];
+
+const FACE_NEIGHBORS: { key: string; dx: number; dy: number; dz: number }[] = [
+  { key: "1,0,0", dx: 1, dy: 0, dz: 0 },
+  { key: "-1,0,0", dx: -1, dy: 0, dz: 0 },
+  { key: "0,1,0", dx: 0, dy: 1, dz: 0 },
+  { key: "0,-1,0", dx: 0, dy: -1, dz: 0 },
+  { key: "0,0,1", dx: 0, dy: 0, dz: 1 },
+  { key: "0,0,-1", dx: 0, dy: 0, dz: -1 },
 ];
 
 export const chunkName = (chunkX: number, chunkY: number, chunkZ: number) =>
@@ -231,6 +242,70 @@ export function floodLightFromScratch(
     lights.set(chunkName(chunkX, chunkY, chunkZ), light);
   }
   return lights;
+}
+
+/**
+ * Lights the chunks the way the game's load pass does: each column top-down
+ * with the chunk above as input, then every chunk spread into and out of its
+ * face neighbors, and all updates merged per chunk.
+ */
+export function lightWorldLikeTheGame(
+  world: LightTestWorld,
+  seed: number,
+): Map<string, Uint8Array> {
+  const names = Array.from(world.blocks.keys());
+  const coordinates = names.map((name) => name.split(",").map(Number) as [number, number, number]);
+  const lights = new Map<string, Uint8Array>();
+  const queues = new Map<string, Uint32Array>();
+
+  const topDown = [...coordinates].sort((first, second) => second[1] - first[1]);
+  for (const [chunkX, chunkY, chunkZ] of topDown) {
+    const topName = chunkName(chunkX, chunkY + 1, chunkZ);
+    const { light, queue } = initializeChunkLight(
+      world.blocks.get(chunkName(chunkX, chunkY, chunkZ))!,
+      seed,
+      chunkX,
+      chunkY,
+      chunkZ,
+      world.blocks.get(topName),
+      lights.get(topName),
+    );
+    lights.set(chunkName(chunkX, chunkY, chunkZ), light);
+    queues.set(chunkName(chunkX, chunkY, chunkZ), queue);
+  }
+
+  const updates = new Map<string, Uint8Array[]>();
+  for (const [chunkX, chunkY, chunkZ] of coordinates) {
+    const name = chunkName(chunkX, chunkY, chunkZ);
+    const neighborBlocks: { [key: string]: Uint8Array } = {};
+    const neighborLights: { [key: string]: Uint8Array } = {};
+    for (const { key, dx, dy, dz } of FACE_NEIGHBORS) {
+      const neighborName = chunkName(chunkX + dx, chunkY + dy, chunkZ + dz);
+      if (!world.blocks.has(neighborName)) continue;
+      neighborBlocks[key] = world.blocks.get(neighborName)!.slice();
+      neighborLights[key] = lights.get(neighborName)!.slice();
+    }
+    const { centerLight, neighborLightUpdates } = propagateChunkLight(
+      world.blocks.get(name)!,
+      lights.get(name)!.slice(),
+      neighborBlocks,
+      neighborLights,
+      queues.get(name)!,
+    );
+    updates.set(name, [...(updates.get(name) ?? []), centerLight]);
+    for (const { key, dx, dy, dz } of FACE_NEIGHBORS) {
+      const update = neighborLightUpdates[key];
+      if (!update) continue;
+      const neighborName = chunkName(chunkX + dx, chunkY + dy, chunkZ + dz);
+      updates.set(neighborName, [...(updates.get(neighborName) ?? []), update]);
+    }
+  }
+
+  const merged = new Map<string, Uint8Array>();
+  for (const [name, chunkUpdates] of updates) {
+    merged.set(name, mergeLightUpdatesInPlace(chunkUpdates[0], chunkUpdates.slice(1)));
+  }
+  return merged;
 }
 
 /** Throws at the first cell where the world's light differs from the expected light. */
