@@ -67,7 +67,19 @@ class SurfaceRuleCodeWriter {
   /** Biome sets of the biome conditions, by the index the generated code checks in context.biomeConditionPossible. */
   readonly biomeConditionSets: ReadonlySet<string>[] = [];
 
-  constructor(private readonly inputs: SurfaceRuleCompilerInputs) {}
+  /** Per stone_depth condition: the depth at or below which it holds (`1 + offset + surface terms`), by surface type. */
+  readonly floorDepthLimits: string[] = [];
+  readonly ceilingDepthLimits: string[] = [];
+  private readonly emptySequenceNames = new Set<string>();
+
+  /**
+   * With `assumeDeep`, every stone_depth and above_preliminary_surface condition is false (the caller only runs that
+   * rule where they are) and the branches they guard are left out.
+   */
+  constructor(
+    private readonly inputs: SurfaceRuleCompilerInputs,
+    private readonly assumeDeep = false,
+  ) {}
 
   private helper(value: unknown): string {
     this.helpers.push(value);
@@ -78,8 +90,12 @@ class SurfaceRuleCodeWriter {
     const node = asObject(json, "condition");
     const type = withDefaultNamespace(String(node.type));
     switch (type) {
-      case "minecraft:not":
-        return `!${this.condition(node.invert)}`;
+      case "minecraft:not": {
+        const inverted = this.condition(node.invert);
+        if (inverted === "false") return "true";
+        if (inverted === "true") return "false";
+        return `!${inverted}`;
+      }
       case "minecraft:biome": {
         const biomeIds = new Set(asArray(node.biome_is, "biome_is").map((id) => withDefaultNamespace(String(id))));
         const conditionIndex = this.biomeConditionSets.length;
@@ -94,7 +110,10 @@ class SurfaceRuleCodeWriter {
           secondaryDepthRange === 0
             ? "0"
             : `Math.trunc(((context.getSurfaceSecondary() - -1) / (1 - -1)) * ${numberLiteral(secondaryDepthRange)})`;
-        return `(${stoneDepth} <= 1 + ${numberLiteral(Number(node.offset))} + ${surfaceDepthTerm} + ${secondaryTerm})`;
+        const depthLimit = `1 + ${numberLiteral(Number(node.offset))} + ${surfaceDepthTerm} + ${secondaryTerm}`;
+        (node.surface_type === "ceiling" ? this.ceilingDepthLimits : this.floorDepthLimits).push(depthLimit);
+        if (this.assumeDeep) return "false";
+        return `(${stoneDepth} <= ${depthLimit})`;
       }
       case "minecraft:y_above": {
         const anchor = this.helper(parseVerticalAnchor(node.anchor));
@@ -141,7 +160,7 @@ class SurfaceRuleCodeWriter {
       case "minecraft:hole":
         return "(context.surfaceDepth <= 0)";
       case "minecraft:above_preliminary_surface":
-        return "(context.blockY >= context.getMinSurfaceLevel())";
+        return this.assumeDeep ? "false" : "(context.blockY >= context.getMinSurfaceLevel())";
       case "minecraft:temperature":
         return "context.isColdEnoughToSnow()";
       default:
@@ -158,10 +177,17 @@ class SurfaceRuleCodeWriter {
         const children = asArray(node.sequence, "sequence");
         if (children.length === 1) return this.rule(children[0]);
         const functionName = this.sequenceFunction(children);
+        if (this.emptySequenceNames.has(functionName)) return "";
         return `{ const result = ${functionName}(context); if (result !== ${NO_RULE_MATCH}) return result; }`;
       }
-      case "minecraft:condition":
-        return `if (${this.condition(node.if_true)}) { ${this.rule(node.then_run)} }`;
+      case "minecraft:condition": {
+        const condition = this.condition(node.if_true);
+        const body = this.rule(node.then_run);
+        // Conditions only read (and cache) pure values, so one guarding nothing can be left out.
+        if (condition === "false" || body.trim() === "") return "";
+        if (condition === "true") return `{ ${body} }`;
+        return `if (${condition}) { ${body} }`;
+      }
       case "minecraft:block": {
         const resultState = asObject(node.result_state, "result_state");
         const properties = resultState.Properties
@@ -181,20 +207,48 @@ class SurfaceRuleCodeWriter {
     this.functionSources.push("");
     const index = this.functionSources.length - 1;
     const body = children.map((child) => this.rule(child)).join("\n");
+    if (body.trim() === "") this.emptySequenceNames.add(functionName);
     this.functionSources[index] = `function ${functionName}(context) {\n${body}\nreturn ${NO_RULE_MATCH};\n}`;
     return functionName;
   }
 }
 
+/** Largest stone depth (floor, ceiling) at which some stone_depth condition still holds, for the current column. */
+export type StoneDepthLimits = (context: SurfaceRuleContext) => number;
+
 /** A generated surface rule plus the biome sets its conditions test (see SurfaceRuleContext.biomeConditionPossible). */
-export type GeneratedSurfaceRule = SurfaceRule & { readonly biomeConditionSets: readonly ReadonlySet<string>[] };
+export type GeneratedSurfaceRule = SurfaceRule & {
+  readonly biomeConditionSets: readonly ReadonlySet<string>[];
+  /**
+   * The same rule for a block where every stone_depth and above_preliminary_surface condition is false: stone depth
+   * above it greater than floorDepthLimit, below it greater than ceilingDepthLimit, and y below the preliminary surface.
+   */
+  readonly deepRule: SurfaceRule;
+  readonly floorDepthLimit: StoneDepthLimits;
+  readonly ceilingDepthLimit: StoneDepthLimits;
+};
+
+function buildRuleFunction(writer: SurfaceRuleCodeWriter, ruleJson: JsonObject): SurfaceRule | undefined {
+  const rootFunction = writer.sequenceFunction([ruleJson]);
+  const helperDeclarations = writer.helpers.map((_, index) => `const helper${index} = helpers[${index}];`).join("\n");
+  const source = `${helperDeclarations}\n${writer.functionSources.join("\n")}\nreturn ${rootFunction};`;
+  return buildGeneratedFunction<SurfaceRule>(["helpers"], source, [writer.helpers]);
+}
+
+function buildDepthLimit(depthLimits: readonly string[]): StoneDepthLimits | undefined {
+  const body = depthLimits.length === 0 ? "return -Infinity;" : `return Math.max(${depthLimits.join(", ")});`;
+  return buildGeneratedFunction<StoneDepthLimits>([], `return function depthLimit(context) {\n${body}\n};`, []);
+}
 
 /** The surface rule as generated code (same results as the closures), or undefined when code generation is blocked. */
 export function generateSurfaceRule(ruleJson: JsonObject, inputs: SurfaceRuleCompilerInputs): GeneratedSurfaceRule | undefined {
   const writer = new SurfaceRuleCodeWriter(inputs);
-  const rootFunction = writer.sequenceFunction([ruleJson]);
-  const helperDeclarations = writer.helpers.map((_, index) => `const helper${index} = helpers[${index}];`).join("\n");
-  const source = `${helperDeclarations}\n${writer.functionSources.join("\n")}\nreturn ${rootFunction};`;
-  const rule = buildGeneratedFunction<SurfaceRule>(["helpers"], source, [writer.helpers]);
-  return rule === undefined ? undefined : Object.assign(rule, { biomeConditionSets: writer.biomeConditionSets });
+  const rule = buildRuleFunction(writer, ruleJson);
+  const deepWriter = new SurfaceRuleCodeWriter(inputs, true);
+  const deepRule = buildRuleFunction(deepWriter, ruleJson);
+  const floorDepthLimit = buildDepthLimit(writer.floorDepthLimits);
+  const ceilingDepthLimit = buildDepthLimit(writer.ceilingDepthLimits);
+  if (rule === undefined || deepRule === undefined || floorDepthLimit === undefined || ceilingDepthLimit === undefined) return undefined;
+  if (deepWriter.biomeConditionSets.length !== writer.biomeConditionSets.length) throw new Error("Deep surface rule lost a biome condition");
+  return Object.assign(rule, { biomeConditionSets: writer.biomeConditionSets, deepRule, floorDepthLimit, ceilingDepthLimit });
 }

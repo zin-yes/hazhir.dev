@@ -268,6 +268,7 @@ export class SurfaceSystem {
     const { chunk, biomeAt } = inputs;
     const { access, defaultBlockId, resultIdOf, context } = prepared;
     const rule = this.rule;
+    const generatedRule = (rule as Partial<GeneratedSurfaceRule>).deepRule === undefined ? undefined : (rule as GeneratedSurfaceRule);
     const typeProfiledRule = isProfiling ? this.profiledRules() : undefined;
     const chunkMinBlockX = chunk.chunkX * 16;
     const chunkMinBlockZ = chunk.chunkZ * 16;
@@ -290,6 +291,15 @@ export class SurfaceSystem {
         }
         const startY = access.heightmap.getHeight(localX, localZ) + 1;
         context.updateXZ(blockX, blockZ);
+        // Below these, every stone_depth and above_preliminary_surface condition is false and the deep rule answers.
+        let deepFloorDepth = Number.POSITIVE_INFINITY;
+        let deepCeilingDepth = Number.POSITIVE_INFINITY;
+        let deepBelowY = Number.NEGATIVE_INFINITY;
+        if (generatedRule !== undefined) {
+          deepFloorDepth = generatedRule.floorDepthLimit(context);
+          deepCeilingDepth = generatedRule.ceilingDepthLimit(context);
+          deepBelowY = context.getMinSurfaceLevel();
+        }
         let stoneDepthAbove = 0;
         let waterHeight = NO_WATER_HEIGHT;
         let stoneRegionBottom = 2147483647;
@@ -318,10 +328,12 @@ export class SurfaceSystem {
           }
           stoneDepthAbove++;
           solidBlocksScanned++;
-          context.updateY(stoneDepthAbove, y - stoneRegionBottom + 1, waterHeight, blockX, y, blockZ);
+          const stoneDepthBelow = y - stoneRegionBottom + 1;
+          context.updateY(stoneDepthAbove, stoneDepthBelow, waterHeight, blockX, y, blockZ);
           if (blockId !== defaultBlockId) continue;
           ruleEvaluations++;
-          const resultIndex = rule(context);
+          const isDeep = y < deepBelowY && stoneDepthAbove > deepFloorDepth && stoneDepthBelow > deepCeilingDepth;
+          const resultIndex = isDeep ? generatedRule!.deepRule(context) : rule(context);
           if (isProfiling) {
             if (ruleEvaluations % RULE_TYPE_SAMPLE_EVERY === 0) {
               startWorkerSection("surface.sampleRuleTypes");
