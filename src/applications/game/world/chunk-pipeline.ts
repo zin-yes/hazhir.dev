@@ -54,6 +54,7 @@ import {
   SKIP_ABOVE_SURFACE_MARGIN,
   WORLD_HIGHEST_CHUNK_Y,
   WORLD_LOWEST_CHUNK_Y,
+  loadedVolumeOf,
   normalizeRenderSettings,
   renderVolumeOf,
   streamConfigFor,
@@ -235,10 +236,29 @@ export class ChunkPipeline {
     this.pump();
   }
 
+  /**
+   * New distances. A smaller volume applies at once: chunks outside the new loaded volume unload (the unload
+   * hysteresis is for walking back and forth, not for settings) and meshes outside the new drawn volume leave the
+   * screen.
+   */
   setRenderSettings(settings: Partial<RenderSettings>): void {
     this.renderSettings = normalizeRenderSettings({ ...this.renderSettings, ...settings });
     this.drawnVolume = renderVolumeOf(this.renderSettings);
     this.planner.setConfig(streamConfigFor(this.renderSettings, this.surfaceChunkYFor));
+    if (!this.startArea) return;
+    const loadedVolume = loadedVolumeOf(this.renderSettings);
+    const keysToUnload: number[] = [];
+    const recordsLeavingView: ChunkRecord[] = [];
+    this.store.forEach((record) => {
+      const offsetX = record.chunkX - this.playerChunk.chunkX;
+      const offsetY = record.chunkY - this.playerChunk.chunkY;
+      const offsetZ = record.chunkZ - this.playerChunk.chunkZ;
+      if (!loadedVolume.contains(offsetX, offsetY, offsetZ)) keysToUnload.push(record.key);
+      else if (!this.drawnVolume.contains(offsetX, offsetY, offsetZ)) recordsLeavingView.push(record);
+    });
+    for (const key of keysToUnload) this.removeChunk(key);
+    for (const record of recordsLeavingView) this.meshes.dropMesh(record);
+    if (keysToUnload.length > 0) this.planner.invalidate();
   }
 
   getBlock(x: number, y: number, z: number): number | null {

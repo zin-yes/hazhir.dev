@@ -80,6 +80,16 @@ export function streamConfigFor(
   };
 }
 
+/** The chunks kept loaded around the player (drawn volume plus the border ring), without unload hysteresis. */
+export function loadedVolumeOf(settings: RenderSettings): LoadOrder {
+  return buildLoadOrder({
+    horizontalRadius: settings.horizontalRadius + BORDER_RING_CHUNKS,
+    verticalUp: settings.verticalUp + BORDER_RING_CHUNKS,
+    verticalDown: settings.verticalDown + BORDER_RING_CHUNKS,
+    shape: settings.shape,
+  });
+}
+
 /** The chunks drawn around the player, as offsets from the player's chunk. */
 export function renderVolumeOf(settings: RenderSettings): LoadOrder {
   return buildLoadOrder({

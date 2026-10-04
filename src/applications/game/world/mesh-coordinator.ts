@@ -125,6 +125,21 @@ export class MeshCoordinator {
     }
   }
 
+  /**
+   * Takes a chunk's mesh off screen (it left the drawn volume): any build in flight comes back stale, and the chunk
+   * waits to be meshed again should it come back into view.
+   */
+  dropMesh(record: ChunkRecord): void {
+    if (record.appliedMeshVersion < 0 && !record.isMeshScheduled && record.meshBuildsInFlight === 0) return;
+    record.meshVersion++;
+    record.appliedMeshVersion = -1;
+    this.queue.remove(record.key);
+    record.isMeshScheduled = false;
+    record.resolveAllMeshWaiters();
+    this.hooks.onMeshReady(record, null, false);
+    this.consider(record);
+  }
+
   /** After the player moved: chunks that were outside the drawn volume may be inside now. */
   revisitWaiting(): void {
     for (const key of Array.from(this.waitingForMesh)) {
@@ -257,7 +272,10 @@ export class MeshCoordinator {
       .finally(() => {
         record.meshBuildsInFlight--;
         this.buildsInFlight--;
-        if (record.meshBuildsInFlight === 0 && !record.isMeshScheduled) record.resolveAllMeshWaiters();
+        if (record.meshBuildsInFlight === 0 && !record.isMeshScheduled) {
+          record.resolveAllMeshWaiters();
+          if (record.appliedMeshVersion < 0 && this.store.getByKey(record.key) === record) this.consider(record);
+        }
         this.pump();
       });
   }

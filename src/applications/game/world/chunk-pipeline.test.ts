@@ -357,3 +357,49 @@ describe("ChunkPipeline showing meshes", () => {
     console.log(`show readiness test: ${(performance.now() - startedAt).toFixed(0)} ms`);
   });
 });
+
+describe("ChunkPipeline render distance changes", () => {
+  test("shrinking unloads beyond the new loaded volume and takes meshes beyond the drawn one off screen at once; growing back meshes them again", async () => {
+    const startedAt = performance.now();
+    const meshShown = new Map<number, boolean>();
+    const generation = new FakeGeneration(1);
+    const lighting = new FakeLighting(1);
+    const meshing = new FakeMeshing(1);
+    const pipeline = new ChunkPipeline({
+      renderSettings: { horizontalRadius: 3, verticalUp: 1, verticalDown: 1, shape: "cylinder" },
+      generation,
+      lighting,
+      meshing,
+      startAreaRadius: 1,
+      events: {
+        onMeshReady: (record, mesh) => meshShown.set(record.key, mesh !== null),
+        onChunkUnloaded: (record) => meshShown.delete(record.key),
+      },
+    });
+    pipeline.update(GROUND_POSITION, FACING_POSITIVE_X);
+    await settle(generation, lighting, meshing);
+    const farthestShown = () => {
+      let farthest = 0;
+      pipeline.forEachChunk((record) => {
+        if (meshShown.get(record.key)) farthest = Math.max(farthest, Math.max(Math.abs(record.chunkX), Math.abs(record.chunkZ)));
+      });
+      return farthest;
+    };
+    const loadedReach = () => {
+      let farthest = 0;
+      pipeline.forEachChunk((record) => (farthest = Math.max(farthest, Math.hypot(record.chunkX, record.chunkZ))));
+      return farthest;
+    };
+    expect(farthestShown()).toBe(3);
+
+    pipeline.setRenderSettings({ horizontalRadius: 1 });
+    expect(farthestShown()).toBeLessThanOrEqual(1);
+    expect(loadedReach()).toBeLessThanOrEqual(Math.hypot(2, 2) + 0.01);
+
+    pipeline.setRenderSettings({ horizontalRadius: 3 });
+    pipeline.update(GROUND_POSITION, FACING_POSITIVE_X);
+    await settle(generation, lighting, meshing);
+    expect(farthestShown()).toBe(3);
+    console.log(`render distance change test: ${(performance.now() - startedAt).toFixed(0)} ms`);
+  });
+});
