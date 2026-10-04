@@ -147,34 +147,40 @@ export class NoiseInterpolator extends NoiseChunkCache {
   }
 }
 
-/** NoiseChunk.FlatCache: the wrapped function sampled once per quart column at (quartX * 4, 0, quartZ * 4). */
+/**
+ * NoiseChunk.FlatCache: the wrapped function sampled once per quart column at (quartX * 4, 0, quartZ * 4). Java fills
+ * every slot when the chunk is wired; the wrapped function is pure, so a filling cache computes each slot on its first
+ * read instead (many flat caches are only read by cell-corner columns, which are sampled without the chunk's caches).
+ */
 export class FlatCache extends NoiseChunkCache {
   readonly values: Float64Array;
+  private readonly slotIsPending: Uint8Array;
   private readonly sideLength: number;
 
   constructor(chunk: NoiseChunk, wrapped: DensityNode, fill: boolean) {
     super(chunk, "flat_cache", wrapped);
     this.sideLength = chunk.noiseSizeXZ + 1;
     this.values = new Float64Array(this.sideLength * this.sideLength);
-    if (fill) {
-      for (let quartOffsetX = 0; quartOffsetX < this.sideLength; quartOffsetX++) {
-        const blockX = (chunk.firstNoiseX + quartOffsetX) << 2;
-        for (let quartOffsetZ = 0; quartOffsetZ < this.sideLength; quartOffsetZ++) {
-          const blockZ = (chunk.firstNoiseZ + quartOffsetZ) << 2;
-          this.values[quartOffsetX * this.sideLength + quartOffsetZ] = wrapped.compute(new SinglePointContext(blockX, 0, blockZ));
-        }
-      }
-    }
+    this.slotIsPending = new Uint8Array(this.sideLength * this.sideLength).fill(fill ? 1 : 0);
   }
 
   compute(context: FunctionContext): number {
-    const quartOffsetX = (context.blockX >> 2) - this.chunk.firstNoiseX;
-    const quartOffsetZ = (context.blockZ >> 2) - this.chunk.firstNoiseZ;
+    const chunk = this.chunk;
+    const quartOffsetX = (context.blockX >> 2) - chunk.firstNoiseX;
+    const quartOffsetZ = (context.blockZ >> 2) - chunk.firstNoiseZ;
     const sideLength = this.sideLength;
     noteDensityEvaluation(FLAT_CACHE_TYPE_INDEX);
     if (quartOffsetX >= 0 && quartOffsetZ >= 0 && quartOffsetX < sideLength && quartOffsetZ < sideLength) {
-      noteDensityCacheHit(FLAT_CACHE_TYPE_INDEX);
-      return this.values[quartOffsetX * sideLength + quartOffsetZ];
+      const slot = quartOffsetX * sideLength + quartOffsetZ;
+      if (this.slotIsPending[slot] === 1) {
+        const blockX = (chunk.firstNoiseX + quartOffsetX) << 2;
+        const blockZ = (chunk.firstNoiseZ + quartOffsetZ) << 2;
+        this.values[slot] = this.wrapped.compute(new SinglePointContext(blockX, 0, blockZ));
+        this.slotIsPending[slot] = 0;
+      } else {
+        noteDensityCacheHit(FLAT_CACHE_TYPE_INDEX);
+      }
+      return this.values[slot]!;
     }
     return this.wrapped.compute(context);
   }
