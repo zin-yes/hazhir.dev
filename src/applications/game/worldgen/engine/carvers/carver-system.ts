@@ -88,7 +88,8 @@ export class CarverSystem {
     return carvers;
   }
 
-  applyCarvers(params: ApplyCarversParams): void {
+  /** Returns the carving mask (index (y - minY) * 256 + localZ * 16 + localX, 1 where a carver removed a block). */
+  applyCarvers(params: ApplyCarversParams): Uint8Array {
     const { chunk } = params;
     const context = new CarvingContext(params);
     const random = this.random;
@@ -106,6 +107,7 @@ export class CarverSystem {
         }
       }
     }
+    return context.mask;
   }
 }
 
@@ -114,6 +116,6 @@ export function createCarverSystem(config: CarverSystemConfig): CarverSystem {
 }
 
 /** One-call form of NoiseBasedChunkGenerator.applyCarvers: `system.applyCarvers(params)`. */
-export function applyCarvers(system: CarverSystem, params: ApplyCarversParams): void {
-  system.applyCarvers(params);
+export function applyCarvers(system: CarverSystem, params: ApplyCarversParams): Uint8Array {
+  return system.applyCarvers(params);
 }

@@ -60,7 +60,7 @@ describe("tree configured features", () => {
     expect([...used.featureSize].sort()).toEqual(["minecraft:three_layers_feature_size", "minecraft:two_layers_feature_size"]);
   });
 
-  test("every block the features can place is accepted by toGameBlock, except the cocoa pods", () => {
+  test("every block the features can place is accepted by toGameBlock", () => {
     const blockNames = new Set<string>(["minecraft:vine", "minecraft:bee_nest", "minecraft:cocoa"]);
     for (const [, definition] of treeLikeConfigurations) collectBlockNames(definition.config, blockNames);
     for (const state of loadTreesReference().palette) blockNames.add(state.replace(/\[.*$/, ""));
@@ -74,8 +74,7 @@ describe("tree configured features", () => {
       }
     }
     expect(blockNames.size).toBeGreaterThan(40);
-    // minecraft-block-map.ts has no mapping for cocoa pods (written by the cocoa tree decorator of jungle trees).
-    expect(unmapped).toEqual(["minecraft:cocoa"]);
+    expect(unmapped).toEqual([]);
   });
 });
 

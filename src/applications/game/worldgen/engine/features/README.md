@@ -50,7 +50,7 @@ every write (`Heightmap.update`). Raw brightness is always 0: protochunks are un
 by the ground-truth fixtures, where red mushrooms stand on gravel under open sky, which `MushroomBlock.canSurvive`
 only allows below brightness 13).
 
-Unregistered feature types become counted no-op features (`diagnostics.unsupportedFeatureTypes`) so decoration runs
+`createDefaultFeatureTypeRegistry()` registers the core, tree, ground, cave and surface types (`ALL_FEATURE_TYPES`; a duplicate id throws). Unregistered feature types become counted no-op features (`diagnostics.unsupportedFeatureTypes`) so decoration runs
 for every biome while other feature types are still being ported; `strict: true` throws instead.
 
 ## Adding a feature type (one file per type)

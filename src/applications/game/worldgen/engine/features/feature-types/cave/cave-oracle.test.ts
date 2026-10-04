@@ -158,11 +158,8 @@ describe("unported feature types", () => {
   });
 });
 
-/** Nether-only (base_stone_nether target of ore_ancient_debris_*): not in the overworld game block map. */
-const KNOWN_UNMAPPED_BLOCKS = new Set(["minecraft:ancient_debris"]);
-
 describe("block names", () => {
-  test("every block state the cave features can place is accepted by toGameBlock (except known nether-only blocks)", () => {
+  test("every block state the cave features can place is accepted by toGameBlock", () => {
     const placeable = new Set<string>(reference.states);
     const collectStates = (value: unknown): void => {
       if (Array.isArray(value)) value.forEach(collectStates);
@@ -190,7 +187,7 @@ describe("block names", () => {
       }
     }
     console.log(`block states toGameBlock rejects: ${rejected.join(", ") || "none"}`);
-    expect(rejected.filter((state) => !KNOWN_UNMAPPED_BLOCKS.has(blockStates.info(state).name))).toEqual([]);
+    expect(rejected).toEqual([]);
   });
 });
 

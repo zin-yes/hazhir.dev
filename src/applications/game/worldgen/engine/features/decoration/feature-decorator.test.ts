@@ -53,7 +53,8 @@ describe("FeatureDecorator", () => {
     expect(shortGrassPerColumn).toBeLessThan(80);
     const flowerKinds = ["minecraft:lilac", "minecraft:pink_tulip", "minecraft:white_tulip", "minecraft:cornflower", "minecraft:peony", "minecraft:rose_bush", "minecraft:lily_of_the_valley"];
     expect(flowerKinds.filter((kind) => (counts.get(kind) ?? 0) > 0).length).toBeGreaterThanOrEqual(2);
-    expect(decorator.diagnostics.unsupportedFeatureTypes.get("minecraft:ore")).toBeGreaterThan(0);
+    expect(counts.get("minecraft:oak_leaves") ?? counts.get("minecraft:birch_leaves") ?? 0).toBeGreaterThan(0);
+    expect([...decorator.diagnostics.unsupportedFeatureTypes.keys()]).toEqual([]);
     expect(decorator.diagnostics.placementErrors.size).toBe(0);
   });
 
