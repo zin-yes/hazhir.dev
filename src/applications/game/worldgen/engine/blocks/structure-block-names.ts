@@ -55,6 +55,7 @@ export const INTENTIONALLY_DROPPED_EXACT_BLOCKS = new Set<string>([
   "candle_cake",
   "cake",
   "end_rod",
+  "cocoa",
 ]);
 
 // Solid furniture and machines, kept as a full block of a similar material so rooms stay enclosed.

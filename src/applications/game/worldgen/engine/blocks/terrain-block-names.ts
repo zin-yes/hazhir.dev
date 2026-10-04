@@ -27,6 +27,7 @@ export const TERRAIN_BLOCKS: Record<string, BlockType> = {
   basalt: BlockType.BASALT,
   polished_basalt: BlockType.BASALT,
   smooth_basalt: BlockType.SMOOTH_BASALT,
+  ancient_debris: BlockType.BLACKSTONE,
   blackstone: BlockType.BLACKSTONE,
   polished_blackstone: BlockType.BLACKSTONE,
   polished_blackstone_bricks: BlockType.BLACKSTONE,

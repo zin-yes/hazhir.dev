@@ -202,3 +202,11 @@ describe("shapes and species", () => {
     );
   });
 });
+
+describe("decoration-only blocks", () => {
+  test("cocoa pods are dropped, ancient debris and jack o lanterns map to solid blocks", () => {
+    expect(toGameBlock("minecraft:cocoa[age=2,facing=north]")).toBe(BlockType.AIR);
+    expect(toGameBlock("minecraft:ancient_debris")).toBe(BlockType.BLACKSTONE);
+    expect(toGameBlock("minecraft:jack_o_lantern[facing=east]")).toBe(BlockType.PUMPKIN);
+  });
+});

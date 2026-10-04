@@ -67,6 +67,7 @@ export const PLANT_BLOCKS: Record<string, BlockType> = {
   melon: BlockType.MELON,
   pumpkin: BlockType.PUMPKIN,
   carved_pumpkin: BlockType.PUMPKIN,
+  jack_o_lantern: BlockType.PUMPKIN,
   hay_block: BlockType.HAY_BLOCK,
   torch: BlockType.TORCH,
   wall_torch: BlockType.TORCH,
