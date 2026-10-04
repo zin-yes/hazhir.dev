@@ -7,6 +7,8 @@ import {
 } from "../vertex-format";
 import {
   CELL_AXIS_CORNER_PAIRS,
+  CORNER_EXTRA_CELLS_BY_EXCLUDED_MASK,
+  CORNER_OCCLUSION_BY_BLOCKED_MASK,
   CORNER_RING_INDICES,
   CORNER_SIZE_MASKS,
   CORNER_U_AT_FAR_END,
@@ -70,6 +72,12 @@ export function sampleFaceSurface(
   z: number
 ): number {
   const light = paddedLightGrid.cells;
+  const ringDeltas = FACE_RING_DELTAS;
+  const ringRowDeltas = RING_ROW_DELTAS;
+  const ringZOffsets = RING_Z_OFFSETS;
+  const levelOfPackedLight = LIGHT_LEVEL_OF_PACKED_LIGHT;
+  const ringLevels = ringLightLevels;
+  const rows = occluderRows;
   const ringStart = face * RING_CELL_COUNT;
   let blockedMask = 0;
   let excludedMask = 0;
@@ -77,7 +85,7 @@ export function sampleFaceSurface(
   if (isEdgeCell) {
     const blocks = paddedBlockGrid.cells;
     for (let ring = 0; ring < RING_CELL_COUNT; ring++) {
-      const sampleIndex = cellIndex + FACE_RING_DELTAS[ringStart + ring];
+      const sampleIndex = cellIndex + ringDeltas[ringStart + ring];
       if (OCCLUDES_AMBIENT_LIGHT[blocks[sampleIndex]] === 1) {
         blockedMask |= 1 << ring;
         excludedMask |= 1 << ring;
@@ -88,15 +96,15 @@ export function sampleFaceSurface(
   } else {
     // Away from the chunk edge every ring cell is inside, so occlusion is a bit test on the occupancy rows.
     for (let ring = 0; ring < RING_CELL_COUNT; ring++) {
-      const rowBits = occluderRows[rowIndex + RING_ROW_DELTAS[ringStart + ring]];
-      blockedMask |= ((rowBits >>> (z + RING_Z_OFFSETS[ringStart + ring])) & 1) << ring;
+      const rowBits = rows[rowIndex + ringRowDeltas[ringStart + ring]];
+      blockedMask |= ((rowBits >>> (z + ringZOffsets[ringStart + ring])) & 1) << ring;
     }
     excludedMask = blockedMask;
     if (blockedMask === 0) {
       const faceLight = light[cellIndex + FACE_NEIGHBOR_DELTAS[face]];
       let isUniform = true;
       for (let ring = 0; ring < RING_CELL_COUNT; ring++) {
-        if (light[cellIndex + FACE_RING_DELTAS[ringStart + ring]] !== faceLight) {
+        if (light[cellIndex + ringDeltas[ringStart + ring]] !== faceLight) {
           isUniform = false;
           break;
         }
@@ -113,45 +121,28 @@ export function sampleFaceSurface(
   }
 
   for (let ring = 0; ring < RING_CELL_COUNT; ring++) {
-    ringLightLevels[ring] =
+    ringLevels[ring] =
       (excludedMask >> ring) & 1
         ? 0
-        : LIGHT_LEVEL_OF_PACKED_LIGHT[light[cellIndex + FACE_RING_DELTAS[ringStart + ring]]];
+        : levelOfPackedLight[light[cellIndex + ringDeltas[ringStart + ring]]];
   }
 
+  const occlusionBits = receivesAmbientOcclusion ? CORNER_OCCLUSION_BY_BLOCKED_MASK[(face << 8) | blockedMask] : 0xff;
+  const extraCellBits = CORNER_EXTRA_CELLS_BY_EXCLUDED_MASK[(face << 8) | excludedMask];
+  const cornerRingIndices = CORNER_RING_INDICES;
+  const lightSteps = VERTEX_LIGHT_STEPS;
+  const occlusions = cornerAmbientOcclusion;
+  const cornerSteps = cornerLightSteps;
   for (let corner = 0; corner < 4; corner++) {
     const base = (face * 4 + corner) * 3;
-    const firstSide = CORNER_RING_INDICES[base];
-    const secondSide = CORNER_RING_INDICES[base + 1];
-    const diagonal = CORNER_RING_INDICES[base + 2];
-
-    let occlusion = FULLY_LIT_AMBIENT_OCCLUSION;
-    if (receivesAmbientOcclusion) {
-      const isFirstSideBlocked = (blockedMask >> firstSide) & 1;
-      const isSecondSideBlocked = (blockedMask >> secondSide) & 1;
-      const isDiagonalBlocked = (blockedMask >> diagonal) & 1;
-      occlusion =
-        isFirstSideBlocked && isSecondSideBlocked
-          ? 0
-          : FULLY_LIT_AMBIENT_OCCLUSION - isFirstSideBlocked - isSecondSideBlocked - isDiagonalBlocked;
-    }
-
-    let lightSum = faceLevel;
-    let cellCount = 1;
-    if (((excludedMask >> firstSide) & 1) === 0) {
-      lightSum += ringLightLevels[firstSide];
-      cellCount++;
-    }
-    if (((excludedMask >> secondSide) & 1) === 0) {
-      lightSum += ringLightLevels[secondSide];
-      cellCount++;
-    }
-    if (((excludedMask >> diagonal) & 1) === 0) {
-      lightSum += ringLightLevels[diagonal];
-      cellCount++;
-    }
-    cornerAmbientOcclusion[corner] = occlusion;
-    cornerLightSteps[corner] = VERTEX_LIGHT_STEPS[cellCount * VERTEX_LIGHT_SUM_STRIDE + lightSum];
+    const lightSum =
+      faceLevel +
+      ringLevels[cornerRingIndices[base]] +
+      ringLevels[cornerRingIndices[base + 1]] +
+      ringLevels[cornerRingIndices[base + 2]];
+    const cellCount = ((extraCellBits >> (corner * 2)) & 3) + 1;
+    occlusions[corner] = (occlusionBits >> (corner * 2)) & 3;
+    cornerSteps[corner] = lightSteps[cellCount * VERTEX_LIGHT_SUM_STRIDE + lightSum];
   }
 
   return (

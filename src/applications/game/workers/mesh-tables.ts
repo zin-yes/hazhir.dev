@@ -362,6 +362,43 @@ export const CORNER_RING_INDICES = (() => {
 })();
 
 /**
+ * Ambient occlusion of the four corners of a face (2 bits each, corner 0 lowest)
+ * by which of the eight ring cells are blocked, at (face << 8) | blockedMask.
+ */
+export const CORNER_OCCLUSION_BY_BLOCKED_MASK = new Uint8Array(FACE_COUNT * 256);
+
+/**
+ * How many cells besides the face's own cell are averaged into each corner's light
+ * (2 bits each, corner 0 lowest) by which ring cells are excluded, at (face << 8) | excludedMask.
+ */
+export const CORNER_EXTRA_CELLS_BY_EXCLUDED_MASK = new Uint8Array(FACE_COUNT * 256);
+
+for (let face = 0; face < FACE_COUNT; face++) {
+  for (let mask = 0; mask < 256; mask++) {
+    let occlusionBits = 0;
+    let extraCellBits = 0;
+    for (let corner = 0; corner < 4; corner++) {
+      const base = (face * 4 + corner) * 3;
+      const firstSide = CORNER_RING_INDICES[base];
+      const secondSide = CORNER_RING_INDICES[base + 1];
+      const diagonal = CORNER_RING_INDICES[base + 2];
+      const isFirstSideBlocked = (mask >> firstSide) & 1;
+      const isSecondSideBlocked = (mask >> secondSide) & 1;
+      const isDiagonalBlocked = (mask >> diagonal) & 1;
+      const occlusion =
+        isFirstSideBlocked && isSecondSideBlocked
+          ? 0
+          : FULLY_LIT_AMBIENT_OCCLUSION - isFirstSideBlocked - isSecondSideBlocked - isDiagonalBlocked;
+      occlusionBits |= occlusion << (corner * 2);
+      const extraCells = 3 - isFirstSideBlocked - isSecondSideBlocked - isDiagonalBlocked;
+      extraCellBits |= extraCells << (corner * 2);
+    }
+    CORNER_OCCLUSION_BY_BLOCKED_MASK[(face << 8) | mask] = occlusionBits;
+    CORNER_EXTRA_CELLS_BY_EXCLUDED_MASK[(face << 8) | mask] = extraCellBits;
+  }
+}
+
+/**
  * Per padded cell, one bit per face direction the cell lies beyond. A cell beyond
  * one face has light only if that neighbor chunk's light was provided; a cell
  * beyond two faces (diagonal across a chunk edge) never has any.
