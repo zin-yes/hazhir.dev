@@ -20,9 +20,13 @@ import { createSurfaceHeightSampler } from "./generation";
 
 import { calculateOffset } from "../utils";
 import { isPlantVoxelBlock } from "./plant-voxels";
+import { DIMENSIONS } from "../profiler/dimensions";
 import {
   addWorkerCounter,
+  addWorkerKeyedUnits,
   endWorkerSection,
+  isWorkerProfiling,
+  startWorkerSampledSection,
   startWorkerSection,
 } from "../profiler/worker-recorder";
 import {
@@ -30,6 +34,7 @@ import {
   LIGHT_STEPS_PER_LEVEL,
   POSITION_UNITS_PER_BLOCK,
   UV_UNITS_PER_TEXTURE,
+  VERTICES_PER_QUAD,
   packPlantInstance,
   packPositionWord,
   packSurfaceWord,
@@ -39,6 +44,14 @@ import { VertexStream } from "./vertex-stream";
 
 const FULLY_LIT_AMBIENT_OCCLUSION = 3;
 const BLOCK_ID_COUNT = 256;
+
+const BLOCK_SECTION_SAMPLE_INTERVAL = 32;
+const FACE_SECTION_SAMPLE_INTERVAL = 32;
+const MESH_PART_OPAQUE = "opaque";
+const MESH_PART_TRANSPARENT = "transparent";
+const MESH_PART_PLANTS = "plants";
+const MESH_PART_STAIRS = "stairs";
+const INDICES_PER_QUAD = 6;
 
 function buildBlockLookup(isMember: (block: BlockType) => boolean): Uint8Array {
   const lookup = new Uint8Array(BLOCK_ID_COUNT);
@@ -219,6 +232,8 @@ function fillPaddedBlocks(
   chunk: Uint8Array,
   borders: ChunkFaceBuffers
 ) {
+  startWorkerSection("fillPaddedBlocks");
+  startWorkerSection("copyChunkRows");
   for (let x = 0; x < CHUNK_WIDTH; x++) {
     for (let y = 0; y < CHUNK_HEIGHT; y++) {
       const chunkRowStart = calculateOffset(x, y, 0);
@@ -228,7 +243,9 @@ function fillPaddedBlocks(
       );
     }
   }
+  endWorkerSection();
   copyBorderSlabs(paddedBlocks, borders);
+  endWorkerSection();
 }
 
 // Border layouts: top and bottom are [x * length + z], left and right are
@@ -238,6 +255,7 @@ function copyBorderSlabs(
   borders: ChunkFaceBuffers,
   valueMap?: Uint8Array
 ) {
+  startWorkerSection("copyBorderSlabs");
   const left = borders.left ? new Uint8Array(borders.left) : undefined;
   const right = borders.right ? new Uint8Array(borders.right) : undefined;
   const bottom = borders.bottom ? new Uint8Array(borders.bottom) : undefined;
@@ -245,6 +263,15 @@ function copyBorderSlabs(
   const back = borders.back ? new Uint8Array(borders.back) : undefined;
   const front = borders.front ? new Uint8Array(borders.front) : undefined;
   const map = (value: number) => (valueMap ? valueMap[value] : value);
+  addWorkerCounter(
+    "borderSlabsCopied",
+    Number(Boolean(left)) +
+      Number(Boolean(right)) +
+      Number(Boolean(bottom)) +
+      Number(Boolean(top)) +
+      Number(Boolean(back)) +
+      Number(Boolean(front))
+  );
 
   if (left || right) {
     for (let y = 0; y < CHUNK_HEIGHT; y++) {
@@ -270,6 +297,7 @@ function copyBorderSlabs(
       }
     }
   }
+  endWorkerSection();
 }
 
 const LIGHT_LEVEL_OF_PACKED_LIGHT = (() => {
@@ -286,6 +314,8 @@ function fillPaddedLightLevels(
   lightMap: Uint8Array,
   borderLights: ChunkFaceBuffers
 ) {
+  startWorkerSection("fillPaddedLight");
+  startWorkerSection("mapChunkLight");
   for (let x = 0; x < CHUNK_WIDTH; x++) {
     for (let y = 0; y < CHUNK_HEIGHT; y++) {
       const rowStart = calculateOffset(x, y, 0);
@@ -295,7 +325,9 @@ function fillPaddedLightLevels(
       }
     }
   }
+  endWorkerSection();
   copyBorderSlabs(paddedLight, borderLights, LIGHT_LEVEL_OF_PACKED_LIGHT);
+  endWorkerSection();
 }
 
 const EMPTY_RESULT = (): ChunkMeshResult => ({
@@ -303,6 +335,18 @@ const EMPTY_RESULT = (): ChunkMeshResult => ({
   transparent: new ArrayBuffer(0),
   plants: [],
 });
+
+function reportFacesPerBlockType(facesByBlockId: Int32Array) {
+  for (let blockId = 0; blockId < BLOCK_ID_COUNT; blockId++) {
+    const faceCount = facesByBlockId[blockId];
+    if (faceCount === 0) continue;
+    addWorkerKeyedUnits(
+      DIMENSIONS.meshBlockFaces,
+      BlockType[blockId] ?? `block${blockId}`,
+      faceCount
+    );
+  }
+}
 
 export function generateMesh(
   _chunk: ArrayBuffer,
@@ -314,10 +358,12 @@ export function generateMesh(
   chunkY: number = 0,
   chunkZ: number = 0
 ): ChunkMeshResult {
+  const isProfiling = isWorkerProfiling();
   startWorkerSection("unpackInputs");
   const chunk = new Uint8Array(_chunk);
   const lightMap = new Uint8Array(_lightBuffer);
 
+  startWorkerSection("emptyScan");
   let hasAnyBlock = false;
   for (let index = 0; index < chunk.length; index++) {
     if (chunk[index] !== BlockType.AIR) {
@@ -325,6 +371,7 @@ export function generateMesh(
       break;
     }
   }
+  endWorkerSection();
   if (!hasAnyBlock) {
     endWorkerSection();
     addWorkerCounter("blocksScanned", CHUNK_WIDTH * CHUNK_HEIGHT * CHUNK_LENGTH);
@@ -332,9 +379,12 @@ export function generateMesh(
     return EMPTY_RESULT();
   }
 
+  startWorkerSection("allocatePaddedGrids");
   const paddedBlocks = new Uint8Array(PADDED_VOLUME);
-  fillPaddedBlocks(paddedBlocks, chunk, borders);
   const paddedLight = new Uint8Array(PADDED_VOLUME);
+  endWorkerSection();
+  addWorkerCounter("paddedGridBytes", paddedBlocks.byteLength + paddedLight.byteLength);
+  fillPaddedBlocks(paddedBlocks, chunk, borders);
   fillPaddedLightLevels(paddedLight, lightMap, borderLights);
   // Order matches FACE_NORMALS: up, down, front, back, left, right.
   const hasLightBorderForFace = [
@@ -350,12 +400,19 @@ export function generateMesh(
   const opaque = new VertexStream();
   const transparent = new VertexStream();
   const plantInstancesByBlock = new Map<number, number[]>();
+  const facesByBlockId = new Int32Array(BLOCK_ID_COUNT);
 
   let solidBlocksVisited = 0;
+  let transparentBlocksVisited = 0;
+  let translucentBlocksVisited = 0;
+  let stairBlocksVisited = 0;
   let facesCulled = 0;
   let facesEmitted = 0;
+  let stairQuadsEmitted = 0;
   let aoQuads = 0;
   let plantInstancesEmitted = 0;
+  let unloadedLightEstimates = 0;
+  let edgeLightCellChecks = 0;
 
   let lookUpSurfaceHeight: ((x: number, z: number) => number) | undefined;
   // Light for a face whose neighbor chunk is not loaded: sky above the terrain, else dimmed own light.
@@ -365,6 +422,7 @@ export function generateMesh(
     neighborZ: number,
     ownLight: number
   ) => {
+    unloadedLightEstimates++;
     lookUpSurfaceHeight ??= createSurfaceHeightSampler(seed);
     const surfaceY = lookUpSurfaceHeight(
       chunkX * CHUNK_WIDTH + neighborX,
@@ -381,6 +439,7 @@ export function generateMesh(
   // Light cells diagonal across a chunk edge are not stored, and slabs of unloaded
   // neighbors are empty, so those cells say nothing about the real light.
   const isLightCellKnown = (x: number, y: number, z: number, offset: number[]) => {
+    edgeLightCellChecks++;
     const cell = [x + offset[0], y + offset[1], z + offset[2]];
     const limits = [CHUNK_WIDTH, CHUNK_HEIGHT, CHUNK_LENGTH];
     let outsideAxisCount = 0;
@@ -410,6 +469,14 @@ export function generateMesh(
         const ownLight = paddedLight[paddedBase];
 
         if (isPlantVoxelBlock(block)) {
+          if (isProfiling) {
+            startWorkerSampledSection(
+              "plantInstance",
+              BLOCK_SECTION_SAMPLE_INTERVAL,
+              DIMENSIONS.meshPart,
+              MESH_PART_PLANTS
+            );
+          }
           let neighborMask = 0;
           for (let direction = 0; direction < PLANT_NEIGHBOR_DELTAS.length; direction++) {
             if (OCCLUDES_AMBIENT_LIGHT[paddedBlocks[paddedBase + PLANT_NEIGHBOR_DELTAS[direction]]]) {
@@ -423,15 +490,40 @@ export function generateMesh(
           }
           instances.push(packPlantInstance(x, y, z, ownLight, neighborMask));
           plantInstancesEmitted++;
+          if (isProfiling) endWorkerSection();
           continue;
         }
 
         if (isStairs(block)) {
+          if (isProfiling) {
+            startWorkerSampledSection(
+              "stairBlock",
+              BLOCK_SECTION_SAMPLE_INTERVAL,
+              DIMENSIONS.meshPart,
+              MESH_PART_STAIRS
+            );
+          }
+          const verticesBeforeStairs = opaque.vertexCount;
           emitStairs(opaque, block, x, y, z, ownLight, paddedBlocks, paddedBase);
+          const stairQuads = (opaque.vertexCount - verticesBeforeStairs) / VERTICES_PER_QUAD;
+          stairBlocksVisited++;
+          stairQuadsEmitted += stairQuads;
+          facesByBlockId[block] += stairQuads;
+          if (isProfiling) endWorkerSection();
           continue;
         }
 
+        if (IS_TRANSPARENT[block]) transparentBlocksVisited++;
         const isTranslucent = IS_TRANSLUCENT[block] === 1;
+        if (isTranslucent) translucentBlocksVisited++;
+        if (isProfiling) {
+          startWorkerSampledSection(
+            "cubeBlock",
+            BLOCK_SECTION_SAMPLE_INTERVAL,
+            DIMENSIONS.meshPart,
+            isTranslucent ? MESH_PART_TRANSPARENT : MESH_PART_OPAQUE
+          );
+        }
         const target = isTranslucent ? transparent : opaque;
         const receivesAmbientOcclusion = RECEIVES_AMBIENT_OCCLUSION[block] === 1;
 
@@ -468,6 +560,7 @@ export function generateMesh(
             continue;
           }
 
+          if (isProfiling) startWorkerSampledSection("emitFace", FACE_SECTION_SAMPLE_INTERVAL);
           let faceLight = paddedLight[paddedBase + FACE_NEIGHBOR_DELTAS[face]];
           if (isOnChunkEdge && !hasLightBorderForFace[face]) {
             const normal = FACE_NORMALS[face];
@@ -489,6 +582,8 @@ export function generateMesh(
           const textureIndex = FACE_TEXTURES[face][block];
           const corners = FACE_CORNERS[face];
           const uvCodes = FACE_UV_CODES[face];
+
+          if (isProfiling) startWorkerSampledSection("cornerPositions", FACE_SECTION_SAMPLE_INTERVAL);
           for (let corner = 0; corner < 4; corner++) {
             const cornerFlags = corners[corner];
             cornerPositionWords[corner] = packPositionWord(
@@ -496,7 +591,11 @@ export function generateMesh(
               cornerFlags[1] ? topY16 : bottomY16,
               (z + cornerFlags[2]) * POSITION_UNITS_PER_BLOCK
             );
+          }
+          if (isProfiling) endWorkerSection();
 
+          if (isProfiling) startWorkerSampledSection("ambientOcclusion", FACE_SECTION_SAMPLE_INTERVAL);
+          for (let corner = 0; corner < 4; corner++) {
             let occlusion = FULLY_LIT_AMBIENT_OCCLUSION;
             if (receivesAmbientOcclusion) {
               const sampleDeltas = AMBIENT_OCCLUSION_SAMPLE_DELTAS[face][corner];
@@ -512,7 +611,11 @@ export function generateMesh(
                     isCornerBlocked;
             }
             cornerOcclusion[corner] = occlusion;
+          }
+          if (isProfiling) endWorkerSection();
 
+          if (isProfiling) startWorkerSampledSection("vertexLightAndSurface", FACE_SECTION_SAMPLE_INTERVAL);
+          for (let corner = 0; corner < 4; corner++) {
             let lightSum = faceLight;
             let lightCellCount = 1;
             const sampleDeltas = AMBIENT_OCCLUSION_SAMPLE_DELTAS[face][corner];
@@ -540,13 +643,15 @@ export function generateMesh(
                 ? rowBottomV
                 : 0,
               textureIndex,
-              occlusion,
+              cornerOcclusion[corner],
               vertexLightSteps
             );
           }
+          if (isProfiling) endWorkerSection();
           if (receivesAmbientOcclusion) aoQuads++;
 
           // Split along the brighter diagonal so a dark corner does not streak.
+          if (isProfiling) startWorkerSampledSection("pushQuad", FACE_SECTION_SAMPLE_INTERVAL);
           target.pushQuad(
             cornerPositionWords[0],
             cornerSurfaceWords[0],
@@ -558,43 +663,87 @@ export function generateMesh(
             cornerSurfaceWords[3],
             cornerOcclusion[0] + cornerOcclusion[3] > cornerOcclusion[1] + cornerOcclusion[2]
           );
+          if (isProfiling) endWorkerSection();
           facesEmitted++;
+          facesByBlockId[block]++;
+          if (isProfiling) endWorkerSection();
         }
+        if (isProfiling) endWorkerSection();
       }
     }
   }
   endWorkerSection();
 
   startWorkerSection("packResult");
+  startWorkerSection("plantInstanceBuffers", DIMENSIONS.meshPart, MESH_PART_PLANTS);
   const plants: PlantInstanceBatch[] = [];
   plantInstancesByBlock.forEach((instanceWords, blockType) => {
     plants.push({ blockType, instances: new Uint32Array(instanceWords).buffer });
   });
+  endWorkerSection();
+  startWorkerSection("opaqueBuffer", DIMENSIONS.meshPart, MESH_PART_OPAQUE);
+  const opaqueBuffer = opaque.toBuffer();
+  endWorkerSection();
+  startWorkerSection("transparentBuffer", DIMENSIONS.meshPart, MESH_PART_TRANSPARENT);
+  const transparentBuffer = transparent.toBuffer();
+  endWorkerSection();
   const result: ChunkMeshResult = {
-    opaque: opaque.toBuffer(),
-    transparent: transparent.toBuffer(),
+    opaque: opaqueBuffer,
+    transparent: transparentBuffer,
     plants,
   };
   endWorkerSection();
 
+  facesEmitted += stairQuadsEmitted;
   addWorkerCounter("blocksScanned", CHUNK_WIDTH * CHUNK_HEIGHT * CHUNK_LENGTH);
   addWorkerCounter("solidBlocksVisited", solidBlocksVisited);
+  addWorkerCounter("transparentBlocksVisited", transparentBlocksVisited);
+  addWorkerCounter("translucentBlocksVisited", translucentBlocksVisited);
+  addWorkerCounter("stairBlocksVisited", stairBlocksVisited);
   addWorkerCounter("facesEmitted", facesEmitted);
+  addWorkerCounter("stairQuadsEmitted", stairQuadsEmitted);
   addWorkerCounter("facesCulled", facesCulled);
   addWorkerCounter("opaqueVertices", opaque.vertexCount);
   addWorkerCounter("transparentVertices", transparent.vertexCount);
   addWorkerCounter("aoSamples", aoQuads * 12);
   addWorkerCounter("plantInstancesEmitted", plantInstancesEmitted);
+  addWorkerCounter("unloadedLightEstimates", unloadedLightEstimates);
+  addWorkerCounter("edgeLightCellChecks", edgeLightCellChecks);
+  if (isProfiling) {
+    addWorkerCounter("opaqueBytes", opaqueBuffer.byteLength);
+    addWorkerCounter("transparentBytes", transparentBuffer.byteLength);
+    addWorkerCounter(
+      "plantBytes",
+      plants.reduce((total, batch) => total + batch.instances.byteLength, 0)
+    );
+    addWorkerCounter(
+      "impliedIndices",
+      ((opaque.vertexCount + transparent.vertexCount) / VERTICES_PER_QUAD) * INDICES_PER_QUAD
+    );
+    reportFacesPerBlockType(facesByBlockId);
+    addWorkerKeyedUnits(
+      DIMENSIONS.meshPart,
+      MESH_PART_OPAQUE,
+      opaque.vertexCount / VERTICES_PER_QUAD - stairQuadsEmitted
+    );
+    addWorkerKeyedUnits(DIMENSIONS.meshPart, MESH_PART_TRANSPARENT, transparent.vertexCount / VERTICES_PER_QUAD);
+    addWorkerKeyedUnits(DIMENSIONS.meshPart, MESH_PART_STAIRS, stairQuadsEmitted);
+    addWorkerKeyedUnits(DIMENSIONS.meshPart, MESH_PART_PLANTS, plantInstancesEmitted);
+  }
 
   return result;
 }
 
 export function listTransferables(result: ChunkMeshResult): ArrayBuffer[] {
-  return [
+  startWorkerSection("listTransferables");
+  const transferables = [
     result.opaque,
     result.transparent,
     ...result.plants.map((batch) => batch.instances),
   ];
+  endWorkerSection();
+  addWorkerCounter("transferableBuffers", transferables.length);
+  return transferables;
 }
 
 type Corner = [number, number, number];

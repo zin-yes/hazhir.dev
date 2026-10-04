@@ -1,3 +1,4 @@
+import { addWorkerCounter, endWorkerSection, startWorkerSection } from "../profiler/worker-recorder";
 import { WORDS_PER_VERTEX } from "../vertex-format";
 
 const INITIAL_VERTEX_CAPACITY = 2048;
@@ -18,11 +19,15 @@ export class VertexStream {
   private reserveWords(extraWords: number) {
     const requiredWords = this.wordCount + extraWords;
     if (requiredWords <= this.words.length) return;
+    startWorkerSection("growVertexStream");
     let grownLength = this.words.length * 2;
     while (grownLength < requiredWords) grownLength *= 2;
     const grownWords = new Uint32Array(grownLength);
     grownWords.set(this.words.subarray(0, this.wordCount));
     this.words = grownWords;
+    endWorkerSection();
+    addWorkerCounter("vertexStreamGrowths", 1);
+    addWorkerCounter("vertexStreamGrowthBytes", grownWords.byteLength);
   }
 
   /**

@@ -9,9 +9,13 @@ import {
   CHUNK_WIDTH,
 } from "@/applications/game/config";
 import { createSurfaceHeightSampler } from "./generation";
+import { DIMENSIONS } from "../profiler/dimensions";
 import {
   addWorkerCounter,
+  addWorkerKeyedUnits,
   endWorkerSection,
+  isWorkerProfiling,
+  startWorkerSampledSection,
   startWorkerSection,
 } from "../profiler/worker-recorder";
 
@@ -38,6 +42,17 @@ for (let block = 0; block < 256; block++) {
 
 const MAX_LIGHT = 15;
 
+const BLOCK_ID_COUNT = 256;
+const COLUMN_SECTION_SAMPLE_INTERVAL = 16;
+const BFS_SECTION_SAMPLE_INTERVAL = 64;
+const LIGHT_STAGE_SKY = "sky";
+const LIGHT_STAGE_BLOCK_SOURCES = "blockSources";
+const LIGHT_STAGE_FRONTIER = "frontier";
+const LIGHT_STAGE_BORDER_EXCHANGE = "borderExchange";
+const LIGHT_STAGE_FLOOD = "flood";
+const LIGHT_STAGE_NEIGHBOR_UPDATES = "neighborUpdates";
+const LIGHT_EMITTER_KEY_PREFIX = "emitter.";
+
 export interface InitializedChunkLight {
   light: Uint8Array;
   /**
@@ -63,14 +78,20 @@ export function initializeChunkLight(
   topChunk?: Uint8Array,
   topChunkLight?: Uint8Array,
 ): InitializedChunkLight {
+  const isProfiling = isWorkerProfiling();
+  startWorkerSection("allocateLightMap");
   const light = new Uint8Array(BLOCKS_PER_CHUNK);
+  endWorkerSection();
+  addWorkerCounter("lightMapBytes", light.byteLength);
   const hasTopInformation = Boolean(topChunk || topChunkLight);
   let lookUpSurfaceHeight: ((x: number, z: number) => number) | undefined;
   let columnsExposed = 0;
+  let topChunkColumnScans = 0;
+  let surfaceHeightLookups = 0;
 
   // 1. Sunlight Initialization (Vertical Raycast)
   // We assume sunlight comes from the top.
-  startWorkerSection("sunlightColumns");
+  startWorkerSection("sunlightColumns", DIMENSIONS.lightKind, LIGHT_STAGE_SKY);
   for (let x = 0; x < CHUNK_WIDTH; x++) {
     for (let z = 0; z < CHUNK_LENGTH; z++) {
       let isExposed = true;
@@ -80,22 +101,36 @@ export function initializeChunkLight(
         if (topChunkLight[getIndex(x, 0, z)] >> 4 < MAX_LIGHT)
           isExposed = false;
       } else if (topChunk) {
+        if (isProfiling) {
+          startWorkerSampledSection("topChunkColumnScan", COLUMN_SECTION_SAMPLE_INTERVAL);
+        }
+        topChunkColumnScans++;
         for (let ty = 0; ty < CHUNK_HEIGHT; ty++) {
           if (!IS_TRANSPARENT[topChunk[getIndex(x, ty, z)]]) {
             isExposed = false;
             break;
           }
         }
+        if (isProfiling) endWorkerSection();
       }
 
       // Without anything from above, the terrain noise decides how high the ground is.
       let surfaceY = -Infinity;
       if (!hasTopInformation) {
-        lookUpSurfaceHeight ??= createSurfaceHeightSampler(seed);
+        if (!lookUpSurfaceHeight) {
+          startWorkerSection("createSurfaceHeightSampler");
+          lookUpSurfaceHeight = createSurfaceHeightSampler(seed);
+          endWorkerSection();
+        }
+        if (isProfiling) {
+          startWorkerSampledSection("surfaceHeightLookup", COLUMN_SECTION_SAMPLE_INTERVAL);
+        }
+        surfaceHeightLookups++;
         surfaceY = lookUpSurfaceHeight(
           chunkX * CHUNK_WIDTH + x,
           chunkZ * CHUNK_LENGTH + z,
         );
+        if (isProfiling) endWorkerSection();
       }
 
       for (let y = CHUNK_HEIGHT - 1; y >= 0; y--) {
@@ -117,8 +152,9 @@ export function initializeChunkLight(
   endWorkerSection();
 
   // 2. Block Light Sources
-  startWorkerSection("blockLightScan");
+  startWorkerSection("blockLightScan", DIMENSIONS.lightKind, LIGHT_STAGE_BLOCK_SOURCES);
   const queue: number[] = [];
+  const emitterCountsByBlockId = new Int32Array(BLOCK_ID_COUNT);
   let lightSourcesFound = 0;
   for (let i = 0; i < BLOCKS_PER_CHUNK; i++) {
     const emission = EMISSION[chunk[i]];
@@ -126,34 +162,63 @@ export function initializeChunkLight(
       light[i] = (light[i] & 0xf0) | emission;
       queue.push(i);
       lightSourcesFound++;
+      emitterCountsByBlockId[chunk[i]]++;
     }
   }
   endWorkerSection();
+  const lightSourceQueueLength = queue.length;
 
   // 3. Queue only the sky-lit cells that can still brighten something.
-  startWorkerSection("frontierQueue");
+  startWorkerSection("frontierQueue", DIMENSIONS.lightKind, LIGHT_STAGE_FRONTIER);
   let isFullySunlit = lightSourcesFound === 0;
+  let openCellsScanned = 0;
+  let skyLitCells = 0;
   for (let x = 0; x < CHUNK_WIDTH; x++) {
     for (let y = 0; y < CHUNK_HEIGHT; y++) {
       for (let z = 0; z < CHUNK_LENGTH; z++) {
         const index = getIndex(x, y, z);
         if (!IS_TRANSPARENT[chunk[index]]) continue;
+        openCellsScanned++;
         if (light[index] >> 4 !== MAX_LIGHT) {
           isFullySunlit = false;
           continue;
         }
+        skyLitCells++;
         if (isSkyFrontierCell(chunk, light, x, y, z)) queue.push(index);
       }
     }
   }
   endWorkerSection();
 
+  startWorkerSection("queueToTypedArray");
+  const queueCells = Uint32Array.from(queue);
+  endWorkerSection();
+
   addWorkerCounter("columnsExposed", columnsExposed);
   addWorkerCounter("lightSourcesFound", lightSourcesFound);
   addWorkerCounter("queueLength", queue.length);
+  addWorkerCounter("frontierCellsQueued", queue.length - lightSourceQueueLength);
+  addWorkerCounter("openCellsScanned", openCellsScanned);
+  addWorkerCounter("skyLitCells", skyLitCells);
+  addWorkerCounter("topChunkColumnScans", topChunkColumnScans);
+  addWorkerCounter("surfaceHeightLookups", surfaceHeightLookups);
+  addWorkerCounter("queueBytes", queueCells.byteLength);
   if (isFullySunlit) addWorkerCounter("fullySunlitChunks", 1);
+  if (isProfiling) {
+    addWorkerKeyedUnits(DIMENSIONS.lightKind, LIGHT_STAGE_SKY, columnsExposed);
+    addWorkerKeyedUnits(DIMENSIONS.lightKind, LIGHT_STAGE_BLOCK_SOURCES, lightSourcesFound);
+    addWorkerKeyedUnits(DIMENSIONS.lightKind, LIGHT_STAGE_FRONTIER, queue.length - lightSourceQueueLength);
+    for (let blockId = 0; blockId < BLOCK_ID_COUNT; blockId++) {
+      if (emitterCountsByBlockId[blockId] === 0) continue;
+      addWorkerKeyedUnits(
+        DIMENSIONS.lightKind,
+        LIGHT_EMITTER_KEY_PREFIX + (BlockType[blockId] ?? `block${blockId}`),
+        emitterCountsByBlockId[blockId],
+      );
+    }
+  }
 
-  return { light, queue: Uint32Array.from(queue), isFullySunlit };
+  return { light, queue: queueCells, isFullySunlit };
 }
 
 const X_STRIDE = 1 << (CHUNK_SHIFT * 2);
@@ -296,15 +361,22 @@ export function propagateChunkLight(
   centerLight: Uint8Array;
   neighborLightUpdates: { [key: string]: Uint8Array };
 } {
+  const isProfiling = isWorkerProfiling();
+  startWorkerSection("bindNeighborSlots");
   const blocksBySlot: (Uint8Array | undefined)[] = new Array(SLOT_COUNT);
   const lightBySlot: (Uint8Array | undefined)[] = new Array(SLOT_COUNT);
   const isClonedBySlot: boolean[] = new Array(SLOT_COUNT).fill(false);
   blocksBySlot[SLOT_CENTER] = centerChunk;
   lightBySlot[SLOT_CENTER] = centerLight;
+  let neighborChunksLoaded = 0;
+  let neighborLightsLoaded = 0;
   for (let slot = 1; slot < SLOT_COUNT; slot++) {
     blocksBySlot[slot] = neighbors[SLOT_KEYS[slot]] || undefined;
     lightBySlot[slot] = neighborLights[SLOT_KEYS[slot]] || undefined;
+    if (blocksBySlot[slot]) neighborChunksLoaded++;
+    if (lightBySlot[slot]) neighborLightsLoaded++;
   }
+  endWorkerSection();
 
   const readLight = (x: number, y: number, z: number): number => {
     const slot = slotOf(x, y, z);
@@ -321,9 +393,11 @@ export function propagateChunkLight(
     let light = lightBySlot[slot];
     if (!light) return;
     if (slot !== SLOT_CENTER && !isClonedBySlot[slot]) {
+      startWorkerSection("cloneNeighborLight");
       light = new Uint8Array(light);
       lightBySlot[slot] = light;
       isClonedBySlot[slot] = true;
+      endWorkerSection();
     }
     light[getIndex(x & CHUNK_MASK, y & CHUNK_MASK, z & CHUNK_MASK)] = value;
   };
@@ -331,11 +405,13 @@ export function propagateChunkLight(
   // Cells waiting to spread, three integers each.
   let cells = new Int32Array(3 * 4096);
   let cellCount = 0;
+  let cellBufferGrowths = 0;
   const pushCell = (x: number, y: number, z: number) => {
     if (cellCount + 3 > cells.length) {
       const grown = new Int32Array(cells.length * 2);
       grown.set(cells);
       cells = grown;
+      cellBufferGrowths++;
     }
     cells[cellCount++] = x;
     cells[cellCount++] = y;
@@ -343,6 +419,7 @@ export function propagateChunkLight(
   };
 
   startWorkerSection("seedFromQueue");
+  addWorkerCounter("seedQueueLength", queue.length);
   for (let position = 0; position < queue.length; position++) {
     const index = queue[position];
     pushCell(
@@ -355,15 +432,19 @@ export function propagateChunkLight(
 
   // Seed queue with light from neighbors: for each boundary cell of the center
   // chunk, pull in what the neighbor beyond it holds.
-  startWorkerSection("seedFromNeighborBorders");
+  startWorkerSection("seedFromNeighborBorders", DIMENSIONS.lightKind, LIGHT_STAGE_BORDER_EXCHANGE);
+  let borderCellsExamined = 0;
+  let borderCellsSeeded = 0;
   const seedFromFace = (slot: number, isFromAbove: boolean) => {
     const neighborLight = lightBySlot[slot];
     if (!blocksBySlot[slot] || !neighborLight) return;
+    startWorkerSection("seedFromFace");
     const centerIndices = FACE_CENTER_INDICES[slot];
     const neighborIndices = FACE_NEIGHBOR_INDICES[slot];
     for (let position = 0; position < centerIndices.length; position++) {
       const index = centerIndices[position];
       if (!IS_TRANSPARENT[centerChunk[index]]) continue;
+      borderCellsExamined++;
 
       const neighborValue = neighborLight[neighborIndices[position]];
       if (neighborValue === 0) continue;
@@ -386,6 +467,7 @@ export function propagateChunkLight(
         centerLight[index] =
           (Math.max(newSky, currentSky) << 4) |
           Math.max(newBlock, currentBlock);
+        borderCellsSeeded++;
         pushCell(
           index >> (CHUNK_SHIFT * 2),
           (index >> CHUNK_SHIFT) & CHUNK_MASK,
@@ -393,6 +475,7 @@ export function propagateChunkLight(
         );
       }
     }
+    endWorkerSection();
   };
   seedFromFace(SLOT_NEGATIVE_X, false);
   seedFromFace(SLOT_POSITIVE_X, false);
@@ -402,8 +485,12 @@ export function propagateChunkLight(
   seedFromFace(SLOT_POSITIVE_Z, false);
   endWorkerSection();
 
-  startWorkerSection("bfsFlood");
+  const cellsQueuedBeforeFlood = cellCount / 3;
+  startWorkerSection("bfsFlood", DIMENSIONS.lightKind, LIGHT_STAGE_FLOOD);
   let lightValuesChanged = 0;
+  let deadNodesSkipped = 0;
+  let neighborProbes = 0;
+  let neighborProbesBlockedByOpaque = 0;
   let head = 0;
   while (head < cellCount) {
     const x = cells[head++];
@@ -413,8 +500,12 @@ export function propagateChunkLight(
     const currentLight = readLight(x, y, z);
     const sky = currentLight >> 4;
     const block = currentLight & 0xf;
-    if (sky === 0 && block === 0) continue;
+    if (sky === 0 && block === 0) {
+      deadNodesSkipped++;
+      continue;
+    }
 
+    if (isProfiling) startWorkerSampledSection("spreadFromCell", BFS_SECTION_SAMPLE_INTERVAL);
     for (let direction = 0; direction < 6; direction++) {
       const nx = x + DIRECTION_X[direction];
       const ny = y + DIRECTION_Y[direction];
@@ -429,7 +520,11 @@ export function propagateChunkLight(
       const neighborBlockType = blocks
         ? blocks[getIndex(nx & CHUNK_MASK, ny & CHUNK_MASK, nz & CHUNK_MASK)]
         : BlockType.AIR;
-      if (!IS_TRANSPARENT[neighborBlockType]) continue;
+      neighborProbes++;
+      if (!IS_TRANSPARENT[neighborBlockType]) {
+        neighborProbesBlockedByOpaque++;
+        continue;
+      }
 
       const neighborLightValue = readLight(nx, ny, nz);
       const neighborSky = neighborLightValue >> 4;
@@ -459,21 +554,37 @@ export function propagateChunkLight(
         lightValuesChanged++;
       }
     }
+    if (isProfiling) endWorkerSection();
   }
   endWorkerSection();
 
+  startWorkerSection("buildNeighborUpdates", DIMENSIONS.lightKind, LIGHT_STAGE_NEIGHBOR_UPDATES);
   const neighborUpdates: { [key: string]: Uint8Array } = {};
   for (let slot = 1; slot < SLOT_COUNT; slot++) {
     if (isClonedBySlot[slot])
       neighborUpdates[SLOT_KEYS[slot]] = lightBySlot[slot]!;
   }
+  const neighborBordersUpdated = Object.keys(neighborUpdates).length;
+  endWorkerSection();
 
   addWorkerCounter("bfsNodesVisited", head / 3);
+  addWorkerCounter("bfsNodesQueuedBySeeding", cellsQueuedBeforeFlood);
+  addWorkerCounter("bfsDeadNodesSkipped", deadNodesSkipped);
   addWorkerCounter("lightValuesChanged", lightValuesChanged);
-  addWorkerCounter(
-    "neighborBordersUpdated",
-    Object.keys(neighborUpdates).length,
-  );
+  addWorkerCounter("neighborProbes", neighborProbes);
+  addWorkerCounter("neighborProbesBlockedByOpaque", neighborProbesBlockedByOpaque);
+  addWorkerCounter("neighborChunksLoaded", neighborChunksLoaded);
+  addWorkerCounter("neighborLightsLoaded", neighborLightsLoaded);
+  addWorkerCounter("borderCellsExamined", borderCellsExamined);
+  addWorkerCounter("borderCellsSeeded", borderCellsSeeded);
+  addWorkerCounter("cellBufferGrowths", cellBufferGrowths);
+  addWorkerCounter("neighborBordersUpdated", neighborBordersUpdated);
+  addWorkerCounter("neighborLightBytesReturned", neighborBordersUpdated * BLOCKS_PER_CHUNK);
+  if (isProfiling) {
+    addWorkerKeyedUnits(DIMENSIONS.lightKind, LIGHT_STAGE_BORDER_EXCHANGE, borderCellsSeeded);
+    addWorkerKeyedUnits(DIMENSIONS.lightKind, LIGHT_STAGE_FLOOD, head / 3);
+    addWorkerKeyedUnits(DIMENSIONS.lightKind, LIGHT_STAGE_NEIGHBOR_UPDATES, neighborBordersUpdated);
+  }
 
   return { centerLight, neighborLightUpdates: neighborUpdates };
 }

@@ -8,6 +8,13 @@ import {
 } from "../blocks";
 import { TEXTURE_SIZE } from "../config";
 import { PLANT_PIXEL_MASKS } from "../data/plant-pixel-masks";
+import { DIMENSIONS } from "../profiler/dimensions";
+import {
+  addWorkerCounter,
+  endWorkerSection,
+  isWorkerProfiling,
+  startWorkerSection,
+} from "../profiler/worker-recorder";
 import { packPositionWord, packSurfaceWord } from "../vertex-format";
 import { VertexStream } from "./vertex-stream";
 
@@ -61,6 +68,7 @@ function buildVoxelCells(
   pixelRows: string[],
 ): Map<number, VoxelCell> {
   const cells = new Map<number, VoxelCell>();
+  let opaquePixelsSampled = 0;
 
   const claimCell = (
     cellX: number,
@@ -77,6 +85,7 @@ function buildVoxelCells(
   for (let pixelRow = 0; pixelRow < TEXTURE_SIZE; pixelRow++) {
     for (let pixelColumn = 0; pixelColumn < TEXTURE_SIZE; pixelColumn++) {
       if (pixelRows[pixelRow]?.[pixelColumn] !== OPAQUE_PIXEL) continue;
+      opaquePixelsSampled++;
 
       const cellY = TEXTURE_SIZE - 1 - pixelRow;
 
@@ -99,6 +108,9 @@ function buildVoxelCells(
       }
     }
   }
+  addWorkerCounter("plantPixelsSampled", TEXTURE_SIZE * TEXTURE_SIZE);
+  addWorkerCounter("plantOpaquePixels", opaquePixelsSampled);
+  addWorkerCounter("plantVoxelCells", cells.size);
   return cells;
 }
 
@@ -160,15 +172,31 @@ export interface PlantTemplate {
   quadCount: number;
 }
 
+function plantTemplateKey(prefix: string, block: BlockType): string | undefined {
+  return isWorkerProfiling() ? `${prefix}.${BlockType[block]}` : undefined;
+}
+
 export function buildPlantTemplate(block: BlockType): PlantTemplate {
+  startWorkerSection(
+    "buildPlantTemplate",
+    DIMENSIONS.meshPart,
+    plantTemplateKey("plantTemplate", block),
+  );
   const textureIndex = BLOCK_TEXTURES[block].DEFAULT;
   const pixelRows = PLANT_PIXEL_MASKS[TEXTURE_FILE_NAMES[textureIndex]];
   const stream = new VertexStream();
-  if (!pixelRows)
-    return { blockType: block, vertexBuffer: stream.toBuffer(), quadCount: 0 };
+  if (!pixelRows) {
+    const emptyTemplate = { blockType: block, vertexBuffer: stream.toBuffer(), quadCount: 0 };
+    endWorkerSection();
+    return emptyTemplate;
+  }
 
+  startWorkerSection("buildVoxelCells");
   const cells = buildVoxelCells(block, pixelRows);
+  endWorkerSection();
 
+  startWorkerSection("emitVoxelFaces");
+  let hiddenFaces = 0;
   for (const cell of cells.values()) {
     const u32 = cell.pixelColumn * 2 + 1;
     const v32 = cell.pixelRow * 2 + 1;
@@ -182,7 +210,10 @@ export function buildPlantTemplate(block: BlockType): PlantTemplate {
           cell.cellZ + normalZ,
         ),
       );
-      if (isHidden) continue;
+      if (isHidden) {
+        hiddenFaces++;
+        continue;
+      }
 
       const corners: Vector[] = [
         face.base,
@@ -227,8 +258,17 @@ export function buildPlantTemplate(block: BlockType): PlantTemplate {
     }
   }
 
+  endWorkerSection();
+
+  startWorkerSection("packTemplateBuffer");
   const vertexBuffer = stream.toBuffer();
-  return { blockType: block, vertexBuffer, quadCount: stream.vertexCount / 4 };
+  endWorkerSection();
+  const quadCount = stream.vertexCount / 4;
+  addWorkerCounter("plantTemplateQuads", quadCount);
+  addWorkerCounter("plantTemplateHiddenFaces", hiddenFaces);
+  addWorkerCounter("plantTemplateBytes", vertexBuffer.byteLength);
+  endWorkerSection();
+  return { blockType: block, vertexBuffer, quadCount };
 }
 
 type Corner2 = [number, number];
@@ -239,6 +279,11 @@ type Corner2 = [number, number];
  * on the whole-voxel line closest to where the voxels are, so they stay on the grid.
  */
 export function buildPlantBillboardTemplate(block: BlockType): PlantTemplate {
+  startWorkerSection(
+    "buildPlantBillboardTemplate",
+    DIMENSIONS.meshPart,
+    plantTemplateKey("plantBillboard", block),
+  );
   const textureIndex = BLOCK_TEXTURES[block].DEFAULT;
   const stream = new VertexStream();
   const unit = TEXTURE_SIZE;
@@ -325,9 +370,10 @@ export function buildPlantBillboardTemplate(block: BlockType): PlantTemplate {
     );
   }
 
-  return {
-    blockType: block,
-    vertexBuffer: stream.toBuffer(),
-    quadCount: stream.vertexCount / 4,
-  };
+  const vertexBuffer = stream.toBuffer();
+  const quadCount = stream.vertexCount / 4;
+  addWorkerCounter("plantBillboardQuads", quadCount);
+  addWorkerCounter("plantBillboardBytes", vertexBuffer.byteLength);
+  endWorkerSection();
+  return { blockType: block, vertexBuffer, quadCount };
 }

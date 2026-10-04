@@ -8,9 +8,20 @@ import {
 } from "../profiler/worker-recorder";
 
 async function loadImage(url: string) {
-  const image = await (await fetch(url)).blob();
+  startWorkerSection("fetchResponse");
+  const response = await fetch(url);
+  endWorkerSection();
 
-  return await createImageBitmap(image);
+  startWorkerSection("readBlob");
+  const image = await response.blob();
+  endWorkerSection();
+  addWorkerCounter("bytesFetched", image.size);
+
+  startWorkerSection("decodeBitmap");
+  const bitmap = await createImageBitmap(image);
+  endWorkerSection();
+  addWorkerCounter("pixelsDecoded", bitmap.width * bitmap.height);
+  return bitmap;
 }
 
 export async function loadTextureArray(
@@ -34,10 +45,17 @@ export async function loadTextureArray(
       endWorkerSection();
 
       startWorkerSection("drawAndRead");
+      startWorkerSection("clearCanvas");
       context.clearRect(0, 0, TEXTURE_SIZE, TEXTURE_SIZE);
+      endWorkerSection();
+      startWorkerSection("drawImage");
       context.drawImage(image, 0, 0);
+      endWorkerSection();
+      startWorkerSection("readPixels");
       const imageData = context.getImageData(0, 0, TEXTURE_SIZE, TEXTURE_SIZE);
       endWorkerSection();
+      endWorkerSection();
+      addWorkerCounter("bytesRead", imageData.data.byteLength);
 
       textureData.push(new Uint8ClampedArray(imageData.data.buffer));
       onProgress?.(textureData.length / texturesToLoad.length);
@@ -49,12 +67,16 @@ export async function loadTextureArray(
       length += item.length;
     });
 
+    startWorkerSection("allocateMerged");
     let mergedTextureData = new Uint8ClampedArray(length);
+    endWorkerSection();
+    startWorkerSection("copyLayers");
     let offset = 0;
     textureData.forEach((item) => {
       mergedTextureData.set(item, offset);
       offset += item.length;
     });
+    endWorkerSection();
     endWorkerSection();
     addWorkerCounter("texturesLoaded", textureData.length);
     addWorkerCounter("bytesMerged", length);
