@@ -8,6 +8,7 @@
     "generate:blocks": "bun scripts/generate-blocks.ts",
     "generate:plant-voxels": "bun scripts/generate-plant-voxels.ts",
     "generate:terralith": "bun scripts/compile-terralith-data.ts",
+    "profile:worldgen": "bun scripts/profile-worldgen.ts",
     "start": "next start",
     "lint": "next lint",
     "db:push": "drizzle-kit push",
