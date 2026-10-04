@@ -60,4 +60,35 @@ describe("createProfiledRender", () => {
     expect(fake.gl.drawElements).toBe(originalDraw);
     profiled.dispose();
   });
+
+  test("draws of a pass before the scene count in the frame's draw calls, like three's auto reset would not", () => {
+    const fake = createFakeWebGl();
+    const info = {
+      autoReset: true,
+      render: { calls: 0, triangles: 0 },
+      memory: { geometries: 0, textures: 0 },
+      programs: [],
+      reset() {
+        info.render.calls = 0;
+      },
+    };
+    const renderer = {
+      getContext: () => fake.asWebGl2(),
+      info,
+      autoClear: false,
+      render() {
+        if (info.autoReset) info.reset();
+        info.render.calls += 10;
+      },
+    };
+    const profiler = new Profiler();
+    profiler.setEnabled(true);
+    const profiled = createProfiledRender(renderer as never, {} as never, {} as never, profiler);
+
+    profiler.beginFrame();
+    profiled.render(() => renderer.render());
+    expect(profiler.snapshot().gauges.find((gauge) => gauge.name === "gpu.drawCalls")?.last).toBe(20);
+    expect(info.autoReset).toBe(true);
+    profiled.dispose();
+  });
 });

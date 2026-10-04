@@ -12,7 +12,11 @@ import { renderScenePasses, type PassRenderTarget, type PassRenderable } from ".
 export { classifyRenderObject } from "./render-passes";
 
 export interface ProfiledRender {
-  render(): void;
+  /**
+   * Renders the scene; `beforeScene` draws a pass first (the LOD). Its draws count in the renderer stats and its GPU
+   * time is part of gpu.frame, or gpu.pass.lod with the pass breakdown on.
+   */
+  render(beforeScene?: () => void): void;
   dispose(): void;
 }
 
@@ -84,15 +88,23 @@ export function createProfiledRender(
     activeProfiler.noteFrame("triangles", info.render.triangles);
   };
 
-  const renderProfiled = () => {
+  const renderProfiled = (beforeScene?: () => void) => {
     instrumentation ??= install();
     const active = instrumentation;
     reportSessionInfo(active);
     const frameId = activeProfiler.currentFrameId;
 
+    const previousAutoReset = renderer.info.autoReset;
+    renderer.info.autoReset = false;
+    renderer.info.reset();
     const token = activeProfiler.begin("main.frame.render");
     try {
       if (activeProfiler.settings.gpuPassBreakdown) {
+        if (beforeScene) {
+          active.gpuTimer.begin("lod", frameId);
+          beforeScene();
+          active.gpuTimer.end();
+        }
         renderScenePasses(
           renderer as unknown as PassRenderTarget,
           scene as unknown as { children: PassRenderable[] },
@@ -102,11 +114,13 @@ export function createProfiledRender(
         );
       } else {
         active.gpuTimer.begin("frame", frameId);
+        beforeScene?.();
         renderer.render(scene, camera);
         active.gpuTimer.end();
       }
     } finally {
       activeProfiler.end(token);
+      renderer.info.autoReset = previousAutoReset;
     }
 
     active.gpuTimer.poll();
@@ -115,12 +129,13 @@ export function createProfiledRender(
   };
 
   return {
-    render() {
+    render(beforeScene) {
       if (!activeProfiler.enabled) {
+        beforeScene?.();
         renderer.render(scene, camera);
         return;
       }
-      renderProfiled();
+      renderProfiled(beforeScene);
     },
     dispose() {
       unsubscribe();

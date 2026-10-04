@@ -30,7 +30,8 @@ export interface PassRenderTarget {
 /**
  * Renders the scene once per non-empty pass by hiding every other child,
  * producing the same image as one render call (the first pass clears, later
- * passes draw on top). Visibility and clear state are always restored.
+ * passes draw on top). Visibility and clear state are always restored. The
+ * caller resets renderer.info, so draws before the scene (the LOD pass) count.
  */
 export function renderScenePasses(
   renderer: PassRenderTarget,
@@ -46,7 +47,6 @@ export function renderScenePasses(
   const originalAutoReset = renderer.info.autoReset;
 
   renderer.info.autoReset = false;
-  renderer.info.reset();
   let hasCleared = false;
   try {
     for (const pass of RENDER_PASS_ORDER) {
