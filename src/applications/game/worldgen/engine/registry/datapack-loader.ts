@@ -79,6 +79,10 @@ function loadRegistryFromDataRoot(
   }
 }
 
+function withDefaultNamespace(resourceId: string): string {
+  return resourceId.includes(":") ? resourceId : `minecraft:${resourceId}`;
+}
+
 function loadTagRegistry(dataRoots: string[], tagDirectoryPath: string[]): TagRegistry {
   const rawTags: Record<string, { values: string[]; replace: boolean }> = {};
   for (const dataRoot of dataRoots) {
@@ -89,9 +93,10 @@ function loadTagRegistry(dataRoots: string[], tagDirectoryPath: string[]): TagRe
         const relativePath = filePath.slice(tagDirectory.length + 1, -".json".length);
         const parsed = readJsonFile(filePath) as { values?: JsonValue[]; replace?: boolean };
         const tagId = `${namespace}:${relativePath}`;
-        const values = (parsed.values ?? []).map((value) =>
-          typeof value === "string" ? value : String((value as JsonObject).id),
-        );
+        const values = (parsed.values ?? []).map((value) => {
+          const rawId = typeof value === "string" ? value : String((value as JsonObject).id);
+          return rawId.startsWith("#") ? `#${withDefaultNamespace(rawId.slice(1))}` : withDefaultNamespace(rawId);
+        });
         const existing = rawTags[tagId];
         rawTags[tagId] =
           parsed.replace || !existing
