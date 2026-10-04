@@ -256,7 +256,7 @@ describe("lighting profiling", () => {
       "queueToTypedArray",
       "sunlightColumns",
     ]);
-    expect(callsAt(profile, "sunlightColumns>topChunkColumnScan")).toBe(CHUNK_WIDTH * CHUNK_LENGTH);
+    expect(profile.counters.columnsExposed).toBe(CHUNK_WIDTH * CHUNK_LENGTH);
     expect(profile.counters.lightSourcesFound).toBe(1);
     expect(unitsOf(profile, DIMENSIONS.lightKind)["emitter.GLOWSTONE"]).toBe(1);
     expect(profile.counters.queueBytes).toBe(profile.counters.queueLength * 4);
@@ -265,12 +265,23 @@ describe("lighting profiling", () => {
     );
   });
 
-  test("initializeChunkLight without chunks above samples the terrain height per column", () => {
+  test("initializeChunkLight without chunks above reads the chunk alone and never samples terrain", () => {
     const chunk = mixedChunk();
     const { profile } = recordTask(() => initializeChunkLight(chunk, WORLD_SEED, 0, 0, 0));
 
-    expect(callsAt(profile, "sunlightColumns>surfaceHeightLookup")).toBe(CHUNK_WIDTH * CHUNK_LENGTH);
-    expect(callsAt(profile, "sunlightColumns>createSurfaceHeightSampler")).toBe(1);
+    expect(nodePaths(profile).some((path) => path.includes("createSurfaceHeightSampler"))).toBe(false);
+    expect(profile.counters.columnsExposed).toBe(CHUNK_WIDTH * CHUNK_LENGTH);
+    expect(profile.counters.skyLitCells).toBeGreaterThan(CHUNK_WIDTH * CHUNK_LENGTH);
+  });
+
+  test("a chunk of one solid block is lit without scanning it", () => {
+    const stone = new Uint8Array(BLOCKS).fill(BlockType.STONE);
+    const { result, profile } = recordTask(() => initializeChunkLight(stone, WORLD_SEED, 0, 0, 0));
+
+    expect(profile.counters.uniformChunksSkipped).toBe(1);
+    expect(result.isFullySunlit).toBe(true);
+    expect(result.queue.length).toBe(0);
+    expect(callsAt(profile, "sunlightColumns")).toBe(0);
   });
 
   test("propagateChunkLight records the flood, border exchange and neighbor updates", () => {
@@ -298,15 +309,12 @@ describe("lighting profiling", () => {
       "seedFromQueue",
     ]);
     expect(callsAt(profile, "seedFromNeighborBorders>seedFromFace")).toBe(2);
-    expect(callsAt(profile, "bfsFlood>spreadFromCell>cloneNeighborLight")).toBe(2);
     expect(Object.keys(result.neighborLightUpdates).sort()).toEqual(["-1,0,0", "1,0,0"]);
     expect(profile.counters.neighborBordersUpdated).toBe(2);
     expect(profile.counters.neighborLightBytesReturned).toBe(2 * BLOCKS);
     expect(profile.counters.neighborChunksLoaded).toBe(2);
     expect(profile.counters.lightValuesChanged).toBeGreaterThan(100);
-    expect(callsAt(profile, "bfsFlood>spreadFromCell") + profile.counters.bfsDeadNodesSkipped).toBe(
-      profile.counters.bfsNodesVisited,
-    );
+    expect(profile.counters.bfsDeadNodesSkipped).toBeLessThanOrEqual(profile.counters.bfsNodesVisited);
     expect(unitsOf(profile, DIMENSIONS.lightKind).flood).toBe(profile.counters.bfsNodesVisited);
   });
 
