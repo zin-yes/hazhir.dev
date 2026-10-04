@@ -157,6 +157,8 @@ const RANDOM_TICK_RADIUS_CHUNKS = 4;
 // Chunks whose centers are farther than this from the camera draw plants as flat sheets.
 const PLANT_VOXEL_DETAIL_DISTANCE = 72;
 const PLANT_DETAIL_UPDATE_INTERVAL_MS = 250;
+/** A held chunk is shown anyway after this long, so a neighbor that never meshes cannot hide it for good. */
+const HELD_CHUNK_TIMEOUT_MS = 1500;
 /**
  * Chunks whose centers are farther than this draw no plants: a plant there is a few pixels tall, and each plant type
  * of each chunk costs a draw call (about a third of all draws at a 12 chunk render distance).
@@ -164,6 +166,7 @@ const PLANT_DETAIL_UPDATE_INTERVAL_MS = 250;
 const PLANT_DRAW_DISTANCE = 160;
 
 interface PlantDetailMeshes {
+  chunkName: string;
   center: THREE.Vector3;
   voxel: THREE.Mesh[];
   billboard: THREE.Mesh[];
@@ -528,6 +531,8 @@ export default function Game() {
   }>({});
   const chunkMeshesRef = useRef(new Map<string, THREE.Mesh[]>());
   const plantDetailRef = useRef(new Map<string, PlantDetailMeshes>());
+  /** Meshed chunks kept hidden until their drawn neighbors are meshed too, with the time they were first held. */
+  const heldChunksRef = useRef(new Map<string, { record: ChunkRecord; heldSinceMs: number }>());
   const pendingLightEditsRef = useRef(0);
   const lightIdleResolversRef = useRef<Array<() => void>>([]);
   const tickableBlocksRef = useRef(new TickableBlockIndex());
@@ -619,11 +624,13 @@ export default function Game() {
           const chunkName = chunkNameOf(record.chunkX, record.chunkY, record.chunkZ);
           if (mesh) addChunkMesh(mesh, chunkName, record.chunkX, record.chunkY, record.chunkZ);
           else pruneChunkMesh(chunkName);
+          refreshChunkAndNeighborVisibility(record);
           lodBridgeRef.current?.onChunkMeshed(record);
         },
         onChunkUnloaded: (record) => {
           profiler.addCounter("game.chunks.pruned");
           pruneChunkMesh(chunkNameOf(record.chunkX, record.chunkY, record.chunkZ));
+          refreshChunkAndNeighborVisibility(record);
           lodBridgeRef.current?.onChunkUnloaded(record);
         },
         savedEditsFor: (chunkX, chunkY, chunkZ) =>
@@ -1486,7 +1493,35 @@ export default function Game() {
     return mesh;
   }
 
+  /** Shows a meshed chunk once the pipeline says its neighbors will not leave its buried faces exposed. */
+  function refreshChunkVisibility(record: ChunkRecord) {
+    const chunkName = chunkNameOf(record.chunkX, record.chunkY, record.chunkZ);
+    const meshes = chunkMeshesRef.current.get(chunkName);
+    const held = heldChunksRef.current;
+    if (!meshes) {
+      held.delete(chunkName);
+      return;
+    }
+    const heldSinceMs = held.get(chunkName)?.heldSinceMs;
+    const isReady =
+      !pipelineRef.current ||
+      pipelineRef.current.isReadyToShow(record) ||
+      (heldSinceMs !== undefined && performance.now() - heldSinceMs > HELD_CHUNK_TIMEOUT_MS);
+    if (isReady) held.delete(chunkName);
+    else if (heldSinceMs === undefined) held.set(chunkName, { record, heldSinceMs: performance.now() });
+    for (const mesh of meshes) mesh.visible = isReady;
+    const plantDetail = plantDetailRef.current.get(chunkName);
+    if (isReady && plantDetail) applyPlantDetail(plantDetail);
+  }
+
+  function refreshChunkAndNeighborVisibility(record: ChunkRecord) {
+    refreshChunkVisibility(record);
+    const neighbors = pipelineRef.current ? [...pipelineRef.current.faceNeighborsOf(record)] : [];
+    for (const neighbor of neighbors) if (neighbor) refreshChunkVisibility(neighbor);
+  }
+
   function applyPlantDetail(plantDetail: PlantDetailMeshes) {
+    if (heldChunksRef.current.has(plantDetail.chunkName)) return;
     const distance = plantDetail.center.distanceTo(camera.position);
     const isNear = distance <= PLANT_VOXEL_DETAIL_DISTANCE;
     const isDrawn = distance <= PLANT_DRAW_DISTANCE;
@@ -1500,6 +1535,7 @@ export default function Game() {
       DIMENSIONS.simulationSystem,
       "frame.plantDetail",
     );
+    heldChunksRef.current.forEach(({ record }) => refreshChunkVisibility(record));
     plantDetailRef.current.forEach(applyPlantDetail);
     profiler.addCounter("game.plantDetail.chunksUpdated", plantDetailRef.current.size);
     profiler.end(plantDetailToken);
@@ -1552,6 +1588,7 @@ export default function Game() {
     let plantVertexCount = 0;
     let plantInstanceBytes = 0;
     const plantDetail: PlantDetailMeshes = {
+      chunkName,
       center: new THREE.Vector3(
         chunkX * CHUNK_WIDTH + CHUNK_WIDTH / 2 - 0.5,
         chunkY * CHUNK_HEIGHT + CHUNK_HEIGHT / 2 - 0.5,

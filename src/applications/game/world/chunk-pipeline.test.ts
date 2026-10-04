@@ -321,3 +321,39 @@ describe("ChunkPipeline light and mesh updates", () => {
     expect(pipeline.getBlock(2 * 32 + 5, 5 * 32, 5)).toBe(BlockType.AIR);
   });
 });
+
+describe("ChunkPipeline showing meshes", () => {
+  test("a meshed chunk is held back until every drawn face neighbor has its first mesh, then shown", async () => {
+    const startedAt = performance.now();
+    const { pipeline, generation, lighting, meshing } = createPipeline({ meshWorkers: 1 });
+    pipeline.update(GROUND_POSITION, FACING_POSITIVE_X);
+    let heldBack = 0;
+    while (generation.calls.pending.length + lighting.calls.pending.length + meshing.calls.pending.length > 0) {
+      generation.calls.releaseAll();
+      lighting.calls.releaseAll();
+      await flushPromises();
+      const nextMesh = meshing.calls.pending[0];
+      if (nextMesh) {
+        nextMesh.release();
+        await flushPromises();
+        pipeline.forEachChunk((record) => {
+          if (record.appliedMeshVersion < 0 || pipeline.isReadyToShow(record)) return;
+          heldBack++;
+          const waitsOnUnmeshedNeighbor = pipeline.faceNeighborsOf(record).some((neighbor) => neighbor && neighbor.appliedMeshVersion < 0);
+          expect(waitsOnUnmeshedNeighbor).toBe(true);
+        });
+      }
+      await flushPromises();
+    }
+    await settle(generation, lighting, meshing);
+    expect(heldBack).toBeGreaterThan(0);
+    let meshed = 0;
+    pipeline.forEachChunk((record) => {
+      if (record.appliedMeshVersion < 0) return;
+      meshed++;
+      expect(pipeline.isReadyToShow(record)).toBe(true);
+    });
+    expect(meshed).toBeGreaterThan(20);
+    console.log(`show readiness test: ${(performance.now() - startedAt).toFixed(0)} ms`);
+  });
+});

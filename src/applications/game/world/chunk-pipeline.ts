@@ -194,6 +194,7 @@ export class ChunkPipeline {
       priorityOf: (key) => this.planner.priorityOfKey(key),
       isInDrawnVolume: (record) => this.isInDrawnVolume(record),
       onMeshReady: (record, mesh, isFirstMesh) => this.onMeshReady(record, mesh, isFirstMesh),
+      isOpenSkyAbove: (record) => this.isOpenSkyAbove(record),
     });
   }
 
@@ -292,6 +293,25 @@ export class ChunkPipeline {
     }
     this.pump();
     return { ...result, meshesApplied };
+  }
+
+  /**
+   * Whether a meshed chunk can be shown without exposing what its neighbors will cover: every face neighbor that will
+   * be drawn has its first mesh too. Until then the chunk's cave walls and buried faces would show through the
+   * neighbor's missing surface, unlit and black.
+   */
+  isReadyToShow(record: ChunkRecord): boolean {
+    if (record.appliedMeshVersion < 0) return false;
+    for (const delta of FACE_NEIGHBOR_KEY_DELTAS) {
+      const neighbor = this.store.getByKey(record.key + delta);
+      if (neighbor && neighbor.appliedMeshVersion < 0 && this.isInDrawnVolume(neighbor)) return false;
+    }
+    return true;
+  }
+
+  /** The loaded face neighbors of a chunk (reused array: read it before the next call). */
+  faceNeighborsOf(record: ChunkRecord): ReadonlyArray<ChunkRecord | undefined> {
+    return this.store.neighborsOfKey(record.key);
   }
 
   /** Every loaded chunk; do not add or remove chunks while visiting. */
@@ -426,6 +446,12 @@ export class ChunkPipeline {
       record.chunkY - this.playerChunk.chunkY,
       record.chunkZ - this.playerChunk.chunkZ,
     );
+  }
+
+  /** The chunk above is skipped as air (more than SKIP_ABOVE_SURFACE_MARGIN above the column's surface). */
+  private isOpenSkyAbove(record: ChunkRecord): boolean {
+    const surfaceChunkY = this.surfaceChunkYFor(record.chunkX, record.chunkZ);
+    return surfaceChunkY !== undefined && record.chunkY + 1 > surfaceChunkY + SKIP_ABOVE_SURFACE_MARGIN;
   }
 
   private isNextToPlayer(record: ChunkRecord): boolean {
