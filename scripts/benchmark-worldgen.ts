@@ -1,11 +1,16 @@
-// Steady-state world generation benchmark: every vertical chunk of a square area of game columns, generated in a
-// fresh process (cold: includes world construction and JIT warmup) and then over a second, disjoint area (warm).
-// Also times the surface height sampler over a coarse grid, as distant terrain and spawn search use it. Usage:
-//   bun scripts/benchmark-worldgen.ts [--seed N] [--size COLUMNS] [--height-samples N]
+// Steady-state world generation benchmark: every vertical chunk of a square area of game columns (through the
+// worker's generateChunkColumn), generated in a fresh process (cold: includes world construction and JIT warmup) and
+// then over a second, disjoint area (warm). `--profile` records every column as a profiled worker task, as the game's
+// benchmark mode does. Also times the surface height sampler over a coarse grid. Usage:
+//   bun scripts/benchmark-worldgen.ts [--seed N] [--size COLUMNS] [--height-samples N] [--profile]
+// The game runs on V8, so also measure there (JavaScriptCore numbers differ a lot):
+//   bun build scripts/benchmark-worldgen.ts --target=node --outfile <dir>/benchmark-worldgen.js
+//   node <dir>/benchmark-worldgen.js [flags]      (add --cpu-prof --cpu-prof-dir=<dir> before the script to profile)
 
 import { parseArgs } from "node:util";
 import { CHUNK_HEIGHT } from "@/applications/game/config";
-import { generateChunkBlocks } from "@/applications/game/worldgen/chunk-generator";
+import { beginWorkerTask, finishWorkerTask } from "@/applications/game/profiler/worker-recorder";
+import { generateChunkColumn } from "@/applications/game/workers/generation";
 import { GAME_Y_OFFSET } from "@/applications/game/worldgen/constants";
 import { createSurfaceHeightSampler } from "@/applications/game/worldgen/surface-height";
 
@@ -23,11 +28,14 @@ const { values: flags } = parseArgs({
     seed: { type: "string", default: "20240607" },
     size: { type: "string", default: "9" },
     "height-samples": { type: "string", default: "1024" },
+    profile: { type: "boolean", default: false },
   },
 });
 const seed = Number(flags.seed);
 const areaSize = Number(flags.size);
 const heightSampleCount = Number(flags["height-samples"]);
+const isProfiling = flags.profile === true;
+const columnChunkYs = Array.from({ length: VERTICAL_CHUNKS_PER_COLUMN }, (_, index) => LOWEST_CHUNK_Y + index);
 
 interface AreaTiming {
   totalMs: number;
@@ -44,9 +52,9 @@ function generateArea(cornerChunkX: number, cornerChunkZ: number): AreaTiming {
   for (let offsetX = 0; offsetX < areaSize; offsetX++) {
     for (let offsetZ = 0; offsetZ < areaSize; offsetZ++) {
       const columnStartedAtMs = performance.now();
-      for (let chunkY = LOWEST_CHUNK_Y; chunkY <= HIGHEST_CHUNK_Y; chunkY++) {
-        generateChunkBlocks(seed, cornerChunkX + offsetX, chunkY, cornerChunkZ + offsetZ);
-      }
+      beginWorkerTask(isProfiling);
+      generateChunkColumn(seed, cornerChunkX + offsetX, cornerChunkZ + offsetZ, columnChunkYs);
+      finishWorkerTask();
       slowestColumnMs = Math.max(slowestColumnMs, performance.now() - columnStartedAtMs);
     }
   }
@@ -90,7 +98,9 @@ function describeMemory(): string {
   return `heap ${(usage.heapUsed / BYTES_PER_MEGABYTE).toFixed(0)} MB, rss ${(usage.rss / BYTES_PER_MEGABYTE).toFixed(0)} MB`;
 }
 
-console.log(`Seed ${seed}, ${areaSize}x${areaSize} game columns, ${VERTICAL_CHUNKS_PER_COLUMN} vertical chunks each`);
+console.log(
+  `Seed ${seed}, ${areaSize}x${areaSize} game columns, ${VERTICAL_CHUNKS_PER_COLUMN} vertical chunks each, profiling ${isProfiling ? "on" : "off"}`,
+);
 console.log(describeArea("cold", generateArea(0, 0)));
 console.log(describeArea("warm", generateArea(WARM_AREA_DISTANCE_IN_COLUMNS, WARM_AREA_DISTANCE_IN_COLUMNS)));
 console.log(describeMemory());
