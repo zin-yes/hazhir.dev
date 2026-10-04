@@ -4,6 +4,7 @@
 // know are called through their own `compute`. The column and point caches of column-memoization.ts become lazily
 // computed closure variables: column values are kept until the evaluated (x, z) changes, point values for one call.
 
+import { buildGeneratedFunction } from "../generated-function";
 import { NormalNoise } from "../noise/normal-noise";
 import {
   DensityNode,
@@ -260,7 +261,15 @@ return function evaluate(x, y, z) {
   ${bodyStatements.join("\n  ")}
   return ${result};
 };`;
-  return new Function("helpers", source)(writer.helpers) as CompiledDensityFunction;
+  const compiled = buildGeneratedFunction<CompiledDensityFunction>(["helpers"], source, [writer.helpers]);
+  if (compiled !== undefined) return compiled;
+  const context = { blockX: 0, blockY: 0, blockZ: 0 };
+  return (blockX, blockY, blockZ) => {
+    context.blockX = blockX;
+    context.blockY = blockY;
+    context.blockZ = blockZ;
+    return root.compute(context);
+  };
 }
 
 /** A DensityNode whose compute runs the compiled form of `source` (bounds and children are the source's). */

@@ -130,8 +130,8 @@ function profileCondition(condition: SurfaceCondition, typeKey: string): Surface
 }
 
 export function compileSurfaceRules(ruleJson: JsonObject, inputs: SurfaceRuleCompilerInputs): SurfaceRule {
-  if (!inputs.profileRuleTypes) return generateSurfaceRule(ruleJson, inputs);
-  return compileSurfaceRuleClosures(ruleJson, inputs);
+  const generated = inputs.profileRuleTypes ? undefined : generateSurfaceRule(ruleJson, inputs);
+  return generated ?? compileSurfaceRuleClosures(ruleJson, inputs);
 }
 
 /** The closure form of the rules (one closure per node); the profiler wraps each one with its type. */

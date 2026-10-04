@@ -4,6 +4,7 @@
 
 import type { RandomSource } from "../random/random-source";
 import type { ImprovedNoise } from "./improved-noise";
+import { buildGeneratedFunction } from "../generated-function";
 import { PerlinNoise, wrapNoiseCoordinate } from "./perlin-noise";
 
 const BASE_SCALE = 684.412;
@@ -121,11 +122,13 @@ export class BlendedNoise {
     }
     lines.push("return clampedLerp(minLimitTotal / 512.0, maxLimitTotal / 512.0, blendFactor) / 128.0;");
     const source = `return function blendedNoise(blockX, blockY, blockZ) {\n${lines.join("\n")}\n};`;
-    return new Function("octaves", "wrap", "clampedLerp", source)(octaves, wrapNoiseCoordinate, clampedLerp) as (
-      blockX: number,
-      blockY: number,
-      blockZ: number,
-    ) => number;
+    return (
+      buildGeneratedFunction<(blockX: number, blockY: number, blockZ: number) => number>(
+        ["octaves", "wrap", "clampedLerp"],
+        source,
+        [octaves, wrapNoiseCoordinate, clampedLerp],
+      ) ?? ((blockX, blockY, blockZ) => this.computeInterpreted(blockX, blockY, blockZ))
+    );
   }
 
   /** The loop form of compute (reference for compileCompute). */

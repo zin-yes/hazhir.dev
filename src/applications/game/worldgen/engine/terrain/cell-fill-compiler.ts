@@ -6,6 +6,7 @@
 // are not compiled and keep the generic path.
 
 import type { DensityNode } from "../density/density-function";
+import { buildGeneratedFunction } from "../generated-function";
 import {
   ClampNode,
   ConstantNode,
@@ -186,7 +187,8 @@ export function compileCellFill(root: DensityNode, cellWidth: number, cellHeight
     };`;
   const interpolatorTemplates = writer.interpolators.map((interpolator) => interpolator.templateWrapped);
   if (interpolatorTemplates.some((template) => template === undefined)) return undefined;
-  const fill = new Function(source)() as CompiledCellFill;
+  const fill = buildGeneratedFunction<CompiledCellFill>([], source, []);
+  if (fill === undefined) return undefined;
   return { interpolatorTemplates: interpolatorTemplates as DensityNode[], fill };
 }
 

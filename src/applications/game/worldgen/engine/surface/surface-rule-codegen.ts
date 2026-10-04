@@ -5,6 +5,7 @@
 
 import type { JsonObject, JsonValue } from "../registry/datapack-loader";
 import { formatBlockState } from "../chunk";
+import { buildGeneratedFunction } from "../generated-function";
 import { transientRandomAt } from "../random/xoroshiro-random-source";
 import { NO_WATER_HEIGHT, type SurfaceRuleContext } from "./surface-rule-context";
 import type { SurfaceRule, SurfaceRuleCompilerInputs } from "./surface-rule-compiler";
@@ -181,11 +182,11 @@ class SurfaceRuleCodeWriter {
   }
 }
 
-/** The surface rule as generated code (same results as compileSurfaceRules without profiling wrappers). */
-export function generateSurfaceRule(ruleJson: JsonObject, inputs: SurfaceRuleCompilerInputs): SurfaceRule {
+/** The surface rule as generated code (same results as the closures), or undefined when code generation is blocked. */
+export function generateSurfaceRule(ruleJson: JsonObject, inputs: SurfaceRuleCompilerInputs): SurfaceRule | undefined {
   const writer = new SurfaceRuleCodeWriter(inputs);
   const rootFunction = writer.sequenceFunction([ruleJson]);
   const helperDeclarations = writer.helpers.map((_, index) => `const helper${index} = helpers[${index}];`).join("\n");
   const source = `${helperDeclarations}\n${writer.functionSources.join("\n")}\nreturn ${rootFunction};`;
-  return new Function("helpers", source)(writer.helpers) as SurfaceRule;
+  return buildGeneratedFunction<SurfaceRule>(["helpers"], source, [writer.helpers]);
 }

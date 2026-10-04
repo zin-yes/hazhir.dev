@@ -2,6 +2,7 @@
 // sampled at a slightly scaled input, normalized so the result has roughly a target deviation of 1/3.
 
 import type { RandomSource } from "../random/random-source";
+import { buildGeneratedFunction } from "../generated-function";
 import { PerlinNoise, wrapNoiseCoordinate } from "./perlin-noise";
 
 /** The `minecraft:noise` registry entry shape. */
@@ -70,11 +71,11 @@ ${first.source}
 ${second.source}
 return (firstTotal + secondTotal) * ${String(this.valueFactor)};
 };`;
-      this.compiled = new Function("octaves", "wrap", source)([...first.octaves, ...second.octaves], wrapNoiseCoordinate) as (
-        x: number,
-        y: number,
-        z: number,
-      ) => number;
+      this.compiled =
+        buildGeneratedFunction<(x: number, y: number, z: number) => number>(["octaves", "wrap"], source, [
+          [...first.octaves, ...second.octaves],
+          wrapNoiseCoordinate,
+        ]) ?? ((x, y, z) => this.getValue(x, y, z));
     }
     return this.compiled;
   }
