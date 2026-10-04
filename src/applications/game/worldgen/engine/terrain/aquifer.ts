@@ -33,6 +33,8 @@ const Z_SPACING = 16;
 /** (-2, -1) style chunk offsets sampled when looking for the surface above an aquifer centre. */
 const NEAREST_CENTERS_SAMPLE_EVERY = 64;
 const GRID_CELLS_PER_LOOKUP = 12;
+const ORIGIN_UNIFORM = 1;
+const ORIGIN_MIXED = 2;
 
 const SURFACE_SAMPLING_OFFSETS_IN_CHUNKS: readonly (readonly [number, number])[] = [
   [0, 0], [-2, -1], [-1, -1], [0, -1], [1, -1], [-3, 0], [-2, 0], [-1, 0], [1, 0], [-2, 1], [-1, 1], [0, 1], [1, 1],
@@ -91,6 +93,8 @@ export class NoiseBasedAquifer {
   private readonly statusKnown: Uint8Array;
   private readonly statusLevel: Int32Array;
   private readonly statusFluid: Uint8Array;
+  /** Per origin grid cell: 0 unknown, ORIGIN_UNIFORM when its 12 candidate centres share one status, else ORIGIN_MIXED. */
+  private readonly originUniformity: Uint8Array;
 
   private readonly isProfiling = isWorkerProfiling();
   private substanceLookups = 0;
@@ -125,6 +129,7 @@ export class NoiseBasedAquifer {
     this.statusKnown = new Uint8Array(cellCount);
     this.statusLevel = new Int32Array(cellCount);
     this.statusFluid = new Uint8Array(cellCount);
+    this.originUniformity = new Uint8Array(cellCount);
   }
 
   private cellIndex(gridX: number, gridY: number, gridZ: number): number {
@@ -181,6 +186,15 @@ export class NoiseBasedAquifer {
     const originGridX = Math.floor((blockX - 5) / X_SPACING);
     const originGridY = Math.floor((blockY + 1) / Y_SPACING);
     const originGridZ = Math.floor((blockZ - 5) / Z_SPACING);
+    const originIndex = this.cellIndex(originGridX, originGridY, originGridZ);
+    let uniformity = this.originUniformity[originIndex]!;
+    if (uniformity === 0) {
+      uniformity = this.classifyOrigin(originGridX, originGridY, originGridZ);
+      this.originUniformity[originIndex] = uniformity;
+    }
+    // When every candidate centre (the origin cell is one) has the same fluid status, all pressures are 0 and the
+    // answer is that status's fluid.
+    if (uniformity === ORIGIN_UNIFORM) return this.fluidAtStatus(originIndex, blockY);
     let nearestDistance = MAX_INT;
     let secondDistance = MAX_INT;
     let thirdDistance = MAX_INT;
@@ -196,14 +210,7 @@ export class NoiseBasedAquifer {
           const gridY = originGridY + offsetY;
           const gridZ = originGridZ + offsetZ;
           const index = this.cellIndex(gridX, gridY, gridZ);
-          if (this.locationKnown[index] === 0) {
-            const random = this.params.positionalRandomFactory.at(gridX, gridY, gridZ);
-            this.locationX[index] = gridX * X_SPACING + random.nextIntBounded(X_RANGE);
-            this.locationY[index] = gridY * Y_SPACING + random.nextIntBounded(Y_RANGE);
-            this.locationZ[index] = gridZ * Z_SPACING + random.nextIntBounded(Z_RANGE);
-            this.locationKnown[index] = 1;
-            this.locationMisses++;
-          }
+          this.ensureLocation(index, gridX, gridY, gridZ);
           const deltaX = this.locationX[index]! - blockX;
           const deltaY = this.locationY[index]! - blockY;
           const deltaZ = this.locationZ[index]! - blockZ;
@@ -253,6 +260,44 @@ export class NoiseBasedAquifer {
       if (density + pressure > 0) return NULL_SUBSTANCE;
     }
     return nearestFluid;
+  }
+
+  private ensureLocation(index: number, gridX: number, gridY: number, gridZ: number): void {
+    if (this.locationKnown[index] !== 0) return;
+    const random = this.params.positionalRandomFactory.at(gridX, gridY, gridZ);
+    this.locationX[index] = gridX * X_SPACING + random.nextIntBounded(X_RANGE);
+    this.locationY[index] = gridY * Y_SPACING + random.nextIntBounded(Y_RANGE);
+    this.locationZ[index] = gridZ * Z_SPACING + random.nextIntBounded(Z_RANGE);
+    this.locationKnown[index] = 1;
+    this.locationMisses++;
+  }
+
+  /** Statuses are pure per chunk, so resolving all 12 candidates up front changes no answer. */
+  private classifyOrigin(originGridX: number, originGridY: number, originGridZ: number): number {
+    let firstLevel = 0;
+    let firstFluid = 0;
+    let isUniform = true;
+    let isFirst = true;
+    for (let offsetX = 0; offsetX <= 1; offsetX++) {
+      for (let offsetY = -1; offsetY <= 1; offsetY++) {
+        for (let offsetZ = 0; offsetZ <= 1; offsetZ++) {
+          const gridX = originGridX + offsetX;
+          const gridY = originGridY + offsetY;
+          const gridZ = originGridZ + offsetZ;
+          const index = this.cellIndex(gridX, gridY, gridZ);
+          this.ensureLocation(index, gridX, gridY, gridZ);
+          this.ensureStatus(index);
+          if (isFirst) {
+            firstLevel = this.statusLevel[index]!;
+            firstFluid = this.statusFluid[index]!;
+            isFirst = false;
+          } else if (this.statusLevel[index] !== firstLevel || this.statusFluid[index] !== firstFluid) {
+            isUniform = false;
+          }
+        }
+      }
+    }
+    return isUniform ? ORIGIN_UNIFORM : ORIGIN_MIXED;
   }
 
   private fluidAtStatus(index: number, blockY: number): number {
