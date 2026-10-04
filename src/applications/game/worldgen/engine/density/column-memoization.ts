@@ -1,6 +1,7 @@
 // Exact speedups for evaluating a plain (marker-transparent) density tree many times down one block column: every
 // maximal subtree that cannot read the block y is a pure function of (x, z), so it is wrapped in a node that keeps
-// its last column's value. Bounds are delegated unchanged, so rebuilt parents keep Java's min/max short-circuits.
+// its last column's value, and every cache_once subtree keeps its last point's value (it is referenced several times
+// per sample). Bounds are delegated unchanged, so rebuilt parents keep Java's min/max short-circuits.
 
 import { DensityNode, DensityVisitor, type FunctionContext, type StructuralIdLookup } from "./density-function";
 import { ClampNode, ConstantNode, MappedNode, RangeChoiceNode, YClampedGradientNode } from "./nodes/arithmetic-nodes";
@@ -107,6 +108,51 @@ export class LastColumnCacheNode extends DensityNode {
   }
 }
 
+/** Remembers the value for the last block position (what cache_once shares between references inside one sample). */
+export class LastPointCacheNode extends DensityNode {
+  private lastBlockX = Number.NaN;
+  private lastBlockY = Number.NaN;
+  private lastBlockZ = Number.NaN;
+  private lastValue = 0;
+
+  constructor(readonly wrapped: DensityNode) {
+    super();
+  }
+
+  get minValue(): number {
+    return this.wrapped.minValue;
+  }
+
+  get maxValue(): number {
+    return this.wrapped.maxValue;
+  }
+
+  compute(context: FunctionContext): number {
+    const blockX = context.blockX;
+    const blockY = context.blockY;
+    const blockZ = context.blockZ;
+    if (blockX === this.lastBlockX && blockY === this.lastBlockY && blockZ === this.lastBlockZ) return this.lastValue;
+    const value = this.wrapped.compute(context);
+    this.lastBlockX = blockX;
+    this.lastBlockY = blockY;
+    this.lastBlockZ = blockZ;
+    this.lastValue = value;
+    return value;
+  }
+
+  mapAll(visitor: DensityVisitor): DensityNode {
+    return visitor.apply(new LastPointCacheNode(visitor.map(this.wrapped)));
+  }
+
+  children(): readonly DensityNode[] {
+    return [this.wrapped];
+  }
+
+  structuralSignature(structuralIdOf: StructuralIdLookup): string {
+    return `last_point_cache(${structuralIdOf(this.wrapped)})`;
+  }
+}
+
 function isTriviallyCheap(node: DensityNode): boolean {
   return node instanceof ConstantNode || node instanceof BlendConstantNode || node instanceof BeardifierNode || node instanceof EndIslandsNode;
 }
@@ -116,7 +162,15 @@ class ColumnMemoizingVisitor extends DensityVisitor {
   private readonly cacheBySource = new Map<DensityNode, DensityNode>();
 
   map(node: DensityNode): DensityNode {
-    if (this.dependence.dependsOnBlockY(node)) return super.map(node);
+    if (this.dependence.dependsOnBlockY(node)) {
+      if (!(node instanceof MarkerNode && node.type === "cache_once")) return super.map(node);
+      let cached = this.cacheBySource.get(node);
+      if (cached === undefined) {
+        cached = new LastPointCacheNode(this.map(node.wrapped));
+        this.cacheBySource.set(node, cached);
+      }
+      return cached;
+    }
     if (isTriviallyCheap(node)) return node;
     let cached = this.cacheBySource.get(node);
     if (cached === undefined) {
