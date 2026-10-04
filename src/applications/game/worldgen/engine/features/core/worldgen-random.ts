@@ -23,7 +23,13 @@ export class WorldgenRandom implements RandomSource {
   private drawCount = 0;
   private readonly gaussianSource = new MarsagliaPolarGaussian(this);
 
-  constructor(private readonly source: RandomSource) {}
+  private readonly legacySource: LegacyRandomSource | undefined;
+  private readonly xoroshiroSource: XoroshiroRandomSource | undefined;
+
+  constructor(private readonly source: RandomSource) {
+    this.legacySource = source instanceof LegacyRandomSource ? source : undefined;
+    this.xoroshiroSource = source instanceof XoroshiroRandomSource ? source : undefined;
+  }
 
   /** WorldgenRandom.getCount: number of next(bits) calls so far. */
   get count(): number {
@@ -32,9 +38,9 @@ export class WorldgenRandom implements RandomSource {
 
   next(bits: number): number {
     this.drawCount++;
-    if (this.source instanceof LegacyRandomSource) return this.source.next(bits);
-    if (this.source instanceof XoroshiroRandomSource) {
-      this.source.nextLongInto(scratch);
+    if (this.legacySource !== undefined) return this.legacySource.next(bits);
+    if (this.xoroshiroSource !== undefined) {
+      this.xoroshiroSource.nextLongInto(scratch);
     } else {
       const value = BigInt.asUintN(64, this.source.nextLong());
       scratch.high = Number(value >> BigInt(32)) | 0;
