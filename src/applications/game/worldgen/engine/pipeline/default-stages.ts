@@ -57,7 +57,12 @@ export function createSurfaceStage(surfaceSystem: SurfaceSystem): ColumnStage {
   return {
     name: SURFACE_STAGE_NAME,
     run(column, context) {
-      surfaceSystem.buildSurface({ chunk: column, router: context.router, biomeAt: context.biomeAt });
+      surfaceSystem.buildSurface({
+        chunk: column,
+        router: context.router,
+        biomeAt: context.biomeAt,
+        biomesNearChunk: context.biomesNearChunk?.(context.chunkX, context.chunkZ),
+      });
     },
   };
 }

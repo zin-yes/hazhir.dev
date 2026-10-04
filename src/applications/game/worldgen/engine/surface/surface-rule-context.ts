@@ -26,6 +26,11 @@ export interface WorldSurfaceHeightmap {
 }
 
 export class SurfaceRuleContext {
+  /**
+   * Per biome condition of generated rules: 1 when one of its biomes occurs in the chunks around this one, 0 when the
+   * condition can only be false here (biomeAt picks among quart cells of those chunks). Empty: every condition runs.
+   */
+  biomeConditionPossible: Uint8Array = new Uint8Array(0);
   lastUpdateXZ = 0;
   lastUpdateY = 0;
   blockX = 0;

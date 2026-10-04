@@ -64,6 +64,8 @@ function lazyByColumn(compute: (context: SurfaceRuleContext) => boolean): (conte
 class SurfaceRuleCodeWriter {
   readonly helpers: unknown[] = [];
   readonly functionSources: string[] = [];
+  /** Biome sets of the biome conditions, by the index the generated code checks in context.biomeConditionPossible. */
+  readonly biomeConditionSets: ReadonlySet<string>[] = [];
 
   constructor(private readonly inputs: SurfaceRuleCompilerInputs) {}
 
@@ -80,7 +82,9 @@ class SurfaceRuleCodeWriter {
         return `!${this.condition(node.invert)}`;
       case "minecraft:biome": {
         const biomeIds = new Set(asArray(node.biome_is, "biome_is").map((id) => withDefaultNamespace(String(id))));
-        return `${this.helper(biomeIds)}.has(context.getBiome())`;
+        const conditionIndex = this.biomeConditionSets.length;
+        this.biomeConditionSets.push(biomeIds);
+        return `(context.biomeConditionPossible[${conditionIndex}] !== 0 && ${this.helper(biomeIds)}.has(context.getBiome()))`;
       }
       case "minecraft:stone_depth": {
         const stoneDepth = node.surface_type === "ceiling" ? "context.stoneDepthBelow" : "context.stoneDepthAbove";
@@ -182,11 +186,15 @@ class SurfaceRuleCodeWriter {
   }
 }
 
+/** A generated surface rule plus the biome sets its conditions test (see SurfaceRuleContext.biomeConditionPossible). */
+export type GeneratedSurfaceRule = SurfaceRule & { readonly biomeConditionSets: readonly ReadonlySet<string>[] };
+
 /** The surface rule as generated code (same results as the closures), or undefined when code generation is blocked. */
-export function generateSurfaceRule(ruleJson: JsonObject, inputs: SurfaceRuleCompilerInputs): SurfaceRule | undefined {
+export function generateSurfaceRule(ruleJson: JsonObject, inputs: SurfaceRuleCompilerInputs): GeneratedSurfaceRule | undefined {
   const writer = new SurfaceRuleCodeWriter(inputs);
   const rootFunction = writer.sequenceFunction([ruleJson]);
   const helperDeclarations = writer.helpers.map((_, index) => `const helper${index} = helpers[${index}];`).join("\n");
   const source = `${helperDeclarations}\n${writer.functionSources.join("\n")}\nreturn ${rootFunction};`;
-  return buildGeneratedFunction<SurfaceRule>(["helpers"], source, [writer.helpers]);
+  const rule = buildGeneratedFunction<SurfaceRule>(["helpers"], source, [writer.helpers]);
+  return rule === undefined ? undefined : Object.assign(rule, { biomeConditionSets: writer.biomeConditionSets });
 }

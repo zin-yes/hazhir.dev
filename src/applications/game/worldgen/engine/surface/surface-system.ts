@@ -18,6 +18,7 @@ import type { JsonObject } from "../registry/datapack-loader";
 import { generateClayBands, CLAY_BAND_COUNT } from "./clay-bands";
 import { BiomeTemperatureSampler } from "./biome-temperature";
 import { NO_WATER_HEIGHT, SurfaceRuleContext, type SurfaceContextServices } from "./surface-rule-context";
+import type { GeneratedSurfaceRule } from "./surface-rule-codegen";
 import { compileSurfaceRules, NO_RULE_MATCH, SurfaceResultTable, type SurfaceRule } from "./surface-rule-compiler";
 import type {
   BiomeAtBlock,
@@ -65,6 +66,8 @@ export interface SurfaceChunkInputs {
   chunk: ChunkBlocks;
   router: SurfaceNoiseRouter;
   biomeAt: BiomeAtBlock;
+  /** Every biome stored in the 3x3 chunks around the chunk (lets rules skip biome checks that cannot match). */
+  biomesNearChunk?: ReadonlySet<string>;
 }
 
 export class SurfaceSystem {
@@ -243,6 +246,23 @@ export class SurfaceSystem {
         this.temperatureSampler.isColdEnoughToSnow(biomeId, blockX, blockY, blockZ),
     };
     const context = new SurfaceRuleContext(services, access.heightmap, biomeAt);
+    const biomeConditionSets = (this.rule as Partial<GeneratedSurfaceRule>).biomeConditionSets;
+    if (biomeConditionSets !== undefined) {
+      context.biomeConditionPossible = new Uint8Array(biomeConditionSets.length).fill(1);
+      const biomesNearChunk = inputs.biomesNearChunk;
+      if (biomesNearChunk !== undefined) {
+        biomeConditionSets.forEach((biomeIds, conditionIndex) => {
+          let isPossible = false;
+          for (const biomeId of biomeIds) {
+            if (biomesNearChunk.has(biomeId)) {
+              isPossible = true;
+              break;
+            }
+          }
+          context.biomeConditionPossible[conditionIndex] = isPossible ? 1 : 0;
+        });
+      }
+    }
     return { access, defaultBlockId, resultIdOf, context };
   }
 

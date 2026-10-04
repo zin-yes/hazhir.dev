@@ -46,6 +46,8 @@ export interface OverworldGenerator {
   generateBaseColumn(chunkX: number, chunkZ: number): ChunkBlocks;
   rawBiomeAtQuart(quartX: number, quartY: number, quartZ: number): string;
   biomeAt(blockX: number, blockY: number, blockZ: number): string;
+  /** The distinct biomes a chunk's sections hold (what decoration's biome set reads). */
+  chunkBiomes(chunkX: number, chunkZ: number): string[];
   /** The carvers' air mask of a base column (undefined for the liquid step and when the carvers stage is absent). */
   carvingMask(chunkX: number, chunkZ: number, step: CarvingStep): CarvingMask | undefined;
   /** First free y above the highest matching block (Heightmap value), computed on the generated base column. */
@@ -74,6 +76,16 @@ export function createOverworldGenerator(params: OverworldGeneratorParams): Over
   const rawBiomeAtQuart = (quartX: number, quartY: number, quartZ: number) => biomeStore.rawBiomeAtQuart(quartX, quartY, quartZ);
   const biomeManager = new BiomeManager(rawBiomeAtQuart, seed, (quartX, quartZ) => biomeStore.hasQuartColumn(quartX, quartZ));
   const biomeAt = (blockX: number, blockY: number, blockZ: number) => biomeManager.getBiome(blockX, blockY, blockZ);
+  const chunkBiomes = (chunkX: number, chunkZ: number) => biomeStore.chunkBiomes(chunkX, chunkZ);
+  const biomesNearChunk = (chunkX: number, chunkZ: number): ReadonlySet<string> => {
+    const biomes = new Set<string>();
+    for (let offsetX = -1; offsetX <= 1; offsetX++) {
+      for (let offsetZ = -1; offsetZ <= 1; offsetZ++) {
+        for (const biome of biomeStore.chunkBiomes(chunkX + offsetX, chunkZ + offsetZ)) biomes.add(biome);
+      }
+    }
+    return biomes;
+  };
 
   const palette = new BlockPalette();
   const rootRandomFactory = createRootRandomFactory(seed);
@@ -97,7 +109,18 @@ export function createOverworldGenerator(params: OverworldGeneratorParams): Over
       return cached;
     }
     const column = new ChunkBlocks(chunkX, chunkZ, settings.minY, settings.height, palette);
-    const context: ColumnStageContext = { chunkX, chunkZ, seed, settings, registries, router, aquifer: undefined, rawBiomeAtQuart, biomeAt };
+    const context: ColumnStageContext = {
+      chunkX,
+      chunkZ,
+      seed,
+      settings,
+      registries,
+      router,
+      aquifer: undefined,
+      rawBiomeAtQuart,
+      biomeAt,
+      biomesNearChunk,
+    };
     if (isProfiling) {
       addWorkerCounter("baseColumnCacheMisses", 1);
       runStagesWithProfiling(stages, column, context);
@@ -126,6 +149,7 @@ export function createOverworldGenerator(params: OverworldGeneratorParams): Over
     generateBaseColumn,
     rawBiomeAtQuart,
     biomeAt,
+    chunkBiomes,
     carvingMask: (chunkX, chunkZ, step) => (step === "air" ? carvingMaskByColumn.get(generateBaseColumn(chunkX, chunkZ)) : undefined),
     surfaceHeight(blockX, blockZ, heightmap) {
       const column = generateBaseColumn(blockX >> 4, blockZ >> 4);

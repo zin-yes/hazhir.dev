@@ -33,6 +33,7 @@ const PRIMING_TARGET: TargetPoint = { temperature: 90000, humidity: 90000, conti
 
 class ChunkBiomeGrid {
   private readonly biomeIndices: Uint16Array;
+  private distinctIndices: number[] | undefined;
 
   constructor(
     private readonly chunkX: number,
@@ -82,6 +83,12 @@ class ChunkBiomeGrid {
       addWorkerCounter("biomeRTreeSearches", searches);
       addWorkerCounter("biomeRTreeNodeVisits", nodeDistanceEvaluations);
     }
+  }
+
+  /** The distinct biomes the grid holds (computed once). */
+  distinctBiomeIndices(): readonly number[] {
+    if (this.distinctIndices === undefined) this.distinctIndices = [...new Set(this.biomeIndices)];
+    return this.distinctIndices;
   }
 
   biomeIndexAt(quartX: number, clampedQuartY: number, quartZ: number): number {
@@ -254,6 +261,23 @@ export class ChunkBiomeStore {
     } finally {
       if (isProfiling) endWorkerSection();
     }
+  }
+
+  private gridAt(chunkX: number, chunkZ: number): ChunkBiomeGrid {
+    if (chunkX === this.lastGridChunkX && chunkZ === this.lastGridChunkZ) return this.lastGrid!;
+    const key = packChunkColumnKey(chunkX, chunkZ);
+    let grid = this.grids.get(key);
+    if (grid === undefined) {
+      this.gridMisses++;
+      grid = this.createFilledGrid(chunkX, chunkZ);
+      this.grids.set(key, grid);
+    }
+    return grid;
+  }
+
+  /** ChunkAccess biomes of a chunk: every biome its quart cells hold (the set FeatureSorter and decoration read). */
+  chunkBiomes(chunkX: number, chunkZ: number): string[] {
+    return this.gridAt(chunkX, chunkZ).distinctBiomeIndices().map((index) => this.biomeIds[index]!);
   }
 
   /** Whether the chunk holding this quart column already has its biome grid (no climate sampling needed). */
