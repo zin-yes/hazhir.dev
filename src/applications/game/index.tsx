@@ -143,23 +143,14 @@ import { sampleSceneMemory } from "./profiler/scene-memory-sampler";
 
 const FLYING_SPEED = 10;
 const STREAMING_INTERVAL_MS = 100;
-const LIGHTING_WORKER_COUNT = 2;
+const AVAILABLE_CORES = typeof navigator === "undefined" ? 6 : navigator.hardwareConcurrency || 6;
+/** Terrain generation is the slowest stage by far (light and mesh pools sit near 1% busy), so it gets most cores. */
+const GENERATION_WORKER_COUNT = Math.min(8, Math.max(2, AVAILABLE_CORES - 3));
+/** Lighting a column takes about 2 ms; one worker keeps up with every generation worker. */
+const LIGHTING_WORKER_COUNT = 1;
+/** Two, so an edit's rebuilds are not stuck behind a streaming mesh. */
 const MESH_WORKER_COUNT = 2;
 const LOD_WORKER_COUNT = 2;
-/** Cores left to the main thread and the rest of the machine. */
-const RESERVED_CORES = 2;
-/** Terrain generation gets the cores the other pools leave, keeping RESERVED_CORES free. */
-const GENERATION_WORKER_COUNT = Math.min(
-  6,
-  Math.max(
-    2,
-    (typeof navigator === "undefined" ? 6 : navigator.hardwareConcurrency || 6) -
-      LIGHTING_WORKER_COUNT -
-      MESH_WORKER_COUNT -
-      LOD_WORKER_COUNT -
-      RESERVED_CORES,
-  ),
-);
 const RANDOM_TICKS_PER_CHUNK = 100;
 /** Random ticks (grass, saplings) only run this many chunks around the player, like a simulation distance. */
 const RANDOM_TICK_RADIUS_CHUNKS = 4;
