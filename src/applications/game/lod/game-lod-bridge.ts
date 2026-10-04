@@ -8,6 +8,7 @@ import type { PipelineEditResult } from "../world/chunk-pipeline";
 import type { ChunkRecord } from "../world/chunk-record";
 import { createLodManager, type LodManager } from "./manager/lod-manager";
 import type { LodStats } from "./manager/lod-stats";
+import { createWorkerPoolExecutor, shareExecutor, type TileBuildExecutor } from "./manager/tile-build-executor";
 
 /** What the bridge reads from the chunk pipeline. */
 export interface LodChunkSource {
@@ -30,9 +31,13 @@ export class GameLodBridge {
   private renderDistanceChunks = 0;
   private hasCapturedHaze = false;
   private readonly createManager: typeof createLodManager;
+  /** Started with the game, so the workers have decoded the worldgen registries before the first world. */
+  private readonly executor: TileBuildExecutor & { terminateShared(): void };
 
   constructor(private readonly options: GameLodBridgeOptions) {
     this.createManager = options.createManager ?? createLodManager;
+    this.executor = shareExecutor(createWorkerPoolExecutor(options.createWorker, options.workerCount));
+    this.executor.prepare?.();
   }
 
   get isActive(): boolean {
@@ -113,6 +118,7 @@ export class GameLodBridge {
 
   dispose(): void {
     this.disposeManager();
+    this.executor.terminateShared();
     this.seed = null;
   }
 
@@ -120,7 +126,7 @@ export class GameLodBridge {
     if (this.seed === null) return;
     const manager = this.createManager({
       seed: this.seed,
-      workerFactory: this.options.createWorker,
+      executor: this.executor,
       workerCount: this.options.workerCount,
       renderDistanceChunks: this.renderDistanceChunks,
     });

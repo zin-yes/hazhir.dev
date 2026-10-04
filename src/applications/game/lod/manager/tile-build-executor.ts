@@ -7,6 +7,8 @@ import { buildLodTile, type LodTileBuildRequest, type LodTileBuildResult } from 
 export interface TileBuildExecutor {
   build(request: LodTileBuildRequest, transfer: Transferable[]): Promise<LodTileBuildResult>;
   terminate(): void;
+  /** Builds the worldgen state ahead of the first tile: the shared registries, or a seed's noise router. */
+  prepare?(seed?: number): void;
 }
 
 export const LOD_WORKER_POOL_NAME = "lod";
@@ -17,6 +19,22 @@ export function createWorkerPoolExecutor(workerFactory: () => Worker, workerCoun
   return {
     build: (request, transfer) => pool.execLazy("buildLodTile", () => ({ params: [request], transfer })),
     terminate: () => pool.terminate(),
+    prepare: (seed) => {
+      for (let worker = 0; worker < workerCount; worker++) void pool.exec("prepareWorldgen", [seed]).catch(() => undefined);
+    },
+  };
+}
+
+/**
+ * The same executor for every LOD manager of a session: managers come and go with worlds and settings while the
+ * workers (and their decoded worldgen registries) stay warm. Only `terminateShared` stops them.
+ */
+export function shareExecutor(executor: TileBuildExecutor): TileBuildExecutor & { terminateShared(): void } {
+  return {
+    build: (request, transfer) => executor.build(request, transfer),
+    terminate: () => undefined,
+    prepare: (seed) => executor.prepare?.(seed),
+    terminateShared: () => executor.terminate(),
   };
 }
 
