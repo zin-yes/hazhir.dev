@@ -8,7 +8,6 @@ import {
   addWorkerCounter,
   endWorkerSection,
   isWorkerProfiling,
-  startWorkerSampledSection,
   startWorkerSection,
 } from "@/applications/game/profiler/worker-recorder";
 import { type FunctionContext, SinglePointContext } from "../density/density-function";
@@ -33,8 +32,6 @@ const X_SPACING = 16;
 const Y_SPACING = 12;
 const Z_SPACING = 16;
 
-/** (-2, -1) style chunk offsets sampled when looking for the surface above an aquifer centre. */
-const NEAREST_CENTERS_SAMPLE_EVERY = 64;
 const GRID_CELLS_PER_LOOKUP = 12;
 const ORIGIN_UNIFORM = 1;
 const ORIGIN_MIXED = 2;
@@ -232,7 +229,6 @@ export class NoiseBasedAquifer {
     let secondIndex = 0;
     let thirdIndex = 0;
     // Only the center search is timed: the fluid status work below can trigger rare heavy children, which would skew a sampled estimate.
-    if (this.isProfiling) startWorkerSampledSection("aquifer.findNearestCenters", NEAREST_CENTERS_SAMPLE_EVERY);
     for (let offsetX = 0; offsetX <= 1; offsetX++) {
       for (let offsetY = -1; offsetY <= 1; offsetY++) {
         for (let offsetZ = 0; offsetZ <= 1; offsetZ++) {
@@ -265,7 +261,6 @@ export class NoiseBasedAquifer {
       }
     }
 
-    if (this.isProfiling) endWorkerSection();
 
     this.ensureStatus(nearestIndex);
     const nearestFluid = this.fluidAtStatus(nearestIndex, blockY);
@@ -370,9 +365,7 @@ export class NoiseBasedAquifer {
     this.statusLookups++;
     if (this.statusKnown[index] !== 0) return;
     this.statusMisses++;
-    if (this.isProfiling) startWorkerSection("aquifer.computeFluid");
     this.computeFluid(this.locationX[index]!, this.locationY[index]!, this.locationZ[index]!);
-    if (this.isProfiling) endWorkerSection();
     this.statusLevel[index] = this.computedLevel;
     this.statusFluid[index] = this.computedFluid;
     this.statusKnown[index] = 1;

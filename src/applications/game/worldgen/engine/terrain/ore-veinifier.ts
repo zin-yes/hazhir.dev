@@ -3,11 +3,6 @@
 // vein_gap leaves holes. Veins are raw ore blocks (2%), ore, or the granite / tuff filler. Returns a terrain symbol,
 // or NO_VEIN where the block is not part of a vein.
 
-import {
-  endWorkerSection,
-  isWorkerProfiling,
-  startWorkerSampledSection,
-} from "@/applications/game/profiler/worker-recorder";
 import type { FunctionContext } from "../density/density-function";
 import type { DensityNode } from "../density/density-function";
 import type { PositionalRandomFactory } from "../random";
@@ -51,10 +46,8 @@ function clampedMap(value: number, fromStart: number, fromEnd: number, toStart: 
   return toStart + delta * (toEnd - toStart);
 }
 
-const VEIN_SAMPLE_EVERY = 128;
 
 export class OreVeinifier {
-  private readonly isProfiling = isWorkerProfiling();
 
   constructor(
     private readonly veinToggle: DensityNode,
@@ -70,13 +63,7 @@ export class OreVeinifier {
 
   /** The BlockStateFiller of OreVeinifier.create: the vein block at the context's position, or NO_VEIN. */
   compute(context: FunctionContext): number {
-    if (!this.isProfiling) return this.computeVein(context);
-    startWorkerSampledSection("noise.oreVein", VEIN_SAMPLE_EVERY);
-    try {
-      return this.computeVein(context);
-    } finally {
-      endWorkerSection();
-    }
+    return this.computeVein(context);
   }
 
   private computeVein(context: FunctionContext): number {

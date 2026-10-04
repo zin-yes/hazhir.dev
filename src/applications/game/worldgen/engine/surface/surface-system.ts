@@ -6,7 +6,6 @@ import {
   addWorkerCounter,
   endWorkerSection,
   isWorkerProfiling,
-  startWorkerSampledSection,
   startWorkerSection,
 } from "@/applications/game/profiler/worker-recorder";
 import type { ChunkBlocks } from "../chunk";
@@ -31,9 +30,8 @@ import type {
 } from "./surface-types";
 import { BLOCK_KIND_AIR, BLOCK_KIND_FLUID, BLOCK_KIND_SOLID, SurfaceChunkAccess } from "./surface-chunk-access";
 
-const RULE_EVALUATION_SAMPLE_EVERY = 8;
 /** One in this many evaluations is repeated through the per-type wrapped rules to time each rule and condition type. */
-const RULE_TYPE_SAMPLE_EVERY = 32;
+const RULE_TYPE_SAMPLE_EVERY = 4096;
 const INITIAL_DENSITY_SURFACE_THRESHOLD = 0.390625;
 const PRELIMINARY_SURFACE_CELL_HEIGHT = 4;
 const PRELIMINARY_CACHE_LIMIT = 200_000;
@@ -323,10 +321,8 @@ export class SurfaceSystem {
           context.updateY(stoneDepthAbove, y - stoneRegionBottom + 1, waterHeight, blockX, y, blockZ);
           if (blockId !== defaultBlockId) continue;
           ruleEvaluations++;
-          if (isProfiling) startWorkerSampledSection("surface.evaluateRules", RULE_EVALUATION_SAMPLE_EVERY);
           const resultIndex = rule(context);
           if (isProfiling) {
-            endWorkerSection();
             if (ruleEvaluations % RULE_TYPE_SAMPLE_EVERY === 0) {
               startWorkerSection("surface.sampleRuleTypes");
               typeProfiledRule!(context);

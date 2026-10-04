@@ -9,7 +9,6 @@ import {
   addWorkerKeyedUnits,
   endWorkerSection,
   isWorkerProfiling,
-  startWorkerSampledSection,
   startWorkerSection,
 } from "@/applications/game/profiler/worker-recorder";
 import type { ChunkBlocks } from "../chunk";
@@ -46,8 +45,6 @@ export interface ApplyCarversParams {
 }
 
 const SEED_MASK_BITS = 64;
-const SOURCE_BIOME_SAMPLE_EVERY = 8;
-const START_ROLL_SAMPLE_EVERY = 8;
 
 const firstLong: Int64Halves = { high: 0, low: 0 };
 const secondLong: Int64Halves = { high: 0, low: 0 };
@@ -134,16 +131,12 @@ export class CarverSystem {
       for (let offsetZ = -SOURCE_CHUNK_RADIUS; offsetZ <= SOURCE_CHUNK_RADIUS; offsetZ++) {
         const sourceChunkX = chunk.chunkX + offsetX;
         const sourceChunkZ = chunk.chunkZ + offsetZ;
-        if (isProfiling) startWorkerSampledSection("carver.lookupSourceBiome", SOURCE_BIOME_SAMPLE_EVERY);
         const carvers = this.carversOfSourceChunk(sourceChunkX, sourceChunkZ);
-        if (isProfiling) endWorkerSection();
         sourceChunksScanned++;
         for (let carverIndex = 0; carverIndex < carvers.length; carverIndex++) {
           const carver = carvers[carverIndex]!;
-          if (isProfiling) startWorkerSampledSection("carver.rollStart", START_ROLL_SAMPLE_EVERY);
           setLargeFeatureSeed(random, this.carverSeed(carverIndex), sourceChunkX, sourceChunkZ);
           const startsHere = random.nextFloat() <= carver.probability;
-          if (isProfiling) endWorkerSection();
           carverRolls++;
           if (!startsHere) continue;
           carversStarted++;

@@ -247,18 +247,12 @@ function interpolateColumn(noiseChunk: NoiseChunk, settings: InterpolationSettin
     if (isProfiling) endWorkerSection();
     for (let cellZ = 0; cellZ < cellsPerChunkSide; cellZ++) {
       for (let cellY = cellCountY - 1; cellY >= 0; cellY--) {
-        if (isProfiling) startWorkerSection("noise.selectCell");
         noiseChunk.selectCellYZ(cellY, cellZ);
-        if (isProfiling) {
-          endWorkerSection();
-          startWorkerSection("noise.interpolateBlocks");
-        }
         if (aquifer === undefined) {
           fillCellWithoutAquifer(blocks, cellValues, noiseChunk, density, cellX, cellY, cellZ, minCellY, minY, seaLevel, chunkMinBlockX, chunkMinBlockZ);
         } else {
           fillCellWithAquifer(blocks, cellValues, noiseChunk, density, aquifer, oreVeinifier, cellX, cellY, cellZ, minCellY, minY, chunkMinBlockX, chunkMinBlockZ);
         }
-        if (isProfiling) endWorkerSection();
       }
     }
     noiseChunk.swapSlices();

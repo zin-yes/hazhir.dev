@@ -9,7 +9,6 @@ import {
   addWorkerCounter,
   endWorkerSection,
   isWorkerProfiling,
-  startWorkerSampledSection,
   startWorkerSection,
 } from "@/applications/game/profiler/worker-recorder";
 import { type NoiseRouter, quantizeClimateCoordinate } from "../density";
@@ -28,7 +27,6 @@ const CLIMATE_FIELDS = ["temperature", "vegetation", "continents", "erosion", "d
  * Vanilla's last-leaf hint carries over from whatever chunk the worker thread sampled before, which is unknowable.
  * A far-away unique-minimum query before each chunk makes the hint (and so every tie) independent of chunk order.
  */
-const BIOME_SEARCH_SAMPLE_EVERY = 16;
 const PRIMING_TARGET: TargetPoint = { temperature: 90000, humidity: 90000, continentalness: 90000, erosion: 90000, depth: 90000, weirdness: 90000 };
 
 class ChunkBiomeGrid {
@@ -61,7 +59,6 @@ class ChunkBiomeGrid {
           for (let quartZInSection = 0; quartZInSection < 4; quartZInSection++) {
             const quartYOffset = sectionIndex * 4 + quartYInSection;
             const sampleIndex = climate.indexOf(quartXInSection, quartYOffset, quartZInSection);
-            if (isProfiling) startWorkerSampledSection("biome.searchRTree", BIOME_SEARCH_SAMPLE_EVERY);
             const cellIndex = (quartYOffset * QUARTS_PER_CHUNK_SIDE + quartZInSection) * QUARTS_PER_CHUNK_SIDE + quartXInSection;
             const biomeId = this.biomeSource.findBiomeForClimate(
               climate.temperature[sampleIndex]!,
@@ -72,7 +69,6 @@ class ChunkBiomeGrid {
               climate.weirdness[sampleIndex]!,
             );
             this.biomeIndices[cellIndex] = this.internBiome(biomeId);
-            if (isProfiling) endWorkerSection();
           }
         }
       }
