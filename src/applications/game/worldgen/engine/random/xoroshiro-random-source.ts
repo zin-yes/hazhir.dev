@@ -28,7 +28,8 @@ export class XoroshiroRandomSource implements RandomSource {
   /** Result of the last `advance()`, as int32 halves. */
   private resultHigh = 0;
   private resultLow = 0;
-  private readonly gaussianSource = new MarsagliaPolarGaussian(this);
+  /** Created on first use: most random sources (positional ones especially) never draw a gaussian. */
+  private gaussianSource: MarsagliaPolarGaussian | undefined;
 
   /** Java `new XoroshiroRandomSource(long seed)`: upgrades the seed to 128 bits with mixStafford13. */
   constructor(seed: bigint);
@@ -154,7 +155,7 @@ export class XoroshiroRandomSource implements RandomSource {
   }
 
   nextGaussian(): number {
-    return this.gaussianSource.nextGaussian();
+    return (this.gaussianSource ??= new MarsagliaPolarGaussian(this)).nextGaussian();
   }
 
   triangle(center: number, spread: number): number {
@@ -183,7 +184,7 @@ export class XoroshiroRandomSource implements RandomSource {
 
   setSeed(seed: bigint): void {
     this.setSeedWithoutGaussianReset(seed);
-    this.gaussianSource.reset();
+    this.gaussianSource?.reset();
   }
 }
 

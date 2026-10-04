@@ -25,7 +25,8 @@ const scratchHalves: Int64Halves = { high: 0, low: 0 };
 export class LegacyRandomSource implements RandomSource {
   private stateHigh = 0;
   private stateLow = 0;
-  private readonly gaussianSource = new MarsagliaPolarGaussian(this);
+  /** Created on first use: most random sources (positional ones especially) never draw a gaussian. */
+  private gaussianSource: MarsagliaPolarGaussian | undefined;
 
   constructor(seed: bigint);
   /** Internal: seed given as int32 halves of a Java long. */
@@ -115,7 +116,7 @@ export class LegacyRandomSource implements RandomSource {
   }
 
   nextGaussian(): number {
-    return this.gaussianSource.nextGaussian();
+    return (this.gaussianSource ??= new MarsagliaPolarGaussian(this)).nextGaussian();
   }
 
   triangle(center: number, spread: number): number {
@@ -139,7 +140,7 @@ export class LegacyRandomSource implements RandomSource {
   setSeed(seed: bigint): void {
     bigIntToHalves(seed, scratchHalves);
     this.setSeedFromHalves(scratchHalves.high, scratchHalves.low);
-    this.gaussianSource.reset();
+    this.gaussianSource?.reset();
   }
 }
 
