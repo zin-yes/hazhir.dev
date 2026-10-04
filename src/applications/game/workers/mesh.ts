@@ -53,7 +53,7 @@ import {
 import type { ChunkFaceBuffers, ChunkMeshResult, PlantInstanceBatch } from "./mesh-types";
 import { fillPaddedGrid, paddedBlockGrid, paddedLightGrid } from "./padded-grid";
 import { paddedDelta, paddedIndex } from "./padded-layout";
-import { buildRowOccupancy, visibleCellsOfRow } from "./row-occupancy";
+import { buildRowOccupancy, rowIndexOf, visibleCellsOfRow } from "./row-occupancy";
 import { emitStairs } from "./stairs";
 import { VertexStream } from "./vertex-stream";
 
@@ -184,7 +184,8 @@ function emitCubeFaces(
   y: number,
   z: number,
   cellIndex: number,
-  isEdgeCell: boolean
+  isEdgeCell: boolean,
+  rowIndex: number
 ) {
   const blocks = paddedBlockGrid.cells;
   const light = paddedLightGrid.cells;
@@ -227,7 +228,15 @@ function emitCubeFaces(
       isEdgeCell && lightKnownByOutsideFlags[OUTSIDE_FACE_FLAGS[neighborIndex]] === 0
         ? ownLevel
         : LIGHT_LEVEL_OF_PACKED_LIGHT[light[neighborIndex]];
-    const mergeDirections = sampleFaceSurface(face, cellIndex, faceLevel, receivesAmbientOcclusion, isEdgeCell);
+    const mergeDirections = sampleFaceSurface(
+      face,
+      cellIndex,
+      faceLevel,
+      receivesAmbientOcclusion,
+      isEdgeCell,
+      rowIndex,
+      z
+    );
     stats.cubeFacesEmitted++;
     facesByBlockId[block]++;
     const textureIndex = FACE_TEXTURES[face][block];
@@ -340,7 +349,16 @@ export function generateMesh(
           stats.stairQuads += quads;
           facesByBlockId[block] += quads;
         } else {
-          emitCubeFaces(block, kind, x, y, z, cellIndex, isEdgeRow || z === 0 || z === CHUNK_LENGTH - 1);
+          emitCubeFaces(
+            block,
+            kind,
+            x,
+            y,
+            z,
+            cellIndex,
+            isEdgeRow || z === 0 || z === CHUNK_LENGTH - 1,
+            rowIndexOf(x, y)
+          );
         }
       }
     }

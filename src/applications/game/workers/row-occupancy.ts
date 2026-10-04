@@ -63,6 +63,13 @@ function classifyRow(x: number, y: number) {
 
 /** Classifies every row of the chunk and the neighbor rows its edge rows read. */
 export function buildRowOccupancy() {
+  // Rows diagonal across a chunk edge hold no blocks.
+  for (const [x, y] of [[-1, -1], [-1, CHUNK_HEIGHT], [CHUNK_WIDTH, -1], [CHUNK_WIDTH, CHUNK_HEIGHT]]) {
+    const rowIndex = rowIndexOf(x, y);
+    solidRows[rowIndex] = 0;
+    occluderRows[rowIndex] = 0;
+    cubeOccluderRows[rowIndex] = 0;
+  }
   for (let x = 0; x < CHUNK_WIDTH; x++) {
     for (let y = 0; y < CHUNK_HEIGHT; y++) classifyRow(x, y);
   }

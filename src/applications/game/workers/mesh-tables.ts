@@ -58,8 +58,8 @@ export const BLOCK_KIND = (() => {
 
 /**
  * Per block flags for the row occupancy masks. An occluder hides the face of any
- * block pressed against it (every block that is not transparent, stairs
- * included). A cube occluder additionally emits no faces of its own once all six
+ * block pressed against it and darkens the ambient occlusion around it (every
+ * block that is not transparent, stairs included). A cube occluder additionally emits no faces of its own once all six
  * neighbors are occluders, which is what lets buried cells be skipped.
  */
 export const ROW_FLAG_SOLID = 1;
@@ -69,7 +69,7 @@ export const ROW_FLAG_CUBE_OCCLUDER = 4;
 export const BLOCK_ROW_FLAGS = (() => {
   const flags = new Uint8Array(BLOCK_ID_COUNT);
   for (let block = 0; block < BLOCK_ID_COUNT; block++) {
-    const isOccluder = block !== BlockType.AIR && !TRANSPARENT_BLOCKS.includes(block);
+    const isOccluder = OCCLUDES_AMBIENT_LIGHT[block] === 1;
     flags[block] =
       (block !== BlockType.AIR ? ROW_FLAG_SOLID : 0) |
       (isOccluder ? ROW_FLAG_OCCLUDER : 0) |
@@ -297,6 +297,23 @@ export const FACE_RING_DELTAS = (() => {
   });
   return deltas;
 })();
+
+/**
+ * Where each ring cell sits in the occupancy rows: the row index offset (x * 34 + y)
+ * and the shift along z, for the cell at ring index r of face f at f * 8 + r.
+ */
+export const RING_ROW_DELTAS = new Int32Array(FACE_COUNT * RING_CELL_COUNT);
+export const RING_Z_OFFSETS = new Int8Array(FACE_COUNT * RING_CELL_COUNT);
+FACE_NORMALS.forEach((normal, face) => {
+  const [firstTangent, secondTangent] = tangentAxesOf(normal);
+  RING_STEPS.forEach(([firstStep, secondStep], ring) => {
+    const offset = [...normal];
+    offset[firstTangent] += firstStep;
+    offset[secondTangent] += secondStep;
+    RING_ROW_DELTAS[face * RING_CELL_COUNT + ring] = offset[0] * PADDED_ROWS + offset[1];
+    RING_Z_OFFSETS[face * RING_CELL_COUNT + ring] = offset[2];
+  });
+});
 
 /** For corner c of face f: ring indices of the first side, second side and diagonal cell, at (f * 4 + c) * 3. */
 export const CORNER_RING_INDICES = (() => {

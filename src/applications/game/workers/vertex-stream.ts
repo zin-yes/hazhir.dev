@@ -2,6 +2,8 @@ import { addWorkerCounter, endWorkerSection, startWorkerSection } from "../profi
 import { WORDS_PER_VERTEX } from "../vertex-format";
 
 const INITIAL_VERTEX_CAPACITY = 2048;
+const STRAIGHT_CORNER_ORDER = Uint8Array.from([0, 1, 2, 3]);
+const FLIPPED_CORNER_ORDER = Uint8Array.from([1, 3, 0, 2]);
 
 /**
  * Growable stream of packed vertices. Quads are appended as four vertices; a
@@ -71,6 +73,24 @@ export class VertexStream {
       words[cursor++] = surfaceWord2;
       words[cursor++] = positionWord3;
       words[cursor++] = surfaceWord3;
+    }
+    this.wordCount = cursor;
+  }
+
+  /** Same as pushQuad, taking the four corners from two scratch arrays. */
+  pushQuadFromCorners(
+    positionWords: ArrayLike<number>,
+    surfaceWords: ArrayLike<number>,
+    flipDiagonal: boolean
+  ) {
+    this.reserveWords(4 * WORDS_PER_VERTEX);
+    const words = this.words;
+    const order = flipDiagonal ? FLIPPED_CORNER_ORDER : STRAIGHT_CORNER_ORDER;
+    let cursor = this.wordCount;
+    for (let slot = 0; slot < 4; slot++) {
+      const corner = order[slot];
+      words[cursor++] = positionWords[corner];
+      words[cursor++] = surfaceWords[corner];
     }
     this.wordCount = cursor;
   }
