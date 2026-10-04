@@ -166,6 +166,11 @@ const RANDOM_TICK_RADIUS_CHUNKS = 4;
 // Chunks whose centers are farther than this from the camera draw plants as flat sheets.
 const PLANT_VOXEL_DETAIL_DISTANCE = 72;
 const PLANT_DETAIL_UPDATE_INTERVAL_MS = 250;
+/**
+ * Chunks whose centers are farther than this draw no plants: a plant there is a few pixels tall, and each plant type
+ * of each chunk costs a draw call (about a third of all draws at a 12 chunk render distance).
+ */
+const PLANT_DRAW_DISTANCE = 160;
 
 interface PlantDetailMeshes {
   center: THREE.Vector3;
@@ -1483,10 +1488,11 @@ export default function Game() {
   }
 
   function applyPlantDetail(plantDetail: PlantDetailMeshes) {
-    const isNear =
-      plantDetail.center.distanceTo(camera.position) <= PLANT_VOXEL_DETAIL_DISTANCE;
+    const distance = plantDetail.center.distanceTo(camera.position);
+    const isNear = distance <= PLANT_VOXEL_DETAIL_DISTANCE;
+    const isDrawn = distance <= PLANT_DRAW_DISTANCE;
     for (const mesh of plantDetail.voxel) mesh.visible = isNear;
-    for (const mesh of plantDetail.billboard) mesh.visible = !isNear;
+    for (const mesh of plantDetail.billboard) mesh.visible = !isNear && isDrawn;
   }
 
   function updatePlantDetail() {
