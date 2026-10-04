@@ -1,4 +1,4 @@
-import type { ButtonHTMLAttributes, InputHTMLAttributes, ReactNode } from "react";
+import type { ButtonHTMLAttributes, CSSProperties, InputHTMLAttributes, ReactNode } from "react";
 import styles from "./pixel-ui.module.css";
 
 type PixelButtonTone = "default" | "primary" | "danger" | "tab" | "tabActive";
@@ -55,6 +55,55 @@ export function PixelInput({
   ...inputProps
 }: InputHTMLAttributes<HTMLInputElement>) {
   return <input {...inputProps} className={`${styles.field} ${className}`} />;
+}
+
+interface PixelSliderProps {
+  value: number;
+  min: number;
+  max: number;
+  step: number;
+  label: string;
+  onChange: (value: number) => void;
+}
+
+export function PixelSlider({ value, min, max, step, label, onChange }: PixelSliderProps) {
+  const filledPercent = ((value - min) / (max - min)) * 100;
+  return (
+    <input
+      data-mobile-ui
+      type="range"
+      aria-label={label}
+      className={styles.slider}
+      style={{ "--filled": `${filledPercent}%` } as CSSProperties}
+      min={min}
+      max={max}
+      step={step}
+      value={value}
+      onChange={(event) => onChange(Number(event.target.value))}
+    />
+  );
+}
+
+interface PixelToggleProps {
+  checked: boolean;
+  label: string;
+  onChange: (checked: boolean) => void;
+}
+
+export function PixelToggle({ checked, label, onChange }: PixelToggleProps) {
+  return (
+    <button
+      data-mobile-ui
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      aria-label={label}
+      className={`${styles.toggle} ${checked ? styles.toggleOn : ""}`}
+      onClick={() => onChange(!checked)}
+    >
+      <span className={styles.toggleKnob} />
+    </button>
+  );
 }
 
 export function PixelKey({ children }: { children: ReactNode }) {
