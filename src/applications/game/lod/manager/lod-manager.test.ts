@@ -66,8 +66,12 @@ interface SceneTile {
   size: number;
 }
 
+function tileMeshesOf(manager: LodManager): THREE.Object3D[] {
+  return manager.scene.getObjectByName("lod-tiles")!.children;
+}
+
 function sceneTiles(manager: LodManager): SceneTile[] {
-  return manager.scene.children
+  return tileMeshesOf(manager)
     .filter((child): child is THREE.Mesh => child instanceof THREE.Mesh)
     .map((mesh) => {
       const level = Math.log2(mesh.scale.x);
@@ -175,7 +179,7 @@ describe("LOD manager", () => {
     expect(columnX).toBeDefined();
     for (let chunkY = 1; chunkY <= 7; chunkY++) manager.onRealChunkLoaded(columnX, chunkY, columnZ, createSyntheticChunk(columnX, chunkY, columnZ));
     await harness.settle();
-    const levelZeroMesh = manager.scene.children.find(
+    const levelZeroMesh = tileMeshesOf(manager).find(
       (child): child is THREE.Mesh =>
         child instanceof THREE.Mesh && child.scale.x === cellSizeOfLevel(0) && child.position.x === columnX * 32 - 0.5 && child.position.z === columnZ * 32 - 0.5,
     );
@@ -189,6 +193,38 @@ describe("LOD manager", () => {
     }
     expect(leafVertices).toBeGreaterThanOrEqual(12);
     expect(manager.getStats().realDataNodes).toBeGreaterThanOrEqual(4);
+    manager.dispose();
+  });
+
+  test("a larger radius set in place draws tiles out to it and keeps the tiles it already built", async () => {
+    const harness = createHarness();
+    const { manager, camera } = harness;
+    await harness.settle();
+    const levelZeroBuildsBefore = manager.getStats().buildsByLevel[0]!.tiles;
+    const farPoint = { x: camera.position.x, z: camera.position.z - RENDER_DISTANCE_CHUNKS * 32 * 1.6 };
+    expect(tilesAt(sceneTiles(manager), farPoint.x, farPoint.z)).toHaveLength(0);
+
+    manager.setRenderDistanceChunks(RENDER_DISTANCE_CHUNKS * 2);
+    expect(manager.renderDistanceChunks).toBe(RENDER_DISTANCE_CHUNKS * 2);
+    await harness.settle();
+    expect(tilesAt(sceneTiles(manager), farPoint.x, farPoint.z)).toHaveLength(1);
+    expect(manager.getStats().buildsByLevel[0]!.tiles).toBe(levelZeroBuildsBefore);
+    manager.dispose();
+  });
+
+  test("a camera deep below the surface hides the terrain tiles, one above it shows them", async () => {
+    const harness = createHarness();
+    const { manager, camera } = harness;
+    await harness.settle();
+    expect(manager.isCameraUnderground).toBe(false);
+    camera.position.y = syntheticHeightAt(camera.position.x, camera.position.z) - 200;
+    camera.updateMatrixWorld();
+    manager.update(camera, 1080);
+    expect(manager.isCameraUnderground).toBe(true);
+    camera.position.y = 300;
+    camera.updateMatrixWorld();
+    manager.update(camera, 1080);
+    expect(manager.isCameraUnderground).toBe(false);
     manager.dispose();
   });
 

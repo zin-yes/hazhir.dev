@@ -67,6 +67,16 @@ export interface LodManager {
   /** Moves the sky into the LOD pass so it draws behind the tiles. */
   adoptBackground(background: THREE.Object3D): void;
   setFogColor(srgbHex: number): void;
+  /**
+   * Renders the adopted background into a cube map and fades the far terrain into it, so the fog matches the sky
+   * behind every tile. Call again when the sky changes.
+   */
+  captureBackgroundHaze(renderer: THREE.WebGLRenderer): void;
+  /** Changes the LOD radius in place: cached tiles and real data are kept. */
+  setRenderDistanceChunks(renderDistanceChunks: number): void;
+  readonly renderDistanceChunks: number;
+  /** True while the camera is well below the LOD surface; the pass then draws only the background. */
+  readonly isCameraUnderground: boolean;
   /** A real chunk's blocks arrived (game layout, 32^3, index x * 1024 + y * 32 + z). */
   onRealChunkLoaded(chunkX: number, chunkY: number, chunkZ: number, blocks: Uint8Array): void;
   /** A real chunk's mesh is in the scene (call it for chunks without faces too). */
@@ -91,6 +101,10 @@ interface CachedTilePayload {
 }
 
 const DEFAULT_RENDER_DISTANCE_CHUNKS = 256;
+/** Largest LOD radius `setRenderDistanceChunks` accepts; the real data pyramid is built tall enough for it. */
+export const MAXIMUM_RENDER_DISTANCE_CHUNKS = 512;
+/** The terrain pass is skipped while the camera is this far below the lowest LOD surface around it. */
+const UNDERGROUND_MARGIN_BLOCKS = 12;
 const DEFAULT_MAXIMUM_CELL_PIXELS = 8;
 const DEFAULT_THRESHOLD_GROWTH_PER_LEVEL = 1.2;
 const DEFAULT_MEMORY_BUDGET_BYTES = 160 * 1024 * 1024;
@@ -117,6 +131,10 @@ export function createLodManager(options: LodManagerOptions): LodManager {
   return new LodManagerImplementation(options);
 }
 
+function clampRenderDistanceChunks(renderDistanceChunks: number): number {
+  return Math.max(1, Math.min(MAXIMUM_RENDER_DISTANCE_CHUNKS, Math.round(renderDistanceChunks)));
+}
+
 export function maximumLevelForRadius(radiusBlocks: number): number {
   return Math.min(MAX_LOD_LEVEL, Math.max(0, Math.ceil(Math.log2(radiusBlocks / tileSizeOfLevel(0)))));
 }
@@ -132,8 +150,9 @@ class LodManagerImplementation implements LodManager {
   private readonly frustum = new THREE.Frustum();
   private readonly projectionView = new THREE.Matrix4();
   private readonly tileBox = new THREE.Box3();
-  private readonly radiusBlocks: number;
-  private readonly maximumLevel: number;
+  private radiusBlocks: number;
+  private maximumLevel: number;
+  private cameraUnderground = false;
   private readonly maximumBuildsInFlight: number;
   private readonly now: () => number;
   private readonly createdAtMilliseconds: number;
@@ -153,7 +172,7 @@ class LodManagerImplementation implements LodManager {
   constructor(private readonly options: LodManagerOptions) {
     this.now = options.now ?? (() => performance.now());
     this.createdAtMilliseconds = this.now();
-    this.radiusBlocks = (options.renderDistanceChunks ?? DEFAULT_RENDER_DISTANCE_CHUNKS) * CHUNK_SIZE_BLOCKS;
+    this.radiusBlocks = clampRenderDistanceChunks(options.renderDistanceChunks ?? DEFAULT_RENDER_DISTANCE_CHUNKS) * CHUNK_SIZE_BLOCKS;
     this.maximumLevel = maximumLevelForRadius(this.radiusBlocks);
     this.farPlane = this.radiusBlocks * 1.25;
     const workerCount = options.workerCount ?? DEFAULT_WORKER_COUNT;
@@ -166,18 +185,17 @@ class LodManagerImplementation implements LodManager {
       throw new Error("createLodManager needs a workerFactory (or an executor)");
     }
     this.materials = createLodMaterials(options.fogColor ?? DEFAULT_FOG_COLOR);
-    const sceneUniforms = this.materials.sceneUniforms;
-    sceneUniforms.hazeStart.value = Math.max(MINIMUM_FOG_START_BLOCKS, this.radiusBlocks * FOG_START_FRACTION);
-    sceneUniforms.hazeEnd.value = this.radiusBlocks;
-    sceneUniforms.dissolveStart.value = this.radiusBlocks * DISSOLVE_START_FRACTION;
-    sceneUniforms.dissolveEnd.value = this.radiusBlocks;
-    this.display = new TileDisplay(this.pass.scene, options.fadeMilliseconds ?? DEFAULT_FADE_MILLISECONDS);
+    this.applyRadiusUniforms();
+    this.display = new TileDisplay(this.pass.tiles, options.fadeMilliseconds ?? DEFAULT_FADE_MILLISECONDS);
     this.cache = new LodTileCache<CachedTilePayload>(options.memoryBudgetBytes ?? DEFAULT_MEMORY_BUDGET_BYTES, (tile) => {
       this.stateVersion++;
       this.display.remove(tile.address, tile.payload.tileMesh);
       tile.payload.tileMesh.dispose();
     });
-    this.realData = new RealDataTracker(options.realDataBudgetBytes ?? DEFAULT_REAL_DATA_BUDGET_BYTES, this.maximumLevel);
+    this.realData = new RealDataTracker(
+      options.realDataBudgetBytes ?? DEFAULT_REAL_DATA_BUDGET_BYTES,
+      maximumLevelForRadius(MAXIMUM_RENDER_DISTANCE_CHUNKS * CHUNK_SIZE_BLOCKS),
+    );
     this.stats = {
       selectedTiles: 0,
       drawnTiles: 0,
@@ -204,6 +222,49 @@ class LodManagerImplementation implements LodManager {
 
   get scene(): THREE.Scene {
     return this.pass.scene;
+  }
+
+  get renderDistanceChunks(): number {
+    return this.radiusBlocks / CHUNK_SIZE_BLOCKS;
+  }
+
+  get isCameraUnderground(): boolean {
+    return this.cameraUnderground;
+  }
+
+  private applyRadiusUniforms(): void {
+    const sceneUniforms = this.materials.sceneUniforms;
+    sceneUniforms.hazeStart.value = Math.max(MINIMUM_FOG_START_BLOCKS, this.radiusBlocks * FOG_START_FRACTION);
+    sceneUniforms.hazeEnd.value = this.radiusBlocks;
+    sceneUniforms.dissolveStart.value = this.radiusBlocks * DISSOLVE_START_FRACTION;
+    sceneUniforms.dissolveEnd.value = this.radiusBlocks;
+  }
+
+  setRenderDistanceChunks(renderDistanceChunks: number): void {
+    const radiusBlocks = clampRenderDistanceChunks(renderDistanceChunks) * CHUNK_SIZE_BLOCKS;
+    if (radiusBlocks === this.radiusBlocks) return;
+    this.radiusBlocks = radiusBlocks;
+    this.maximumLevel = maximumLevelForRadius(radiusBlocks);
+    this.previouslySplit = new Set();
+    this.applyRadiusUniforms();
+    this.stateVersion++;
+  }
+
+  captureBackgroundHaze(renderer: THREE.WebGLRenderer): void {
+    const hazeCube = this.pass.captureBackground(renderer);
+    const sceneUniforms = this.materials.sceneUniforms;
+    sceneUniforms.hazeCube.value = hazeCube;
+    sceneUniforms.useHazeCube.value = hazeCube === null ? 0 : 1;
+  }
+
+  /** Well below the lowest surface of the finest cached tile over the camera column (nothing cached: never). */
+  private isBelowLodSurface(cameraBlockPosition: THREE.Vector3): boolean {
+    const blockX = Math.floor(cameraBlockPosition.x);
+    const blockZ = Math.floor(cameraBlockPosition.z);
+    const tileSize = tileSizeOfLevel(0);
+    const finestAddress: TileAddress = { level: 0, tileX: Math.floor(blockX / tileSize), tileZ: Math.floor(blockZ / tileSize) };
+    const range = this.heightRangeFor(finestAddress);
+    return range !== undefined && cameraBlockPosition.y < range.minHeight - UNDERGROUND_MARGIN_BLOCKS;
   }
 
   adoptBackground(background: THREE.Object3D): void {
@@ -296,6 +357,7 @@ class LodManagerImplementation implements LodManager {
       }
       const plan = this.lastPlan;
 
+      this.cameraUnderground = this.isBelowLodSurface(cameraBlockPosition);
       this.display.advance(elapsedMilliseconds);
       this.display.reconcile(plan.drawn, (address) => this.cache.get(address)!.payload.tileMesh, (this.options.fadeMilliseconds ?? DEFAULT_FADE_MILLISECONDS) <= 0);
       this.updateCoverageTexture(cameraBlockPosition);
@@ -522,6 +584,7 @@ class LodManagerImplementation implements LodManager {
     if (this.isDisposed) return;
     const token = profiler.begin("main.lod.render");
     try {
+      this.pass.tiles.visible = !this.cameraUnderground;
       this.pass.render(renderer, camera, this.nearPlane, this.farPlane);
     } finally {
       profiler.end(token);
@@ -539,6 +602,7 @@ class LodManagerImplementation implements LodManager {
     this.display.clear();
     this.cache.clear();
     this.pass.releaseBackground();
+    this.pass.dispose();
     this.materials.dispose();
   }
 }

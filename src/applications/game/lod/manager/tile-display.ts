@@ -19,7 +19,7 @@ export class TileDisplay {
   private readonly displayed = new Map<number, DisplayedTile>();
 
   constructor(
-    private readonly scene: THREE.Scene,
+    private readonly scene: THREE.Object3D,
     private readonly fadeMilliseconds: number,
   ) {}
 

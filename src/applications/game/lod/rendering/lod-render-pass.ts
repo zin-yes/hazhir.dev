@@ -7,14 +7,46 @@
 import * as THREE from "three";
 
 const BACKGROUND_RENDER_ORDER = -1_000_000;
+const HAZE_CUBE_SIZE = 32;
 
 export class LodRenderPass {
   readonly scene = new THREE.Scene();
   readonly camera = new THREE.PerspectiveCamera();
+  /** Every tile mesh; hidden as a whole while the camera is underground. */
+  readonly tiles = new THREE.Group();
   private adoptedBackground: { object: THREE.Object3D; previousParent: THREE.Object3D | null; previousRenderOrder: number } | null = null;
+  private hazeCubeTarget: THREE.WebGLCubeRenderTarget | null = null;
 
   constructor() {
     this.scene.name = "lod";
+    this.tiles.name = "lod-tiles";
+    this.scene.add(this.tiles);
+  }
+
+  /**
+   * Renders the adopted background (the sky) into a small cube map in linear colour, so the far terrain can fade into
+   * exactly the sky colour behind it in every direction. Returns null without a background.
+   */
+  captureBackground(renderer: THREE.WebGLRenderer): THREE.CubeTexture | null {
+    if (this.adoptedBackground === null) return null;
+    this.hazeCubeTarget ??= new THREE.WebGLCubeRenderTarget(HAZE_CUBE_SIZE, { type: THREE.HalfFloatType, generateMipmaps: false });
+    const cubeCamera = new THREE.CubeCamera(1, 1_000_000, this.hazeCubeTarget);
+    const previousTilesVisible = this.tiles.visible;
+    const previousAutoClear = renderer.autoClear;
+    this.tiles.visible = false;
+    renderer.autoClear = true;
+    try {
+      cubeCamera.update(renderer, this.scene);
+    } finally {
+      this.tiles.visible = previousTilesVisible;
+      renderer.autoClear = previousAutoClear;
+    }
+    return this.hazeCubeTarget.texture;
+  }
+
+  dispose(): void {
+    this.hazeCubeTarget?.dispose();
+    this.hazeCubeTarget = null;
   }
 
   /** Moves the sky (or any backdrop) into this pass, drawn before every tile. */

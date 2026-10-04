@@ -1,7 +1,8 @@
 // LOD tile shaders. Lighting matches the main chunk shader (pow(0.8, 15 - sky light) * (0.55 + 0.15 * ao), applied to
 // the output-encoded texture colour); the vertex colour is the texture's average, so a far tile reads like the main
 // renderer's mipmapped faces. On top: the real-chunk coverage discard, a screen-door dither for level cross-fades and
-// for dissolving into the sky at the far edge, and atmospheric fog towards the horizon colour.
+// for dissolving into the sky at the far edge, and atmospheric fog towards the sky colour behind each fragment (a cube
+// map of the adopted sky) or a fixed horizon colour.
 
 import { COVERAGE_NORMAL_NUDGE_BLOCKS } from "../coverage/real-chunk-coverage";
 import { BLOCK_RENDER_OFFSET, CHUNK_SIZE_BLOCKS } from "../core/lod-constants";
@@ -68,6 +69,8 @@ uniform vec2 coverageCenterChunk;
 uniform float coverageSize;
 uniform float tileFade;
 uniform vec3 hazeColor;
+uniform samplerCube hazeCube;
+uniform float useHazeCube;
 uniform float hazeStart;
 uniform float hazeEnd;
 uniform float dissolveStart;
@@ -102,6 +105,9 @@ void main() {
   vec3 lighting = max(vec3(vShade), vec3(0.05));
   vec3 displayColor = linearToOutputTexel(vec4(vColor, 1.0)).rgb * lighting;
   float hazeAmount = smoothstep(hazeStart, hazeEnd, distanceToCamera);
-  gl_FragColor = vec4(mix(displayColor, hazeColor, hazeAmount), surfaceAlpha);
+  vec3 skyBehind = useHazeCube > 0.5
+    ? linearToOutputTexel(vec4(texture(hazeCube, (vWorldPosition - cameraPosition) / distanceToCamera).rgb, 1.0)).rgb
+    : hazeColor;
+  gl_FragColor = vec4(mix(displayColor, skyBehind, hazeAmount), surfaceAlpha);
 }
 `;

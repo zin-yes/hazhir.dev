@@ -12,8 +12,11 @@ export interface LodSceneUniforms {
   coverageTexture: { value: THREE.DataTexture };
   coverageCenterChunk: { value: THREE.Vector2 };
   coverageSize: { value: number };
-  /** Output-space (sRGB) colour the far terrain fades towards. */
+  /** Output-space (sRGB) colour the far terrain fades towards, unless a sky cube is set. */
   hazeColor: { value: THREE.Vector3 };
+  /** The sky rendered into a cube map (linear colour): the far terrain fades into the sky behind it. */
+  hazeCube: { value: THREE.CubeTexture | null };
+  useHazeCube: { value: number };
   hazeStart: { value: number };
   hazeEnd: { value: number };
   dissolveStart: { value: number };
@@ -47,6 +50,8 @@ export function createLodMaterials(fogColorHex: number): LodMaterials {
     coverageCenterChunk: { value: new THREE.Vector2() },
     coverageSize: { value: COVERAGE_TEXTURE_SIZE },
     hazeColor: { value: srgbHexToVector(fogColorHex) },
+    hazeCube: { value: null },
+    useHazeCube: { value: 0 },
     hazeStart: { value: 1e9 },
     hazeEnd: { value: 2e9 },
     dissolveStart: { value: 1e9 },
