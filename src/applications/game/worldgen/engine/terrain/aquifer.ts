@@ -18,6 +18,8 @@ import { BLOCK_AIR, BLOCK_DEFAULT_FLUID, BLOCK_LAVA } from "./terrain-blocks";
 
 /** Aquifer.computeSubstance returning null: the block is not decided by the aquifer. */
 export const NULL_SUBSTANCE = -1;
+/** openBlockSubstanceWithoutContext could not decide without evaluating density functions at the block. */
+export const UNRESOLVED_SUBSTANCE = -2;
 
 const GLOBAL_LAVA_LEVEL = -54;
 const WAY_BELOW_MIN_Y = -134217728;
@@ -146,6 +148,29 @@ export class NoiseBasedAquifer {
   computeSubstance(context: FunctionContext, density: number): number {
     if (density > 0) return NULL_SUBSTANCE;
     return this.resolveSubstance(context, density, context.blockX, context.blockY, context.blockZ);
+  }
+
+  /**
+   * The answer for an open block (density <= 0) when it needs no density function: lava below the lava level, or the
+   * shared fluid of a uniform origin cell. UNRESOLVED_SUBSTANCE means computeSubstanceAt must decide.
+   */
+  openBlockSubstanceWithoutContext(blockX: number, blockY: number, blockZ: number): number {
+    if (blockY < this.lavaBelowY) {
+      this.substanceLookups++;
+      return BLOCK_LAVA;
+    }
+    const originGridX = (blockX - 5) >> 4;
+    const originGridY = Math.floor((blockY + 1) / Y_SPACING);
+    const originGridZ = (blockZ - 5) >> 4;
+    const originIndex = ((originGridY - this.minGridY) * this.gridSizeZ + (originGridZ - this.minGridZ)) * this.gridSizeX + (originGridX - this.minGridX);
+    let uniformity = this.originUniformity[originIndex]!;
+    if (uniformity === 0) {
+      uniformity = this.classifyOrigin(originGridX, originGridY, originGridZ);
+      this.originUniformity[originIndex] = uniformity;
+    }
+    if (uniformity !== ORIGIN_UNIFORM) return UNRESOLVED_SUBSTANCE;
+    this.substanceLookups++;
+    return this.fluidAtStatus(originIndex, blockY);
   }
 
   /** computeSubstance for a context known to sit at (blockX, blockY, blockZ), skipping its coordinate getters. */

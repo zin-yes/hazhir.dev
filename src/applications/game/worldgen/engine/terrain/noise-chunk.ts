@@ -263,6 +263,20 @@ export class NoiseChunk implements FunctionContext, ContextProvider {
     this.fillingCell = false;
   }
 
+  /**
+   * updateForY, updateForX and updateForZ in one step, for loops that only need the chunk as a context at some blocks:
+   * the interpolation counter advances once per positioned block, so cache_once still sees every block as new.
+   */
+  moveToBlockInCell(inCellX: number, inCellY: number, inCellZ: number): void {
+    this.inCellX = inCellX;
+    this.inCellY = inCellY;
+    this.inCellZ = inCellZ;
+    this.deltaX = inCellX / this.cellWidth;
+    this.deltaY = inCellY / this.cellHeight;
+    this.deltaZ = inCellZ / this.cellWidth;
+    this.interpolationCounter++;
+  }
+
   updateForY(blockY: number, deltaY: number): void {
     this.inCellY = blockY - this.cellStartBlockY;
     this.deltaY = deltaY;

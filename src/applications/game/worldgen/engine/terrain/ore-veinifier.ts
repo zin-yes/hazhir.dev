@@ -62,6 +62,11 @@ export class OreVeinifier {
     private readonly positionalRandomFactory: PositionalRandomFactory,
   ) {}
 
+  /** False where compute is NO_VEIN whatever the noise (outside both vein height ranges). */
+  mayHoldVeinAt(blockY: number): boolean {
+    return blockY <= COPPER_VEIN.maxY && blockY >= IRON_VEIN.minY;
+  }
+
   /** The BlockStateFiller of OreVeinifier.create: the vein block at the context's position, or NO_VEIN. */
   compute(context: FunctionContext): number {
     if (!this.isProfiling) return this.computeVein(context);
