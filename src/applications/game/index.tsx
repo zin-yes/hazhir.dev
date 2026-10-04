@@ -43,7 +43,11 @@ import { HOTBAR_SIZE, normalizeHotbar } from "./constants";
 import { NetworkManager } from "./network/NetworkManager";
 import { RemotePlayer } from "./network/RemotePlayer";
 import { PhysicsEngine } from "./physics-engine";
-import { LoadTracker, type LoadStageStatus } from "./load-progress";
+import {
+  LoadTracker,
+  type LoadSnapshot,
+  type LoadStageStatus,
+} from "./load-progress";
 import { PlayerControls } from "./player-controls";
 import {
   createChunkSurfaceGeometry,
@@ -289,21 +293,44 @@ export default function Game() {
   const [loadStageLabel, setLoadStageLabel] = useState("Starting threads");
   const [loadStages, setLoadStages] = useState<LoadStageStatus[]>([]);
   const loadProgressRef = useRef(0);
-  const loadTracker = useMemo(
-    () =>
-      new LoadTracker(({ progress, label, stages }) => {
-        setLoadStages(stages);
-        loadProgressRef.current = progress;
-        setLoadProgress(progress);
-        setLoadStageLabel(label);
-        if (progress >= 1) {
-          setTimeout(() => {
-            if (phaseRef.current === "loading") setPhase("paused");
-          }, 150);
-        }
-      }),
-    [],
-  );
+  const loadTracker = useMemo(() => {
+    const MIN_LOAD_UI_UPDATE_INTERVAL_MS = 50;
+    let lastUiUpdateAtMs = 0;
+    let pendingSnapshot: LoadSnapshot | null = null;
+    let pendingTimeout: ReturnType<typeof setTimeout> | null = null;
+
+    const applySnapshot = ({ progress, label, stages }: LoadSnapshot) => {
+      lastUiUpdateAtMs = performance.now();
+      setLoadStages(stages);
+      loadProgressRef.current = progress;
+      setLoadProgress(progress);
+      setLoadStageLabel(label);
+      if (progress >= 1) {
+        setTimeout(() => {
+          if (phaseRef.current === "loading") setPhase("paused");
+        }, 150);
+      }
+    };
+
+    return new LoadTracker((snapshot) => {
+      loadProgressRef.current = snapshot.progress;
+      const msSinceLastUpdate = performance.now() - lastUiUpdateAtMs;
+      if (snapshot.progress >= 1 || msSinceLastUpdate >= MIN_LOAD_UI_UPDATE_INTERVAL_MS) {
+        if (pendingTimeout) clearTimeout(pendingTimeout);
+        pendingTimeout = null;
+        pendingSnapshot = null;
+        applySnapshot(snapshot);
+        return;
+      }
+      pendingSnapshot = snapshot;
+      if (pendingTimeout) return;
+      pendingTimeout = setTimeout(() => {
+        pendingTimeout = null;
+        if (pendingSnapshot) applySnapshot(pendingSnapshot);
+        pendingSnapshot = null;
+      }, MIN_LOAD_UI_UPDATE_INTERVAL_MS - msSinceLastUpdate);
+    });
+  }, []);
   const [worlds, setWorlds] = useState<StoredWorld[]>([]);
   const [isLoadingWorlds, setIsLoadingWorlds] = useState(true);
   const [activeWorldName, setActiveWorldName] = useState("");
