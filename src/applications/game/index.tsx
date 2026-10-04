@@ -78,6 +78,7 @@ import {
 import { packColumnKey } from "./world/chunk-key";
 import { installVoxelWorldApi, summarizeEdit } from "./world/world-api";
 import { castVoxelRay } from "./voxel-ray";
+import { GameLodBridge } from "./lod/game-lod-bridge";
 import type { ChunkMeshResult } from "./workers/mesh-types";
 import { MobileControls } from "./ui/mobile-controls";
 import UILayer, { type GamePhase } from "./ui/index";
@@ -123,6 +124,7 @@ const FLYING_SPEED = 10;
 const STREAMING_INTERVAL_MS = 100;
 const LIGHTING_WORKER_COUNT = 2;
 const MESH_WORKER_COUNT = 2;
+const LOD_WORKER_COUNT = 2;
 /** Terrain generation is the slowest stage, so it gets every core the other pools and the main thread leave. */
 const GENERATION_WORKER_COUNT = Math.min(
   6,
@@ -202,6 +204,7 @@ export default function Game() {
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const pipelineRef = useRef<ChunkPipeline | null>(null);
+  const lodBridgeRef = useRef<GameLodBridge | null>(null);
   const renderSettingsRef = useRef<RenderSettings>({ ...DEFAULT_RENDER_SETTINGS });
   const modifiedChunks = useRef<Map<string, Map<number, number>>>(new Map());
   /** Highest chunk y holding a saved edit, per column key, so tall builds are never skipped as sky. */
@@ -531,6 +534,7 @@ export default function Game() {
     if (intervalRef.current) clearInterval(intervalRef.current);
     pipelineRef.current?.dispose();
     loadTracker.resetWorldStages();
+    lodBridgeRef.current?.startWorld(currentSeed, renderSettingsRef.current.lodRenderDistanceChunks);
 
     pipelineRef.current = new ChunkPipeline({
       renderSettings: renderSettingsRef.current,
@@ -546,14 +550,17 @@ export default function Game() {
         currentSeed,
       ),
       events: {
+        onChunkGenerated: (record) => lodBridgeRef.current?.onChunkGenerated(record),
         onMeshReady: (record, mesh) => {
           const chunkName = chunkNameOf(record.chunkX, record.chunkY, record.chunkZ);
           if (mesh) addChunkMesh(mesh, chunkName, record.chunkX, record.chunkY, record.chunkZ);
           else pruneChunkMesh(chunkName);
+          lodBridgeRef.current?.onChunkMeshed(record);
         },
         onChunkUnloaded: (record) => {
           profiler.addCounter("game.chunks.pruned");
           pruneChunkMesh(chunkNameOf(record.chunkX, record.chunkY, record.chunkZ));
+          lodBridgeRef.current?.onChunkUnloaded(record);
         },
         savedEditsFor: (chunkX, chunkY, chunkZ) =>
           modifiedChunks.current.get(chunkNameOf(chunkX, chunkY, chunkZ)),
@@ -572,10 +579,11 @@ export default function Game() {
     intervalRef.current = setInterval(streamChunksAroundCamera, STREAMING_INTERVAL_MS);
   }
 
-  /** Changes how far real chunks are drawn; takes effect on the next streaming tick. */
+  /** Changes how far real chunks (next streaming tick) and the far terrain (next frame) are drawn. */
   function applyRenderSettings(settings: Partial<RenderSettings>) {
     renderSettingsRef.current = normalizeRenderSettings({ ...renderSettingsRef.current, ...settings });
     pipelineRef.current?.setRenderSettings(renderSettingsRef.current);
+    lodBridgeRef.current?.setRenderDistance(renderSettingsRef.current.lodRenderDistanceChunks, pipelineRef.current);
     return renderSettingsRef.current;
   }
 
@@ -650,6 +658,12 @@ export default function Game() {
       sky.material.uniforms.sunPosition.value = sunPosition;
 
       scene.add(sky);
+      lodBridgeRef.current = new GameLodBridge({
+        createWorker: () => new Worker(new URL("./lod/worker/lod-worker.ts", import.meta.url), { name: "lod" }),
+        workerCount: LOD_WORKER_COUNT,
+        background: sky,
+      });
+      renderer.autoClear = false;
 
       renderer.setSize(window.innerWidth, window.innerHeight);
       renderer.setPixelRatio(window.devicePixelRatio);
@@ -673,6 +687,7 @@ export default function Game() {
         getRenderSettings: () => ({ ...renderSettingsRef.current }),
         setRenderSettings: applyRenderSettings,
         stats: () => pipelineRef.current?.stats() ?? null,
+        lodStats: () => lodBridgeRef.current?.stats() ?? null,
         getBlock: (x, y, z) => getBlock(x, y, z),
         setCamera: (position, yaw, pitch) => {
           camera.position.set(position.x, position.y, position.z);
@@ -1062,6 +1077,8 @@ export default function Game() {
         if (intervalRef.current) clearInterval(intervalRef.current);
         pipelineRef.current?.dispose();
         pipelineRef.current = null;
+        lodBridgeRef.current?.dispose();
+        lodBridgeRef.current = null;
 
         document.removeEventListener("keyup", onKeyUp);
         if (container) {
@@ -1092,6 +1109,8 @@ export default function Game() {
             }
           }
         });
+        // The scene outlives a remount (React runs effects twice in development); a sky left behind would cover the LOD.
+        scene.clear();
 
         if (playerControlsRef.current) {
           playerControlsRef.current.dispose();
@@ -1614,6 +1633,7 @@ export default function Game() {
       }
     });
 
+    lodBridgeRef.current?.onBlocksEdited(result, pipeline);
     applyEditSideEffects(result, broadcast);
     return result;
   }
@@ -2321,9 +2341,12 @@ export default function Game() {
     profiler.addCounter("game.getBlock.calls", getBlockCallsRef.current);
     getBlockCallsRef.current = 0;
 
+    renderer.clear();
+    const drawFarTerrain = () => lodBridgeRef.current?.renderPass(renderer, camera);
     if (profiledRenderRef.current) {
-      profiledRenderRef.current.render();
+      profiledRenderRef.current.render(drawFarTerrain);
     } else {
+      drawFarTerrain();
       renderer.render(scene, camera);
     }
     // stats.end();

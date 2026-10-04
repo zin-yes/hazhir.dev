@@ -3,6 +3,7 @@
 
 import type { BlockEdit, BlockPosition, BrushMode } from "../edits/block-edit-batch";
 import type { PipelineEditResult } from "./chunk-pipeline";
+import type { LodStats } from "../lod/manager/lod-stats";
 import type { RenderSettings } from "./render-settings";
 
 export interface WorldEditSummary {
@@ -21,6 +22,8 @@ export interface VoxelWorldApi {
   setRenderSettings(settings: Partial<RenderSettings>): RenderSettings;
   /** Counts, queue sizes and memory of the chunk pipeline, or null before a world is loaded. */
   stats(): Record<string, number> | null;
+  /** Far terrain (LOD) tiles, builds, cache and timings, or null while it is off. */
+  lodStats(): LodStats | null;
   getBlock(x: number, y: number, z: number): number | null;
   /** Moves the camera (and player); yaw and pitch in radians. */
   setCamera(position: BlockPosition, yaw: number, pitch: number): void;
