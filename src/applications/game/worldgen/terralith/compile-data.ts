@@ -60,14 +60,40 @@ function featureIdsOfBiomes(biomes: Registry): string[] {
   return [...ids];
 }
 
+/** Block tags the engine reads by hardcoded id (BlockState.is(TagKey) in the ported Java), absent from any datapack JSON value. */
+const ENGINE_REQUIRED_BLOCK_TAGS = [
+  "minecraft:base_stone_overworld",
+  "minecraft:coral_blocks",
+  "minecraft:corals",
+  "minecraft:dirt",
+  "minecraft:dripstone_replaceable_blocks",
+  "minecraft:features_cannot_replace",
+  "minecraft:geode_invalid_blocks",
+  "minecraft:lava_pool_stone_cannot_replace",
+  "minecraft:leaves",
+  "minecraft:logs",
+  "minecraft:mushroom_grow_block",
+  "minecraft:replaceable_by_trees",
+  "minecraft:sculk_replaceable",
+  "minecraft:stone_ore_replaceables",
+  "minecraft:wall_corals",
+];
+
+/**
+ * Datapack JSON names tags three ways: "#ns:tag" (block state providers, predicates), a bare "ns:tag" under keys such
+ * as "tag", "replaceable" or "root_replaceable", and inside lists. Any string that is a known tag id counts (a block
+ * sharing a tag's id only pulls in one extra small tag), as do the engine's hardcoded tags.
+ */
 function pickReferencedTags(tags: Record<string, string[]>, ...sources: JsonValue[]): Record<string, string[]> {
-  const strings = new Set<string>();
+  const strings = new Set<string>(ENGINE_REQUIRED_BLOCK_TAGS);
   for (const source of sources) collectStrings(source, strings);
   const picked: Record<string, string[]> = {};
   for (const text of strings) {
-    if (!text.startsWith("#")) continue;
-    const tagId = withDefaultNamespace(text.slice(1));
+    const tagId = withDefaultNamespace(text.startsWith("#") ? text.slice(1) : text);
     if (tags[tagId] !== undefined) picked[tagId] = tags[tagId]!;
+  }
+  for (const tagId of ENGINE_REQUIRED_BLOCK_TAGS) {
+    if (picked[tagId] === undefined) throw new Error(`Engine-required block tag ${tagId} is missing from the datapacks`);
   }
   return picked;
 }

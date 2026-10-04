@@ -32,6 +32,14 @@ describe("committed Terralith data", () => {
     expect(registries.biome["minecraft:plains"]!.temperature).toBe(0.8);
   });
 
+  test("block tags that features name without a leading # and the engine's hardcoded tags are present and populated", () => {
+    for (const tagId of ["minecraft:replaceable_by_trees", "minecraft:logs", "minecraft:leaves", "minecraft:dirt", "minecraft:mushroom_grow_block", "minecraft:stone_ore_replaceables", "terralith:alt_stones", "minecraft:azalea_grows_on"]) {
+      expect(blockTags[tagId]?.length ?? 0).toBeGreaterThan(0);
+    }
+    expect(blockTags["minecraft:logs"]).toContain("minecraft:oak_log");
+    expect(blockTags["minecraft:replaceable_by_trees"]).toContain("minecraft:short_grass");
+  });
+
   test("every feature and carver a biome lists resolves, and every configured feature a placed feature points at exists", () => {
     const missing: string[] = [];
     for (const [biomeId, biome] of Object.entries(registries.biome)) {
