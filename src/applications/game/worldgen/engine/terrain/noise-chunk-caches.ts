@@ -71,13 +71,6 @@ export class NoiseInterpolator extends NoiseChunkCache {
   private noise011 = 0;
   private noise110 = 0;
   private noise111 = 0;
-  private valueXZ00 = 0;
-  private valueXZ10 = 0;
-  private valueXZ01 = 0;
-  private valueXZ11 = 0;
-  private valueZ0 = 0;
-  private valueZ1 = 0;
-  private value = 0;
 
   constructor(chunk: NoiseChunk, wrapped: DensityNode) {
     super(chunk, "interpolated", wrapped);
@@ -102,20 +95,21 @@ export class NoiseInterpolator extends NoiseChunkCache {
     this.noise111 = this.slice1[cellZ + 1][cellY + 1];
   }
 
-  updateForY(deltaY: number): void {
-    this.valueXZ00 = lerp(deltaY, this.noise000, this.noise010);
-    this.valueXZ10 = lerp(deltaY, this.noise100, this.noise110);
-    this.valueXZ01 = lerp(deltaY, this.noise001, this.noise011);
-    this.valueXZ11 = lerp(deltaY, this.noise101, this.noise111);
-  }
-
-  updateForX(deltaX: number): void {
-    this.valueZ0 = lerp(deltaX, this.valueXZ00, this.valueXZ10);
-    this.valueZ1 = lerp(deltaX, this.valueXZ01, this.valueXZ11);
-  }
-
-  updateForZ(deltaZ: number): void {
-    this.value = lerp(deltaZ, this.valueZ0, this.valueZ1);
+  /**
+   * The value Java's updateForY / updateForX / updateForZ leave behind, computed on demand from the chunk's current
+   * deltas (the same lerps in the same order, so the same doubles).
+   */
+  private incrementalValue(): number {
+    const chunk = this.chunk;
+    const deltaY = chunk.deltaY;
+    const deltaX = chunk.deltaX;
+    const valueXZ00 = lerp(deltaY, this.noise000, this.noise010);
+    const valueXZ10 = lerp(deltaY, this.noise100, this.noise110);
+    const valueXZ01 = lerp(deltaY, this.noise001, this.noise011);
+    const valueXZ11 = lerp(deltaY, this.noise101, this.noise111);
+    const valueZ0 = lerp(deltaX, valueXZ00, valueXZ10);
+    const valueZ1 = lerp(deltaX, valueXZ01, valueXZ11);
+    return lerp(chunk.deltaZ, valueZ0, valueZ1);
   }
 
   swapSlices(): void {
@@ -131,7 +125,7 @@ export class NoiseInterpolator extends NoiseChunkCache {
     if (!chunk.interpolating) throw new Error("Trying to sample interpolator outside the interpolation loop");
     if (!chunk.fillingCell) {
       noteDensityCacheHit(INTERPOLATED_TYPE_INDEX);
-      return this.value;
+      return this.incrementalValue();
     }
     // Mth.lerp3(dx, dy, dz, ...) = lerp(dz, lerp2(dx, dy, c000, c100, c010, c110), lerp2(dx, dy, c001, c101, c011, c111)).
     const deltaX = chunk.inCellX / chunk.cellWidth;

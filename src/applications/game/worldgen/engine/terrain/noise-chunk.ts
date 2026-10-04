@@ -76,6 +76,10 @@ export class NoiseChunk implements FunctionContext, ContextProvider {
   interpolationCounter = 0;
   arrayInterpolationCounter = 0;
   arrayIndex = 0;
+  /** The interpolation deltas of the last updateForY / updateForX / updateForZ (interpolators read them lazily). */
+  deltaY = 0;
+  deltaX = 0;
+  deltaZ = 0;
 
   readonly sliceFillingContextProvider: ContextProvider;
 
@@ -219,18 +223,18 @@ export class NoiseChunk implements FunctionContext, ContextProvider {
 
   updateForY(blockY: number, deltaY: number): void {
     this.inCellY = blockY - this.cellStartBlockY;
-    for (const interpolator of this.interpolators) interpolator.updateForY(deltaY);
+    this.deltaY = deltaY;
   }
 
   updateForX(blockX: number, deltaX: number): void {
     this.inCellX = blockX - this.cellStartBlockX;
-    for (const interpolator of this.interpolators) interpolator.updateForX(deltaX);
+    this.deltaX = deltaX;
   }
 
   updateForZ(blockZ: number, deltaZ: number): void {
     this.inCellZ = blockZ - this.cellStartBlockZ;
     this.interpolationCounter++;
-    for (const interpolator of this.interpolators) interpolator.updateForZ(deltaZ);
+    this.deltaZ = deltaZ;
   }
 
   swapSlices(): void {
