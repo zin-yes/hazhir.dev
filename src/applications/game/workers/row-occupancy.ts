@@ -83,27 +83,41 @@ export function buildRowOccupancy() {
   }
 }
 
+/** For the row last passed to prepareRow, per face (up, down, front, back, left, right) the opaque cube cells showing that face. */
+export const exposedCubeFaceCells = new Int32Array(6);
+
 /**
- * The cells of a row that can emit a face: solid cells, except cube blocks
- * buried among occluders on all six sides. Neighbors along z are the row
- * shifted by one, with the neighbor chunk's cell entering at the ends.
+ * Looks at one row and returns the cells that need the general per-block path
+ * (everything solid that is not an opaque cube: plants, stairs, slabs, water,
+ * glass, leaves). Opaque cubes are handled in bulk: their faces are exactly the
+ * sides not pressed against an occluder, left in exposedCubeFaceCells. Neighbors
+ * along z are the row shifted by one, with the neighbor chunk's cell entering at
+ * the ends.
  */
-export function visibleCellsOfRow(x: number, y: number): number {
+export function prepareRow(x: number, y: number): number {
   const rowIndex = rowIndexOf(x, y);
   const solid = solidRows[rowIndex];
-  if (solid === 0) return 0;
+  if (solid === 0) {
+    exposedCubeFaceCells.fill(0);
+    return 0;
+  }
   const occluder = occluderRows[rowIndex];
+  const cubes = cubeOccluderRows[rowIndex];
   const firstCell = paddedIndex(x, y, 0);
   const blocks = paddedBlockGrid.cells;
   const occluderBeforeEnd = BLOCK_ROW_FLAGS[blocks[firstCell - 1]] & ROW_FLAG_OCCLUDER ? 1 : 0;
   const occluderAfterEnd = BLOCK_ROW_FLAGS[blocks[firstCell + CHUNK_LENGTH]] & ROW_FLAG_OCCLUDER ? 1 : 0;
-  const buried =
-    cubeOccluderRows[rowIndex] &
-    occluderRows[rowIndex - PADDED_ROWS] &
-    occluderRows[rowIndex + PADDED_ROWS] &
-    occluderRows[rowIndex - 1] &
-    occluderRows[rowIndex + 1] &
-    ((occluder << 1) | occluderBeforeEnd) &
-    ((occluder >>> 1) | (occluderAfterEnd << 31));
-  return solid & ~buried;
+  exposedCubeFaceCells[0] = cubes & ~occluderRows[rowIndex + 1];
+  exposedCubeFaceCells[1] = cubes & ~occluderRows[rowIndex - 1];
+  exposedCubeFaceCells[2] = cubes & ~((occluder >>> 1) | (occluderAfterEnd << 31));
+  exposedCubeFaceCells[3] = cubes & ~((occluder << 1) | occluderBeforeEnd);
+  exposedCubeFaceCells[4] = cubes & ~occluderRows[rowIndex - PADDED_ROWS];
+  exposedCubeFaceCells[5] = cubes & ~occluderRows[rowIndex + PADDED_ROWS];
+  return solid & ~cubes;
+}
+
+export function countSetBits(mask: number): number {
+  let value = mask - ((mask >>> 1) & 0x55555555);
+  value = (value & 0x33333333) + ((value >>> 2) & 0x33333333);
+  return Math.imul((value + (value >>> 4)) & 0x0f0f0f0f, 0x01010101) >>> 24;
 }

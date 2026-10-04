@@ -54,7 +54,7 @@ import {
 import type { ChunkFaceBuffers, ChunkMeshResult, PlantInstanceBatch } from "./mesh-types";
 import { fillPaddedGrid, paddedBlockGrid, paddedLightGrid } from "./padded-grid";
 import { paddedDelta, paddedIndex } from "./padded-layout";
-import { buildRowOccupancy, rowIndexOf, visibleCellsOfRow } from "./row-occupancy";
+import { buildRowOccupancy, countSetBits, exposedCubeFaceCells, prepareRow, rowIndexOf } from "./row-occupancy";
 import { emitStairs } from "./stairs";
 import { VertexStream } from "./vertex-stream";
 
@@ -83,7 +83,6 @@ const stats = {
   translucentCells: 0,
   stairCells: 0,
   plantCells: 0,
-  facesCulled: 0,
   cubeFacesEmitted: 0,
   mergeableFaces: 0,
   stairQuads: 0,
@@ -94,7 +93,6 @@ function resetStats() {
   stats.translucentCells = 0;
   stats.stairCells = 0;
   stats.plantCells = 0;
-  stats.facesCulled = 0;
   stats.cubeFacesEmitted = 0;
   stats.mergeableFaces = 0;
   stats.stairQuads = 0;
@@ -221,7 +219,6 @@ function emitCubeFaces(
   for (let face = 0; face < FACE_COUNT; face++) {
     const neighborIndex = cellIndex + FACE_NEIGHBOR_DELTAS[face];
     if (isFaceCulledMemoized(block, blocks[neighborIndex], FACE_KINDS[face])) {
-      stats.facesCulled++;
       continue;
     }
 
@@ -278,6 +275,47 @@ function emitCubeFaces(
   }
 }
 
+// An opaque cube takes full ambient occlusion, is never translucent, and its face is
+// known to be exposed, so nothing but shading is left to decide.
+function emitOpaqueCubeFace(
+  face: number,
+  x: number,
+  y: number,
+  z: number,
+  cellIndex: number,
+  isEdgeCell: boolean,
+  rowIndex: number
+) {
+  const light = paddedLightGrid.cells;
+  const neighborIndex = cellIndex + FACE_NEIGHBOR_DELTAS[face];
+  const faceLevel =
+    isEdgeCell && lightKnownByOutsideFlags[OUTSIDE_FACE_FLAGS[neighborIndex]] === 0
+      ? LIGHT_LEVEL_OF_PACKED_LIGHT[light[cellIndex]]
+      : LIGHT_LEVEL_OF_PACKED_LIGHT[light[neighborIndex]];
+  const mergeDirections = sampleFaceSurface(face, cellIndex, faceLevel, true, isEdgeCell, rowIndex, z);
+  const block = paddedBlockGrid.cells[cellIndex];
+  const textureIndex = FACE_TEXTURES[face][block];
+  stats.cubeFacesEmitted++;
+  facesByBlockId[block]++;
+  if (mergeDirections !== 0) {
+    stats.mergeableFaces++;
+    recordMergeableFace(face, x, y, z, textureIndex, false, face === FACE_UP ? FULL_BLOCK_HEIGHT : 0, mergeDirections);
+    return;
+  }
+  const isHorizontalFace = face <= FACE_DOWN;
+  const isVForward = FACE_V_FORWARD[face] === 1;
+  emitFaceQuad(
+    opaqueStream,
+    face,
+    packPositionWord(x * POSITION_UNITS_PER_BLOCK, y * POSITION_UNITS_PER_BLOCK, z * POSITION_UNITS_PER_BLOCK),
+    packPositionWord(POSITION_UNITS_PER_BLOCK, FULL_BLOCK_HEIGHT, POSITION_UNITS_PER_BLOCK),
+    CHUNK_UV_UNITS_PER_BLOCK,
+    isHorizontalFace ? (isVForward ? 0 : CHUNK_UV_UNITS_PER_BLOCK) : CHUNK_UV_UNITS_PER_BLOCK,
+    isHorizontalFace ? (isVForward ? CHUNK_UV_UNITS_PER_BLOCK : 0) : 0,
+    textureIndex
+  );
+}
+
 export function generateMesh(
   _chunk: ArrayBuffer,
   _lightBuffer: ArrayBuffer,
@@ -328,17 +366,40 @@ export function generateMesh(
   startWorkerSection("faceGeneration");
   for (let x = 0; x < CHUNK_WIDTH; x++) {
     for (let y = 0; y < CHUNK_HEIGHT; y++) {
-      let visibleCells = visibleCellsOfRow(x, y);
-      if (visibleCells === 0) continue;
+      let visibleCells = prepareRow(x, y);
+      stats.cellsVisited += countSetBits(
+        visibleCells |
+          exposedCubeFaceCells[0] |
+          exposedCubeFaceCells[1] |
+          exposedCubeFaceCells[2] |
+          exposedCubeFaceCells[3] |
+          exposedCubeFaceCells[4] |
+          exposedCubeFaceCells[5]
+      );
       const firstCell = paddedIndex(x, y, 0);
       const isEdgeRow = x === 0 || x === CHUNK_WIDTH - 1 || y === 0 || y === CHUNK_HEIGHT - 1;
+      for (let face = 0; face < FACE_COUNT; face++) {
+        let faceCells = exposedCubeFaceCells[face];
+        while (faceCells !== 0) {
+          const z = 31 - Math.clz32(faceCells & -faceCells);
+          faceCells &= faceCells - 1;
+          emitOpaqueCubeFace(
+            face,
+            x,
+            y,
+            z,
+            firstCell + z,
+            isEdgeRow || z === 0 || z === CHUNK_LENGTH - 1,
+            rowIndexOf(x, y)
+          );
+        }
+      }
       while (visibleCells !== 0) {
         const z = 31 - Math.clz32(visibleCells & -visibleCells);
         visibleCells &= visibleCells - 1;
         const cellIndex = firstCell + z;
         const block = blocks[cellIndex];
         const kind = BLOCK_KIND[block];
-        stats.cellsVisited++;
 
         if (kind === BLOCK_KIND_PLANT) {
           recordPlant(block, x, y, z, cellIndex);
@@ -396,7 +457,10 @@ export function generateMesh(
   addWorkerCounter("mergeableFaces", stats.mergeableFaces);
   addWorkerCounter("mergedQuads", mergedQuads);
   addWorkerCounter("stairQuadsEmitted", stats.stairQuads);
-  addWorkerCounter("facesCulled", stats.facesCulled);
+  addWorkerCounter(
+    "facesCulled",
+    (stats.cellsVisited - stats.plantCells - stats.stairCells) * FACE_COUNT - stats.cubeFacesEmitted
+  );
   addWorkerCounter("opaqueVertices", opaqueStream.vertexCount);
   addWorkerCounter("transparentVertices", transparentStream.vertexCount);
   addWorkerCounter("plantInstancesEmitted", stats.plantCells);
