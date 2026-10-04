@@ -2,6 +2,7 @@
 
 import type { RandomSource } from "../random/random-source";
 import { ImprovedNoise } from "./improved-noise";
+import { type InlineNoiseSource, noiseNumberLiteral } from "./inline-noise-source";
 
 /** PerlinNoise.ROUND_OFF = 2^25: inputs are wrapped into [-2^24, 2^24] to keep precision far from the origin. */
 const ROUND_OFF = 33554432.0;
@@ -155,20 +156,22 @@ export class PerlinNoise {
   }
 
   /**
-   * Source of a statement block adding this noise's getValue at (`xName`, `yName`, `zName`) into `totalName`, with the
-   * octaves unrolled and their factors as literals (same operations and order as getValue). Octave i is read from
-   * `octaveArrayName[octaveOffset + i]`; returns the octaves to put there.
+   * Statements adding this noise's getValue at (`xName`, `yName`, `zName`) into `let totalName`, with every octave
+   * sampled inline (same operations and order as getValue).
    */
-  unrolledSource(totalName: string, xName: string, yName: string, zName: string, octaveArrayName: string, octaveOffset: number): { source: string; octaves: ImprovedNoise[] } {
-    const lines: string[] = [`let ${totalName} = 0;`];
+  appendInlineSource(source: InlineNoiseSource, totalName: string, xName: string, yName: string, zName: string, lines: string[]): void {
+    lines.push(`let ${totalName} = 0;`);
     for (let index = 0; index < this.activeNoises.length; index++) {
-      const inputFactor = numberLiteral(this.activeInputFactors[index]!);
-      const octave = `${octaveArrayName}[${octaveOffset + index}]`;
+      const inputFactor = noiseNumberLiteral(this.activeInputFactors[index]!);
+      const octaveValue = source.temporary("octave");
+      const wrappedX = source.wrapped(`${xName} * ${inputFactor}`, lines);
+      const wrappedY = source.wrapped(`${yName} * ${inputFactor}`, lines);
+      const wrappedZ = source.wrapped(`${zName} * ${inputFactor}`, lines);
+      source.octave(this.activeNoises[index]!, octaveValue, wrappedX, wrappedY, wrappedZ, lines);
       lines.push(
-        `${totalName} += ${numberLiteral(this.activeAmplitudes[index]!)} * ${octave}.noise(wrap(${xName} * ${inputFactor}), wrap(${yName} * ${inputFactor}), wrap(${zName} * ${inputFactor})) * ${numberLiteral(this.activeValueFactors[index]!)};`,
+        `${totalName} += ${noiseNumberLiteral(this.activeAmplitudes[index]!)} * ${octaveValue} * ${noiseNumberLiteral(this.activeValueFactors[index]!)};`,
       );
     }
-    return { source: lines.join("\n"), octaves: [...this.activeNoises] };
   }
 
   /** Java's deprecated `getValue(x, y, z, yScale, yMax, useFixedY)`. */
