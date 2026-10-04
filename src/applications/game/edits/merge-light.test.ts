@@ -1,5 +1,11 @@
 import { describe, expect, test } from "bun:test";
-import { mergeLightInPlace, mergeLightUpdatesInPlace } from "./merge-light";
+import { NEGATIVE_X, NEGATIVE_Y, POSITIVE_X, POSITIVE_Y, POSITIVE_Z } from "./chunk-cluster";
+import {
+  LIGHT_MERGE_CHANGED,
+  mergeLightInPlace,
+  mergeLightReportingFaces,
+  mergeLightUpdatesInPlace,
+} from "./merge-light";
 import { createSeededRandom } from "./light-test-world.test-helper";
 
 const CHUNK_CELLS = 32 * 32 * 32;
@@ -62,5 +68,42 @@ describe("mergeLightInPlace", () => {
 
   test("refuses arrays of different sizes", () => {
     expect(() => mergeLightInPlace(new Uint8Array(8), new Uint8Array(4))).toThrow();
+  });
+});
+
+describe("mergeLightReportingFaces", () => {
+  const cellAt = (x: number, y: number, z: number) => (x << 10) | (y << 5) | z;
+
+  test("merges like mergeLightInPlace and names exactly the faces whose cells got brighter", () => {
+    const target = randomLight(11);
+    const update = new Uint8Array(CHUNK_CELLS);
+    update[cellAt(0, 7, 9)] = 0xff;
+    update[cellAt(12, 31, 3)] = 0xff;
+    update[cellAt(5, 5, 5)] = 0xff;
+    target[cellAt(0, 7, 9)] = 0x11;
+    target[cellAt(12, 31, 3)] = 0x22;
+    target[cellAt(5, 5, 5)] = 0x33;
+    const expected = nibbleWiseMax(target, update);
+
+    const changes = mergeLightReportingFaces(target, update);
+
+    expect(Array.from(target)).toEqual(Array.from(expected));
+    expect(changes).toBe(LIGHT_MERGE_CHANGED | (1 << NEGATIVE_X) | (1 << POSITIVE_Y));
+  });
+
+  test("reports nothing when the update is no brighter anywhere, even if its bytes differ", () => {
+    const target = new Uint8Array(CHUNK_CELLS).fill(0xf5);
+    const update = new Uint8Array(CHUNK_CELLS).fill(0x52);
+    expect(mergeLightReportingFaces(target, update)).toBe(0);
+    expect(target.every((value) => value === 0xf5)).toBe(true);
+  });
+
+  test("a brighter block channel on a corner cell names all three faces of the corner", () => {
+    const target = new Uint8Array(CHUNK_CELLS).fill(0xf0);
+    const update = new Uint8Array(CHUNK_CELLS);
+    update[cellAt(31, 0, 31)] = 0x0a;
+    const changes = mergeLightReportingFaces(target, update);
+    expect(changes).toBe(LIGHT_MERGE_CHANGED | (1 << POSITIVE_X) | (1 << NEGATIVE_Y) | (1 << POSITIVE_Z));
+    expect(target[cellAt(31, 0, 31)]).toBe(0xfa);
   });
 });

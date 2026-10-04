@@ -1,3 +1,5 @@
+import { BOUNDARY_FACES, CELLS_PER_CHUNK } from "./chunk-cluster";
+
 const LOW_NIBBLE_LANES = 0x0f0f0f0f;
 const LANE_HIGH_BITS = 0x80808080;
 const LANE_LOW_BITS = 0x01010101;
@@ -77,4 +79,46 @@ export function mergeLightUpdatesInPlace(
     mergeLightInPlace(target, updates[position]);
   }
   return target;
+}
+
+/** Bit set by mergeLightReportingFaces when any cell got brighter, above the six face bits. */
+export const LIGHT_MERGE_CHANGED = 1 << 6;
+
+/**
+ * mergeLightInPlace for a whole chunk that also says what changed: LIGHT_MERGE_CHANGED when any cell got
+ * brighter, plus one bit per chunk face (chunk-cluster direction order) that has a brightened cell on it.
+ */
+export function mergeLightReportingFaces(target: Uint8Array, update: Uint8Array): number {
+  if (target.length !== CELLS_PER_CHUNK || update.length !== CELLS_PER_CHUNK) {
+    throw new Error("mergeLightReportingFaces merges whole chunks");
+  }
+  if (target.byteOffset % BYTES_PER_WORD !== 0 || update.byteOffset % BYTES_PER_WORD !== 0) {
+    const before = target.slice();
+    mergeLightInPlace(target, update);
+    let changes = 0;
+    for (let index = 0; index < CELLS_PER_CHUNK; index++) {
+      if (before[index] !== target[index]) changes |= LIGHT_MERGE_CHANGED | BOUNDARY_FACES[index]!;
+    }
+    return changes;
+  }
+  const wordCount = CELLS_PER_CHUNK / BYTES_PER_WORD;
+  const targetWords = new Uint32Array(target.buffer, target.byteOffset, wordCount);
+  const updateWords = new Uint32Array(update.buffer, update.byteOffset, wordCount);
+  let changes = 0;
+  for (let word = 0; word < wordCount; word++) {
+    const updateWord = updateWords[word]!;
+    const targetWord = targetWords[word]!;
+    if (updateWord === targetWord) continue;
+    const mergedWord = maxOfPackedLight(targetWord, updateWord) >>> 0;
+    if (mergedWord === targetWord) continue;
+    targetWords[word] = mergedWord;
+    changes |= LIGHT_MERGE_CHANGED;
+    for (let lane = 0; lane < BYTES_PER_WORD; lane++) {
+      const shift = lane * 8;
+      if (((mergedWord >>> shift) & 0xff) !== ((targetWord >>> shift) & 0xff)) {
+        changes |= BOUNDARY_FACES[word * BYTES_PER_WORD + lane]!;
+      }
+    }
+  }
+  return changes;
 }
