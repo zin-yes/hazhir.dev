@@ -1706,9 +1706,8 @@ export default function Game() {
     profiler.end(disposeToken);
   }
 
-  function growTree(x: number, y: number, z: number) {
+  function growTree(x: number, y: number, z: number, edits: BlockEdit[]) {
     const height = 4 + Math.floor(Math.random() * 3); // 4 to 6
-    const edits: BlockEdit[] = [];
 
     // Trunk
     for (let i = 0; i < height; i++) {
@@ -1735,7 +1734,6 @@ export default function Game() {
         }
       }
     }
-    applyBlockEditBatch(edits);
   }
 
   function reactsToRandomTicks(block: number) {
@@ -1764,6 +1762,8 @@ export default function Game() {
     if (profiler.enabled) {
       profiler.addCounter("game.randomTicks", tickedChunks.length * RANDOM_TICKS_PER_CHUNK);
     }
+    // Every change of one tick goes in as one batch: one relight and one rebuild per touched chunk.
+    const tickEdits: BlockEdit[] = [];
     tickedChunks.forEach((record) => {
       const chunk = record.blocks;
       if (!chunk) return;
@@ -1805,7 +1805,7 @@ export default function Game() {
               DIMENSIONS.simulationSystem,
               "randomTick.growTree",
             );
-            growTree(globalX, globalY, globalZ);
+            growTree(globalX, globalY, globalZ, tickEdits);
             profiler.end(growTreeToken);
           }
         } else if (block === BlockType.GRASS) {
@@ -1821,7 +1821,7 @@ export default function Game() {
             blockAbove !== null &&
             !TRANSPARENT_BLOCKS.includes(blockAbove)
           ) {
-            setBlock(globalX, globalY, globalZ, BlockType.DIRT);
+            tickEdits.push({ x: globalX, y: globalY, z: globalZ, block: BlockType.DIRT });
           } else {
             // Grass spread
             // Try one random neighbor
@@ -1844,12 +1844,13 @@ export default function Game() {
                 (blockAboveTarget !== null &&
                   TRANSPARENT_BLOCKS.includes(blockAboveTarget)))
             ) {
-              setBlock(targetX, targetY, targetZ, BlockType.GRASS);
+              tickEdits.push({ x: targetX, y: targetY, z: targetZ, block: BlockType.GRASS });
             }
           }
         }
       }
     });
+    if (tickEdits.length > 0) applyBlockEditBatch(tickEdits);
   }
 
   useEffect(() => {
