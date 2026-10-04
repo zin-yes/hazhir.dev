@@ -1,0 +1,10 @@
+{
+  "id": 153,
+  "name": "MANGROVE_ROOTS",
+  "texture": {
+    "default": "mangrove_roots_top.png",
+    "sides": "mangrove_roots_side.png"
+  },
+  "isTransparent": true,
+  "model": "CUBE"
+}

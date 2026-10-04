@@ -1,0 +1,21 @@
+{
+  "id": 201,
+  "name": "SNOW_LAYER",
+  "texture": "snow_layer.png",
+  "isTransparent": true,
+  "isCollidable": false,
+  "isReplaceable": true,
+  "model": "FLAT_QUAD",
+  "hitbox": {
+    "scale": [
+      1.002,
+      0.08,
+      1.002
+    ],
+    "offset": [
+      0,
+      -0.46,
+      0
+    ]
+  }
+}

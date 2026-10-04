@@ -1,0 +1,21 @@
+{
+  "id": 187,
+  "name": "TULIP_ORANGE",
+  "texture": "flower_tulip_orange.png",
+  "isTransparent": true,
+  "isCollidable": false,
+  "isReplaceable": false,
+  "model": "X_SHAPE",
+  "hitbox": {
+    "scale": [
+      0.6,
+      1.002,
+      0.6
+    ],
+    "offset": [
+      0,
+      0,
+      0
+    ]
+  }
+}

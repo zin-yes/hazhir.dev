@@ -119,6 +119,88 @@ export enum BlockType {
   BROWN_MUSHROOM = 122,
   RED_MUSHROOM = 123,
   LILY_PAD = 124,
+  DEEPSLATE = 125,
+  COBBLED_DEEPSLATE = 126,
+  DEEPSLATE_BRICKS = 127,
+  TUFF = 128,
+  DIORITE = 129,
+  ANDESITE = 130,
+  BLACKSTONE = 131,
+  SMOOTH_BASALT = 132,
+  DRIPSTONE_BLOCK = 133,
+  BEDROCK = 134,
+  MOSSY_COBBLESTONE = 135,
+  STONE_BRICKS = 136,
+  MOSSY_STONE_BRICKS = 137,
+  BRICKS = 138,
+  MUD_BRICKS = 139,
+  PACKED_MUD = 140,
+  AMETHYST_BLOCK = 141,
+  NETHERRACK = 142,
+  SCULK = 143,
+  PRISMARINE = 144,
+  BLUE_ICE = 145,
+  CORAL_DEAD = 146,
+  MYCELIUM = 147,
+  ROOTED_DIRT = 148,
+  RED_MUSHROOM_BLOCK = 149,
+  BROWN_MUSHROOM_BLOCK = 150,
+  MUSHROOM_STEM = 151,
+  MOSS_CARPET = 152,
+  MANGROVE_ROOTS = 153,
+  HAY_BLOCK = 154,
+  PUMPKIN = 155,
+  MELON = 156,
+  LAVA = 157,
+  TERRACOTTA_BLACK = 158,
+  TERRACOTTA_BLUE = 159,
+  TERRACOTTA_CYAN = 160,
+  TERRACOTTA_GRAY = 161,
+  TERRACOTTA_GREEN = 162,
+  TERRACOTTA_LIGHT_BLUE = 163,
+  TERRACOTTA_LIGHT_GRAY = 164,
+  TERRACOTTA_LIME = 165,
+  TERRACOTTA_MAGENTA = 166,
+  TERRACOTTA_PINK = 167,
+  PLANKS_SPRUCE = 168,
+  PLANKS_BIRCH = 169,
+  PLANKS_JUNGLE = 170,
+  PLANKS_ACACIA = 171,
+  PLANKS_DARK_OAK = 172,
+  PLANKS_CHERRY = 173,
+  PLANKS_MANGROVE = 174,
+  LOG_DARK_OAK = 175,
+  LEAVES_DARK_OAK = 176,
+  LEAVES_AZALEA = 177,
+  LEAVES_AZALEA_FLOWERING = 178,
+  ALLIUM = 179,
+  AZURE_BLUET = 180,
+  BLUE_ORCHID = 181,
+  CORNFLOWER = 182,
+  OXEYE_DAISY = 183,
+  LILY_OF_THE_VALLEY = 184,
+  TORCHFLOWER = 185,
+  TULIP_RED = 186,
+  TULIP_ORANGE = 187,
+  TULIP_WHITE = 188,
+  TULIP_PINK = 189,
+  SUNFLOWER = 190,
+  LILAC = 191,
+  ROSE_BUSH = 192,
+  PEONY = 193,
+  VINE = 194,
+  CAVE_VINES = 195,
+  HANGING_ROOTS = 196,
+  COBWEB = 197,
+  POINTED_DRIPSTONE_UP = 198,
+  POINTED_DRIPSTONE_DOWN = 199,
+  TORCH = 200,
+  SNOW_LAYER = 201,
+  PINK_PETALS = 202,
+  COBBLESTONE_STAIRS_NORTH = 203,
+  COBBLESTONE_STAIRS_SOUTH = 204,
+  COBBLESTONE_STAIRS_EAST = 205,
+  COBBLESTONE_STAIRS_WEST = 206,
 }
 
 export function isWater(block: BlockType): boolean {
@@ -151,6 +233,8 @@ export function getWaterLevel(block: BlockType): number {
 export function getBlockLightLevel(block: BlockType): number {
   if (block === BlockType.GLOWSTONE) return 15;
   if (block === BlockType.MAGMA) return 8;
+  if (block === BlockType.LAVA) return 15;
+  if (block === BlockType.TORCH) return 14;
   return 0;
 }
 
@@ -165,7 +249,10 @@ export function isReplaceable(block: BlockType): boolean {
     block === BlockType.WATER_LEVEL_5 ||
     block === BlockType.WATER_LEVEL_6 ||
     block === BlockType.WATER_LEVEL_7 ||
-    block === BlockType.WATER_FALLING
+    block === BlockType.WATER_FALLING ||
+    block === BlockType.MOSS_CARPET ||
+    block === BlockType.SNOW_LAYER ||
+    block === BlockType.PINK_PETALS
   );
 }
 
@@ -205,14 +292,39 @@ export function isCrossBlock(block: BlockType): boolean {
     block === BlockType.HEATHER ||
     block === BlockType.AGAVE ||
     block === BlockType.BROWN_MUSHROOM ||
-    block === BlockType.RED_MUSHROOM
+    block === BlockType.RED_MUSHROOM ||
+    block === BlockType.ALLIUM ||
+    block === BlockType.AZURE_BLUET ||
+    block === BlockType.BLUE_ORCHID ||
+    block === BlockType.CORNFLOWER ||
+    block === BlockType.OXEYE_DAISY ||
+    block === BlockType.LILY_OF_THE_VALLEY ||
+    block === BlockType.TORCHFLOWER ||
+    block === BlockType.TULIP_RED ||
+    block === BlockType.TULIP_ORANGE ||
+    block === BlockType.TULIP_WHITE ||
+    block === BlockType.TULIP_PINK ||
+    block === BlockType.SUNFLOWER ||
+    block === BlockType.LILAC ||
+    block === BlockType.ROSE_BUSH ||
+    block === BlockType.PEONY ||
+    block === BlockType.VINE ||
+    block === BlockType.CAVE_VINES ||
+    block === BlockType.HANGING_ROOTS ||
+    block === BlockType.COBWEB ||
+    block === BlockType.POINTED_DRIPSTONE_UP ||
+    block === BlockType.POINTED_DRIPSTONE_DOWN ||
+    block === BlockType.TORCH
   );
 }
 
 export function isFlatQuad(block: BlockType): boolean {
   return (
     block === BlockType.BELLIS_FLOWER ||
-    block === BlockType.LILY_PAD
+    block === BlockType.LILY_PAD ||
+    block === BlockType.MOSS_CARPET ||
+    block === BlockType.SNOW_LAYER ||
+    block === BlockType.PINK_PETALS
   );
 }
 
@@ -227,7 +339,11 @@ export function isStairs(block: BlockType): boolean {
     block === BlockType.PLANKS_STAIRS_NORTH ||
     block === BlockType.PLANKS_STAIRS_SOUTH ||
     block === BlockType.PLANKS_STAIRS_EAST ||
-    block === BlockType.PLANKS_STAIRS_WEST
+    block === BlockType.PLANKS_STAIRS_WEST ||
+    block === BlockType.COBBLESTONE_STAIRS_NORTH ||
+    block === BlockType.COBBLESTONE_STAIRS_SOUTH ||
+    block === BlockType.COBBLESTONE_STAIRS_EAST ||
+    block === BlockType.COBBLESTONE_STAIRS_WEST
   );
 }
 
@@ -237,6 +353,10 @@ export function getDirection(block: BlockType): "NORTH" | "SOUTH" | "EAST" | "WE
     case BlockType.PLANKS_STAIRS_SOUTH: return "SOUTH";
     case BlockType.PLANKS_STAIRS_EAST: return "EAST";
     case BlockType.PLANKS_STAIRS_WEST: return "WEST";
+    case BlockType.COBBLESTONE_STAIRS_NORTH: return "NORTH";
+    case BlockType.COBBLESTONE_STAIRS_SOUTH: return "SOUTH";
+    case BlockType.COBBLESTONE_STAIRS_EAST: return "EAST";
+    case BlockType.COBBLESTONE_STAIRS_WEST: return "WEST";
     default: return null;
   }
 }
@@ -270,6 +390,35 @@ export function getHitboxes(block: BlockType): { scale: [number, number, number]
     case BlockType.BROWN_MUSHROOM: return [{"scale":[0.6,1.002,0.6],"offset":[0,0,0]}];
     case BlockType.RED_MUSHROOM: return [{"scale":[0.6,1.002,0.6],"offset":[0,0,0]}];
     case BlockType.LILY_PAD: return [{"scale":[1.002,0.08,1.002],"offset":[0,-0.46,0]}];
+    case BlockType.MOSS_CARPET: return [{"scale":[1.002,0.08,1.002],"offset":[0,-0.46,0]}];
+    case BlockType.ALLIUM: return [{"scale":[0.6,1.002,0.6],"offset":[0,0,0]}];
+    case BlockType.AZURE_BLUET: return [{"scale":[0.6,1.002,0.6],"offset":[0,0,0]}];
+    case BlockType.BLUE_ORCHID: return [{"scale":[0.6,1.002,0.6],"offset":[0,0,0]}];
+    case BlockType.CORNFLOWER: return [{"scale":[0.6,1.002,0.6],"offset":[0,0,0]}];
+    case BlockType.OXEYE_DAISY: return [{"scale":[0.6,1.002,0.6],"offset":[0,0,0]}];
+    case BlockType.LILY_OF_THE_VALLEY: return [{"scale":[0.6,1.002,0.6],"offset":[0,0,0]}];
+    case BlockType.TORCHFLOWER: return [{"scale":[0.6,1.002,0.6],"offset":[0,0,0]}];
+    case BlockType.TULIP_RED: return [{"scale":[0.6,1.002,0.6],"offset":[0,0,0]}];
+    case BlockType.TULIP_ORANGE: return [{"scale":[0.6,1.002,0.6],"offset":[0,0,0]}];
+    case BlockType.TULIP_WHITE: return [{"scale":[0.6,1.002,0.6],"offset":[0,0,0]}];
+    case BlockType.TULIP_PINK: return [{"scale":[0.6,1.002,0.6],"offset":[0,0,0]}];
+    case BlockType.SUNFLOWER: return [{"scale":[0.6,1.002,0.6],"offset":[0,0,0]}];
+    case BlockType.LILAC: return [{"scale":[0.6,1.002,0.6],"offset":[0,0,0]}];
+    case BlockType.ROSE_BUSH: return [{"scale":[0.6,1.002,0.6],"offset":[0,0,0]}];
+    case BlockType.PEONY: return [{"scale":[0.6,1.002,0.6],"offset":[0,0,0]}];
+    case BlockType.VINE: return [{"scale":[0.6,1.002,0.6],"offset":[0,0,0]}];
+    case BlockType.CAVE_VINES: return [{"scale":[0.6,1.002,0.6],"offset":[0,0,0]}];
+    case BlockType.HANGING_ROOTS: return [{"scale":[0.6,1.002,0.6],"offset":[0,0,0]}];
+    case BlockType.COBWEB: return [{"scale":[0.6,1.002,0.6],"offset":[0,0,0]}];
+    case BlockType.POINTED_DRIPSTONE_UP: return [{"scale":[0.6,1.002,0.6],"offset":[0,0,0]}];
+    case BlockType.POINTED_DRIPSTONE_DOWN: return [{"scale":[0.6,1.002,0.6],"offset":[0,0,0]}];
+    case BlockType.TORCH: return [{"scale":[0.6,1.002,0.6],"offset":[0,0,0]}];
+    case BlockType.SNOW_LAYER: return [{"scale":[1.002,0.08,1.002],"offset":[0,-0.46,0]}];
+    case BlockType.PINK_PETALS: return [{"scale":[1.002,0.08,1.002],"offset":[0,-0.46,0]}];
+    case BlockType.COBBLESTONE_STAIRS_NORTH: return [{"scale":[1.002,0.502,1.002],"offset":[0,-0.25,0]},{"scale":[1.002,0.502,0.502],"offset":[0,0.25,-0.25]}];
+    case BlockType.COBBLESTONE_STAIRS_SOUTH: return [{"scale":[1.002,0.502,1.002],"offset":[0,-0.25,0]},{"scale":[1.002,0.502,0.502],"offset":[0,0.25,0.25]}];
+    case BlockType.COBBLESTONE_STAIRS_EAST: return [{"scale":[1.002,0.502,1.002],"offset":[0,-0.25,0]},{"scale":[0.502,0.502,1.002],"offset":[0.25,0.25,0]}];
+    case BlockType.COBBLESTONE_STAIRS_WEST: return [{"scale":[1.002,0.502,1.002],"offset":[0,-0.25,0]},{"scale":[0.502,0.502,1.002],"offset":[-0.25,0.25,0]}];
     default: return [{ scale: [1.002, 1.002, 1.002], offset: [0, 0, 0] }];
   }
 }
@@ -312,6 +461,7 @@ export const Texture = {
   SAPLING: "sapling.png",
   FLOWER_BELLIS: "flower_bellis.png",
   FLOWER_FORGETMENOTS: "flower_forgetmenots.png",
+  GLOWSTONE: "glowstone.png",
   GRASS_LUSH_SIDE: "grass_lush_side.png",
   GRASS_LUSH_TOP: "grass_lush_top.png",
   GRASS_DRY_SIDE: "grass_dry_side.png",
@@ -401,6 +551,91 @@ export const Texture = {
   BROWN_MUSHROOM: "brown_mushroom.png",
   RED_MUSHROOM: "red_mushroom.png",
   LILY_PAD: "lily_pad.png",
+  DEEPSLATE_TOP: "deepslate_top.png",
+  DEEPSLATE: "deepslate.png",
+  COBBLED_DEEPSLATE: "cobbled_deepslate.png",
+  DEEPSLATE_BRICKS: "deepslate_bricks.png",
+  TUFF: "tuff.png",
+  DIORITE: "diorite.png",
+  ANDESITE: "andesite.png",
+  BLACKSTONE_TOP: "blackstone_top.png",
+  BLACKSTONE: "blackstone.png",
+  SMOOTH_BASALT: "smooth_basalt.png",
+  DRIPSTONE_BLOCK: "dripstone_block.png",
+  BEDROCK: "bedrock.png",
+  MOSSY_COBBLESTONE: "mossy_cobblestone.png",
+  STONE_BRICKS: "stone_bricks.png",
+  MOSSY_STONE_BRICKS: "mossy_stone_bricks.png",
+  BRICKS: "bricks.png",
+  MUD_BRICKS: "mud_bricks.png",
+  PACKED_MUD: "packed_mud.png",
+  AMETHYST_BLOCK: "amethyst_block.png",
+  NETHERRACK: "netherrack.png",
+  SCULK: "sculk.png",
+  PRISMARINE: "prismarine.png",
+  BLUE_ICE: "blue_ice.png",
+  DEAD_TUBE_CORAL_BLOCK: "dead_tube_coral_block.png",
+  MYCELIUM_SIDE: "mycelium_side.png",
+  MYCELIUM_TOP: "mycelium_top.png",
+  ROOTED_DIRT: "rooted_dirt.png",
+  RED_MUSHROOM_BLOCK: "red_mushroom_block.png",
+  BROWN_MUSHROOM_BLOCK: "brown_mushroom_block.png",
+  MUSHROOM_STEM: "mushroom_stem.png",
+  MANGROVE_ROOTS_TOP: "mangrove_roots_top.png",
+  MANGROVE_ROOTS_SIDE: "mangrove_roots_side.png",
+  HAY_BLOCK_TOP: "hay_block_top.png",
+  HAY_BLOCK_SIDE: "hay_block_side.png",
+  PUMPKIN_TOP: "pumpkin_top.png",
+  PUMPKIN_SIDE: "pumpkin_side.png",
+  MELON_TOP: "melon_top.png",
+  MELON_SIDE: "melon_side.png",
+  LAVA: "lava.png",
+  TERRACOTTA_BLACK: "terracotta_black.png",
+  TERRACOTTA_BLUE: "terracotta_blue.png",
+  TERRACOTTA_CYAN: "terracotta_cyan.png",
+  TERRACOTTA_GRAY: "terracotta_gray.png",
+  TERRACOTTA_GREEN: "terracotta_green.png",
+  TERRACOTTA_LIGHT_BLUE: "terracotta_light_blue.png",
+  TERRACOTTA_LIGHT_GRAY: "terracotta_light_gray.png",
+  TERRACOTTA_LIME: "terracotta_lime.png",
+  TERRACOTTA_MAGENTA: "terracotta_magenta.png",
+  TERRACOTTA_PINK: "terracotta_pink.png",
+  PLANKS_SPRUCE: "planks_spruce.png",
+  PLANKS_BIRCH: "planks_birch.png",
+  PLANKS_JUNGLE: "planks_jungle.png",
+  PLANKS_ACACIA: "planks_acacia.png",
+  PLANKS_DARK_OAK: "planks_dark_oak.png",
+  PLANKS_CHERRY: "planks_cherry.png",
+  PLANKS_MANGROVE: "planks_mangrove.png",
+  LOG_DARK_OAK_TOP: "log_dark_oak_top.png",
+  LOG_DARK_OAK_SIDE: "log_dark_oak_side.png",
+  LEAVES_DARK_OAK: "leaves_dark_oak.png",
+  LEAVES_AZALEA: "leaves_azalea.png",
+  LEAVES_AZALEA_FLOWERING: "leaves_azalea_flowering.png",
+  FLOWER_ALLIUM: "flower_allium.png",
+  FLOWER_AZURE_BLUET: "flower_azure_bluet.png",
+  FLOWER_BLUE_ORCHID: "flower_blue_orchid.png",
+  FLOWER_CORNFLOWER: "flower_cornflower.png",
+  FLOWER_OXEYE_DAISY: "flower_oxeye_daisy.png",
+  FLOWER_LILY_OF_THE_VALLEY: "flower_lily_of_the_valley.png",
+  FLOWER_TORCHFLOWER: "flower_torchflower.png",
+  FLOWER_TULIP_RED: "flower_tulip_red.png",
+  FLOWER_TULIP_ORANGE: "flower_tulip_orange.png",
+  FLOWER_TULIP_WHITE: "flower_tulip_white.png",
+  FLOWER_TULIP_PINK: "flower_tulip_pink.png",
+  FLOWER_SUNFLOWER: "flower_sunflower.png",
+  FLOWER_LILAC: "flower_lilac.png",
+  FLOWER_ROSE_BUSH: "flower_rose_bush.png",
+  FLOWER_PEONY: "flower_peony.png",
+  VINE: "vine.png",
+  CAVE_VINES: "cave_vines.png",
+  HANGING_ROOTS: "hanging_roots.png",
+  COBWEB: "cobweb.png",
+  POINTED_DRIPSTONE_UP: "pointed_dripstone_up.png",
+  POINTED_DRIPSTONE_DOWN: "pointed_dripstone_down.png",
+  TORCH: "torch.png",
+  SNOW_LAYER: "snow_layer.png",
+  PINK_PETALS: "pink_petals.png",
 };
 
 export const LOADING_SCREEN_TEXTURES = [
@@ -434,6 +669,7 @@ export const LOADING_SCREEN_TEXTURES = [
   "sapling.png",
   "flower_bellis.png",
   "flower_forgetmenots.png",
+  "glowstone.png",
   "grass_lush_side.png",
   "grass_lush_top.png",
   "grass_dry_side.png",
@@ -523,6 +759,91 @@ export const LOADING_SCREEN_TEXTURES = [
   "brown_mushroom.png",
   "red_mushroom.png",
   "lily_pad.png",
+  "deepslate_top.png",
+  "deepslate.png",
+  "cobbled_deepslate.png",
+  "deepslate_bricks.png",
+  "tuff.png",
+  "diorite.png",
+  "andesite.png",
+  "blackstone_top.png",
+  "blackstone.png",
+  "smooth_basalt.png",
+  "dripstone_block.png",
+  "bedrock.png",
+  "mossy_cobblestone.png",
+  "stone_bricks.png",
+  "mossy_stone_bricks.png",
+  "bricks.png",
+  "mud_bricks.png",
+  "packed_mud.png",
+  "amethyst_block.png",
+  "netherrack.png",
+  "sculk.png",
+  "prismarine.png",
+  "blue_ice.png",
+  "dead_tube_coral_block.png",
+  "mycelium_side.png",
+  "mycelium_top.png",
+  "rooted_dirt.png",
+  "red_mushroom_block.png",
+  "brown_mushroom_block.png",
+  "mushroom_stem.png",
+  "mangrove_roots_top.png",
+  "mangrove_roots_side.png",
+  "hay_block_top.png",
+  "hay_block_side.png",
+  "pumpkin_top.png",
+  "pumpkin_side.png",
+  "melon_top.png",
+  "melon_side.png",
+  "lava.png",
+  "terracotta_black.png",
+  "terracotta_blue.png",
+  "terracotta_cyan.png",
+  "terracotta_gray.png",
+  "terracotta_green.png",
+  "terracotta_light_blue.png",
+  "terracotta_light_gray.png",
+  "terracotta_lime.png",
+  "terracotta_magenta.png",
+  "terracotta_pink.png",
+  "planks_spruce.png",
+  "planks_birch.png",
+  "planks_jungle.png",
+  "planks_acacia.png",
+  "planks_dark_oak.png",
+  "planks_cherry.png",
+  "planks_mangrove.png",
+  "log_dark_oak_top.png",
+  "log_dark_oak_side.png",
+  "leaves_dark_oak.png",
+  "leaves_azalea.png",
+  "leaves_azalea_flowering.png",
+  "flower_allium.png",
+  "flower_azure_bluet.png",
+  "flower_blue_orchid.png",
+  "flower_cornflower.png",
+  "flower_oxeye_daisy.png",
+  "flower_lily_of_the_valley.png",
+  "flower_torchflower.png",
+  "flower_tulip_red.png",
+  "flower_tulip_orange.png",
+  "flower_tulip_white.png",
+  "flower_tulip_pink.png",
+  "flower_sunflower.png",
+  "flower_lilac.png",
+  "flower_rose_bush.png",
+  "flower_peony.png",
+  "vine.png",
+  "cave_vines.png",
+  "hanging_roots.png",
+  "cobweb.png",
+  "pointed_dripstone_up.png",
+  "pointed_dripstone_down.png",
+  "torch.png",
+  "snow_layer.png",
+  "pink_petals.png",
 ];
 
 function getTextureIndexByName(name: string): number {
@@ -736,7 +1057,7 @@ BLOCK_TEXTURES[BlockType.PLANKS_STAIRS_WEST] = {
 };
 
 BLOCK_TEXTURES[BlockType.GLOWSTONE] = {
-  DEFAULT: getTextureIndexByName("INVALID"),
+  DEFAULT: getTextureIndexByName("GLOWSTONE"),
 };
 
 BLOCK_TEXTURES[BlockType.GRASS_LUSH] = {
@@ -1048,6 +1369,343 @@ BLOCK_TEXTURES[BlockType.LILY_PAD] = {
   DEFAULT: getTextureIndexByName("LILY_PAD"),
 };
 
+BLOCK_TEXTURES[BlockType.DEEPSLATE] = {
+  DEFAULT: getTextureIndexByName("DEEPSLATE_TOP"),
+  SIDES: getTextureIndexByName("DEEPSLATE"),
+};
+
+BLOCK_TEXTURES[BlockType.COBBLED_DEEPSLATE] = {
+  DEFAULT: getTextureIndexByName("COBBLED_DEEPSLATE"),
+};
+
+BLOCK_TEXTURES[BlockType.DEEPSLATE_BRICKS] = {
+  DEFAULT: getTextureIndexByName("DEEPSLATE_BRICKS"),
+};
+
+BLOCK_TEXTURES[BlockType.TUFF] = {
+  DEFAULT: getTextureIndexByName("TUFF"),
+};
+
+BLOCK_TEXTURES[BlockType.DIORITE] = {
+  DEFAULT: getTextureIndexByName("DIORITE"),
+};
+
+BLOCK_TEXTURES[BlockType.ANDESITE] = {
+  DEFAULT: getTextureIndexByName("ANDESITE"),
+};
+
+BLOCK_TEXTURES[BlockType.BLACKSTONE] = {
+  DEFAULT: getTextureIndexByName("BLACKSTONE_TOP"),
+  SIDES: getTextureIndexByName("BLACKSTONE"),
+};
+
+BLOCK_TEXTURES[BlockType.SMOOTH_BASALT] = {
+  DEFAULT: getTextureIndexByName("SMOOTH_BASALT"),
+};
+
+BLOCK_TEXTURES[BlockType.DRIPSTONE_BLOCK] = {
+  DEFAULT: getTextureIndexByName("DRIPSTONE_BLOCK"),
+};
+
+BLOCK_TEXTURES[BlockType.BEDROCK] = {
+  DEFAULT: getTextureIndexByName("BEDROCK"),
+};
+
+BLOCK_TEXTURES[BlockType.MOSSY_COBBLESTONE] = {
+  DEFAULT: getTextureIndexByName("MOSSY_COBBLESTONE"),
+};
+
+BLOCK_TEXTURES[BlockType.STONE_BRICKS] = {
+  DEFAULT: getTextureIndexByName("STONE_BRICKS"),
+};
+
+BLOCK_TEXTURES[BlockType.MOSSY_STONE_BRICKS] = {
+  DEFAULT: getTextureIndexByName("MOSSY_STONE_BRICKS"),
+};
+
+BLOCK_TEXTURES[BlockType.BRICKS] = {
+  DEFAULT: getTextureIndexByName("BRICKS"),
+};
+
+BLOCK_TEXTURES[BlockType.MUD_BRICKS] = {
+  DEFAULT: getTextureIndexByName("MUD_BRICKS"),
+};
+
+BLOCK_TEXTURES[BlockType.PACKED_MUD] = {
+  DEFAULT: getTextureIndexByName("PACKED_MUD"),
+};
+
+BLOCK_TEXTURES[BlockType.AMETHYST_BLOCK] = {
+  DEFAULT: getTextureIndexByName("AMETHYST_BLOCK"),
+};
+
+BLOCK_TEXTURES[BlockType.NETHERRACK] = {
+  DEFAULT: getTextureIndexByName("NETHERRACK"),
+};
+
+BLOCK_TEXTURES[BlockType.SCULK] = {
+  DEFAULT: getTextureIndexByName("SCULK"),
+};
+
+BLOCK_TEXTURES[BlockType.PRISMARINE] = {
+  DEFAULT: getTextureIndexByName("PRISMARINE"),
+};
+
+BLOCK_TEXTURES[BlockType.BLUE_ICE] = {
+  DEFAULT: getTextureIndexByName("BLUE_ICE"),
+};
+
+BLOCK_TEXTURES[BlockType.CORAL_DEAD] = {
+  DEFAULT: getTextureIndexByName("DEAD_TUBE_CORAL_BLOCK"),
+};
+
+BLOCK_TEXTURES[BlockType.MYCELIUM] = {
+  DEFAULT: getTextureIndexByName("DIRT"),
+  SIDES: getTextureIndexByName("MYCELIUM_SIDE"),
+  TOP_FACE: getTextureIndexByName("MYCELIUM_TOP"),
+};
+
+BLOCK_TEXTURES[BlockType.ROOTED_DIRT] = {
+  DEFAULT: getTextureIndexByName("ROOTED_DIRT"),
+};
+
+BLOCK_TEXTURES[BlockType.RED_MUSHROOM_BLOCK] = {
+  DEFAULT: getTextureIndexByName("RED_MUSHROOM_BLOCK"),
+};
+
+BLOCK_TEXTURES[BlockType.BROWN_MUSHROOM_BLOCK] = {
+  DEFAULT: getTextureIndexByName("BROWN_MUSHROOM_BLOCK"),
+};
+
+BLOCK_TEXTURES[BlockType.MUSHROOM_STEM] = {
+  DEFAULT: getTextureIndexByName("MUSHROOM_STEM"),
+};
+
+BLOCK_TEXTURES[BlockType.MOSS_CARPET] = {
+  DEFAULT: getTextureIndexByName("MOSS"),
+};
+
+BLOCK_TEXTURES[BlockType.MANGROVE_ROOTS] = {
+  DEFAULT: getTextureIndexByName("MANGROVE_ROOTS_TOP"),
+  SIDES: getTextureIndexByName("MANGROVE_ROOTS_SIDE"),
+};
+
+BLOCK_TEXTURES[BlockType.HAY_BLOCK] = {
+  DEFAULT: getTextureIndexByName("HAY_BLOCK_TOP"),
+  SIDES: getTextureIndexByName("HAY_BLOCK_SIDE"),
+};
+
+BLOCK_TEXTURES[BlockType.PUMPKIN] = {
+  DEFAULT: getTextureIndexByName("PUMPKIN_TOP"),
+  SIDES: getTextureIndexByName("PUMPKIN_SIDE"),
+};
+
+BLOCK_TEXTURES[BlockType.MELON] = {
+  DEFAULT: getTextureIndexByName("MELON_TOP"),
+  SIDES: getTextureIndexByName("MELON_SIDE"),
+};
+
+BLOCK_TEXTURES[BlockType.LAVA] = {
+  DEFAULT: getTextureIndexByName("LAVA"),
+};
+
+BLOCK_TEXTURES[BlockType.TERRACOTTA_BLACK] = {
+  DEFAULT: getTextureIndexByName("TERRACOTTA_BLACK"),
+};
+
+BLOCK_TEXTURES[BlockType.TERRACOTTA_BLUE] = {
+  DEFAULT: getTextureIndexByName("TERRACOTTA_BLUE"),
+};
+
+BLOCK_TEXTURES[BlockType.TERRACOTTA_CYAN] = {
+  DEFAULT: getTextureIndexByName("TERRACOTTA_CYAN"),
+};
+
+BLOCK_TEXTURES[BlockType.TERRACOTTA_GRAY] = {
+  DEFAULT: getTextureIndexByName("TERRACOTTA_GRAY"),
+};
+
+BLOCK_TEXTURES[BlockType.TERRACOTTA_GREEN] = {
+  DEFAULT: getTextureIndexByName("TERRACOTTA_GREEN"),
+};
+
+BLOCK_TEXTURES[BlockType.TERRACOTTA_LIGHT_BLUE] = {
+  DEFAULT: getTextureIndexByName("TERRACOTTA_LIGHT_BLUE"),
+};
+
+BLOCK_TEXTURES[BlockType.TERRACOTTA_LIGHT_GRAY] = {
+  DEFAULT: getTextureIndexByName("TERRACOTTA_LIGHT_GRAY"),
+};
+
+BLOCK_TEXTURES[BlockType.TERRACOTTA_LIME] = {
+  DEFAULT: getTextureIndexByName("TERRACOTTA_LIME"),
+};
+
+BLOCK_TEXTURES[BlockType.TERRACOTTA_MAGENTA] = {
+  DEFAULT: getTextureIndexByName("TERRACOTTA_MAGENTA"),
+};
+
+BLOCK_TEXTURES[BlockType.TERRACOTTA_PINK] = {
+  DEFAULT: getTextureIndexByName("TERRACOTTA_PINK"),
+};
+
+BLOCK_TEXTURES[BlockType.PLANKS_SPRUCE] = {
+  DEFAULT: getTextureIndexByName("PLANKS_SPRUCE"),
+};
+
+BLOCK_TEXTURES[BlockType.PLANKS_BIRCH] = {
+  DEFAULT: getTextureIndexByName("PLANKS_BIRCH"),
+};
+
+BLOCK_TEXTURES[BlockType.PLANKS_JUNGLE] = {
+  DEFAULT: getTextureIndexByName("PLANKS_JUNGLE"),
+};
+
+BLOCK_TEXTURES[BlockType.PLANKS_ACACIA] = {
+  DEFAULT: getTextureIndexByName("PLANKS_ACACIA"),
+};
+
+BLOCK_TEXTURES[BlockType.PLANKS_DARK_OAK] = {
+  DEFAULT: getTextureIndexByName("PLANKS_DARK_OAK"),
+};
+
+BLOCK_TEXTURES[BlockType.PLANKS_CHERRY] = {
+  DEFAULT: getTextureIndexByName("PLANKS_CHERRY"),
+};
+
+BLOCK_TEXTURES[BlockType.PLANKS_MANGROVE] = {
+  DEFAULT: getTextureIndexByName("PLANKS_MANGROVE"),
+};
+
+BLOCK_TEXTURES[BlockType.LOG_DARK_OAK] = {
+  DEFAULT: getTextureIndexByName("LOG_DARK_OAK_TOP"),
+  SIDES: getTextureIndexByName("LOG_DARK_OAK_SIDE"),
+};
+
+BLOCK_TEXTURES[BlockType.LEAVES_DARK_OAK] = {
+  DEFAULT: getTextureIndexByName("LEAVES_DARK_OAK"),
+};
+
+BLOCK_TEXTURES[BlockType.LEAVES_AZALEA] = {
+  DEFAULT: getTextureIndexByName("LEAVES_AZALEA"),
+};
+
+BLOCK_TEXTURES[BlockType.LEAVES_AZALEA_FLOWERING] = {
+  DEFAULT: getTextureIndexByName("LEAVES_AZALEA_FLOWERING"),
+};
+
+BLOCK_TEXTURES[BlockType.ALLIUM] = {
+  DEFAULT: getTextureIndexByName("FLOWER_ALLIUM"),
+};
+
+BLOCK_TEXTURES[BlockType.AZURE_BLUET] = {
+  DEFAULT: getTextureIndexByName("FLOWER_AZURE_BLUET"),
+};
+
+BLOCK_TEXTURES[BlockType.BLUE_ORCHID] = {
+  DEFAULT: getTextureIndexByName("FLOWER_BLUE_ORCHID"),
+};
+
+BLOCK_TEXTURES[BlockType.CORNFLOWER] = {
+  DEFAULT: getTextureIndexByName("FLOWER_CORNFLOWER"),
+};
+
+BLOCK_TEXTURES[BlockType.OXEYE_DAISY] = {
+  DEFAULT: getTextureIndexByName("FLOWER_OXEYE_DAISY"),
+};
+
+BLOCK_TEXTURES[BlockType.LILY_OF_THE_VALLEY] = {
+  DEFAULT: getTextureIndexByName("FLOWER_LILY_OF_THE_VALLEY"),
+};
+
+BLOCK_TEXTURES[BlockType.TORCHFLOWER] = {
+  DEFAULT: getTextureIndexByName("FLOWER_TORCHFLOWER"),
+};
+
+BLOCK_TEXTURES[BlockType.TULIP_RED] = {
+  DEFAULT: getTextureIndexByName("FLOWER_TULIP_RED"),
+};
+
+BLOCK_TEXTURES[BlockType.TULIP_ORANGE] = {
+  DEFAULT: getTextureIndexByName("FLOWER_TULIP_ORANGE"),
+};
+
+BLOCK_TEXTURES[BlockType.TULIP_WHITE] = {
+  DEFAULT: getTextureIndexByName("FLOWER_TULIP_WHITE"),
+};
+
+BLOCK_TEXTURES[BlockType.TULIP_PINK] = {
+  DEFAULT: getTextureIndexByName("FLOWER_TULIP_PINK"),
+};
+
+BLOCK_TEXTURES[BlockType.SUNFLOWER] = {
+  DEFAULT: getTextureIndexByName("FLOWER_SUNFLOWER"),
+};
+
+BLOCK_TEXTURES[BlockType.LILAC] = {
+  DEFAULT: getTextureIndexByName("FLOWER_LILAC"),
+};
+
+BLOCK_TEXTURES[BlockType.ROSE_BUSH] = {
+  DEFAULT: getTextureIndexByName("FLOWER_ROSE_BUSH"),
+};
+
+BLOCK_TEXTURES[BlockType.PEONY] = {
+  DEFAULT: getTextureIndexByName("FLOWER_PEONY"),
+};
+
+BLOCK_TEXTURES[BlockType.VINE] = {
+  DEFAULT: getTextureIndexByName("VINE"),
+};
+
+BLOCK_TEXTURES[BlockType.CAVE_VINES] = {
+  DEFAULT: getTextureIndexByName("CAVE_VINES"),
+};
+
+BLOCK_TEXTURES[BlockType.HANGING_ROOTS] = {
+  DEFAULT: getTextureIndexByName("HANGING_ROOTS"),
+};
+
+BLOCK_TEXTURES[BlockType.COBWEB] = {
+  DEFAULT: getTextureIndexByName("COBWEB"),
+};
+
+BLOCK_TEXTURES[BlockType.POINTED_DRIPSTONE_UP] = {
+  DEFAULT: getTextureIndexByName("POINTED_DRIPSTONE_UP"),
+};
+
+BLOCK_TEXTURES[BlockType.POINTED_DRIPSTONE_DOWN] = {
+  DEFAULT: getTextureIndexByName("POINTED_DRIPSTONE_DOWN"),
+};
+
+BLOCK_TEXTURES[BlockType.TORCH] = {
+  DEFAULT: getTextureIndexByName("TORCH"),
+};
+
+BLOCK_TEXTURES[BlockType.SNOW_LAYER] = {
+  DEFAULT: getTextureIndexByName("SNOW_LAYER"),
+};
+
+BLOCK_TEXTURES[BlockType.PINK_PETALS] = {
+  DEFAULT: getTextureIndexByName("PINK_PETALS"),
+};
+
+BLOCK_TEXTURES[BlockType.COBBLESTONE_STAIRS_NORTH] = {
+  DEFAULT: getTextureIndexByName("COBBLESTONE"),
+};
+
+BLOCK_TEXTURES[BlockType.COBBLESTONE_STAIRS_SOUTH] = {
+  DEFAULT: getTextureIndexByName("COBBLESTONE"),
+};
+
+BLOCK_TEXTURES[BlockType.COBBLESTONE_STAIRS_EAST] = {
+  DEFAULT: getTextureIndexByName("COBBLESTONE"),
+};
+
+BLOCK_TEXTURES[BlockType.COBBLESTONE_STAIRS_WEST] = {
+  DEFAULT: getTextureIndexByName("COBBLESTONE"),
+};
+
 export const TRANSPARENT_BLOCKS = [
   BlockType.AIR,
   BlockType.LEAVES,
@@ -1102,6 +1760,39 @@ export const TRANSPARENT_BLOCKS = [
   BlockType.BROWN_MUSHROOM,
   BlockType.RED_MUSHROOM,
   BlockType.LILY_PAD,
+  BlockType.MOSS_CARPET,
+  BlockType.MANGROVE_ROOTS,
+  BlockType.LEAVES_DARK_OAK,
+  BlockType.LEAVES_AZALEA,
+  BlockType.LEAVES_AZALEA_FLOWERING,
+  BlockType.ALLIUM,
+  BlockType.AZURE_BLUET,
+  BlockType.BLUE_ORCHID,
+  BlockType.CORNFLOWER,
+  BlockType.OXEYE_DAISY,
+  BlockType.LILY_OF_THE_VALLEY,
+  BlockType.TORCHFLOWER,
+  BlockType.TULIP_RED,
+  BlockType.TULIP_ORANGE,
+  BlockType.TULIP_WHITE,
+  BlockType.TULIP_PINK,
+  BlockType.SUNFLOWER,
+  BlockType.LILAC,
+  BlockType.ROSE_BUSH,
+  BlockType.PEONY,
+  BlockType.VINE,
+  BlockType.CAVE_VINES,
+  BlockType.HANGING_ROOTS,
+  BlockType.COBWEB,
+  BlockType.POINTED_DRIPSTONE_UP,
+  BlockType.POINTED_DRIPSTONE_DOWN,
+  BlockType.TORCH,
+  BlockType.SNOW_LAYER,
+  BlockType.PINK_PETALS,
+  BlockType.COBBLESTONE_STAIRS_NORTH,
+  BlockType.COBBLESTONE_STAIRS_SOUTH,
+  BlockType.COBBLESTONE_STAIRS_EAST,
+  BlockType.COBBLESTONE_STAIRS_WEST,
 ];
 
 export const TRANSLUCENT_BLOCKS = [
@@ -1147,6 +1838,32 @@ export const NON_COLLIDABLE_BLOCKS = [
   BlockType.BROWN_MUSHROOM,
   BlockType.RED_MUSHROOM,
   BlockType.LILY_PAD,
+  BlockType.MOSS_CARPET,
+  BlockType.LAVA,
+  BlockType.ALLIUM,
+  BlockType.AZURE_BLUET,
+  BlockType.BLUE_ORCHID,
+  BlockType.CORNFLOWER,
+  BlockType.OXEYE_DAISY,
+  BlockType.LILY_OF_THE_VALLEY,
+  BlockType.TORCHFLOWER,
+  BlockType.TULIP_RED,
+  BlockType.TULIP_ORANGE,
+  BlockType.TULIP_WHITE,
+  BlockType.TULIP_PINK,
+  BlockType.SUNFLOWER,
+  BlockType.LILAC,
+  BlockType.ROSE_BUSH,
+  BlockType.PEONY,
+  BlockType.VINE,
+  BlockType.CAVE_VINES,
+  BlockType.HANGING_ROOTS,
+  BlockType.COBWEB,
+  BlockType.POINTED_DRIPSTONE_UP,
+  BlockType.POINTED_DRIPSTONE_DOWN,
+  BlockType.TORCH,
+  BlockType.SNOW_LAYER,
+  BlockType.PINK_PETALS,
 ];
 
 export const BLOCK_ITEM_TEXTURES: Record<
@@ -1199,7 +1916,7 @@ export const BLOCK_ITEM_TEXTURES: Record<
   [BlockType.PLANKS_STAIRS_SOUTH]: Texture.PLANKS,
   [BlockType.PLANKS_STAIRS_EAST]: Texture.PLANKS,
   [BlockType.PLANKS_STAIRS_WEST]: Texture.PLANKS,
-  [BlockType.GLOWSTONE]: Texture.INVALID,
+  [BlockType.GLOWSTONE]: Texture.GLOWSTONE,
   [BlockType.GRASS_LUSH]: Texture.GRASS_LUSH_SIDE,
   [BlockType.GRASS_DRY]: Texture.GRASS_DRY_SIDE,
   [BlockType.GRASS_COLD]: Texture.GRASS_COLD_SIDE,
@@ -1270,4 +1987,86 @@ export const BLOCK_ITEM_TEXTURES: Record<
   [BlockType.BROWN_MUSHROOM]: Texture.BROWN_MUSHROOM,
   [BlockType.RED_MUSHROOM]: Texture.RED_MUSHROOM,
   [BlockType.LILY_PAD]: Texture.LILY_PAD,
+  [BlockType.DEEPSLATE]: Texture.DEEPSLATE,
+  [BlockType.COBBLED_DEEPSLATE]: Texture.COBBLED_DEEPSLATE,
+  [BlockType.DEEPSLATE_BRICKS]: Texture.DEEPSLATE_BRICKS,
+  [BlockType.TUFF]: Texture.TUFF,
+  [BlockType.DIORITE]: Texture.DIORITE,
+  [BlockType.ANDESITE]: Texture.ANDESITE,
+  [BlockType.BLACKSTONE]: Texture.BLACKSTONE,
+  [BlockType.SMOOTH_BASALT]: Texture.SMOOTH_BASALT,
+  [BlockType.DRIPSTONE_BLOCK]: Texture.DRIPSTONE_BLOCK,
+  [BlockType.BEDROCK]: Texture.BEDROCK,
+  [BlockType.MOSSY_COBBLESTONE]: Texture.MOSSY_COBBLESTONE,
+  [BlockType.STONE_BRICKS]: Texture.STONE_BRICKS,
+  [BlockType.MOSSY_STONE_BRICKS]: Texture.MOSSY_STONE_BRICKS,
+  [BlockType.BRICKS]: Texture.BRICKS,
+  [BlockType.MUD_BRICKS]: Texture.MUD_BRICKS,
+  [BlockType.PACKED_MUD]: Texture.PACKED_MUD,
+  [BlockType.AMETHYST_BLOCK]: Texture.AMETHYST_BLOCK,
+  [BlockType.NETHERRACK]: Texture.NETHERRACK,
+  [BlockType.SCULK]: Texture.SCULK,
+  [BlockType.PRISMARINE]: Texture.PRISMARINE,
+  [BlockType.BLUE_ICE]: Texture.BLUE_ICE,
+  [BlockType.CORAL_DEAD]: Texture.DEAD_TUBE_CORAL_BLOCK,
+  [BlockType.MYCELIUM]: Texture.MYCELIUM_SIDE,
+  [BlockType.ROOTED_DIRT]: Texture.ROOTED_DIRT,
+  [BlockType.RED_MUSHROOM_BLOCK]: Texture.RED_MUSHROOM_BLOCK,
+  [BlockType.BROWN_MUSHROOM_BLOCK]: Texture.BROWN_MUSHROOM_BLOCK,
+  [BlockType.MUSHROOM_STEM]: Texture.MUSHROOM_STEM,
+  [BlockType.MOSS_CARPET]: Texture.MOSS,
+  [BlockType.MANGROVE_ROOTS]: Texture.MANGROVE_ROOTS_SIDE,
+  [BlockType.HAY_BLOCK]: Texture.HAY_BLOCK_SIDE,
+  [BlockType.PUMPKIN]: Texture.PUMPKIN_SIDE,
+  [BlockType.MELON]: Texture.MELON_SIDE,
+  [BlockType.LAVA]: Texture.LAVA,
+  [BlockType.TERRACOTTA_BLACK]: Texture.TERRACOTTA_BLACK,
+  [BlockType.TERRACOTTA_BLUE]: Texture.TERRACOTTA_BLUE,
+  [BlockType.TERRACOTTA_CYAN]: Texture.TERRACOTTA_CYAN,
+  [BlockType.TERRACOTTA_GRAY]: Texture.TERRACOTTA_GRAY,
+  [BlockType.TERRACOTTA_GREEN]: Texture.TERRACOTTA_GREEN,
+  [BlockType.TERRACOTTA_LIGHT_BLUE]: Texture.TERRACOTTA_LIGHT_BLUE,
+  [BlockType.TERRACOTTA_LIGHT_GRAY]: Texture.TERRACOTTA_LIGHT_GRAY,
+  [BlockType.TERRACOTTA_LIME]: Texture.TERRACOTTA_LIME,
+  [BlockType.TERRACOTTA_MAGENTA]: Texture.TERRACOTTA_MAGENTA,
+  [BlockType.TERRACOTTA_PINK]: Texture.TERRACOTTA_PINK,
+  [BlockType.PLANKS_SPRUCE]: Texture.PLANKS_SPRUCE,
+  [BlockType.PLANKS_BIRCH]: Texture.PLANKS_BIRCH,
+  [BlockType.PLANKS_JUNGLE]: Texture.PLANKS_JUNGLE,
+  [BlockType.PLANKS_ACACIA]: Texture.PLANKS_ACACIA,
+  [BlockType.PLANKS_DARK_OAK]: Texture.PLANKS_DARK_OAK,
+  [BlockType.PLANKS_CHERRY]: Texture.PLANKS_CHERRY,
+  [BlockType.PLANKS_MANGROVE]: Texture.PLANKS_MANGROVE,
+  [BlockType.LOG_DARK_OAK]: Texture.LOG_DARK_OAK_SIDE,
+  [BlockType.LEAVES_DARK_OAK]: Texture.LEAVES_DARK_OAK,
+  [BlockType.LEAVES_AZALEA]: Texture.LEAVES_AZALEA,
+  [BlockType.LEAVES_AZALEA_FLOWERING]: Texture.LEAVES_AZALEA_FLOWERING,
+  [BlockType.ALLIUM]: Texture.FLOWER_ALLIUM,
+  [BlockType.AZURE_BLUET]: Texture.FLOWER_AZURE_BLUET,
+  [BlockType.BLUE_ORCHID]: Texture.FLOWER_BLUE_ORCHID,
+  [BlockType.CORNFLOWER]: Texture.FLOWER_CORNFLOWER,
+  [BlockType.OXEYE_DAISY]: Texture.FLOWER_OXEYE_DAISY,
+  [BlockType.LILY_OF_THE_VALLEY]: Texture.FLOWER_LILY_OF_THE_VALLEY,
+  [BlockType.TORCHFLOWER]: Texture.FLOWER_TORCHFLOWER,
+  [BlockType.TULIP_RED]: Texture.FLOWER_TULIP_RED,
+  [BlockType.TULIP_ORANGE]: Texture.FLOWER_TULIP_ORANGE,
+  [BlockType.TULIP_WHITE]: Texture.FLOWER_TULIP_WHITE,
+  [BlockType.TULIP_PINK]: Texture.FLOWER_TULIP_PINK,
+  [BlockType.SUNFLOWER]: Texture.FLOWER_SUNFLOWER,
+  [BlockType.LILAC]: Texture.FLOWER_LILAC,
+  [BlockType.ROSE_BUSH]: Texture.FLOWER_ROSE_BUSH,
+  [BlockType.PEONY]: Texture.FLOWER_PEONY,
+  [BlockType.VINE]: Texture.VINE,
+  [BlockType.CAVE_VINES]: Texture.CAVE_VINES,
+  [BlockType.HANGING_ROOTS]: Texture.HANGING_ROOTS,
+  [BlockType.COBWEB]: Texture.COBWEB,
+  [BlockType.POINTED_DRIPSTONE_UP]: Texture.POINTED_DRIPSTONE_UP,
+  [BlockType.POINTED_DRIPSTONE_DOWN]: Texture.POINTED_DRIPSTONE_DOWN,
+  [BlockType.TORCH]: Texture.TORCH,
+  [BlockType.SNOW_LAYER]: Texture.SNOW_LAYER,
+  [BlockType.PINK_PETALS]: Texture.PINK_PETALS,
+  [BlockType.COBBLESTONE_STAIRS_NORTH]: Texture.COBBLESTONE,
+  [BlockType.COBBLESTONE_STAIRS_SOUTH]: Texture.COBBLESTONE,
+  [BlockType.COBBLESTONE_STAIRS_EAST]: Texture.COBBLESTONE,
+  [BlockType.COBBLESTONE_STAIRS_WEST]: Texture.COBBLESTONE,
 };

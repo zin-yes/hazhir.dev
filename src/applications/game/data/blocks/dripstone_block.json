@@ -1,0 +1,6 @@
+{
+  "id": 133,
+  "name": "DRIPSTONE_BLOCK",
+  "texture": "dripstone_block.png",
+  "model": "CUBE"
+}

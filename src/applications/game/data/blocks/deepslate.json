@@ -1,0 +1,9 @@
+{
+  "id": 125,
+  "name": "DEEPSLATE",
+  "texture": {
+    "default": "deepslate_top.png",
+    "sides": "deepslate.png"
+  },
+  "model": "CUBE"
+}

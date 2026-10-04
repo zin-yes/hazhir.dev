@@ -1,0 +1,9 @@
+{
+  "id": 156,
+  "name": "MELON",
+  "texture": {
+    "default": "melon_top.png",
+    "sides": "melon_side.png"
+  },
+  "model": "CUBE"
+}

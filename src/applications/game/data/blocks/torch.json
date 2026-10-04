@@ -1,0 +1,22 @@
+{
+  "id": 200,
+  "name": "TORCH",
+  "texture": "torch.png",
+  "isTransparent": true,
+  "isCollidable": false,
+  "isReplaceable": false,
+  "lightLevel": 14,
+  "model": "X_SHAPE",
+  "hitbox": {
+    "scale": [
+      0.6,
+      1.002,
+      0.6
+    ],
+    "offset": [
+      0,
+      0,
+      0
+    ]
+  }
+}

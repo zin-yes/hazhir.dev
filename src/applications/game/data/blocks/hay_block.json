@@ -1,0 +1,9 @@
+{
+  "id": 154,
+  "name": "HAY_BLOCK",
+  "texture": {
+    "default": "hay_block_top.png",
+    "sides": "hay_block_side.png"
+  },
+  "model": "CUBE"
+}

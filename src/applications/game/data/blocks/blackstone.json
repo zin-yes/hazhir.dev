@@ -1,0 +1,9 @@
+{
+  "id": 131,
+  "name": "BLACKSTONE",
+  "texture": {
+    "default": "blackstone_top.png",
+    "sides": "blackstone.png"
+  },
+  "model": "CUBE"
+}

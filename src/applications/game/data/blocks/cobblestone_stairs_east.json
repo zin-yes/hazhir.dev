@@ -1,0 +1,8 @@
+{
+  "id": 205,
+  "name": "COBBLESTONE_STAIRS_EAST",
+  "texture": "cobblestone.png",
+  "isTransparent": true,
+  "model": "STAIRS",
+  "direction": "EAST"
+}

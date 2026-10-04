@@ -1,0 +1,21 @@
+{
+  "id": 183,
+  "name": "OXEYE_DAISY",
+  "texture": "flower_oxeye_daisy.png",
+  "isTransparent": true,
+  "isCollidable": false,
+  "isReplaceable": false,
+  "model": "X_SHAPE",
+  "hitbox": {
+    "scale": [
+      0.6,
+      1.002,
+      0.6
+    ],
+    "offset": [
+      0,
+      0,
+      0
+    ]
+  }
+}

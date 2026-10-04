@@ -1,0 +1,9 @@
+{
+  "id": 175,
+  "name": "LOG_DARK_OAK",
+  "texture": {
+    "default": "log_dark_oak_top.png",
+    "sides": "log_dark_oak_side.png"
+  },
+  "model": "CUBE"
+}

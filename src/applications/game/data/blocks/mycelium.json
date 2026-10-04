@@ -1,0 +1,10 @@
+{
+  "id": 147,
+  "name": "MYCELIUM",
+  "texture": {
+    "default": "dirt.png",
+    "sides": "mycelium_side.png",
+    "top": "mycelium_top.png"
+  },
+  "model": "CUBE"
+}

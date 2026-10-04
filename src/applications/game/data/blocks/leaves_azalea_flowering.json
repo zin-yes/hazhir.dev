@@ -1,0 +1,7 @@
+{
+  "id": 178,
+  "name": "LEAVES_AZALEA_FLOWERING",
+  "texture": "leaves_azalea_flowering.png",
+  "isTransparent": true,
+  "model": "CUBE"
+}
