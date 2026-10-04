@@ -16,8 +16,6 @@ import {
   CHUNK_WIDTH,
 } from "@/applications/game/config";
 
-import { createSurfaceHeightSampler } from "./generation";
-
 import { calculateOffset } from "../utils";
 import { isPlantVoxelBlock } from "./plant-voxels";
 import { DIMENSIONS } from "../profiler/dimensions";
@@ -411,26 +409,7 @@ export function generateMesh(
   let stairQuadsEmitted = 0;
   let aoQuads = 0;
   let plantInstancesEmitted = 0;
-  let unloadedLightEstimates = 0;
   let edgeLightCellChecks = 0;
-
-  let lookUpSurfaceHeight: ((x: number, z: number) => number) | undefined;
-  // Light for a face whose neighbor chunk is not loaded: sky above the terrain, else dimmed own light.
-  const estimateUnloadedLight = (
-    neighborX: number,
-    neighborY: number,
-    neighborZ: number,
-    ownLight: number
-  ) => {
-    unloadedLightEstimates++;
-    lookUpSurfaceHeight ??= createSurfaceHeightSampler(seed);
-    const surfaceY = lookUpSurfaceHeight(
-      chunkX * CHUNK_WIDTH + neighborX,
-      chunkZ * CHUNK_LENGTH + neighborZ
-    );
-    const heuristic = chunkY * CHUNK_HEIGHT + neighborY > surfaceY ? 15 : 0;
-    return Math.max(heuristic, ownLight - 1);
-  };
 
   const cornerPositionWords = new Int32Array(4);
   const cornerSurfaceWords = new Int32Array(4);
@@ -574,9 +553,7 @@ export function generateMesh(
               neighborY >= CHUNK_HEIGHT ||
               neighborZ < 0 ||
               neighborZ >= CHUNK_LENGTH;
-            if (isNeighborOutside) {
-              faceLight = estimateUnloadedLight(neighborX, neighborY, neighborZ, ownLight);
-            }
+            if (isNeighborOutside) faceLight = ownLight;
           }
 
           const textureIndex = FACE_TEXTURES[face][block];
@@ -707,7 +684,6 @@ export function generateMesh(
   addWorkerCounter("transparentVertices", transparent.vertexCount);
   addWorkerCounter("aoSamples", aoQuads * 12);
   addWorkerCounter("plantInstancesEmitted", plantInstancesEmitted);
-  addWorkerCounter("unloadedLightEstimates", unloadedLightEstimates);
   addWorkerCounter("edgeLightCellChecks", edgeLightCellChecks);
   if (isProfiling) {
     addWorkerCounter("opaqueBytes", opaqueBuffer.byteLength);
