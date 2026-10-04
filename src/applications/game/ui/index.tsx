@@ -5,6 +5,7 @@ import type { LoadStageStatus } from "../load-progress";
 import type { StoredWorld } from "../worlds/world-store";
 import { DebugInfo, DebugOverlay } from "./debug-overlay";
 import { Hotbar } from "./hotbar";
+import type { VideoSettingsValues } from "./menu/video-settings";
 import { Inventory } from "./inventory";
 import { LoadingHud } from "./menu/loading-hud";
 import { PixelSandBackdrop } from "./pixel/pixel-sand-backdrop";
@@ -52,6 +53,8 @@ interface UILayerProps {
   isDebugVisible?: boolean;
   isMobile?: boolean;
   brushRadius?: number;
+  videoSettings: VideoSettingsValues;
+  onVideoSettingsChange: (values: Partial<VideoSettingsValues>) => void;
 }
 
 export default function UILayer({
@@ -84,6 +87,8 @@ export default function UILayer({
   isDebugVisible,
   isMobile,
   brushRadius,
+  videoSettings,
+  onVideoSettingsChange,
 }: UILayerProps) {
   useProfiledRender("uiLayer");
   const isInWorld = phase === "playing" || phase === "paused";
@@ -175,6 +180,8 @@ export default function UILayer({
           onExitToWorlds={onExitToWorlds}
           onHost={onHost}
           onJoin={onJoin}
+          videoSettings={videoSettings}
+          onVideoSettingsChange={onVideoSettingsChange}
         />
       )}
 

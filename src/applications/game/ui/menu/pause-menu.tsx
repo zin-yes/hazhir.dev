@@ -4,11 +4,13 @@ import { ControlsList } from "./controls-list";
 import { MenuBackdrop } from "./menu-primitives";
 import { MultiplayerPanel } from "./multiplayer-panel";
 import { useProfiledRender } from "../use-profiled-render";
+import { VideoSettings, type VideoSettingsValues } from "./video-settings";
 
-type PauseMenuTab = "game" | "controls" | "multiplayer";
+type PauseMenuTab = "game" | "video" | "controls" | "multiplayer";
 
 const TAB_LABELS: Record<PauseMenuTab, string> = {
   game: "Game",
+  video: "Video",
   controls: "Keys",
   multiplayer: "Friends",
 };
@@ -22,6 +24,8 @@ interface PauseMenuProps {
   onExitToWorlds: () => void;
   onHost?: () => void;
   onJoin?: (hostId: string) => void;
+  videoSettings: VideoSettingsValues;
+  onVideoSettingsChange: (values: Partial<VideoSettingsValues>) => void;
 }
 
 export function PauseMenu({
@@ -33,6 +37,8 @@ export function PauseMenu({
   onExitToWorlds,
   onHost,
   onJoin,
+  videoSettings,
+  onVideoSettingsChange,
 }: PauseMenuProps) {
   useProfiledRender("pauseMenu");
   const [activeTab, setActiveTab] = useState<PauseMenuTab>("game");
@@ -49,7 +55,7 @@ export function PauseMenu({
           </h2>
         </header>
 
-        <div className="mb-5 grid grid-cols-3 gap-2">
+        <div className="mb-5 grid grid-cols-4 gap-2">
           {(Object.keys(TAB_LABELS) as PauseMenuTab[]).map((tab) => (
             <PixelButton
               key={tab}
@@ -77,6 +83,9 @@ export function PauseMenu({
               menu is open.
             </p>
           </div>
+        )}
+        {activeTab === "video" && (
+          <VideoSettings initialValues={videoSettings} onChange={onVideoSettingsChange} />
         )}
         {activeTab === "controls" && <ControlsList />}
         {activeTab === "multiplayer" && (

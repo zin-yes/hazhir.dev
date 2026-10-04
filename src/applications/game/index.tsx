@@ -76,6 +76,7 @@ import {
   type RenderSettings,
 } from "./world/render-settings";
 import { packColumnKey } from "./world/chunk-key";
+import { browserStorage, loadStoredRenderSettings, storeRenderSettings } from "./world/render-settings-storage";
 import { installVoxelWorldApi, summarizeEdit, type WorldEditSummary } from "./world/world-api";
 import { castVoxelRay } from "./voxel-ray";
 import { BrushPreview } from "./brush/brush-preview";
@@ -228,7 +229,11 @@ export default function Game() {
 
   const pipelineRef = useRef<ChunkPipeline | null>(null);
   const lodBridgeRef = useRef<GameLodBridge | null>(null);
-  const renderSettingsRef = useRef<RenderSettings>({ ...DEFAULT_RENDER_SETTINGS });
+  const initialRenderSettings = useMemo(
+    () => normalizeRenderSettings({ ...DEFAULT_RENDER_SETTINGS, ...loadStoredRenderSettings(browserStorage()) }),
+    [],
+  );
+  const renderSettingsRef = useRef<RenderSettings>(initialRenderSettings);
   const modifiedChunks = useRef<Map<string, Map<number, number>>>(new Map());
   /** Highest chunk y holding a saved edit, per column key, so tall builds are never skipped as sky. */
   const editedColumnTopsRef = useRef<Map<number, number>>(new Map());
@@ -2487,6 +2492,17 @@ export default function Game() {
           isDebugVisible={isDebugVisible}
           isMobile={isMobile}
           brushRadius={brushHud.enabled ? brushHud.radius : undefined}
+          videoSettings={{
+            renderDistanceChunks: renderSettingsRef.current.horizontalRadius,
+            farTerrainChunks: renderSettingsRef.current.lodRenderDistanceChunks,
+          }}
+          onVideoSettingsChange={({ renderDistanceChunks, farTerrainChunks }) => {
+            const applied = applyRenderSettings({
+              ...(renderDistanceChunks !== undefined ? { horizontalRadius: renderDistanceChunks } : {}),
+              ...(farTerrainChunks !== undefined ? { lodRenderDistanceChunks: farTerrainChunks } : {}),
+            });
+            storeRenderSettings(browserStorage(), applied);
+          }}
         />
         {isMobile && phase === "playing" && (
           <MobileControls
