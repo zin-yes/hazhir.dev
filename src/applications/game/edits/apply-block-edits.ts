@@ -90,9 +90,19 @@ export interface BulkEditResult {
   stats: BulkEditStats;
 }
 
+export type BulkEditPhase =
+  | "writeBlocks"
+  | "seedLightChanges"
+  | "removeSkyLight"
+  | "removeBlockLight"
+  | "refillLight"
+  | "collectChunks";
+
 export interface BulkEditOptions {
   /** Build the per-block change log. Defaults to true. */
   recordChanges?: boolean;
+  /** Called as each phase starts and ends, for main-thread profilers. */
+  onPhase?: (phase: BulkEditPhase, hasStarted: boolean) => void;
 }
 
 interface EditSession {
@@ -108,6 +118,7 @@ interface EditSession {
   editedSlots: number[];
   removalMilliseconds: number;
   refillMilliseconds: number;
+  onPhase: BulkEditOptions["onPhase"];
 }
 
 const INITIAL_CHANGE_CAPACITY = 4096;
@@ -125,9 +136,21 @@ const session: EditSession = {
   editedSlots: [],
   removalMilliseconds: 0,
   refillMilliseconds: 0,
+  onPhase: undefined,
 };
 
-function beginSession(source: LightChunkSource) {
+function beginPhase(phase: BulkEditPhase) {
+  startWorkerSection(phase);
+  session.onPhase?.(phase, true);
+}
+
+function endPhase(phase: BulkEditPhase) {
+  session.onPhase?.(phase, false);
+  endWorkerSection();
+}
+
+function beginSession(source: LightChunkSource, options: BulkEditOptions) {
+  session.onPhase = options.onPhase;
   session.cluster.reset(source);
   session.skyRemovalQueue.clear();
   session.blockRemovalQueue.clear();
@@ -141,6 +164,7 @@ function beginSession(source: LightChunkSource) {
 }
 
 function endSession() {
+  session.onPhase = undefined;
   session.cluster.reset(NO_CHUNKS_SOURCE);
 }
 
@@ -200,7 +224,7 @@ function relightRecordedChanges() {
   const blocksBySlot = cluster.blocksBySlot;
   const lightBySlot = cluster.lightBySlot;
 
-  startWorkerSection("seedLightChanges");
+  beginPhase("seedLightChanges");
   for (let record = 0; record < session.changeCount; record++) {
     const cell = session.changeCells[record];
     const slot = cell >>> CELL_INDEX_BITS;
@@ -245,10 +269,10 @@ function relightRecordedChanges() {
       markCellChanged(slot, index);
     }
   }
-  endWorkerSection();
+  endPhase("seedLightChanges");
 
   const removalStartedAtMs = performance.now();
-  startWorkerSection("removeLight");
+  beginPhase("removeSkyLight");
   removeLight(
     cluster,
     skyRemovalQueue,
@@ -257,6 +281,8 @@ function relightRecordedChanges() {
     session.restoredEmitterQueue,
     session.floodStats,
   );
+  endPhase("removeSkyLight");
+  beginPhase("removeBlockLight");
   removeLight(
     cluster,
     blockRemovalQueue,
@@ -274,13 +300,13 @@ function relightRecordedChanges() {
       (light[index] & 0xf0) | EMISSION[blocksBySlot[slot][index]];
     refillQueue.push(cell);
   }
-  endWorkerSection();
+  endPhase("removeBlockLight");
   session.removalMilliseconds = performance.now() - removalStartedAtMs;
 
   const refillStartedAtMs = performance.now();
-  startWorkerSection("refillLight");
+  beginPhase("refillLight");
   spreadLight(cluster, refillQueue, session.floodStats);
-  endWorkerSection();
+  endPhase("refillLight");
   session.refillMilliseconds = performance.now() - refillStartedAtMs;
 }
 
@@ -422,10 +448,10 @@ function finishSession(
   relightRecordedChanges();
 
   const collectingStartedAtMs = performance.now();
-  startWorkerSection("collectChunks");
+  beginPhase("collectChunks");
   const { changedChunks, chunksToRemesh } = collectChangedChunks();
   const changes = shouldRecordChanges ? buildChangeLog() : emptyChangeLog();
-  endWorkerSection();
+  endPhase("collectChunks");
   const stats = buildStats(
     editsRequested,
     editsInUnloadedChunks,
@@ -466,11 +492,11 @@ export function applyBlockEdits(
 ): BulkEditResult {
   const batch =
     edits instanceof BlockEditBatch ? edits : BlockEditBatch.fromEdits(edits);
-  beginSession(source);
+  beginSession(source, options);
   const cluster = session.cluster;
   const writingStartedAtMs = performance.now();
 
-  startWorkerSection("writeBlocks");
+  beginPhase("writeBlocks");
   const { xs, ys, zs, blocks: newBlocks, replaceRule } = batch;
   let editsInUnloadedChunks = 0;
   let editsSkippedByReplaceRule = 0;
@@ -516,7 +542,7 @@ export function applyBlockEdits(
     markCellChanged(lastSlot, index);
     recordChange((lastSlot << CELL_INDEX_BITS) | index, oldBlock);
   }
-  endWorkerSection();
+  endPhase("writeBlocks");
 
   return finishSession(
     batch.length,
@@ -527,36 +553,43 @@ export function applyBlockEdits(
   );
 }
 
+/** Notes a block the caller already wrote. Returns false when its chunk is not loaded. */
+function recordWrittenChange(
+  x: number,
+  y: number,
+  z: number,
+  oldBlock: number,
+): boolean {
+  const slot = session.cluster.slotForChunk(
+    x >> CHUNK_SHIFT,
+    y >> CHUNK_SHIFT,
+    z >> CHUNK_SHIFT,
+  );
+  if (session.cluster.hasBlocksBySlot[slot] === 0) return false;
+  const index =
+    ((x & CHUNK_MASK) << (CHUNK_SHIFT * 2)) |
+    ((y & CHUNK_MASK) << CHUNK_SHIFT) |
+    (z & CHUNK_MASK);
+  markCellChanged(slot, index);
+  recordChange((slot << CELL_INDEX_BITS) | index, oldBlock);
+  return true;
+}
+
 /**
  * Relights after blocks that the caller has already written, given what each
- * block was before. Use it when block writes are done elsewhere (a single
- * edit, water simulation); applyBlockEdits does the writing itself.
+ * block was before. Use it when block writes are done elsewhere (water
+ * simulation, saved edits); applyBlockEdits does the writing itself.
  */
 export function relightAfterBlocksWritten(
   source: LightChunkSource,
   changes: ArrayLike<{ x: number; y: number; z: number; oldBlock: number }>,
   options: BulkEditOptions = {},
 ): BulkEditResult {
-  beginSession(source);
-  const cluster = session.cluster;
+  beginSession(source, options);
   let editsInUnloadedChunks = 0;
   for (let position = 0; position < changes.length; position++) {
     const { x, y, z, oldBlock } = changes[position];
-    const slot = cluster.slotForChunk(
-      x >> CHUNK_SHIFT,
-      y >> CHUNK_SHIFT,
-      z >> CHUNK_SHIFT,
-    );
-    if (cluster.hasBlocksBySlot[slot] === 0) {
-      editsInUnloadedChunks++;
-      continue;
-    }
-    const index =
-      ((x & CHUNK_MASK) << (CHUNK_SHIFT * 2)) |
-      ((y & CHUNK_MASK) << CHUNK_SHIFT) |
-      (z & CHUNK_MASK);
-    markCellChanged(slot, index);
-    recordChange((slot << CELL_INDEX_BITS) | index, oldBlock);
+    if (!recordWrittenChange(x, y, z, oldBlock)) editsInUnloadedChunks++;
   }
   return finishSession(
     changes.length,
@@ -564,5 +597,25 @@ export function relightAfterBlocksWritten(
     0,
     0,
     options.recordChanges !== false,
+  );
+}
+
+/** The single-block fast path: no batch or change arrays are built. */
+export function relightAfterSingleBlockWritten(
+  source: LightChunkSource,
+  x: number,
+  y: number,
+  z: number,
+  oldBlock: number,
+  options: BulkEditOptions = {},
+): BulkEditResult {
+  beginSession(source, options);
+  const isLoaded = recordWrittenChange(x, y, z, oldBlock);
+  return finishSession(
+    1,
+    isLoaded ? 0 : 1,
+    0,
+    0,
+    options.recordChanges === true,
   );
 }
