@@ -3,7 +3,7 @@
 // frustum culling never drops a visible tile. Each mesh carries its cross-fade value into the shared materials.
 
 import * as THREE from "three";
-import { cellSizeOfLevel, TILE_CELLS, tileSizeOfLevel } from "../core/lod-constants";
+import { BLOCK_RENDER_OFFSET, cellSizeOfLevel, TILE_CELLS, tileSizeOfLevel } from "../core/lod-constants";
 import type { TileAddress } from "../core/tile-address";
 import type { LodMaterials } from "./lod-materials";
 
@@ -45,7 +45,7 @@ export function createLodTileMesh(address: TileAddress, buffers: TileGeometryBuf
   const mesh = new THREE.Mesh(geometry, [materials.terrain, materials.water]);
   const cellSize = cellSizeOfLevel(address.level);
   const tileSize = tileSizeOfLevel(address.level);
-  mesh.position.set(address.tileX * tileSize, 0, address.tileZ * tileSize);
+  mesh.position.set(address.tileX * tileSize - BLOCK_RENDER_OFFSET, -BLOCK_RENDER_OFFSET, address.tileZ * tileSize - BLOCK_RENDER_OFFSET);
   mesh.scale.set(cellSize, 1, cellSize);
   mesh.matrixAutoUpdate = false;
   mesh.updateMatrix();

@@ -4,7 +4,7 @@
 // for dissolving into the sky at the far edge, and atmospheric fog towards the horizon colour.
 
 import { COVERAGE_NORMAL_NUDGE_BLOCKS } from "../coverage/real-chunk-coverage";
-import { CHUNK_SIZE_BLOCKS } from "../core/lod-constants";
+import { BLOCK_RENDER_OFFSET, CHUNK_SIZE_BLOCKS } from "../core/lod-constants";
 import {
   FACE_BITS,
   FACE_SHIFT,
@@ -82,7 +82,7 @@ float orderedDither(vec2 fragmentCoordinate) {
 }
 
 void main() {
-  vec2 nudged = vWorldPosition.xz - vNormalXZ * ${COVERAGE_NORMAL_NUDGE_BLOCKS.toFixed(3)};
+  vec2 nudged = vWorldPosition.xz + ${BLOCK_RENDER_OFFSET.toFixed(3)} - vNormalXZ * ${COVERAGE_NORMAL_NUDGE_BLOCKS.toFixed(3)};
   vec2 chunk = floor(nudged / ${CHUNK_SIZE_BLOCKS.toFixed(1)});
   vec2 offsetFromCenter = abs(chunk - coverageCenterChunk);
   if (max(offsetFromCenter.x, offsetFromCenter.y) < coverageSize * 0.5) {

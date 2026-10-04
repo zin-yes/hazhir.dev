@@ -18,6 +18,11 @@ export const WORLD_MAX_Y = MINECRAFT_MAX_Y + GAME_Y_OFFSET;
 export const LOD_SEA_LEVEL = SEA_LEVEL;
 /** Water level of a dry cell. */
 export const NO_WATER = -32768;
+/**
+ * The game renders block (x, y, z) over [x - 0.5, x + 0.5] on every axis (chunk meshes sit at chunk origin - 0.5), so
+ * world position = block coordinate - BLOCK_RENDER_OFFSET.
+ */
+export const BLOCK_RENDER_OFFSET = 0.5;
 
 export function cellSizeOfLevel(level: number): number {
   return 1 << level;

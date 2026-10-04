@@ -3,7 +3,7 @@
 // entirely under covered columns are not drawn at all; partly covered tiles discard the covered part in the shader
 // through a toroidal coverage texture centred on the camera (see writeCoverageTexels).
 
-import { CHUNK_SIZE_BLOCKS } from "../core/lod-constants";
+import { BLOCK_RENDER_OFFSET, CHUNK_SIZE_BLOCKS } from "../core/lod-constants";
 import { tileBoundsOf, type TileAddress } from "../core/tile-address";
 
 interface ColumnState {
@@ -148,7 +148,7 @@ export function writeCoverageTexels(coverage: RealChunkCoverage, centerChunkX: n
  * belong to the cell they rise from. Mirrored in the LOD fragment shader. */
 export const COVERAGE_NORMAL_NUDGE_BLOCKS = 0.25;
 
-/** CPU mirror of the shader's discard test, for tests and for picking. */
+/** CPU mirror of the shader's discard test (world position, so blocks span [x - 0.5, x + 0.5]). */
 export function isFragmentHiddenByCoverage(
   texels: Uint8Array,
   size: number,
@@ -159,8 +159,8 @@ export function isFragmentHiddenByCoverage(
   normalX: number,
   normalZ: number,
 ): boolean {
-  const chunkX = Math.floor((worldX - normalX * COVERAGE_NORMAL_NUDGE_BLOCKS) / CHUNK_SIZE_BLOCKS);
-  const chunkZ = Math.floor((worldZ - normalZ * COVERAGE_NORMAL_NUDGE_BLOCKS) / CHUNK_SIZE_BLOCKS);
+  const chunkX = Math.floor((worldX + BLOCK_RENDER_OFFSET - normalX * COVERAGE_NORMAL_NUDGE_BLOCKS) / CHUNK_SIZE_BLOCKS);
+  const chunkZ = Math.floor((worldZ + BLOCK_RENDER_OFFSET - normalZ * COVERAGE_NORMAL_NUDGE_BLOCKS) / CHUNK_SIZE_BLOCKS);
   if (Math.abs(chunkX - centerChunkX) >= size / 2 || Math.abs(chunkZ - centerChunkZ) >= size / 2) return false;
   return texels[positiveModulo(chunkX, size) + positiveModulo(chunkZ, size) * size]! > 127;
 }

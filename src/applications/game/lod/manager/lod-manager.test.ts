@@ -71,7 +71,7 @@ function sceneTiles(manager: LodManager): SceneTile[] {
     .filter((child): child is THREE.Mesh => child instanceof THREE.Mesh)
     .map((mesh) => {
       const level = Math.log2(mesh.scale.x);
-      return { level, minX: mesh.position.x, minZ: mesh.position.z, size: tileSizeOfLevel(level) };
+      return { level, minX: mesh.position.x + 0.5, minZ: mesh.position.z + 0.5, size: tileSizeOfLevel(level) };
     });
 }
 
@@ -177,7 +177,7 @@ describe("LOD manager", () => {
     await harness.settle();
     const levelZeroMesh = manager.scene.children.find(
       (child): child is THREE.Mesh =>
-        child instanceof THREE.Mesh && child.scale.x === cellSizeOfLevel(0) && child.position.x === columnX * 32 && child.position.z === columnZ * 32,
+        child instanceof THREE.Mesh && child.scale.x === cellSizeOfLevel(0) && child.position.x === columnX * 32 - 0.5 && child.position.z === columnZ * 32 - 0.5,
     );
     expect(levelZeroMesh).toBeDefined();
     const words = levelZeroMesh!.geometry.getAttribute("packedVertex").array as Uint32Array;

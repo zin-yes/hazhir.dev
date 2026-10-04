@@ -7,7 +7,7 @@ import * as THREE from "three";
 import { profiler } from "../../profiler";
 import { BuildQueue, BuildUrgency, type BuildCandidate } from "../cache/build-queue";
 import { LodTileCache } from "../cache/tile-cache";
-import { CHUNK_SIZE_BLOCKS, MAX_LOD_LEVEL, tileSizeOfLevel } from "../core/lod-constants";
+import { BLOCK_RENDER_OFFSET, CHUNK_SIZE_BLOCKS, MAX_LOD_LEVEL, tileSizeOfLevel } from "../core/lod-constants";
 import { ancestorAddressAt, childAddressesOf, tileBoundsOf, tileKeyOf, type TileAddress } from "../core/tile-address";
 import { writeCoverageTexels } from "../coverage/real-chunk-coverage";
 import { packedHeightRange } from "../data/packed-tile-surface";
@@ -239,8 +239,8 @@ class LodManagerImplementation implements LodManager {
   private isInFrustum(address: TileAddress): boolean {
     const bounds = tileBoundsOf(address);
     const range = this.heightRangeFor(address) ?? { minHeight: 0, maxHeight: 256 };
-    this.tileBox.min.set(bounds.minX, range.minHeight, bounds.minZ);
-    this.tileBox.max.set(bounds.maxX, range.maxHeight, bounds.maxZ);
+    this.tileBox.min.set(bounds.minX, range.minHeight, bounds.minZ).subScalar(BLOCK_RENDER_OFFSET);
+    this.tileBox.max.set(bounds.maxX, range.maxHeight, bounds.maxZ).subScalar(BLOCK_RENDER_OFFSET);
     return this.frustum.intersectsBox(this.tileBox);
   }
 
@@ -255,15 +255,15 @@ class LodManagerImplementation implements LodManager {
       this.realData.applyPendingColumns(this.options.realColumnsPerUpdate ?? DEFAULT_REAL_COLUMNS_PER_UPDATE);
 
       camera.updateMatrixWorld();
-      const cameraPosition = new THREE.Vector3().setFromMatrixPosition(camera.matrixWorld);
+      const cameraBlockPosition = new THREE.Vector3().setFromMatrixPosition(camera.matrixWorld).addScalar(BLOCK_RENDER_OFFSET);
       this.projectionView.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
       this.frustum.setFromProjectionMatrix(this.projectionView);
 
       const selectionToken = profiler.begin("main.lod.select");
       const parameters: SelectionParameters = {
-        cameraX: cameraPosition.x,
-        cameraY: cameraPosition.y,
-        cameraZ: cameraPosition.z,
+        cameraX: cameraBlockPosition.x,
+        cameraY: cameraBlockPosition.y,
+        cameraZ: cameraBlockPosition.z,
         projectionScale: projectionScaleOf(camera.fov, viewportHeightPixels) * camera.zoom,
         maximumCellPixels: this.options.maximumCellPixels ?? DEFAULT_MAXIMUM_CELL_PIXELS,
         thresholdGrowthPerLevel: this.options.thresholdGrowthPerLevel ?? DEFAULT_THRESHOLD_GROWTH_PER_LEVEL,
@@ -308,8 +308,8 @@ class LodManagerImplementation implements LodManager {
       for (const address of renderSet.drawn) pinned.add(tileKeyOf(address.level, address.tileX, address.tileZ));
       this.cache.enforceBudget(pinned);
 
-      this.updateCoverageTexture(cameraPosition);
-      this.updateClipPlanes(cameraPosition, renderSet.drawn);
+      this.updateCoverageTexture(cameraBlockPosition);
+      this.updateClipPlanes(cameraBlockPosition, renderSet.drawn);
 
       const sinceCreation = nowMilliseconds - this.createdAtMilliseconds;
       if (this.stats.firstHorizonMilliseconds === undefined && !hasUncoveredArea && renderSet.drawn.length > 0) {
@@ -392,10 +392,10 @@ class LodManagerImplementation implements LodManager {
     }
   }
 
-  private updateCoverageTexture(cameraPosition: THREE.Vector3): void {
+  private updateCoverageTexture(cameraBlockPosition: THREE.Vector3): void {
     const coverage = this.realData.coverage;
-    const centerChunkX = Math.floor(cameraPosition.x / CHUNK_SIZE_BLOCKS);
-    const centerChunkZ = Math.floor(cameraPosition.z / CHUNK_SIZE_BLOCKS);
+    const centerChunkX = Math.floor(cameraBlockPosition.x / CHUNK_SIZE_BLOCKS);
+    const centerChunkZ = Math.floor(cameraBlockPosition.z / CHUNK_SIZE_BLOCKS);
     if (
       coverage.version === this.lastCoverageVersion &&
       centerChunkX === this.lastCoverageCenter.chunkX &&
@@ -415,12 +415,12 @@ class LodManagerImplementation implements LodManager {
    * Near plane just inside the closest LOD geometry that can actually show (covered columns are discarded anyway),
    * far plane past the dissolve band.
    */
-  private updateClipPlanes(cameraPosition: THREE.Vector3, drawn: readonly TileAddress[]): void {
+  private updateClipPlanes(cameraBlockPosition: THREE.Vector3, drawn: readonly TileAddress[]): void {
     const coverage = this.realData.coverage;
     let nearestDistance = Infinity;
     for (const address of drawn) {
       const bounds = tileBoundsOf(address);
-      const distance = horizontalDistanceToBounds(bounds, cameraPosition.x, cameraPosition.z);
+      const distance = horizontalDistanceToBounds(bounds, cameraBlockPosition.x, cameraBlockPosition.z);
       if (distance >= nearestDistance) continue;
       const chunksPerSide = (bounds.maxX - bounds.minX) / CHUNK_SIZE_BLOCKS;
       if (distance > NEAR_TILE_SEARCH_DISTANCE || chunksPerSide > 8 || !coverage.isTilePartiallyCovered(address)) {
@@ -433,12 +433,12 @@ class LodManagerImplementation implements LodManager {
           const chunkZ = bounds.minZ / CHUNK_SIZE_BLOCKS + offsetZ;
           if (coverage.isColumnCovered(chunkX, chunkZ)) continue;
           const columnBounds = { minX: chunkX * CHUNK_SIZE_BLOCKS, minZ: chunkZ * CHUNK_SIZE_BLOCKS, maxX: (chunkX + 1) * CHUNK_SIZE_BLOCKS, maxZ: (chunkZ + 1) * CHUNK_SIZE_BLOCKS };
-          nearestDistance = Math.min(nearestDistance, horizontalDistanceToBounds(columnBounds, cameraPosition.x, cameraPosition.z));
+          nearestDistance = Math.min(nearestDistance, horizontalDistanceToBounds(columnBounds, cameraBlockPosition.x, cameraBlockPosition.z));
         }
       }
     }
     this.nearPlane = Math.max(MINIMUM_NEAR_PLANE, Math.min(MAXIMUM_NEAR_PLANE, nearestDistance * NEAR_PLANE_DEPTH_FACTOR));
-    this.farPlane = this.radiusBlocks * 1.25 + Math.abs(cameraPosition.y);
+    this.farPlane = this.radiusBlocks * 1.25 + Math.abs(cameraBlockPosition.y);
   }
 
   private refreshStats(selectedTiles: number, drawnTiles: number, missingTiles: number): void {

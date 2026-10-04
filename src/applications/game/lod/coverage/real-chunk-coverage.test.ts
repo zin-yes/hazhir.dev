@@ -74,7 +74,7 @@ describe("real chunk coverage", () => {
         const pointZ = cameraZ + offsetZ + 0.5;
         const isCovered = coverage.isColumnCovered(Math.floor(pointX / 32), Math.floor(pointZ / 32));
         const tiles = tileContaining(drawnLeaves, pointX, pointZ);
-        const hidden = isFragmentHiddenByCoverage(texels, textureSize, PLAYER_CHUNK_X, PLAYER_CHUNK_Z, pointX, pointZ, 0, 0);
+        const hidden = isFragmentHiddenByCoverage(texels, textureSize, PLAYER_CHUNK_X, PLAYER_CHUNK_Z, pointX - 0.5, pointZ - 0.5, 0, 0);
         if (isCovered) {
           coveredPoints++;
           expect(tiles.length === 0 || hidden).toBe(true);
@@ -95,7 +95,7 @@ describe("real chunk coverage", () => {
     const size = 64;
     const texels = new Uint8Array(size * size);
     writeCoverageTexels(coverage, PLAYER_CHUNK_X, PLAYER_CHUNK_Z, size, texels);
-    const borderX = (PLAYER_CHUNK_X + RENDER_DISTANCE + 1) * 32;
+    const borderX = (PLAYER_CHUNK_X + RENDER_DISTANCE + 1) * 32 - 0.5;
     const middleZ = PLAYER_CHUNK_Z * 32 + 16;
     expect(isFragmentHiddenByCoverage(texels, size, PLAYER_CHUNK_X, PLAYER_CHUNK_Z, borderX, middleZ, -1, 0)).toBe(false);
     expect(isFragmentHiddenByCoverage(texels, size, PLAYER_CHUNK_X, PLAYER_CHUNK_Z, borderX, middleZ, 1, 0)).toBe(true);
