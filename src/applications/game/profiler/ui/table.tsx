@@ -6,6 +6,10 @@ export interface Column<Row> {
   render: (row: Row) => ReactNode;
   /** Extra classes for the cell, for example a fixed or truncating width. */
   className?: string;
+  /** Makes the header a button, for sortable columns. */
+  onHeaderClick?: () => void;
+  /** Shown after the header text, for example a sort arrow. */
+  headerSuffix?: string;
 }
 
 interface DataTableProps<Row> {
@@ -26,7 +30,14 @@ export function DataTable<Row>({ columns, rows, getKey, emptyText = "no data yet
               key={column.header}
               className={`px-1 py-0.5 font-normal ${column.align === "right" ? "text-right" : "text-left"}`}
             >
-              {column.header}
+              {column.onHeaderClick ? (
+                <button className="hover:text-zinc-200" onClick={column.onHeaderClick}>
+                  {column.header}
+                  {column.headerSuffix ?? ""}
+                </button>
+              ) : (
+                column.header
+              )}
             </th>
           ))}
         </tr>
@@ -93,6 +104,24 @@ export function StackedBar({ segments, formatValue }: { segments: StackedSegment
           </span>
         ))}
       </div>
+    </div>
+  );
+}
+
+export function ProportionBar({
+  fraction,
+  label,
+  colorClass = "bg-cyan-600",
+}: {
+  fraction: number;
+  label?: string;
+  colorClass?: string;
+}) {
+  const clamped = Math.max(0, Math.min(1, fraction));
+  return (
+    <div className="relative h-3 w-full min-w-[40px] bg-zinc-800">
+      <div className={`h-full ${colorClass}`} style={{ width: `${clamped * 100}%` }} />
+      {label ? <div className="absolute inset-0 px-1 leading-3 text-zinc-100">{label}</div> : null}
     </div>
   );
 }

@@ -1,5 +1,6 @@
 import type { BrowserEvent, ProfileReport } from "../../types";
 import { formatMilliseconds } from "../format";
+import { SamplingPanel } from "../sampling-panel";
 import { DataTable, SectionTitle, type Column } from "../table";
 
 const COLUMNS: Column<BrowserEvent & { key: string }>[] = [
@@ -15,6 +16,7 @@ export function EventsTab({ report }: { report: ProfileReport }) {
     .map((event, index) => ({ ...event, key: `${event.atMs}-${index}` }));
   return (
     <div>
+      <SamplingPanel sampling={report.snapshot.sampling} />
       <SectionTitle>Long tasks, long animation frames, event loop lag, GC estimates (newest first)</SectionTitle>
       <DataTable columns={COLUMNS} rows={rows} getKey={(event) => event.key} emptyText="no browser events recorded" />
     </div>

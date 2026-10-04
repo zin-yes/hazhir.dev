@@ -9,8 +9,13 @@ import { renderMarkdownReport } from "../markdown-report";
 import { buildProfileReport } from "../report";
 import type { ProfileReport } from "../types";
 import { isOverlayVisible, subscribeOverlayVisibility } from "./overlay-visibility";
+import { getOptionalProfilerApi } from "./profiler-api-access";
+import { BreakdownsTab } from "./tabs/breakdowns-tab";
+import { CallTreeTab } from "./tabs/call-tree-tab";
+import { CompareTab } from "./tabs/compare-tab";
 import { EventsTab } from "./tabs/events-tab";
 import { FramesTab } from "./tabs/frames-tab";
+import { FlameTab } from "./tabs/flame-tab";
 import { GpuTab } from "./tabs/gpu-tab";
 import { LightTab } from "./tabs/light-tab";
 import { MainThreadTab } from "./tabs/main-thread-tab";
@@ -26,6 +31,9 @@ const TABS = [
   { id: "targets", label: "Targets", Component: TargetsTab },
   { id: "frames", label: "Frames", Component: FramesTab },
   { id: "main", label: "Main", Component: MainThreadTab },
+  { id: "calltree", label: "Call tree", Component: CallTreeTab },
+  { id: "flame", label: "Flame", Component: FlameTab },
+  { id: "breakdowns", label: "Breakdowns", Component: BreakdownsTab },
   { id: "workers", label: "Workers", Component: WorkersTab },
   { id: "light", label: "Light", Component: LightTab },
   { id: "gpu", label: "GPU", Component: GpuTab },
@@ -33,6 +41,7 @@ const TABS = [
   { id: "memory", label: "Memory", Component: MemoryTab },
   { id: "meshes", label: "Meshes", Component: MeshesTab },
   { id: "events", label: "Events", Component: EventsTab },
+  { id: "compare", label: "Compare", Component: CompareTab },
 ] as const;
 
 type TabId = (typeof TABS)[number]["id"];
@@ -45,6 +54,7 @@ export function ProfilerPanel({ runBenchmark }: { runBenchmark?: RunBenchmark })
   const [activeTab, setActiveTab] = useState<TabId>("targets");
   const [isRecording, setIsRecording] = useState(profiler.enabled);
   const [isPassBreakdownOn, setIsPassBreakdownOn] = useState(profiler.settings.gpuPassBreakdown);
+  const [isTracing, setIsTracing] = useState(profiler.isTracing);
   const [statusText, setStatusText] = useState("");
   const [benchmarkStartedAtMs, setBenchmarkStartedAtMs] = useState<number | null>(null);
 
@@ -57,6 +67,7 @@ export function ProfilerPanel({ runBenchmark }: { runBenchmark?: RunBenchmark })
       const nextReport = buildProfileReport(profiler.snapshot());
       profiler.recordMainThreadTimer("main.profilerOverlay", performance.now() - startedAtMs);
       setReport(nextReport);
+      setIsTracing(profiler.isTracing);
     };
     refresh();
     const intervalHandle = setInterval(refresh, REFRESH_INTERVAL_MILLISECONDS);
@@ -78,6 +89,22 @@ export function ProfilerPanel({ runBenchmark }: { runBenchmark?: RunBenchmark })
     if (!report) return;
     await navigator.clipboard.writeText(renderMarkdownReport(report));
     setStatusText("markdown copied");
+  };
+
+  const toggleTrace = (enabled: boolean) => {
+    const profilerApi = getOptionalProfilerApi();
+    if (profilerApi.trace) profilerApi.trace(enabled);
+    else profiler.setTracing(enabled);
+    setIsTracing(enabled);
+  };
+
+  const saveTrace = async () => {
+    try {
+      await getOptionalProfilerApi().saveTrace?.();
+      setStatusText("trace saved");
+    } catch (error) {
+      setStatusText(`trace save failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
   };
 
   const startBenchmark = async () => {
@@ -133,6 +160,15 @@ export function ProfilerPanel({ runBenchmark }: { runBenchmark?: RunBenchmark })
           />
           GPU pass split
         </label>
+        <label className="flex items-center gap-1 text-zinc-400" title="Captures a timeline of spans while on; restarts call trees when toggled">
+          <input type="checkbox" checked={isTracing} onChange={(event) => toggleTrace(event.target.checked)} />
+          Trace
+        </label>
+        {isTracing && getOptionalProfilerApi().saveTrace ? (
+          <button className={BUTTON_CLASSES} onClick={saveTrace}>
+            Save trace
+          </button>
+        ) : null}
         <span className="ml-auto text-zinc-500">{isRecording ? "recording" : "paused"} {statusText}</span>
       </div>
       <div className="flex flex-wrap border-b border-zinc-700">

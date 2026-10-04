@@ -13,6 +13,7 @@ const GROUP_TITLES: Record<OptimizationTarget["group"], string> = {
   "gl-driver": "GL driver CPU",
   transfer: "Transfers",
   worker: "Workers",
+  "worker-detail": "Hot paths and breakdown keys",
   memory: "Memory",
   light: "Light edits",
   latency: "Latency",
