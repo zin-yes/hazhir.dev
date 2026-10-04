@@ -125,7 +125,9 @@ const STREAMING_INTERVAL_MS = 100;
 const LIGHTING_WORKER_COUNT = 2;
 const MESH_WORKER_COUNT = 2;
 const LOD_WORKER_COUNT = 2;
-/** Terrain generation is the slowest stage, so it gets every core the other pools and the main thread leave. */
+/** Cores left to the main thread and the rest of the machine. */
+const RESERVED_CORES = 2;
+/** Terrain generation gets the cores the other pools leave, keeping RESERVED_CORES free. */
 const GENERATION_WORKER_COUNT = Math.min(
   6,
   Math.max(
@@ -133,7 +135,8 @@ const GENERATION_WORKER_COUNT = Math.min(
     (typeof navigator === "undefined" ? 6 : navigator.hardwareConcurrency || 6) -
       LIGHTING_WORKER_COUNT -
       MESH_WORKER_COUNT -
-      1,
+      LOD_WORKER_COUNT -
+      RESERVED_CORES,
   ),
 );
 const RANDOM_TICKS_PER_CHUNK = 100;
