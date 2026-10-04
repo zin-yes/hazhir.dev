@@ -1,5 +1,7 @@
-// Fills one chunk: terrain layers and water, chamber caves, ground cover,
-// then trees. Everything is a pure function of (seed, chunk coordinates).
+// Game chunks from the Terralith engine. A game chunk (32^3) covers 2x2 Minecraft chunk columns; the engine
+// generates a whole 16x16 column over the full world height, so converting all four columns once yields every
+// vertical game chunk of that footprint. Those are kept in a bounded per-seed cache, because vertical neighbours
+// are requested one by one.
 
 import { BlockType } from "@/applications/game/blocks";
 import { CHUNK_HEIGHT, CHUNK_LENGTH, CHUNK_WIDTH } from "@/applications/game/config";
@@ -8,100 +10,119 @@ import {
   endWorkerSection,
   startWorkerSection,
 } from "@/applications/game/profiler/worker-recorder";
-import { getChunkColumnGrid } from "./column-grid";
-import { SEA_LEVEL } from "./constants";
-import { BiomeId } from "./biomes";
-import { createCaveField } from "./caves";
-import { solidBlockAt, surfaceTopBlock } from "./surface-layers";
-import { chooseGroundCover, writeColumnPlant } from "./vegetation/ground-cover";
-import { placeTrees } from "./vegetation/tree-placement";
-import { MAX_TREE_FOOTPRINT_RADIUS, MAX_TREE_HEIGHT } from "./trees";
-import { getTerrainModel } from "./column-grid";
+import { BoundedLruCache } from "./engine/pipeline/bounded-lru-cache";
+import { toGameBlock } from "./engine/blocks/minecraft-block-map";
+import { CHUNK_COLUMN_SIZE, type ChunkBlocks } from "./engine/chunk";
+import { GAME_Y_OFFSET } from "./constants";
+import { getFullGenerator } from "./overworld-world";
 
+const GAME_CHUNK_VOLUME = CHUNK_WIDTH * CHUNK_HEIGHT * CHUNK_LENGTH;
 const X_STRIDE = CHUNK_HEIGHT * CHUNK_LENGTH;
 const Y_STRIDE = CHUNK_LENGTH;
-const CAVE_MIN_DEPTH = 10;
-const HEIGHT_SCAN_STRIDE = 6;
-const HEIGHT_SCAN_SLACK = 8;
+const MINECRAFT_COLUMNS_PER_GAME_CHUNK_X = CHUNK_WIDTH / CHUNK_COLUMN_SIZE;
+const MINECRAFT_COLUMNS_PER_GAME_CHUNK_Z = CHUNK_LENGTH / CHUNK_COLUMN_SIZE;
+const MAX_CACHED_GAME_COLUMNS = 64;
+const MAX_CACHED_SEEDS = 2;
 
-function chunkIsEntirelyAboveTerrain(seed: number, chunkX: number, chunkY: number, chunkZ: number): boolean {
-  const chunkFloorY = chunkY * CHUNK_HEIGHT;
-  if (chunkFloorY < SEA_LEVEL) return false;
-  const terrain = getTerrainModel(seed);
-  const reach = MAX_TREE_FOOTPRINT_RADIUS;
-  let highest = SEA_LEVEL;
-  for (let offsetX = -reach; offsetX <= CHUNK_WIDTH + reach; offsetX += HEIGHT_SCAN_STRIDE) {
-    for (let offsetZ = -reach; offsetZ <= CHUNK_LENGTH + reach; offsetZ += HEIGHT_SCAN_STRIDE) {
-      const sample = terrain.sample(chunkX * CHUNK_WIDTH + offsetX, chunkZ * CHUNK_LENGTH + offsetZ);
-      highest = Math.max(highest, sample.height, sample.waterLevel);
-    }
+/** All vertical chunks of one game column; a missing chunk y is entirely air. */
+type GameColumn = Map<number, Uint8Array>;
+
+class SeedChunkSource {
+  private readonly generator;
+  private readonly gameColumns = new BoundedLruCache<string, GameColumn>(MAX_CACHED_GAME_COLUMNS);
+  private readonly gameBlockByPaletteId: BlockType[] = [];
+
+  constructor(seed: number) {
+    this.generator = getFullGenerator(seed);
   }
-  return chunkFloorY > highest + HEIGHT_SCAN_SLACK + MAX_TREE_HEIGHT;
+
+  private gameBlockOf(column: ChunkBlocks, paletteId: number): BlockType {
+    let gameBlock = this.gameBlockByPaletteId[paletteId];
+    if (gameBlock === undefined) {
+      gameBlock = toGameBlock(column.palette.stateOf(paletteId));
+      this.gameBlockByPaletteId[paletteId] = gameBlock;
+    }
+    return gameBlock;
+  }
+
+  private buildGameColumn(chunkX: number, chunkZ: number): GameColumn {
+    const gameColumn: GameColumn = new Map();
+    let solidBlocks = 0;
+    for (let columnOffsetX = 0; columnOffsetX < MINECRAFT_COLUMNS_PER_GAME_CHUNK_X; columnOffsetX++) {
+      for (let columnOffsetZ = 0; columnOffsetZ < MINECRAFT_COLUMNS_PER_GAME_CHUNK_Z; columnOffsetZ++) {
+        const column = this.generator.generateBaseColumn(
+          chunkX * MINECRAFT_COLUMNS_PER_GAME_CHUNK_X + columnOffsetX,
+          chunkZ * MINECRAFT_COLUMNS_PER_GAME_CHUNK_Z + columnOffsetZ,
+        );
+        const blocks = column.blocks;
+        for (let minecraftY = column.minY; minecraftY <= column.maxY; minecraftY++) {
+          const gameY = minecraftY + GAME_Y_OFFSET;
+          const chunkY = Math.floor(gameY / CHUNK_HEIGHT);
+          const localY = gameY - chunkY * CHUNK_HEIGHT;
+          const layerStart = column.indexOf(0, minecraftY, 0);
+          let chunkBlocks = gameColumn.get(chunkY);
+          for (let localColumnZ = 0; localColumnZ < CHUNK_COLUMN_SIZE; localColumnZ++) {
+            for (let localColumnX = 0; localColumnX < CHUNK_COLUMN_SIZE; localColumnX++) {
+              const paletteId = blocks[layerStart + localColumnZ * CHUNK_COLUMN_SIZE + localColumnX]!;
+              if (paletteId === 0) continue;
+              const gameBlock = this.gameBlockOf(column, paletteId);
+              if (gameBlock === BlockType.AIR) continue;
+              if (chunkBlocks === undefined) {
+                chunkBlocks = new Uint8Array(GAME_CHUNK_VOLUME);
+                gameColumn.set(chunkY, chunkBlocks);
+              }
+              const localX = columnOffsetX * CHUNK_COLUMN_SIZE + localColumnX;
+              const localZ = columnOffsetZ * CHUNK_COLUMN_SIZE + localColumnZ;
+              chunkBlocks[localX * X_STRIDE + localY * Y_STRIDE + localZ] = gameBlock;
+              solidBlocks++;
+            }
+          }
+        }
+      }
+    }
+    addWorkerCounter("solidBlocks", solidBlocks);
+    return gameColumn;
+  }
+
+  chunkBlocks(chunkX: number, chunkY: number, chunkZ: number): Uint8Array {
+    const { minY, height } = this.generator.settings;
+    const lowestGameY = minY + GAME_Y_OFFSET;
+    const highestGameY = minY + height - 1 + GAME_Y_OFFSET;
+    const isOutsideWorldHeight = (chunkY + 1) * CHUNK_HEIGHT - 1 < lowestGameY || chunkY * CHUNK_HEIGHT > highestGameY;
+    if (isOutsideWorldHeight) return new Uint8Array(GAME_CHUNK_VOLUME);
+
+    const key = `${chunkX},${chunkZ}`;
+    let gameColumn = this.gameColumns.get(key);
+    if (gameColumn === undefined) {
+      gameColumn = this.buildGameColumn(chunkX, chunkZ);
+      this.gameColumns.set(key, gameColumn);
+    } else {
+      addWorkerCounter("gameColumnCacheHits", 1);
+    }
+    const cached = gameColumn.get(chunkY);
+    // The caller transfers the buffer to another thread, so it must own its copy.
+    return cached === undefined ? new Uint8Array(GAME_CHUNK_VOLUME) : cached.slice();
+  }
+}
+
+const sourcesBySeed = new Map<number, SeedChunkSource>();
+
+function sourceForSeed(seed: number): SeedChunkSource {
+  let source = sourcesBySeed.get(seed);
+  if (source === undefined) {
+    if (sourcesBySeed.size >= MAX_CACHED_SEEDS) sourcesBySeed.delete(sourcesBySeed.keys().next().value as number);
+    source = new SeedChunkSource(seed);
+  } else {
+    sourcesBySeed.delete(seed);
+  }
+  sourcesBySeed.set(seed, source);
+  return source;
 }
 
 export function generateChunkBlocks(seed: number, chunkX: number, chunkY: number, chunkZ: number): Uint8Array {
-  const blocks = new Uint8Array(CHUNK_WIDTH * CHUNK_HEIGHT * CHUNK_LENGTH);
-
   startWorkerSection("terrainNoise");
-  if (chunkIsEntirelyAboveTerrain(seed, chunkX, chunkY, chunkZ)) {
-    endWorkerSection();
-    addWorkerCounter("skippedAirChunks", 1);
-    return blocks;
-  }
-
-  const grid = getChunkColumnGrid(seed, chunkX, chunkZ);
-  const caves = createCaveField(seed);
-  const chunkFloorY = chunkY * CHUNK_HEIGHT;
-  let solidBlocks = 0;
-
-  for (let localX = 0; localX < CHUNK_WIDTH; localX++) {
-    for (let localZ = 0; localZ < CHUNK_LENGTH; localZ++) {
-      const column = grid.localColumn(localX, localZ);
-      const { worldX, worldZ, groundTopY } = column;
-      const topFilledY = column.isSubmerged ? column.waterLevel - 1 : groundTopY;
-      const highestLocalY = Math.min(CHUNK_HEIGHT - 1, topFilledY - chunkFloorY);
-      const isFrozen = column.biome.id === BiomeId.FrozenOcean || column.biome.id === BiomeId.FrozenRiver;
-      const porousness = groundTopY - CAVE_MIN_DEPTH >= chunkFloorY ? caves.porousnessAt(worldX, worldZ) : 0;
-
-      for (let localY = 0; localY <= highestLocalY; localY++) {
-        const worldY = chunkFloorY + localY;
-        let block: BlockType;
-        if (worldY > groundTopY) {
-          block = isFrozen && worldY === column.waterLevel - 1 ? BlockType.ICE : BlockType.WATER;
-        } else {
-          block = solidBlockAt(column, worldY, worldX, worldZ, seed);
-          if (groundTopY - worldY > CAVE_MIN_DEPTH && caves.isCave(worldX, worldY, worldZ, porousness)) {
-            block = BlockType.AIR;
-          }
-          if (block !== BlockType.AIR) solidBlocks++;
-        }
-        blocks[localX * X_STRIDE + localY * Y_STRIDE + localZ] = block;
-      }
-    }
-  }
+  const blocks = sourceForSeed(seed).chunkBlocks(chunkX, chunkY, chunkZ);
   endWorkerSection();
-
-  startWorkerSection("floraPlacement");
-  let plantsPlaced = 0;
-  for (let localX = 0; localX < CHUNK_WIDTH; localX++) {
-    for (let localZ = 0; localZ < CHUNK_LENGTH; localZ++) {
-      const column = grid.localColumn(localX, localZ);
-      const coverTopY = column.isSubmerged ? column.waterLevel : column.groundTopY + 1;
-      if (coverTopY + 3 < chunkFloorY || column.groundTopY >= chunkFloorY + CHUNK_HEIGHT) continue;
-      const groundBlock = surfaceTopBlock(column, column.worldX, column.worldZ, seed);
-      const cover = chooseGroundCover({ column, groundBlock: column.isSubmerged ? BlockType.AIR : groundBlock, seed });
-      if (cover && writeColumnPlant(blocks, localX, localZ, chunkFloorY, cover)) plantsPlaced++;
-    }
-  }
-  endWorkerSection();
-
-  startWorkerSection("treePlacement");
-  const treesPlaced = placeTrees(blocks, seed, chunkX, chunkY, chunkZ, grid);
-  endWorkerSection();
-
   addWorkerCounter("blocksGenerated", blocks.length);
-  addWorkerCounter("solidBlocks", solidBlocks);
-  addWorkerCounter("treesPlaced", treesPlaced);
-  addWorkerCounter("floraPlaced", plantsPlaced);
   return blocks;
 }
