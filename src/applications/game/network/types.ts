@@ -3,7 +3,8 @@ export type PacketType =
   | "PLAYER_UPDATE"
   | "BLOCK_UPDATE"
   | "PLAYER_DISCONNECT"
-  | "WORLD_STATE";
+  | "WORLD_STATE"
+  | "BLOCK_BATCH";
 
 export interface BasePacket {
   type: PacketType;
@@ -35,6 +36,12 @@ export interface BlockUpdatePacket extends BasePacket {
   blockType: number;
 }
 
+/** Many changed blocks at once, encoded by network/block-batch-codec.ts. */
+export interface BlockBatchPacket extends BasePacket {
+  type: "BLOCK_BATCH";
+  runs: ArrayBuffer;
+}
+
 export interface PlayerDisconnectPacket extends BasePacket {
   type: "PLAYER_DISCONNECT";
   id: string;
@@ -45,4 +52,5 @@ export type NetworkPacket =
   | PlayerUpdatePacket
   | BlockUpdatePacket
   | PlayerDisconnectPacket
-  | WorldStatePacket;
+  | WorldStatePacket
+  | BlockBatchPacket;

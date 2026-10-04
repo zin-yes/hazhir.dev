@@ -78,6 +78,13 @@ import {
 import { packColumnKey } from "./world/chunk-key";
 import { installVoxelWorldApi, summarizeEdit } from "./world/world-api";
 import { castVoxelRay } from "./voxel-ray";
+import {
+  recordEditsOutsideLoadedChunks,
+  recordSavedEdits,
+  wakeWaterAroundChanges,
+  type SavedEditTarget,
+} from "./edits/edit-side-effects";
+import { decodeBlockRuns, encodeBlockRuns } from "./network/block-batch-codec";
 import { GameLodBridge } from "./lod/game-lod-bridge";
 import type { ChunkMeshResult } from "./workers/mesh-types";
 import { MobileControls } from "./ui/mobile-controls";
@@ -507,23 +514,19 @@ export default function Game() {
     }
   }
 
-  /** Remembers an edit for saving and for chunks that load later. */
-  function recordSavedEdit(x: number, y: number, z: number, block: number) {
-    const chunkX = Math.floor(x / CHUNK_WIDTH);
-    const chunkY = Math.floor(y / CHUNK_HEIGHT);
-    const chunkZ = Math.floor(z / CHUNK_LENGTH);
-    const chunkName = chunkNameOf(chunkX, chunkY, chunkZ);
-    let edits = modifiedChunks.current.get(chunkName);
-    if (!edits) {
-      edits = new Map();
-      modifiedChunks.current.set(chunkName, edits);
-    }
-    edits.set(
-      calculateOffset(x - chunkX * CHUNK_WIDTH, y - chunkY * CHUNK_HEIGHT, z - chunkZ * CHUNK_LENGTH),
-      block,
-    );
-    noteEditedChunk(chunkX, chunkY, chunkZ);
-  }
+  /** Where saved edits go: the per-chunk maps that are saved and applied to chunks that load later. */
+  const savedEditTarget: SavedEditTarget = {
+    editsOfChunk(chunkX, chunkY, chunkZ) {
+      const chunkName = chunkNameOf(chunkX, chunkY, chunkZ);
+      let edits = modifiedChunks.current.get(chunkName);
+      if (!edits) {
+        edits = new Map();
+        modifiedChunks.current.set(chunkName, edits);
+      }
+      noteEditedChunk(chunkX, chunkY, chunkZ);
+      return edits;
+    },
+  };
 
   function streamChunksAroundCamera() {
     const pipeline = pipelineRef.current;
@@ -978,40 +981,27 @@ export default function Game() {
         );
 
         const buildWorldStateToken = profiler.begin("main.network.buildWorldState");
-        const blocks: { x: number; y: number; z: number; blockType: number }[] =
-          [];
+        let editCount = 0;
+        modifiedChunks.current.forEach((modifications) => (editCount += modifications.size));
+        const editXs = new Int32Array(editCount);
+        const editYs = new Int32Array(editCount);
+        const editZs = new Int32Array(editCount);
+        const editBlocks = new Uint8Array(editCount);
+        let editPosition = 0;
         modifiedChunks.current.forEach((modifications, chunkName) => {
-          const [cx, cy, cz] = chunkName.split(",").map(Number);
-          modifications.forEach((type, index) => {
-            const z = index % CHUNK_HEIGHT;
-            const y = Math.floor(index / CHUNK_HEIGHT) % CHUNK_WIDTH;
-            const x = Math.floor(
-              Math.floor(index / CHUNK_HEIGHT) / CHUNK_WIDTH,
-            );
-
-            const globalX = cx * CHUNK_WIDTH + x;
-            const globalY = cy * CHUNK_HEIGHT + y;
-            const globalZ = cz * CHUNK_LENGTH + z;
-
-            blocks.push({
-              x: globalX,
-              y: globalY,
-              z: globalZ,
-              blockType: type,
-            });
+          const [chunkX, chunkY, chunkZ] = chunkName.split(",").map(Number);
+          modifications.forEach((blockType, index) => {
+            editXs[editPosition] = chunkX * CHUNK_WIDTH + Math.floor(index / (CHUNK_HEIGHT * CHUNK_LENGTH));
+            editYs[editPosition] = chunkY * CHUNK_HEIGHT + (Math.floor(index / CHUNK_LENGTH) % CHUNK_HEIGHT);
+            editZs[editPosition] = chunkZ * CHUNK_LENGTH + (index % CHUNK_LENGTH);
+            editBlocks[editPosition] = blockType;
+            editPosition++;
           });
         });
-
         profiler.end(buildWorldStateToken);
-        profiler.addCounter("game.network.worldStateBlocksSent", blocks.length);
-        if (blocks.length > 0) {
-          nm.send(
-            {
-              type: "WORLD_STATE",
-              blocks,
-            },
-            id,
-          );
+        profiler.addCounter("game.network.worldStateBlocksSent", editCount);
+        if (editCount > 0) {
+          nm.send({ type: "BLOCK_BATCH", runs: encodeBlockRuns(editCount, editXs, editYs, editZs, editBlocks, 2) }, id);
         }
 
         const rp = new RemotePlayer(id, scene, new THREE.Vector3(0, 100, 0));
@@ -1058,6 +1048,9 @@ export default function Game() {
           rp.updatePosition(data.position, data.rotation);
         } else if (data.type === "BLOCK_UPDATE") {
           setBlock(data.x, data.y, data.z, data.blockType, false);
+        } else if (data.type === "BLOCK_BATCH") {
+          profiler.addCounter("game.network.blockBatches");
+          applyBlockEditBatch(decodeBlockRuns(data.runs), false);
         } else if (data.type === "WORLD_STATE") {
           profiler.addCounter("game.network.worldStateBlocks", data.blocks.length);
           const applyWorldStateToken = profiler.begin(
@@ -1586,7 +1579,13 @@ export default function Game() {
     const batch = edits instanceof BlockEditBatch ? edits : BlockEditBatch.fromEdits(edits);
     profiler.addCounter("game.setBlock.calls", batch.length);
     const pipeline = pipelineRef.current;
-    rememberEditsOutsideLoadedChunks(batch, pipeline);
+    if (batch.replaceRule === "any") {
+      recordEditsOutsideLoadedChunks(
+        savedEditTarget,
+        batch,
+        (chunkX, chunkY, chunkZ) => !!pipeline?.store.get(chunkX, chunkY, chunkZ)?.blocks,
+      );
+    }
     if (!pipeline || batch.length === 0) return null;
 
     const firstOldBlock = pipeline.getBlock(batch.xs[0], batch.ys[0], batch.zs[0]) ?? BlockType.AIR;
@@ -1656,53 +1655,17 @@ export default function Game() {
     }
   }
 
-  function rememberEditsOutsideLoadedChunks(
-    batch: BlockEditBatch,
-    pipeline: ChunkPipeline | null,
-  ) {
-    if (batch.replaceRule !== "any") return;
-    for (let position = 0; position < batch.length; position++) {
-      const x = batch.xs[position];
-      const y = batch.ys[position];
-      const z = batch.zs[position];
-      if (!pipeline?.hasBlocksAt(x, y, z)) recordSavedEdit(x, y, z, batch.blocks[position]);
-    }
-  }
-
-  function isWaterAround(x: number, y: number, z: number) {
-    const isWaterAt = (blockX: number, blockY: number, blockZ: number) => {
-      const block = getBlock(blockX, blockY, blockZ);
-      return block !== null && isWater(block);
-    };
-    return (
-      isWaterAt(x, y, z) ||
-      isWaterAt(x + 1, y, z) ||
-      isWaterAt(x - 1, y, z) ||
-      isWaterAt(x, y + 1, z) ||
-      isWaterAt(x, y - 1, z) ||
-      isWaterAt(x, y, z + 1) ||
-      isWaterAt(x, y, z - 1)
-    );
-  }
-
   /** Saves every changed block, wakes the water next to it and sends the changes to peers. */
   function applyEditSideEffects(result: PipelineEditResult, broadcast: boolean) {
     const { changes } = result;
-    for (let position = 0; position < changes.count; position++) {
-      const x = changes.x[position];
-      const y = changes.y[position];
-      const z = changes.z[position];
-      recordSavedEdit(x, y, z, changes.newBlock[position]);
-      if (isWater(changes.oldBlock[position]) || isWaterAround(x, y, z)) {
-        scheduleWaterUpdate(x, y, z);
-        scheduleWaterUpdate(x + 1, y, z);
-        scheduleWaterUpdate(x - 1, y, z);
-        scheduleWaterUpdate(x, y + 1, z);
-        scheduleWaterUpdate(x, y - 1, z);
-        scheduleWaterUpdate(x, y, z + 1);
-        scheduleWaterUpdate(x, y, z - 1);
-      }
-    }
+    const sideEffectsToken = profiler.begin("main.edit.sideEffects");
+    recordSavedEdits(savedEditTarget, changes.count, changes.x, changes.y, changes.z, changes.newBlock);
+    wakeWaterAroundChanges(
+      changes,
+      (chunkX, chunkY, chunkZ) => pipelineRef.current?.store.get(chunkX, chunkY, chunkZ)?.blocks,
+      scheduleWaterUpdate,
+    );
+    profiler.end(sideEffectsToken);
     if (!broadcast || !networkManager.current.myPeerId || changes.count === 0) return;
     if (changes.count === 1) {
       networkManager.current.send({
@@ -1714,16 +1677,10 @@ export default function Game() {
       });
       return;
     }
-    const blocks: { x: number; y: number; z: number; blockType: number }[] = [];
-    for (let position = 0; position < changes.count; position++) {
-      blocks.push({
-        x: changes.x[position],
-        y: changes.y[position],
-        z: changes.z[position],
-        blockType: changes.newBlock[position],
-      });
-    }
-    networkManager.current.send({ type: "WORLD_STATE", blocks });
+    networkManager.current.send({
+      type: "BLOCK_BATCH",
+      runs: encodeBlockRuns(changes.count, changes.x, changes.y, changes.z, changes.newBlock, 1),
+    });
   }
 
   let prevTime = performance.now();
