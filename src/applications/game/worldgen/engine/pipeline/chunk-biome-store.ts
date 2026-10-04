@@ -12,7 +12,7 @@ import {
   startWorkerSampledSection,
   startWorkerSection,
 } from "@/applications/game/profiler/worker-recorder";
-import { SinglePointContext, type DensityNode, type NoiseRouter, quantizeClimateCoordinate } from "../density";
+import { type NoiseRouter, quantizeClimateCoordinate } from "../density";
 import type { TargetPoint } from "../density";
 import { NoiseChunk } from "../terrain";
 import type { MultiNoiseBiomeSource } from "../biome-source";
@@ -59,6 +59,7 @@ class ChunkBiomeGrid {
     const erosion = noiseChunk.router.erosion!;
     const depth = noiseChunk.router.depth!;
     const weirdness = noiseChunk.router.ridges!;
+    const context = { blockX: 0, blockY: 0, blockZ: 0 };
     const firstQuartX = this.chunkX * QUARTS_PER_CHUNK_SIDE;
     const firstQuartZ = this.chunkZ * QUARTS_PER_CHUNK_SIDE;
     const isProfiling = isWorkerProfiling();
@@ -71,22 +72,30 @@ class ChunkBiomeGrid {
             const quartY = this.minQuartY + sectionIndex * 4 + quartYInSection;
             const quartX = firstQuartX + quartXInSection;
             const quartZ = firstQuartZ + quartZInSection;
-            const context = new SinglePointContext(quartX << 2, quartY << 2, quartZ << 2);
+            context.blockX = quartX << 2;
+            context.blockY = quartY << 2;
+            context.blockZ = quartZ << 2;
             if (isProfiling) startWorkerSampledSection("biome.sampleClimate", CLIMATE_SAMPLE_EVERY);
-            const target: TargetPoint = {
-              temperature: quantizeClimateCoordinate(temperature.compute(context)),
-              humidity: quantizeClimateCoordinate(humidity.compute(context)),
-              continentalness: quantizeClimateCoordinate(continentalness.compute(context)),
-              erosion: quantizeClimateCoordinate(erosion.compute(context)),
-              depth: quantizeClimateCoordinate(depth.compute(context)),
-              weirdness: quantizeClimateCoordinate(weirdness.compute(context)),
-            };
+            const quantizedTemperature = quantizeClimateCoordinate(temperature.compute(context));
+            const quantizedHumidity = quantizeClimateCoordinate(humidity.compute(context));
+            const quantizedContinentalness = quantizeClimateCoordinate(continentalness.compute(context));
+            const quantizedErosion = quantizeClimateCoordinate(erosion.compute(context));
+            const quantizedDepth = quantizeClimateCoordinate(depth.compute(context));
+            const quantizedWeirdness = quantizeClimateCoordinate(weirdness.compute(context));
             if (isProfiling) {
               endWorkerSection();
               startWorkerSampledSection("biome.searchRTree", BIOME_SEARCH_SAMPLE_EVERY);
             }
             const cellIndex = ((sectionIndex * 4 + quartYInSection) * QUARTS_PER_CHUNK_SIDE + quartZInSection) * QUARTS_PER_CHUNK_SIDE + quartXInSection;
-            this.biomeIndices[cellIndex] = this.internBiome(this.biomeSource.findBiome(target));
+            const biomeId = this.biomeSource.findBiomeForClimate(
+              quantizedTemperature,
+              quantizedHumidity,
+              quantizedContinentalness,
+              quantizedErosion,
+              quantizedDepth,
+              quantizedWeirdness,
+            );
+            this.biomeIndices[cellIndex] = this.internBiome(biomeId);
             if (isProfiling) endWorkerSection();
           }
         }

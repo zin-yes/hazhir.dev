@@ -202,14 +202,27 @@ export class ClimateRTree {
 
   /** Index (into the construction list) of the leaf with minimal fitness; vanilla tie behavior except the last-leaf cache. */
   search(targetArray: number[]): number {
+    return this.searchClimate(targetArray[0]!, targetArray[1]!, targetArray[2]!, targetArray[3]!, targetArray[4]!, targetArray[5]!, targetArray[6]!);
+  }
+
+  /** `search` with the 7 target values passed directly (no array per query). */
+  searchClimate(
+    temperature: number,
+    humidity: number,
+    continentalness: number,
+    erosion: number,
+    depth: number,
+    weirdness: number,
+    offset: number,
+  ): number {
     this.searchCount++;
-    this.searchTarget0 = targetArray[0]!;
-    this.searchTarget1 = targetArray[1]!;
-    this.searchTarget2 = targetArray[2]!;
-    this.searchTarget3 = targetArray[3]!;
-    this.searchTarget4 = targetArray[4]!;
-    this.searchTarget5 = targetArray[5]!;
-    this.searchTarget6 = targetArray[6]!;
+    this.searchTarget0 = temperature;
+    this.searchTarget1 = humidity;
+    this.searchTarget2 = continentalness;
+    this.searchTarget3 = erosion;
+    this.searchTarget4 = depth;
+    this.searchTarget5 = weirdness;
+    this.searchTarget6 = offset;
     this.bestDistance = Infinity;
     this.bestNodeId = -1;
     if (this.reuseLastLeaf && this.lastLeafNodeId >= 0) {
