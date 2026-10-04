@@ -63,6 +63,19 @@ Markdown report layout: session info (GPU, viewport, DPR, cores, timer mode), fr
 
 Optimization loop: run the benchmark, pick the top target, change one thing, rerun with the same seed, compare the same rows.
 
+## Call trees, breakdowns, trace, sampling, diff
+
+- **Call trees:** every scope and worker section is also kept as a path-keyed tree (`a>b>c`) with calls, inclusive, self and max time per node. Overlay tabs `Call tree` and `Flame`, and the "Call trees" markdown section. `__gameProfiler.callTree()` returns the data. Worker trees are merged per `<pool>.<method>`.
+- **Breakdowns:** cost grouped by a domain key (biome, stage, feature, feature type, carver, density node, surface rule, block, game block, mesh faces per block, light kind, system, UI surface). Dimension names live in `profiler/dimensions.ts`. Keys containing `|` are cross dimensions (`worldgen.biomeStage`, `worldgen.biomeFeature`) and render as matrices. Tag a section with `workerSection(name, fn, dimension, key)` or `profiler.begin(name, dimension, key)`; add pure units with `addWorkerKeyedUnits`.
+- **Hot loops:** `workerSampledSection` / `startWorkerSampledSection(name, every)` count every call exactly and time one in N; the rest is estimated from the running mean (shown as `~`). Read self time on sampled nodes, inclusive time can be inflated by rare heavy children.
+- **Trace:** `__gameProfiler.trace(true)` (or `?trace=1`), exercise, then `saveTrace()` writes `.profiles/latest-trace.json` (open in ui.perfetto.dev or chrome://tracing).
+- **Sampling:** `?sample=1` or `startSampling()` / `stopSampling()` runs the JS Self-Profiling API on the main thread (Chromium only, dev header `Document-Policy: js-profiling`, not available in workers). Finds hot code nobody instrumented.
+- **Diff:** `saveBaseline("name")` then `diffAgainst("name")`, or `bun scripts/profile-diff.ts baseline:<name> latest`. Rows are ranked by impact and flagged regression/improvement beyond a 5% noise threshold.
+
+## Headless worldgen probe
+
+`bun run profile:worldgen` (flags `--seed --columns-per-biome --warmup --biomes a,b --cold --max-biomes --all --out`) finds representative columns for each biome, generates them through the game's own path and writes `.profiles/worldgen-latest.md` and `.json`: slowest biomes, call tree, and per-stage/biome/feature/carver/block breakdowns. No browser needed; use it to attribute generation cost per biome and per block.
+
 ## Hints
 
 `hints.ts` derives evidence-based suggestions from the snapshot. Each cites the measured numbers. Current rules cover: worker payloads copied instead of transferred, GPU upload spikes, wide vertex data (bytes per vertex and per attribute), index buffers wider than needed, frame spikes and their top scope, high unattributed frame time, high draw call counts, GPU time over budget, Game component re-render rate, long tasks, JS heap allocation rate, and worker pools that are saturated or idle. Thresholds are named constants at the top of the file.
