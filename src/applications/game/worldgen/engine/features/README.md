@@ -46,7 +46,10 @@ placed here.
 
 Heightmaps follow `ProtoChunk` during FEATURES: `WORLD_SURFACE_WG` / `OCEAN_FLOOR_WG` stay as the base terrain left
 them; `WORLD_SURFACE`, `OCEAN_FLOOR`, `MOTION_BLOCKING`, `MOTION_BLOCKING_NO_LEAVES` are primed lazily and updated on
-every write (`Heightmap.update`). Raw brightness is always 0: protochunks are unlit until after FEATURES (confirmed
+every write (`Heightmap.update`). Priming reads palette ids directly: untouched columns copy the heightmaps the
+decorator primed once per base column (`BaseHeightmapCache`, shared by every region), and written columns start from
+them and only rescan where a write removed the top block. Written columns' block copies are pooled between regions.
+Raw brightness is always 0: protochunks are unlit until after FEATURES (confirmed
 by the ground-truth fixtures, where red mushrooms stand on gravel under open sky, which `MushroomBlock.canSurvive`
 only allows below brightness 13).
 

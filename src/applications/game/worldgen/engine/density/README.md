@@ -23,3 +23,11 @@ BeardifierMarker), `CubicSpline` (float math), `NoiseRouterData.QuantizedSpaghet
 
 Tests compare against `fixtures/density-reference-vectors.json.gz`, recorded from the real server classes by
 `fixtures/DensityReference.java`; they need the scratch datapacks (`WORLDGEN_SCRATCH`) and skip without them.
+
+Fast evaluation of plain (marker-transparent) trees, same doubles as `compute`:
+- `column-memoization.ts`: `createColumnMemoizedDensity(root)` wraps every maximal y-independent subtree in a
+  last-column cache and every cache_once subtree in a last-point cache (`BlockYDependence` is the conservative
+  analysis).
+- `density-codegen.ts`: `compileDensityFunction(root)` generates one JavaScript function of (x, y, z) with the same
+  operations, order and short circuits as the nodes' `compute`; unknown nodes are called through `compute`.
+  `density-codegen.test.ts` compares it with the interpreted router functions bit for bit.

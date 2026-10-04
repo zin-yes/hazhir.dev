@@ -13,9 +13,14 @@ fill noise (aquifers + ore veins) -> biomes -> `buildSurface` -> carvers.
 - `generator.carvingMask(chunkX, chunkZ, "air")` returns the carvers' mask of a base column (packed `CarvingMask`, what the `carving_mask` placement modifier reads); the liquid step is always empty, as in 1.20.6.
 - The carvers read biomes through a memoized point sampler (stripped climate sampler, no chunk grids); `rawBiomeAtQuart`
   and `biomeAt` stay on the exact chunk-grid store.
+- A chunk's biome grid samples its climate one quart column at a time with compiled plain functions (equal to the
+  NoiseChunk-cached sampler at quart cells, checked by `chunk-climate-samples.test.ts`) and then runs the R-tree
+  searches in the vanilla order. Up to 1024 grids are kept (about 3 KB each).
+- `bounded-lru-cache.ts` is a second-chance (CLOCK) cache keyed by packed chunk coordinates (`packChunkColumnKey`).
+- `generator.router` exposes the seeded noise router (for samplers such as `TerrainHeightSampler`).
 - Biomes mirror `doCreateBiomes`: per chunk, a `NoiseChunk`-cached climate sampler is evaluated in
   `LevelChunkSection.fillBiomesFromNoise` order with the R-tree last-leaf hint, so exact climate ties resolve as in vanilla.
-  The hint is primed per chunk so results do not depend on generation order. Bounded LRU of 64 chunks.
+  The hint is primed per chunk so results do not depend on generation order.
 
 ## Profiling
 

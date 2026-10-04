@@ -13,6 +13,10 @@ Public API (`index.ts`):
 Mirrors: `SurfaceSystem`, `SurfaceRules` (+ `Context`), `NoiseChunk.preliminarySurfaceLevel`, `Heightmap` (WORLD_SURFACE_WG),
 and the temperature parts of `Biome`.
 
+The rules run as generated code (`surface-rule-codegen.ts`: one function per `sequence`, conditions inline, the same
+evaluation order and arithmetic as the closures in `surface-rule-compiler.ts`, which the profiler still uses to time
+rule types).
+
 Tests: `surface-system.test.ts` (real Terralith rules on hand-built columns, clay bands vs Minecraft),
 `biome-noises.test.ts` (vs Minecraft), `surface-fixtures.test.ts` (real server chunks, needs the scratch data,
 `SURFACE_FIXTURE_STRIDE=1` runs every interior chunk). `fixtures/SurfaceReference.java` produced the recorded values.

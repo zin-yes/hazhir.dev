@@ -12,4 +12,6 @@ Climate-to-biome lookup and block-resolution biome zoom for the Terralith worldg
 
 Tests read the real Terralith table; set `TERRALITH_PACK_ROOT` to the pack directory (they skip when it is absent).
 
-`BiomeManager` keeps a direct-mapped cache of the per-quart-cell fiddle offsets (they depend only on the cell, and neighbouring blocks share cells), which removes about 60% of surface-generation time; results stay bit-identical to the uncached BigInt oracle used in the tests.
+`BiomeManager` also remembers which 2x2x2 candidate cubes hold a single biome (that biome is then the answer whatever
+the fiddled distances); a cube spanning chunks is only classified when those chunks' biomes are already cached, so
+scattered lookups never generate extra chunks. It keeps a direct-mapped cache of the per-quart-cell fiddle offsets (they depend only on the cell, and neighbouring blocks share cells), which removes about 60% of surface-generation time; results stay bit-identical to the uncached BigInt oracle used in the tests.
