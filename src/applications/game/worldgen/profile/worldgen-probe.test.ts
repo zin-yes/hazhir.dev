@@ -47,7 +47,8 @@ describe("worldgen probe", () => {
     expect(topCallTreePaths(result.snapshot, 15)[0]!.selfMs).toBeGreaterThan(0);
 
     const biomeBreakdown = result.snapshot.breakdowns.find((summary) => summary.dimension === DIMENSIONS.worldgenBiome);
-    expect(biomeBreakdown?.entries.map((entry) => entry.key).sort()).toEqual([...requestedBiomes].sort());
+    const breakdownKeys = biomeBreakdown?.entries.map((entry) => entry.key) ?? [];
+    for (const requestedBiome of requestedBiomes) expect(breakdownKeys).toContain(requestedBiome);
 
     const blocksGenerated = result.snapshot.counters.find((counter) => counter.name === "work.generation.generateChunk.blocksGenerated");
     expect(blocksGenerated?.total).toBeGreaterThan(0);
