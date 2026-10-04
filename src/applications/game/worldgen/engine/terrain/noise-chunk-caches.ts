@@ -90,6 +90,20 @@ export class NoiseInterpolator extends NoiseChunkCache {
     return slice;
   }
 
+  /** The largest corner magnitude of the selected cell: every value interpolated inside the cell stays within it. */
+  maxAbsoluteCorner(): number {
+    return Math.max(
+      Math.abs(this.noise000),
+      Math.abs(this.noise001),
+      Math.abs(this.noise100),
+      Math.abs(this.noise101),
+      Math.abs(this.noise010),
+      Math.abs(this.noise011),
+      Math.abs(this.noise110),
+      Math.abs(this.noise111),
+    );
+  }
+
   /** The selected cell's corners in lerp3 order: 000, 100, 010, 110, 001, 101, 011, 111. */
   writeCorners(target: Float64Array, offset: number): void {
     target[offset] = this.noise000;

@@ -6,6 +6,7 @@
 import type { FunctionContext } from "../density/density-function";
 import type { DensityNode } from "../density/density-function";
 import type { PositionalRandomFactory } from "../random";
+import { NoiseInterpolator } from "./noise-chunk-caches";
 import { transientRandomAt } from "../random/xoroshiro-random-source";
 import {
   BLOCK_COPPER_ORE,
@@ -19,6 +20,7 @@ import {
 export const NO_VEIN = -1;
 
 const VEININESS_THRESHOLD = Math.fround(0.4);
+const TOGGLE_ROUNDING_MARGIN = 1e-6;
 const EDGE_ROUNDOFF_BEGIN = 20;
 const MAX_EDGE_ROUNDOFF = 0.2;
 const VEIN_SOLIDNESS = Math.fround(0.7);
@@ -59,6 +61,15 @@ export class OreVeinifier {
   /** False where compute is NO_VEIN whatever the noise (outside both vein height ranges). */
   mayHoldVeinAt(blockY: number): boolean {
     return blockY <= COPPER_VEIN.maxY && blockY >= IRON_VEIN.minY;
+  }
+
+  /**
+   * True when no block of the chunk's selected cell can be part of a vein: an interpolated toggle never leaves its
+   * corners' range (the margin covers rounding), and a magnitude below the veininess threshold is NO_VEIN.
+   */
+  selectedCellCannotHoldVeins(): boolean {
+    const toggle = this.veinToggle;
+    return toggle instanceof NoiseInterpolator && toggle.maxAbsoluteCorner() < VEININESS_THRESHOLD - TOGGLE_ROUNDING_MARGIN;
   }
 
   /** The BlockStateFiller of OreVeinifier.create: the vein block at the context's position, or NO_VEIN. */

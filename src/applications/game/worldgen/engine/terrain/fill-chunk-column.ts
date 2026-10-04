@@ -323,10 +323,11 @@ function fillCellWithAquifer(
   if (cellValues !== undefined && fillUniformCell(blocks, cellValues, aquifer, oreVeinifier, cellX, cellY, cellZ, cellWidth, cellHeight, minCellY, minY, chunkMinBlockX, chunkMinBlockZ)) {
     return;
   }
+  const cellMayHoldVeins = oreVeinifier !== undefined && !oreVeinifier.selectedCellCannotHoldVeins();
   for (let yInCell = cellHeight - 1; yInCell >= 0; yInCell--) {
     const blockY = (minCellY + cellY) * cellHeight + yInCell;
     const rowOffset = (blockY - minY) * 256;
-    const rowMayHoldVeins = oreVeinifier !== undefined && oreVeinifier.mayHoldVeinAt(blockY);
+    const rowMayHoldVeins = cellMayHoldVeins && oreVeinifier!.mayHoldVeinAt(blockY);
     const cellRowStart = (cellHeight - 1 - yInCell) * cellWidth;
     for (let xInCell = 0; xInCell < cellWidth; xInCell++) {
       const localX = cellX * cellWidth + xInCell;
@@ -389,7 +390,11 @@ function fillUniformCell(
   const firstLocalX = cellX * cellWidth;
   const firstLocalZ = cellZ * cellWidth;
   if (positiveCount === cellValues.length) {
-    if (oreVeinifier !== undefined && (oreVeinifier.mayHoldVeinAt(lowestBlockY) || oreVeinifier.mayHoldVeinAt(highestBlockY))) return false;
+    const cellMayHoldVeins =
+      oreVeinifier !== undefined &&
+      (oreVeinifier.mayHoldVeinAt(lowestBlockY) || oreVeinifier.mayHoldVeinAt(highestBlockY)) &&
+      !oreVeinifier.selectedCellCannotHoldVeins();
+    if (cellMayHoldVeins) return false;
     for (let blockY = lowestBlockY; blockY <= highestBlockY; blockY++) fillCellRow(blocks, (blockY - minY) * 256, firstLocalX, firstLocalZ, cellWidth, BLOCK_DEFAULT_BLOCK);
     return true;
   }
