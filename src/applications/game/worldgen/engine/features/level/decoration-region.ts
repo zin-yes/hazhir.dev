@@ -65,29 +65,28 @@ export class BaseHeightmapCache {
         maxYExclusive: minY + base.height,
         infoAt: (localX, y, localZ) => paletteInfo.info(baseBlocks[(y - minY) * LAYER_SIZE + localZ * 16 + localX]!),
       };
-      heightmap = new ChunkHeightmap(type, reader, this.primeFirstAvailable(base, HEIGHTMAP_TYPES.indexOf(type), paletteInfo));
+      heightmap = new ChunkHeightmap(type, reader, this.primeFirstAvailable(baseBlocks, minY, base.height, type, paletteInfo));
       heightmaps.set(type, heightmap);
       endDecorationSection();
     }
     return heightmap;
   }
 
-  /** Heightmap priming straight on the palette ids: the highest opaque block + 1 per column, or minY. */
-  private primeFirstAvailable(base: ChunkBlocks, typeIndex: number, paletteInfo: PaletteBlockInfo): Int32Array {
-    const typeBit = 1 << typeIndex;
-    const blocks = base.blocks;
+  /** Heightmap priming straight on palette ids: the highest opaque block + 1 per column, or minY (as scanDown). */
+  primeFirstAvailable(blocks: Uint16Array, minY: number, height: number, type: HeightmapType, paletteInfo: PaletteBlockInfo): Int32Array {
+    const typeBit = 1 << HEIGHTMAP_TYPES.indexOf(type);
     const firstAvailable = new Int32Array(LAYER_SIZE);
-    const topLayerStart = (base.height - 1) * LAYER_SIZE;
+    const topLayerStart = (height - 1) * LAYER_SIZE;
     for (let columnIndex = 0; columnIndex < LAYER_SIZE; columnIndex++) {
-      let height = base.minY;
-      for (let index = topLayerStart + columnIndex, y = base.minY + base.height - 1; index >= 0; index -= LAYER_SIZE, y--) {
+      let columnHeight = minY;
+      for (let index = topLayerStart + columnIndex, y = minY + height - 1; index >= 0; index -= LAYER_SIZE, y--) {
         const paletteId = blocks[index]!;
         if (paletteId !== 0 && (this.opacityBitsOf(paletteId, paletteInfo) & typeBit) !== 0) {
-          height = y + 1;
+          columnHeight = y + 1;
           break;
         }
       }
-      firstAvailable[columnIndex] = height;
+      firstAvailable[columnIndex] = columnHeight;
     }
     return firstAvailable;
   }
@@ -130,7 +129,10 @@ class RegionColumn {
           infoAt: (localX, y, localZ) => this.paletteInfo.info(this.blocks[(y - minY) * LAYER_SIZE + localZ * 16 + localX]!),
         };
         startDecorationSection("region.heightmap.prime");
-        heightmap = new ChunkHeightmap(type, reader, this.copied ? undefined : baseHeightmap);
+        const primedFrom = this.copied
+          ? this.baseHeightmaps.primeFirstAvailable(this.blocks, minY, this.base.height, type, this.paletteInfo)
+          : baseHeightmap;
+        heightmap = new ChunkHeightmap(type, reader, primedFrom);
         endDecorationSection();
       }
       this.heightmaps.set(type, heightmap);
