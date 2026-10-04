@@ -3,6 +3,12 @@
 // picker's fluid at that y, else air. With `aquifers` it is the real list: Aquifer.NoiseBasedAquifer first, then
 // OreVeinifier, and null from both means the default block.
 
+import {
+  addWorkerCounter,
+  endWorkerSection,
+  isWorkerProfiling,
+  startWorkerSection,
+} from "@/applications/game/profiler/worker-recorder";
 import type { NoiseRouter } from "../density/router-wiring";
 import type { PositionalRandomFactory } from "../random";
 import { NoiseBasedAquifer, NULL_SUBSTANCE } from "./aquifer";
@@ -157,24 +163,69 @@ export function fillChunkColumnDetailed(params: FillChunkColumnParams): FilledCh
   const { router, chunkX, chunkZ, minY, height, seaLevel } = params;
   const chunkMinBlockX = chunkX * 16;
   const chunkMinBlockZ = chunkZ * 16;
-  const noiseChunk = new NoiseChunk(router, {
-    cellCountXZ: 4,
-    firstBlockX: chunkMinBlockX,
-    firstBlockZ: chunkMinBlockZ,
-    minY,
-    height,
-    wiredRouterFields: params.aquifers ? AQUIFER_WIRED_ROUTER_FIELDS : ["finalDensity"],
-  });
+  const isProfiling = isWorkerProfiling();
+
+  if (isProfiling) startWorkerSection("noise.wireChunk");
+  let noiseChunk: NoiseChunk;
+  try {
+    noiseChunk = new NoiseChunk(router, {
+      cellCountXZ: 4,
+      firstBlockX: chunkMinBlockX,
+      firstBlockZ: chunkMinBlockZ,
+      minY,
+      height,
+      wiredRouterFields: params.aquifers ? AQUIFER_WIRED_ROUTER_FIELDS : ["finalDensity"],
+    });
+  } finally {
+    if (isProfiling) endWorkerSection();
+  }
+
   let aquifer: NoiseBasedAquifer | undefined;
   let oreVeinifier: OreVeinifier | undefined;
   if (params.aquifers) {
-    const randoms = positionalRandomsOf(params.aquifers.rootRandomFactory);
-    aquifer = createAquiferForChunk(noiseChunk, router, chunkX, chunkZ, minY, height, seaLevel, randoms.aquifer);
-    if (params.aquifers.oreVeins !== false) {
-      const wired = noiseChunk.router;
-      oreVeinifier = new OreVeinifier(wired.veinToggle!, wired.veinRidged!, wired.veinGap!, randoms.ore);
+    if (isProfiling) startWorkerSection("noise.createAquifer");
+    try {
+      const randoms = positionalRandomsOf(params.aquifers.rootRandomFactory);
+      aquifer = createAquiferForChunk(noiseChunk, router, chunkX, chunkZ, minY, height, seaLevel, randoms.aquifer);
+      if (params.aquifers.oreVeins !== false) {
+        const wired = noiseChunk.router;
+        oreVeinifier = new OreVeinifier(wired.veinToggle!, wired.veinRidged!, wired.veinGap!, randoms.ore);
+      }
+    } finally {
+      if (isProfiling) endWorkerSection();
     }
   }
+
+  if (isProfiling) startWorkerSection("noise.fillCells");
+  let blocks: Uint8Array;
+  try {
+    blocks = interpolateColumn(noiseChunk, { aquifer, oreVeinifier, minY, height, seaLevel, chunkMinBlockX, chunkMinBlockZ, isProfiling });
+  } finally {
+    if (isProfiling) endWorkerSection();
+  }
+  if (isProfiling) {
+    addWorkerCounter("columnsFilled", 1);
+    addWorkerCounter("cellsInterpolated", (16 / noiseChunk.cellWidth) ** 2 * noiseChunk.cellCountY);
+    addWorkerCounter("blocksFilled", height * 256);
+    aquifer?.drainProfileCounters();
+  }
+  return { blocks, aquifer };
+}
+
+interface InterpolationSettings {
+  aquifer: NoiseBasedAquifer | undefined;
+  oreVeinifier: OreVeinifier | undefined;
+  minY: number;
+  height: number;
+  seaLevel: number;
+  chunkMinBlockX: number;
+  chunkMinBlockZ: number;
+  isProfiling: boolean;
+}
+
+/** The doFill cell loops: slices of cell corners along x, cells top-down, then every block inside the cell. */
+function interpolateColumn(noiseChunk: NoiseChunk, settings: InterpolationSettings): Uint8Array {
+  const { aquifer, oreVeinifier, minY, height, seaLevel, chunkMinBlockX, chunkMinBlockZ, isProfiling } = settings;
   const density = noiseChunk.finalDensityForFill;
   const cellWidth = noiseChunk.cellWidth;
   const cellHeight = noiseChunk.cellHeight;
@@ -183,12 +234,21 @@ export function fillChunkColumnDetailed(params: FillChunkColumnParams): FilledCh
   const cellCountY = Math.floor(height / cellHeight);
   const blocks = new Uint8Array(height * 256);
 
+  if (isProfiling) startWorkerSection("noise.initializeSlice");
   noiseChunk.initializeForFirstCellX();
+  if (isProfiling) endWorkerSection();
   for (let cellX = 0; cellX < cellsPerChunkSide; cellX++) {
+    if (isProfiling) startWorkerSection("noise.advanceSlice");
     noiseChunk.advanceCellX(cellX);
+    if (isProfiling) endWorkerSection();
     for (let cellZ = 0; cellZ < cellsPerChunkSide; cellZ++) {
       for (let cellY = cellCountY - 1; cellY >= 0; cellY--) {
+        if (isProfiling) startWorkerSection("noise.selectCell");
         noiseChunk.selectCellYZ(cellY, cellZ);
+        if (isProfiling) {
+          endWorkerSection();
+          startWorkerSection("noise.interpolateBlocks");
+        }
         for (let yInCell = cellHeight - 1; yInCell >= 0; yInCell--) {
           const blockY = (minCellY + cellY) * cellHeight + yInCell;
           noiseChunk.updateForY(blockY, yInCell / cellHeight);
@@ -214,10 +274,11 @@ export function fillChunkColumnDetailed(params: FillChunkColumnParams): FilledCh
             }
           }
         }
+        if (isProfiling) endWorkerSection();
       }
     }
     noiseChunk.swapSlices();
   }
   noiseChunk.stopInterpolation();
-  return { blocks, aquifer };
+  return blocks;
 }

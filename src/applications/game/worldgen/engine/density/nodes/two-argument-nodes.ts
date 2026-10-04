@@ -9,7 +9,15 @@ import {
   numberSignature,
   type StructuralIdLookup,
 } from "../density-function";
+import { densityNodeTypeIndex, noteDensityEvaluation } from "../density-evaluation-counter";
 import { ConstantNode } from "./arithmetic-nodes";
+
+const ADD_TYPE_INDEX = densityNodeTypeIndex("add");
+const MUL_TYPE_INDEX = densityNodeTypeIndex("mul");
+const MIN_TYPE_INDEX = densityNodeTypeIndex("min");
+const MAX_TYPE_INDEX = densityNodeTypeIndex("max");
+const ADD_CONSTANT_TYPE_INDEX = densityNodeTypeIndex("add_constant");
+const MUL_CONSTANT_TYPE_INDEX = densityNodeTypeIndex("mul_constant");
 
 export type TwoArgumentType = "add" | "mul" | "min" | "max";
 
@@ -84,6 +92,7 @@ export abstract class TwoArgumentNode extends DensityNode {
 
 class AddNode extends TwoArgumentNode {
   compute(context: FunctionContext): number {
+    noteDensityEvaluation(ADD_TYPE_INDEX);
     return this.first.compute(context) + this.second.compute(context);
   }
 
@@ -97,6 +106,7 @@ class AddNode extends TwoArgumentNode {
 
 class MulNode extends TwoArgumentNode {
   compute(context: FunctionContext): number {
+    noteDensityEvaluation(MUL_TYPE_INDEX);
     const firstValue = this.first.compute(context);
     return firstValue === 0 ? 0 : firstValue * this.second.compute(context);
   }
@@ -113,6 +123,7 @@ class MulNode extends TwoArgumentNode {
 /** min skips the second argument when the first is already below the second's minimum. */
 class MinNode extends TwoArgumentNode {
   compute(context: FunctionContext): number {
+    noteDensityEvaluation(MIN_TYPE_INDEX);
     const firstValue = this.first.compute(context);
     return firstValue < this.second.minValue ? firstValue : Math.min(firstValue, this.second.compute(context));
   }
@@ -131,6 +142,7 @@ class MinNode extends TwoArgumentNode {
 /** max skips the second argument when the first is already above the second's maximum. */
 class MaxNode extends TwoArgumentNode {
   compute(context: FunctionContext): number {
+    noteDensityEvaluation(MAX_TYPE_INDEX);
     const firstValue = this.first.compute(context);
     return firstValue > this.second.maxValue ? firstValue : Math.max(firstValue, this.second.compute(context));
   }
@@ -165,6 +177,7 @@ export class MulOrAddNode extends DensityNode {
   }
 
   compute(context: FunctionContext): number {
+    noteDensityEvaluation(this.type === "add" ? ADD_CONSTANT_TYPE_INDEX : MUL_CONSTANT_TYPE_INDEX);
     return this.transform(this.input.compute(context));
   }
 

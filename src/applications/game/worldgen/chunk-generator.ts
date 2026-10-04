@@ -5,14 +5,17 @@
 
 import { BlockType } from "@/applications/game/blocks";
 import { CHUNK_HEIGHT, CHUNK_LENGTH, CHUNK_WIDTH } from "@/applications/game/config";
+import { DIMENSIONS } from "@/applications/game/profiler/dimensions";
 import {
   addWorkerCounter,
+  addWorkerKeyedUnits,
   endWorkerSection,
+  isWorkerProfiling,
   startWorkerSection,
 } from "@/applications/game/profiler/worker-recorder";
 import { BoundedLruCache } from "./engine/pipeline/bounded-lru-cache";
 import { toGameBlockOrAir } from "./engine/blocks/lenient-block-map";
-import { CHUNK_COLUMN_SIZE, type ChunkBlocks } from "./engine/chunk";
+import { blockNameOf, CHUNK_COLUMN_SIZE, type ChunkBlocks } from "./engine/chunk";
 import { GAME_Y_OFFSET } from "./constants";
 import { getFullWorld, type FullWorld } from "./overworld-world";
 
@@ -23,6 +26,7 @@ const MINECRAFT_COLUMNS_PER_GAME_CHUNK_X = CHUNK_WIDTH / CHUNK_COLUMN_SIZE;
 const MINECRAFT_COLUMNS_PER_GAME_CHUNK_Z = CHUNK_LENGTH / CHUNK_COLUMN_SIZE;
 const MAX_CACHED_GAME_COLUMNS = 64;
 const MAX_CACHED_SEEDS = 2;
+const UNMAPPED_GAME_BLOCK_KEY = "unmapped";
 
 /** All vertical chunks of one game column; a missing chunk y is entirely air. */
 type GameColumn = Map<number, Uint8Array>;
@@ -40,15 +44,58 @@ class SeedChunkSource {
   private gameBlockOf(column: ChunkBlocks, paletteId: number): BlockType {
     let gameBlock = this.gameBlockByPaletteId[paletteId];
     if (gameBlock === undefined) {
+      if (isWorkerProfiling()) {
+        startWorkerSection("convert.paletteLookup");
+        addWorkerCounter("paletteLookupMisses", 1);
+      }
       const lookup = toGameBlockOrAir(column.palette.stateOf(paletteId));
       gameBlock = lookup.gameBlock;
       this.gameBlockByPaletteId[paletteId] = gameBlock;
       this.unknownByPaletteId[paletteId] = lookup.isUnknown;
+      if (isWorkerProfiling()) endWorkerSection();
     }
     return gameBlock;
   }
 
+  /**
+   * Block statistics of one decorated column: one counting pass over the palette ids, then one keyed flush per block
+   * name and per game block type (never per block). Runs only while profiling.
+   */
+  private recordBlockStatistics(column: ChunkBlocks): void {
+    const idCounts = new Uint32Array(column.palette.size);
+    const blocks = column.blocks;
+    for (let index = 0; index < blocks.length; index++) idCounts[blocks[index]!]++;
+    const unitsByBlockName = new Map<string, number>();
+    const unitsByGameBlock = new Map<string, number>();
+    let distinctPaletteIds = 0;
+    for (let paletteId = 1; paletteId < idCounts.length; paletteId++) {
+      const count = idCounts[paletteId]!;
+      if (count === 0) continue;
+      distinctPaletteIds++;
+      const blockName = blockNameOf(column.palette.stateOf(paletteId));
+      unitsByBlockName.set(blockName, (unitsByBlockName.get(blockName) ?? 0) + count);
+      const gameBlock = this.gameBlockOf(column, paletteId);
+      if (gameBlock !== BlockType.AIR || this.unknownByPaletteId[paletteId]) {
+        const gameBlockName = this.unknownByPaletteId[paletteId] ? UNMAPPED_GAME_BLOCK_KEY : BlockType[gameBlock]!;
+        unitsByGameBlock.set(gameBlockName, (unitsByGameBlock.get(gameBlockName) ?? 0) + count);
+      }
+    }
+    for (const [blockName, units] of unitsByBlockName) addWorkerKeyedUnits(DIMENSIONS.worldgenBlock, blockName, units);
+    for (const [gameBlockName, units] of unitsByGameBlock) addWorkerKeyedUnits(DIMENSIONS.gameBlock, gameBlockName, units);
+    addWorkerCounter("distinctPaletteIdsPerColumn", distinctPaletteIds);
+  }
+
   private buildGameColumn(chunkX: number, chunkZ: number): GameColumn {
+    startWorkerSection("convert.buildGameColumn");
+    try {
+      return this.convertDecoratedColumns(chunkX, chunkZ);
+    } finally {
+      endWorkerSection();
+    }
+  }
+
+  private convertDecoratedColumns(chunkX: number, chunkZ: number): GameColumn {
+    const isProfiling = isWorkerProfiling();
     const gameColumn: GameColumn = new Map();
     let solidBlocks = 0;
     let unknownBlocks = 0;
@@ -59,6 +106,12 @@ class SeedChunkSource {
           chunkZ * MINECRAFT_COLUMNS_PER_GAME_CHUNK_Z + columnOffsetZ,
         );
         const blocks = column.blocks;
+        if (isProfiling) {
+          startWorkerSection("convert.blockStatistics");
+          this.recordBlockStatistics(column);
+          endWorkerSection();
+          startWorkerSection("convert.paletteToGameBlocks");
+        }
         for (let minecraftY = column.minY; minecraftY <= column.maxY; minecraftY++) {
           const gameY = minecraftY + GAME_Y_OFFSET;
           const chunkY = Math.floor(gameY / CHUNK_HEIGHT);
@@ -85,10 +138,12 @@ class SeedChunkSource {
             }
           }
         }
+        if (isProfiling) endWorkerSection();
       }
     }
     addWorkerCounter("solidBlocks", solidBlocks);
     addWorkerCounter("unknownBlockNames", unknownBlocks);
+    addWorkerCounter("gameColumnsConverted", 1);
     return gameColumn;
   }
 
@@ -97,19 +152,27 @@ class SeedChunkSource {
     const lowestGameY = minY + GAME_Y_OFFSET;
     const highestGameY = minY + height - 1 + GAME_Y_OFFSET;
     const isOutsideWorldHeight = (chunkY + 1) * CHUNK_HEIGHT - 1 < lowestGameY || chunkY * CHUNK_HEIGHT > highestGameY;
-    if (isOutsideWorldHeight) return new Uint8Array(GAME_CHUNK_VOLUME);
+    if (isOutsideWorldHeight) {
+      addWorkerCounter("verticalChunksOutsideWorld", 1);
+      return new Uint8Array(GAME_CHUNK_VOLUME);
+    }
 
     const key = `${chunkX},${chunkZ}`;
     let gameColumn = this.gameColumns.get(key);
     if (gameColumn === undefined) {
+      addWorkerCounter("gameColumnCacheMisses", 1);
       gameColumn = this.buildGameColumn(chunkX, chunkZ);
       this.gameColumns.set(key, gameColumn);
     } else {
       addWorkerCounter("gameColumnCacheHits", 1);
     }
+    startWorkerSection("chunk.assembleVertical");
     const cached = gameColumn.get(chunkY);
     // The caller transfers the buffer to another thread, so it must own its copy.
-    return cached === undefined ? new Uint8Array(GAME_CHUNK_VOLUME) : cached.slice();
+    const assembled = cached === undefined ? new Uint8Array(GAME_CHUNK_VOLUME) : cached.slice();
+    endWorkerSection();
+    addWorkerCounter(cached === undefined ? "emptyVerticalChunks" : "verticalChunksCopied", 1);
+    return assembled;
   }
 }
 
@@ -129,8 +192,13 @@ function sourceForSeed(seed: number): SeedChunkSource {
 
 export function generateChunkBlocks(seed: number, chunkX: number, chunkY: number, chunkZ: number): Uint8Array {
   startWorkerSection("terrainNoise");
-  const blocks = sourceForSeed(seed).chunkBlocks(chunkX, chunkY, chunkZ);
-  endWorkerSection();
+  let blocks: Uint8Array;
+  try {
+    blocks = sourceForSeed(seed).chunkBlocks(chunkX, chunkY, chunkZ);
+  } finally {
+    endWorkerSection();
+  }
   addWorkerCounter("blocksGenerated", blocks.length);
+  addWorkerCounter("verticalChunksGenerated", 1);
   return blocks;
 }

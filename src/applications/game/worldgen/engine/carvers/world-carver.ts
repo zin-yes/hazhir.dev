@@ -47,6 +47,7 @@ export function carveEllipsoid(
   const minLocalZ = Math.max(Math.floor(z - horizontalRadius) - chunkMinBlockZ - 1, 0);
   const maxLocalZ = Math.min(Math.floor(z + horizontalRadius) - chunkMinBlockZ, 15);
   const lavaLevel = config.lavaLevel(context);
+  context.ellipsoidsCarved++;
   let carvedAny = false;
   for (let localX = minLocalX; localX <= maxLocalX; localX++) {
     const relativeX = (chunkMinBlockX + localX + 0.5 - x) / horizontalRadius;
@@ -54,13 +55,17 @@ export function carveEllipsoid(
       const relativeZ = (chunkMinBlockZ + localZ + 0.5 - z) / horizontalRadius;
       if (relativeX * relativeX + relativeZ * relativeZ >= 1) continue;
       context.reachedSurface = false;
+      if (maxBlockY > minBlockY) context.blocksTested += maxBlockY - minBlockY;
       for (let blockY = maxBlockY; blockY > minBlockY; blockY--) {
         const relativeY = (blockY - 0.5 - y) / verticalRadius;
         if (shouldSkip(relativeX, relativeY, relativeZ, blockY)) continue;
         const maskIndex = (blockY - context.minGenY) * 256 + localZ * 16 + localX;
         if (context.mask[maskIndex] !== 0) continue;
         context.mask[maskIndex] = 1;
-        if (carveBlock(context, config, lavaLevel, localX, blockY, localZ)) carvedAny = true;
+        if (carveBlock(context, config, lavaLevel, localX, blockY, localZ)) {
+          carvedAny = true;
+          context.blocksRemoved++;
+        }
       }
     }
   }

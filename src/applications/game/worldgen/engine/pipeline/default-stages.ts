@@ -1,6 +1,12 @@
 // The pipeline stages: terrain fill (NoiseBasedChunkGenerator.doFill, optionally with aquifers and ore veins),
 // buildSurface, and the air carvers (applyCarvers).
 
+import {
+  addWorkerCounter,
+  endWorkerSection,
+  isWorkerProfiling,
+  startWorkerSection,
+} from "@/applications/game/profiler/worker-recorder";
 import { createTopMaterialSourceFactory, type CarverSystem } from "../carvers";
 import { createSurfaceSystem, createBiomeClimateLookup, type SurfaceSystem } from "../surface";
 import { NoiseRegistry, type NoiseParameters } from "../noise";
@@ -35,8 +41,14 @@ export function createNoiseFillStage(options: NoiseFillStageOptions = {}): Colum
         aquifers: options.aquifers,
       });
       context.aquifer = aquifer;
+      const isProfiling = isWorkerProfiling();
+      if (isProfiling) startWorkerSection("noise.mapSymbolsToPalette");
       const blocks = column.blocks;
       for (let index = 0; index < symbols.length; index++) blocks[index] = paletteIdBySymbol[symbols[index]!]!;
+      if (isProfiling) {
+        endWorkerSection();
+        addWorkerCounter("noiseSymbolsMapped", symbols.length);
+      }
     },
   };
 }

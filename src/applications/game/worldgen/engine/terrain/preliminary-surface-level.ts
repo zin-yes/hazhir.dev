@@ -3,6 +3,12 @@
 // only depends on the router and the column, so one cache per router serves every chunk (aquifers read columns up
 // to three chunks away).
 
+import {
+  addWorkerCounter,
+  endWorkerSection,
+  isWorkerProfiling,
+  startWorkerSection,
+} from "@/applications/game/profiler/worker-recorder";
 import type { NoiseRouter } from "../density/router-wiring";
 
 const INITIAL_DENSITY_SURFACE_THRESHOLD = 0.390625;
@@ -25,15 +31,27 @@ export class PreliminarySurfaceLevelCache {
     const quartZ = blockZ >> 2;
     const key = quartX * QUART_COLUMN_KEY_STRIDE + quartZ;
     const cached = this.levelsByColumn.get(key);
-    if (cached !== undefined) return cached;
+    const isProfiling = isWorkerProfiling();
+    if (cached !== undefined) {
+      if (isProfiling) addWorkerCounter("preliminarySurfaceCacheHits", 1);
+      return cached;
+    }
     const alignedX = quartX << 2;
     const alignedZ = quartZ << 2;
     let level = NO_SURFACE_LEVEL;
+    let densityProbes = 0;
+    if (isProfiling) startWorkerSection("terrain.preliminarySurfaceLevel");
     for (let blockY = this.minY + this.height; blockY >= this.minY; blockY -= this.cellHeight) {
+      densityProbes++;
       if (this.router.initialDensityWithoutJaggedness.compute({ blockX: alignedX, blockY, blockZ: alignedZ }) > INITIAL_DENSITY_SURFACE_THRESHOLD) {
         level = blockY;
         break;
       }
+    }
+    if (isProfiling) {
+      endWorkerSection();
+      addWorkerCounter("preliminarySurfaceCacheMisses", 1);
+      addWorkerCounter("preliminarySurfaceDensityProbes", densityProbes);
     }
     if (this.levelsByColumn.size >= MAX_CACHED_COLUMNS) this.levelsByColumn.clear();
     this.levelsByColumn.set(key, level);

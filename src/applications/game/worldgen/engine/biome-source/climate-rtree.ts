@@ -131,6 +131,8 @@ export class ClimateRTree {
   private bestNodeId = -1;
 
   private lastLeafNodeId = -1;
+  private searchCount = 0;
+  private nodeDistanceCount = 0;
 
   /** @param reuseLastLeaf mirrors vanilla's thread-local last-leaf hint: faster on coherent queries, but exact ties then depend on query order. */
   constructor(
@@ -185,6 +187,7 @@ export class ClimateRTree {
 
   /** Index (into the construction list) of the leaf with minimal fitness; vanilla tie behavior except the last-leaf cache. */
   search(targetArray: number[]): number {
+    this.searchCount++;
     for (let dimension = 0; dimension < CLIMATE_DIMENSION_COUNT; dimension++) this.searchTarget[dimension] = targetArray[dimension];
     this.bestDistance = Infinity;
     this.bestNodeId = -1;
@@ -197,7 +200,16 @@ export class ClimateRTree {
     return this.bestNodeId < 0 ? -1 : this.nodeLeafIndex[this.bestNodeId];
   }
 
+  /** Returns the searches and bounding box distance evaluations since the last call, then resets both. */
+  drainSearchStatistics(): { searches: number; nodeDistanceEvaluations: number } {
+    const statistics = { searches: this.searchCount, nodeDistanceEvaluations: this.nodeDistanceCount };
+    this.searchCount = 0;
+    this.nodeDistanceCount = 0;
+    return statistics;
+  }
+
   private nodeDistance(nodeId: number): number {
+    this.nodeDistanceCount++;
     let distance = 0;
     const boundsBase = nodeId * CLIMATE_DIMENSION_COUNT * 2;
     for (let dimension = 0; dimension < CLIMATE_DIMENSION_COUNT; dimension++) {

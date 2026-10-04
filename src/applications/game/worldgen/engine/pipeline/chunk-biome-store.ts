@@ -5,6 +5,13 @@
 // biome source's last-leaf hint makes exact climate ties depend on query order, and vanilla's stored biomes reflect it.
 // Chunks are kept in a bounded LRU.
 
+import {
+  addWorkerCounter,
+  endWorkerSection,
+  isWorkerProfiling,
+  startWorkerSampledSection,
+  startWorkerSection,
+} from "@/applications/game/profiler/worker-recorder";
 import { SinglePointContext, type DensityNode, type NoiseRouter, quantizeClimateCoordinate } from "../density";
 import type { TargetPoint } from "../density";
 import { NoiseChunk } from "../terrain";
@@ -17,6 +24,8 @@ const CLIMATE_FIELDS = ["temperature", "vegetation", "continents", "erosion", "d
  * Vanilla's last-leaf hint carries over from whatever chunk the worker thread sampled before, which is unknowable.
  * A far-away unique-minimum query before each chunk makes the hint (and so every tie) independent of chunk order.
  */
+const CLIMATE_SAMPLE_EVERY = 16;
+const BIOME_SEARCH_SAMPLE_EVERY = 16;
 const PRIMING_TARGET: TargetPoint = { temperature: 90000, humidity: 90000, continentalness: 90000, erosion: 90000, depth: 90000, weirdness: 90000 };
 
 class ChunkBiomeGrid {
@@ -60,7 +69,9 @@ class ChunkBiomeGrid {
   fill(): void {
     const firstQuartX = this.chunkX * QUARTS_PER_CHUNK_SIDE;
     const firstQuartZ = this.chunkZ * QUARTS_PER_CHUNK_SIDE;
+    const isProfiling = isWorkerProfiling();
     this.biomeSource.findBiome(PRIMING_TARGET);
+    if (isProfiling) this.biomeSource.drainSearchStatistics();
     for (let sectionIndex = 0; sectionIndex < this.quartYCount / 4; sectionIndex++) {
       for (let quartXInSection = 0; quartXInSection < 4; quartXInSection++) {
         for (let quartYInSection = 0; quartYInSection < 4; quartYInSection++) {
@@ -69,6 +80,7 @@ class ChunkBiomeGrid {
             const quartX = firstQuartX + quartXInSection;
             const quartZ = firstQuartZ + quartZInSection;
             const context = new SinglePointContext(quartX << 2, quartY << 2, quartZ << 2);
+            if (isProfiling) startWorkerSampledSection("biome.sampleClimate", CLIMATE_SAMPLE_EVERY);
             const target: TargetPoint = {
               temperature: quantizeClimateCoordinate(this.temperature.compute(context)),
               humidity: quantizeClimateCoordinate(this.humidity.compute(context)),
@@ -77,11 +89,22 @@ class ChunkBiomeGrid {
               depth: quantizeClimateCoordinate(this.depth.compute(context)),
               weirdness: quantizeClimateCoordinate(this.weirdness.compute(context)),
             };
+            if (isProfiling) {
+              endWorkerSection();
+              startWorkerSampledSection("biome.searchRTree", BIOME_SEARCH_SAMPLE_EVERY);
+            }
             const cellIndex = ((sectionIndex * 4 + quartYInSection) * QUARTS_PER_CHUNK_SIDE + quartZInSection) * QUARTS_PER_CHUNK_SIDE + quartXInSection;
             this.biomeIndices[cellIndex] = this.internBiome(this.biomeSource.findBiome(target));
+            if (isProfiling) endWorkerSection();
           }
         }
       }
+    }
+    if (isProfiling) {
+      const { searches, nodeDistanceEvaluations } = this.biomeSource.drainSearchStatistics();
+      addWorkerCounter("biomeQuartCellsSampled", this.biomeIndices.length);
+      addWorkerCounter("biomeRTreeSearches", searches);
+      addWorkerCounter("biomeRTreeNodeVisits", nodeDistanceEvaluations);
     }
   }
 
@@ -108,6 +131,8 @@ export class ChunkBiomeStore {
   private readonly quartYCount: number;
   private lastGridKey = "";
   private lastGrid: ChunkBiomeGrid | undefined;
+  private gridLookups = 0;
+  private gridMisses = 0;
 
   constructor(private readonly params: ChunkBiomeStoreParams) {
     this.grids = new BoundedLruCache(params.maxCachedChunks);
@@ -125,16 +150,21 @@ export class ChunkBiomeStore {
     return index;
   };
 
-  /** ChunkAccess.getNoiseBiome: y is clamped into the chunk's section range, x and z select the chunk. */
-  rawBiomeAtQuart(quartX: number, quartY: number, quartZ: number): string {
-    const chunkX = quartX >> 2;
-    const chunkZ = quartZ >> 2;
-    const key = `${chunkX},${chunkZ}`;
-    let grid: ChunkBiomeGrid | undefined;
-    if (key === this.lastGridKey) grid = this.lastGrid;
-    grid ??= this.grids.get(key);
-    if (grid === undefined) {
-      grid = new ChunkBiomeGrid(
+  /** Moves the grid lookup and miss counts accumulated since the last call into the worker profile. */
+  drainProfileCounters(): void {
+    if (!isWorkerProfiling()) return;
+    addWorkerCounter("biomeGridLookups", this.gridLookups);
+    addWorkerCounter("biomeGridCacheMisses", this.gridMisses);
+    addWorkerCounter("biomeGridCacheHits", this.gridLookups - this.gridMisses);
+    this.gridLookups = 0;
+    this.gridMisses = 0;
+  }
+
+  private createFilledGrid(chunkX: number, chunkZ: number): ChunkBiomeGrid {
+    const isProfiling = isWorkerProfiling();
+    if (isProfiling) startWorkerSection("biome.fillGrid");
+    try {
+      const grid = new ChunkBiomeGrid(
         chunkX,
         chunkZ,
         this.quartYCount,
@@ -146,6 +176,24 @@ export class ChunkBiomeStore {
         this.internBiome,
       );
       grid.fill();
+      return grid;
+    } finally {
+      if (isProfiling) endWorkerSection();
+    }
+  }
+
+  /** ChunkAccess.getNoiseBiome: y is clamped into the chunk's section range, x and z select the chunk. */
+  rawBiomeAtQuart(quartX: number, quartY: number, quartZ: number): string {
+    const chunkX = quartX >> 2;
+    const chunkZ = quartZ >> 2;
+    const key = `${chunkX},${chunkZ}`;
+    let grid: ChunkBiomeGrid | undefined;
+    if (key === this.lastGridKey) grid = this.lastGrid;
+    grid ??= this.grids.get(key);
+    this.gridLookups++;
+    if (grid === undefined) {
+      this.gridMisses++;
+      grid = this.createFilledGrid(chunkX, chunkZ);
       this.grids.set(key, grid);
     }
     this.lastGridKey = key;

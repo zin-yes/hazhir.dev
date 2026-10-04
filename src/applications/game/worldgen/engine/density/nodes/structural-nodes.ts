@@ -10,6 +10,14 @@ import {
   numberSignature,
   type StructuralIdLookup,
 } from "../density-function";
+import { densityNodeTypeIndex, noteDensityEvaluation } from "../density-evaluation-counter";
+
+const HOLDER_TYPE_INDEX = densityNodeTypeIndex("holder");
+const MARKER_TYPE_INDEX = densityNodeTypeIndex("marker");
+const SPLINE_TYPE_INDEX = densityNodeTypeIndex("spline");
+const BLEND_CONSTANT_TYPE_INDEX = densityNodeTypeIndex("blend_constant");
+const BLEND_DENSITY_TYPE_INDEX = densityNodeTypeIndex("blend_density");
+const BEARDIFIER_TYPE_INDEX = densityNodeTypeIndex("beardifier");
 
 /** DensityFunctions.HolderHolder: what every HOLDER_HELPER_CODEC field decodes to. NoiseChunk and Climate unwrap it. */
 export class HolderNode extends DensityNode {
@@ -26,6 +34,7 @@ export class HolderNode extends DensityNode {
   }
 
   compute(context: FunctionContext): number {
+    noteDensityEvaluation(HOLDER_TYPE_INDEX);
     return this.target.compute(context);
   }
 
@@ -68,6 +77,7 @@ export class MarkerNode extends DensityNode {
   }
 
   compute(context: FunctionContext): number {
+    noteDensityEvaluation(MARKER_TYPE_INDEX);
     return this.wrapped.compute(context);
   }
 
@@ -103,6 +113,7 @@ export class SplineNode extends DensityNode {
   }
 
   compute(context: FunctionContext): number {
+    noteDensityEvaluation(SPLINE_TYPE_INDEX);
     return this.spline.apply(context);
   }
 
@@ -139,6 +150,7 @@ export class BlendConstantNode extends DensityNode {
   }
 
   compute(): number {
+    noteDensityEvaluation(BLEND_CONSTANT_TYPE_INDEX);
     return this.value;
   }
 
@@ -169,6 +181,7 @@ export class BlendDensityNode extends DensityNode {
   }
 
   compute(context: FunctionContext): number {
+    noteDensityEvaluation(BLEND_DENSITY_TYPE_INDEX);
     return this.input.compute(context);
   }
 
@@ -206,6 +219,7 @@ export class BeardifierNode extends DensityNode {
   }
 
   compute(): number {
+    noteDensityEvaluation(BEARDIFIER_TYPE_INDEX);
     return 0;
   }
 

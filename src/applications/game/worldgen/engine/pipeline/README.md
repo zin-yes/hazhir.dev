@@ -17,6 +17,10 @@ fill noise (aquifers + ore veins) -> biomes -> `buildSurface` -> carvers.
   `LevelChunkSection.fillBiomesFromNoise` order with the R-tree last-leaf hint, so exact climate ties resolve as in vanilla.
   The hint is primed per chunk so results do not depend on generation order. Bounded LRU of 64 chunks.
 
+## Profiling
+
+Worker profiler instrumentation (see `game/docs/profiler.md`) costs nothing while profiling is off: every section is behind `isWorkerProfiling()` or a null check, and keyed strings are built only while profiling. While a worker task is profiled, `profiled-stage-runner.ts` runs each stage inside `pipeline.biome > pipeline.biomeStage > <stage name>` sections (dimensions `worldgen.biome`, `worldgen.biomeStage`, `worldgen.stage`; biome = surface biome at the column center). Inside the stages: `noise.*` (wire, aquifer, cell loops), `aquifer.*`, `biome.*` (grid fill, climate sampling, R-tree search), `surface.*` (`worldgen.surfaceRule` is timed on one in 32 evaluations), `carver.*` (`worldgen.carver` by carver id, units = blocks removed). Density node evaluations (`worldgen.densityNode`, units per node type) and cache hits/misses are batched per stage and flushed once. Sampled sections give accurate self time but inflated inclusive time when a rare heavy child sits inside them, so read self time for those.
+
 Tests (`overworld-generator.test.ts`) compare against the real-server fixtures and skip without the scratch data
 (`WORLDGEN_SCRATCH`). The default run samples every 50th fixture chunk; `RUN_INTEGRATION=1` runs all of them.
 Note: fixture `biomes` hold only sections 0-15 (y -64..191), an extractor bug, so only those are compared.

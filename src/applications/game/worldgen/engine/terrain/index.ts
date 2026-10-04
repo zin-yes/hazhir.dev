@@ -24,3 +24,4 @@ export {
 } from "./fill-chunk-column";
 export { NoiseBasedAquifer, NULL_SUBSTANCE } from "./aquifer";
 export { NoiseChunk, type NoiseChunkSettings } from "./noise-chunk";
+export { getPreliminarySurfaceLevelCache } from "./preliminary-surface-level";

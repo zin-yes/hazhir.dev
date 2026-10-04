@@ -10,6 +10,8 @@ import type { GenerationHeights } from "./value-providers";
 /** The part of Aquifer the carvers use. Returns a terrain symbol, or a negative value for null (keep the block). */
 export interface CarverAquifer {
   computeSubstance(context: FunctionContext, density: number): number;
+  /** Optional: flushes the aquifer's lookup and cache counters into the worker profile. */
+  drainProfileCounters?(): void;
 }
 
 /** SurfaceSystem.topMaterial for a chunk: the state the surface rules would give a block, if any. */
@@ -47,6 +49,10 @@ export class CarvingContext implements GenerationHeights {
   readonly point = { blockX: 0, blockY: 0, blockZ: 0 };
   /** MutableBoolean of the column loop in WorldCarver.carveEllipsoid. */
   reachedSurface = false;
+  /** Work counters for the profiler; they only ever increase during one applyCarvers call. */
+  blocksRemoved = 0;
+  blocksTested = 0;
+  ellipsoidsCarved = 0;
 
   private readonly symbolPaletteIds: number[];
   private blockFlagsById = new Uint8Array(1024);

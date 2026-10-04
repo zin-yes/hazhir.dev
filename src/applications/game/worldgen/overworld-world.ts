@@ -3,6 +3,7 @@
 // ground-height questions.
 
 import {
+  addWorkerCounter,
   endWorkerSection,
   startWorkerSection,
 } from "@/applications/game/profiler/worker-recorder";
@@ -43,15 +44,30 @@ export interface FullWorld {
   generateDecoratedColumn(chunkX: number, chunkZ: number): ChunkBlocks;
 }
 
+function loadRegistriesProfiled(): ReturnType<typeof loadTerralithRegistries> {
+  startWorkerSection("world.loadRegistries");
+  try {
+    return loadTerralithRegistries();
+  } finally {
+    endWorkerSection();
+  }
+}
+
 function createFullGenerator(seed: number): OverworldGenerator {
-  const { registries, overworldDimension, blockTags } = loadTerralithRegistries();
-  const generator = createOverworldGenerator({
-    registries,
-    overworldDimension,
-    blockTags,
-    seed: BigInt(Math.trunc(seed)),
-    maxCachedColumns: FULL_GENERATOR_CACHED_COLUMNS,
-  });
+  const { registries, overworldDimension, blockTags } = loadRegistriesProfiled();
+  startWorkerSection("world.createGenerator");
+  let generator: OverworldGenerator;
+  try {
+    generator = createOverworldGenerator({
+      registries,
+      overworldDimension,
+      blockTags,
+      seed: BigInt(Math.trunc(seed)),
+      maxCachedColumns: FULL_GENERATOR_CACHED_COLUMNS,
+    });
+  } finally {
+    endWorkerSection();
+  }
   for (const registration of ADDITIONAL_STAGE_REGISTRATIONS) {
     const anchorIndex = generator.stages.findIndex((stage) => stage.name === registration.insertAfterStageName);
     if (anchorIndex === -1) throw new Error(`No stage named "${registration.insertAfterStageName}" to insert after`);
@@ -89,7 +105,10 @@ function createFullWorld(seed: number): FullWorld {
     generateDecoratedColumn(chunkX, chunkZ) {
       const key = `${chunkX},${chunkZ}`;
       let column = decoratedColumns.get(key);
-      if (column === undefined) {
+      if (column !== undefined) {
+        addWorkerCounter("decoratedColumnCacheHits", 1);
+      } else {
+        addWorkerCounter("decoratedColumnCacheMisses", 1);
         startWorkerSection("decoration");
         try {
           column = decorator.generateDecoratedColumn(chunkX, chunkZ);

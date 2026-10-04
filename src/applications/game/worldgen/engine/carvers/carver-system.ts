@@ -3,6 +3,15 @@
 // WorldgenRandom with setLargeFeatureSeed(seed + carverIndex, chunkX, chunkZ), decides isStartChunk, then carves into
 // the chunk being generated, which shares one carving mask across all carvers.
 
+import { DIMENSIONS } from "@/applications/game/profiler/dimensions";
+import {
+  addWorkerCounter,
+  addWorkerKeyedUnits,
+  endWorkerSection,
+  isWorkerProfiling,
+  startWorkerSampledSection,
+  startWorkerSection,
+} from "@/applications/game/profiler/worker-recorder";
 import type { ChunkBlocks } from "../chunk";
 import { LegacyRandomSource } from "../random";
 import type { JsonObject, TagRegistry, WorldgenRegistries } from "../registry/datapack-loader";
@@ -36,6 +45,8 @@ export interface ApplyCarversParams {
 }
 
 const SEED_MASK_BITS = 64;
+const SOURCE_BIOME_SAMPLE_EVERY = 8;
+const START_ROLL_SAMPLE_EVERY = 8;
 
 /** WorldgenRandom.setLargeFeatureSeed on a Legacy source. */
 function setLargeFeatureSeed(random: LegacyRandomSource, seed: bigint, chunkX: number, chunkZ: number): void {
@@ -91,23 +102,57 @@ export class CarverSystem {
   /** Returns the carving mask (index (y - minY) * 256 + localZ * 16 + localX, 1 where a carver removed a block). */
   applyCarvers(params: ApplyCarversParams): Uint8Array {
     const { chunk } = params;
+    const isProfiling = isWorkerProfiling();
     const context = new CarvingContext(params);
     const random = this.random;
+    let sourceChunksScanned = 0;
+    let carverRolls = 0;
+    let carversStarted = 0;
     for (let offsetX = -SOURCE_CHUNK_RADIUS; offsetX <= SOURCE_CHUNK_RADIUS; offsetX++) {
       for (let offsetZ = -SOURCE_CHUNK_RADIUS; offsetZ <= SOURCE_CHUNK_RADIUS; offsetZ++) {
         const sourceChunkX = chunk.chunkX + offsetX;
         const sourceChunkZ = chunk.chunkZ + offsetZ;
+        if (isProfiling) startWorkerSampledSection("carver.lookupSourceBiome", SOURCE_BIOME_SAMPLE_EVERY);
         const carvers = this.carversOfSourceChunk(sourceChunkX, sourceChunkZ);
+        if (isProfiling) endWorkerSection();
+        sourceChunksScanned++;
         for (let carverIndex = 0; carverIndex < carvers.length; carverIndex++) {
           const carver = carvers[carverIndex]!;
+          if (isProfiling) startWorkerSampledSection("carver.rollStart", START_ROLL_SAMPLE_EVERY);
           setLargeFeatureSeed(random, BigInt.asIntN(SEED_MASK_BITS, this.config.seed + BigInt(carverIndex)), sourceChunkX, sourceChunkZ);
-          if (random.nextFloat() > carver.probability) continue;
-          if (carver.kind === "cave") carveCaves(context, carver, random, sourceChunkX, sourceChunkZ);
+          const startsHere = random.nextFloat() <= carver.probability;
+          if (isProfiling) endWorkerSection();
+          carverRolls++;
+          if (!startsHere) continue;
+          carversStarted++;
+          if (isProfiling) this.carveProfiled(context, carver, random, sourceChunkX, sourceChunkZ);
+          else if (carver.kind === "cave") carveCaves(context, carver, random, sourceChunkX, sourceChunkZ);
           else carveCanyon(context, carver, random, sourceChunkX, sourceChunkZ);
         }
       }
     }
+    if (isProfiling) {
+      addWorkerCounter("carverSourceChunksScanned", sourceChunksScanned);
+      addWorkerCounter("carverStartRolls", carverRolls);
+      addWorkerCounter("carversStarted", carversStarted);
+      addWorkerCounter("carverEllipsoids", context.ellipsoidsCarved);
+      addWorkerCounter("carverBlocksTested", context.blocksTested);
+      addWorkerCounter("carverBlocksRemoved", context.blocksRemoved);
+      params.aquifer.drainProfileCounters?.();
+    }
     return context.mask;
+  }
+
+  private carveProfiled(context: CarvingContext, carver: CarverConfig, random: LegacyRandomSource, sourceChunkX: number, sourceChunkZ: number): void {
+    const blocksRemovedBefore = context.blocksRemoved;
+    startWorkerSection(carver.kind === "cave" ? "carver.cave" : "carver.canyon", DIMENSIONS.worldgenCarver, carver.id);
+    try {
+      if (carver.kind === "cave") carveCaves(context, carver, random, sourceChunkX, sourceChunkZ);
+      else carveCanyon(context, carver, random, sourceChunkX, sourceChunkZ);
+    } finally {
+      endWorkerSection();
+    }
+    addWorkerKeyedUnits(DIMENSIONS.worldgenCarver, carver.id, context.blocksRemoved - blocksRemovedBefore);
   }
 }
 

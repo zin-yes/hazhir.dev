@@ -2,6 +2,8 @@
 // RuleSource.apply / ConditionSource.apply pairs of SurfaceRules. A rule returns an index into the result table
 // (block state strings, plus the clay band colours), or -1 when it does not apply.
 
+import { DIMENSIONS } from "@/applications/game/profiler/dimensions";
+import { endWorkerSection, startWorkerSection } from "@/applications/game/profiler/worker-recorder";
 import type { JsonObject, JsonValue } from "../registry/datapack-loader";
 import { formatBlockState } from "../chunk";
 import { NO_WATER_HEIGHT, type SurfaceRuleContext } from "./surface-rule-context";
@@ -32,6 +34,12 @@ export class SurfaceResultTable {
 }
 
 export interface SurfaceRuleCompilerInputs {
+  /**
+   * Wraps every rule and condition in a timed profiler section keyed by its type (DIMENSIONS.worldgenSurfaceRule).
+   * Only used for the variant of the rules that runs on a sample of evaluations while profiling, so the normal rules
+   * carry no wrappers.
+   */
+  profileRuleTypes?: boolean;
   noises: SurfaceNoiseRegistry;
   randomFactory: SurfacePositionalRandomFactory;
   resultTable: SurfaceResultTable;
@@ -94,8 +102,44 @@ function lazyByColumn(compute: SurfaceCondition): SurfaceCondition {
   };
 }
 
+function shortTypeOf(json: JsonValue | undefined, description: string): string {
+  return withDefaultNamespace(String(asObject(json, description).type)).replace("minecraft:", "");
+}
+
+function profileRule(rule: SurfaceRule, typeKey: string): SurfaceRule {
+  return (context) => {
+    startWorkerSection("surface.rule", DIMENSIONS.worldgenSurfaceRule, typeKey);
+    try {
+      return rule(context);
+    } finally {
+      endWorkerSection();
+    }
+  };
+}
+
+function profileCondition(condition: SurfaceCondition, typeKey: string): SurfaceCondition {
+  return (context) => {
+    startWorkerSection("surface.condition", DIMENSIONS.worldgenSurfaceRule, typeKey);
+    try {
+      return condition(context);
+    } finally {
+      endWorkerSection();
+    }
+  };
+}
+
 export function compileSurfaceRules(ruleJson: JsonObject, inputs: SurfaceRuleCompilerInputs): SurfaceRule {
   function compileCondition(json: JsonValue | undefined): SurfaceCondition {
+    const condition = compileConditionBody(json);
+    return inputs.profileRuleTypes ? profileCondition(condition, `condition.${shortTypeOf(json, "condition")}`) : condition;
+  }
+
+  function compileRule(json: JsonValue | undefined): SurfaceRule {
+    const rule = compileRuleBody(json);
+    return inputs.profileRuleTypes ? profileRule(rule, `rule.${shortTypeOf(json, "rule")}`) : rule;
+  }
+
+  function compileConditionBody(json: JsonValue | undefined): SurfaceCondition {
     const node = asObject(json, "condition");
     const type = withDefaultNamespace(String(node.type));
     switch (type) {
@@ -182,7 +226,7 @@ export function compileSurfaceRules(ruleJson: JsonObject, inputs: SurfaceRuleCom
     }
   }
 
-  function compileRule(json: JsonValue | undefined): SurfaceRule {
+  function compileRuleBody(json: JsonValue | undefined): SurfaceRule {
     const node = asObject(json, "rule");
     const type = withDefaultNamespace(String(node.type));
     switch (type) {

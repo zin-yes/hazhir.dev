@@ -9,6 +9,12 @@ import {
   numberSignature,
   type StructuralIdLookup,
 } from "../density-function";
+import { densityNodeTypeIndex, noteDensityEvaluation } from "../density-evaluation-counter";
+
+const CONSTANT_TYPE_INDEX = densityNodeTypeIndex("constant");
+const CLAMP_TYPE_INDEX = densityNodeTypeIndex("clamp");
+const RANGE_CHOICE_TYPE_INDEX = densityNodeTypeIndex("range_choice");
+const Y_CLAMPED_GRADIENT_TYPE_INDEX = densityNodeTypeIndex("y_clamped_gradient");
 
 export class ConstantNode extends DensityNode {
   constructor(readonly value: number) {
@@ -24,6 +30,7 @@ export class ConstantNode extends DensityNode {
   }
 
   compute(): number {
+    noteDensityEvaluation(CONSTANT_TYPE_INDEX);
     return this.value;
   }
 
@@ -81,6 +88,8 @@ export function createMapped(type: MappedType, input: DensityNode): MappedNode {
 }
 
 export class MappedNode extends DensityNode {
+  private readonly typeIndex: number;
+
   constructor(
     readonly type: MappedType,
     readonly input: DensityNode,
@@ -88,9 +97,11 @@ export class MappedNode extends DensityNode {
     readonly maxValue: number,
   ) {
     super();
+    this.typeIndex = densityNodeTypeIndex(type);
   }
 
   compute(context: FunctionContext): number {
+    noteDensityEvaluation(this.typeIndex);
     return transformMapped(this.type, this.input.compute(context));
   }
 
@@ -123,6 +134,7 @@ export class ClampNode extends DensityNode {
   }
 
   compute(context: FunctionContext): number {
+    noteDensityEvaluation(CLAMP_TYPE_INDEX);
     return clamp(this.input.compute(context), this.minValue, this.maxValue);
   }
 
@@ -162,6 +174,7 @@ export class RangeChoiceNode extends DensityNode {
   }
 
   compute(context: FunctionContext): number {
+    noteDensityEvaluation(RANGE_CHOICE_TYPE_INDEX);
     const inputValue = this.input.compute(context);
     return inputValue >= this.minInclusive && inputValue < this.maxExclusive
       ? this.whenInRange.compute(context)
@@ -225,6 +238,7 @@ export class YClampedGradientNode extends DensityNode {
   }
 
   compute(context: FunctionContext): number {
+    noteDensityEvaluation(Y_CLAMPED_GRADIENT_TYPE_INDEX);
     return clampedMap(context.blockY, this.fromY, this.toY, this.fromValue, this.toValue);
   }
 

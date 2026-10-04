@@ -12,6 +12,8 @@ import {
 } from "./value-providers";
 
 export interface CarverBaseConfig {
+  /** Configured carver registry id (for example `minecraft:cave`), used to attribute profiler time. */
+  id: string;
   /** Float, as in ProbabilityFeatureConfiguration. */
   probability: number;
   y: HeightProvider;
@@ -71,6 +73,7 @@ export function parseConfiguredCarver(carverId: string, json: JsonObject, blockT
   const type = String(json.type).replace(/^minecraft:/, "");
   const config = requireField(json, "config", carverId) as JsonObject;
   const base: CarverBaseConfig = {
+    id: carverId,
     probability: Math.fround(requireField(config, "probability", carverId) as number),
     y: parseHeightProvider(requireField(config, "y", carverId)),
     yScale: parseFloatProvider(requireField(config, "yScale", carverId)),

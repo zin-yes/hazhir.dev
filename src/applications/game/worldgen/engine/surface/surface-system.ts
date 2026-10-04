@@ -2,6 +2,13 @@
 // stone/water column into the surface blocks chosen by the compiled `surface_rule`, plus the eroded badlands
 // and frozen ocean (iceberg) extensions.
 
+import {
+  addWorkerCounter,
+  endWorkerSection,
+  isWorkerProfiling,
+  startWorkerSampledSection,
+  startWorkerSection,
+} from "@/applications/game/profiler/worker-recorder";
 import type { ChunkBlocks } from "../chunk";
 import type { JsonObject } from "../registry/datapack-loader";
 import { generateClayBands, CLAY_BAND_COUNT } from "./clay-bands";
@@ -18,6 +25,9 @@ import type {
 } from "./surface-types";
 import { BLOCK_KIND_AIR, BLOCK_KIND_FLUID, BLOCK_KIND_SOLID, SurfaceChunkAccess } from "./surface-chunk-access";
 
+const RULE_EVALUATION_SAMPLE_EVERY = 8;
+/** One in this many evaluations is repeated through the per-type wrapped rules to time each rule and condition type. */
+const RULE_TYPE_SAMPLE_EVERY = 32;
 const INITIAL_DENSITY_SURFACE_THRESHOLD = 0.390625;
 const PRELIMINARY_SURFACE_CELL_HEIGHT = 4;
 const PRELIMINARY_CACHE_LIMIT = 200_000;
@@ -39,6 +49,13 @@ export interface SurfaceSystemConfig {
   biomeClimate?: BiomeClimateLookup;
 }
 
+interface PreparedSurfaceBuild {
+  access: SurfaceChunkAccess;
+  defaultBlockId: number;
+  resultIdOf: (resultIndex: number) => number;
+  context: SurfaceRuleContext;
+}
+
 export interface SurfaceChunkInputs {
   chunk: ChunkBlocks;
   router: SurfaceNoiseRouter;
@@ -51,6 +68,7 @@ export class SurfaceSystem {
 
   private readonly resultTable = new SurfaceResultTable();
   private readonly rule: SurfaceRule;
+  private profiledRule: SurfaceRule | undefined;
   private readonly clayBandResultIndices: number[];
   private readonly clayBandsOffsetNoise: SurfaceNoiseSource;
   private readonly surfaceNoise: SurfaceNoiseSource;
@@ -82,12 +100,36 @@ export class SurfaceSystem {
     this.clayBandResultIndices = generateClayBands(randomFactory.fromHashOf("minecraft:clay_bands")).map((state) =>
       this.resultTable.indexOf(state),
     );
-    this.rule = compileSurfaceRules(config.surfaceRule, {
-      noises,
-      randomFactory,
+    const isProfiling = isWorkerProfiling();
+    if (isProfiling) startWorkerSection("surface.compileRules");
+    try {
+      this.rule = this.compileRules(false);
+    } finally {
+      if (isProfiling) endWorkerSection();
+    }
+  }
+
+  private compileRules(profileRuleTypes: boolean): SurfaceRule {
+    return compileSurfaceRules(this.config.surfaceRule, {
+      noises: this.config.noises,
+      randomFactory: this.config.randomFactory,
       resultTable: this.resultTable,
       getBandResultIndex: (blockX, blockY, blockZ) => this.getBandResultIndex(blockX, blockY, blockZ),
+      profileRuleTypes,
     });
+  }
+
+  /** The rules wrapped per type for the profiler, compiled on first use because the plain rules never need them. */
+  private profiledRules(): SurfaceRule {
+    if (this.profiledRule === undefined) {
+      startWorkerSection("surface.compileProfiledRules");
+      try {
+        this.profiledRule = this.compileRules(true);
+      } finally {
+        endWorkerSection();
+      }
+    }
+    return this.profiledRule;
   }
 
   getBandResultIndex(blockX: number, blockY: number, blockZ: number): number {
@@ -119,7 +161,15 @@ export class SurfaceSystem {
     const quartAlignedZ = (blockZ >> 2) << 2;
     const cacheKey = (quartAlignedX + 2 ** 24) * 2 ** 25 + (quartAlignedZ + 2 ** 24);
     const cached = this.preliminarySurfaceLevels.get(cacheKey);
-    if (cached !== undefined) return cached;
+    const isProfiling = isWorkerProfiling();
+    if (cached !== undefined) {
+      if (isProfiling) addWorkerCounter("surfacePreliminaryLevelCacheHits", 1);
+      return cached;
+    }
+    if (isProfiling) {
+      addWorkerCounter("surfacePreliminaryLevelCacheMisses", 1);
+      startWorkerSection("surface.preliminaryLevel");
+    }
     let level = 2147483647;
     for (let blockY = this.minY + this.height; blockY >= this.minY; blockY -= PRELIMINARY_SURFACE_CELL_HEIGHT) {
       if (router.initialDensityWithoutJaggedness.compute({ blockX: quartAlignedX, blockY, blockZ: quartAlignedZ }) > INITIAL_DENSITY_SURFACE_THRESHOLD) {
@@ -127,12 +177,30 @@ export class SurfaceSystem {
         break;
       }
     }
+    if (isProfiling) endWorkerSection();
     if (this.preliminarySurfaceLevels.size > PRELIMINARY_CACHE_LIMIT) this.preliminarySurfaceLevels.clear();
     this.preliminarySurfaceLevels.set(cacheKey, level);
     return level;
   }
 
   buildSurface(inputs: SurfaceChunkInputs): void {
+    const isProfiling = isWorkerProfiling();
+    if (isProfiling) startWorkerSection("surface.setup");
+    let prepared: PreparedSurfaceBuild;
+    try {
+      prepared = this.prepareSurfaceBuild(inputs);
+    } finally {
+      if (isProfiling) endWorkerSection();
+    }
+    if (isProfiling) startWorkerSection("surface.scanColumns");
+    try {
+      this.scanColumns(inputs, prepared, isProfiling);
+    } finally {
+      if (isProfiling) endWorkerSection();
+    }
+  }
+
+  private prepareSurfaceBuild(inputs: SurfaceChunkInputs): PreparedSurfaceBuild {
     const { chunk, router, biomeAt } = inputs;
     const access = new SurfaceChunkAccess(chunk);
     const defaultBlockId = access.idOf(this.config.defaultBlock);
@@ -156,9 +224,19 @@ export class SurfaceSystem {
         this.temperatureSampler.isColdEnoughToSnow(biomeId, blockX, blockY, blockZ),
     };
     const context = new SurfaceRuleContext(services, access.heightmap, biomeAt);
+    return { access, defaultBlockId, resultIdOf, context };
+  }
+
+  private scanColumns(inputs: SurfaceChunkInputs, prepared: PreparedSurfaceBuild, isProfiling: boolean): void {
+    const { chunk, biomeAt } = inputs;
+    const { access, defaultBlockId, resultIdOf, context } = prepared;
+    const rule = this.rule;
+    const typeProfiledRule = isProfiling ? this.profiledRules() : undefined;
     const chunkMinBlockX = chunk.chunkX * 16;
     const chunkMinBlockZ = chunk.chunkZ * 16;
     const minY = chunk.minY;
+    let ruleEvaluations = 0;
+    let solidBlocksScanned = 0;
 
     for (let localX = 0; localX < 16; localX++) {
       for (let localZ = 0; localZ < 16; localZ++) {
@@ -167,7 +245,9 @@ export class SurfaceSystem {
         const originalSurfaceHeight = access.heightmap.getHeight(localX, localZ) + 1;
         const columnBiome = biomeAt(blockX, originalSurfaceHeight, blockZ);
         if (columnBiome === "minecraft:eroded_badlands") {
+          if (isProfiling) startWorkerSection("surface.erodedBadlandsExtension");
           this.applyErodedBadlandsExtension(access, localX, localZ, blockX, blockZ, originalSurfaceHeight, defaultBlockId);
+          if (isProfiling) endWorkerSection();
         }
         const startY = access.heightmap.getHeight(localX, localZ) + 1;
         context.updateXZ(blockX, blockZ);
@@ -196,16 +276,34 @@ export class SurfaceSystem {
             }
           }
           stoneDepthAbove++;
+          solidBlocksScanned++;
           context.updateY(stoneDepthAbove, y - stoneRegionBottom + 1, waterHeight, blockX, y, blockZ);
           if (blockId !== defaultBlockId) continue;
-          const resultIndex = this.rule(context);
+          ruleEvaluations++;
+          if (isProfiling) startWorkerSampledSection("surface.evaluateRules", RULE_EVALUATION_SAMPLE_EVERY);
+          const resultIndex = rule(context);
+          if (isProfiling) {
+            endWorkerSection();
+            if (ruleEvaluations % RULE_TYPE_SAMPLE_EVERY === 0) {
+              startWorkerSection("surface.sampleRuleTypes");
+              typeProfiledRule!(context);
+              endWorkerSection();
+            }
+          }
           if (resultIndex === NO_RULE_MATCH) continue;
           access.setBlockId(localX, y, localZ, resultIdOf(resultIndex));
         }
         if (columnBiome === "minecraft:frozen_ocean" || columnBiome === "minecraft:deep_frozen_ocean") {
+          if (isProfiling) startWorkerSection("surface.frozenOceanExtension");
           this.applyFrozenOceanExtension(access, context.getMinSurfaceLevel(), columnBiome, localX, localZ, blockX, blockZ, originalSurfaceHeight);
+          if (isProfiling) endWorkerSection();
         }
       }
+    }
+    if (isProfiling) {
+      addWorkerCounter("surfaceColumnsBuilt", 1);
+      addWorkerCounter("surfaceSolidBlocksScanned", solidBlocksScanned);
+      addWorkerCounter("surfaceRuleEvaluations", ruleEvaluations);
     }
   }
 

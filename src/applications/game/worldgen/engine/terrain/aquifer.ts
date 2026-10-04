@@ -3,6 +3,14 @@
 // nearest centres to a block decide its fluid and, through pressure against the barrier noise, whether a thin wall of
 // the default block is kept between differing fluids. Fluids are the terrain symbols (air, default fluid, lava).
 
+import { DIMENSIONS } from "@/applications/game/profiler/dimensions";
+import {
+  addWorkerCounter,
+  endWorkerSection,
+  isWorkerProfiling,
+  startWorkerSampledSection,
+  startWorkerSection,
+} from "@/applications/game/profiler/worker-recorder";
 import { type FunctionContext, SinglePointContext } from "../density/density-function";
 import type { DensityNode } from "../density/density-function";
 import type { PositionalRandomFactory } from "../random";
@@ -23,6 +31,9 @@ const Y_SPACING = 12;
 const Z_SPACING = 16;
 
 /** (-2, -1) style chunk offsets sampled when looking for the surface above an aquifer centre. */
+const NEAREST_CENTERS_SAMPLE_EVERY = 64;
+const GRID_CELLS_PER_LOOKUP = 12;
+
 const SURFACE_SAMPLING_OFFSETS_IN_CHUNKS: readonly (readonly [number, number])[] = [
   [0, 0], [-2, -1], [-1, -1], [0, -1], [1, -1], [-3, 0], [-2, 0], [-1, 0], [1, 0], [-2, 1], [-1, 1], [0, 1], [1, 1],
 ];
@@ -81,6 +92,13 @@ export class NoiseBasedAquifer {
   private readonly statusLevel: Int32Array;
   private readonly statusFluid: Uint8Array;
 
+  private readonly isProfiling = isWorkerProfiling();
+  private substanceLookups = 0;
+  private locationMisses = 0;
+  private statusLookups = 0;
+  private statusMisses = 0;
+  private pressureCalculations = 0;
+
   private computedLevel = 0;
   private computedFluid = BLOCK_AIR;
   private cachedBarrierValue = Number.NaN;
@@ -122,6 +140,39 @@ export class NoiseBasedAquifer {
   /** Aquifer.computeSubstance: a terrain symbol, or NULL_SUBSTANCE where the block stays solid. */
   computeSubstance(context: FunctionContext, density: number): number {
     if (density > 0) return NULL_SUBSTANCE;
+    return this.resolveSubstance(context, density);
+  }
+
+  /** Moves the lookup and cache counters accumulated since the last call into the worker profile. */
+  drainProfileCounters(): void {
+    if (!this.isProfiling) return;
+    addWorkerCounter("aquiferLookups", this.substanceLookups);
+    addWorkerCounter("aquiferLocationCacheMisses", this.locationMisses);
+    addWorkerCounter("aquiferLocationCacheHits", this.substanceLookups * GRID_CELLS_PER_LOOKUP - this.locationMisses);
+    addWorkerCounter("aquiferStatusLookups", this.statusLookups);
+    addWorkerCounter("aquiferStatusCacheMisses", this.statusMisses);
+    addWorkerCounter("aquiferStatusCacheHits", this.statusLookups - this.statusMisses);
+    addWorkerCounter("aquiferPressureCalculations", this.pressureCalculations);
+    this.substanceLookups = 0;
+    this.locationMisses = 0;
+    this.statusLookups = 0;
+    this.statusMisses = 0;
+    this.pressureCalculations = 0;
+  }
+
+  /** A router function the aquifer reads, timed exactly under the density node dimension (a few hundred calls per column). */
+  private computeRouterFunction(routerFunction: DensityNode, point: FunctionContext, sectionName: string): number {
+    if (!this.isProfiling) return routerFunction.compute(point);
+    startWorkerSection(sectionName, DIMENSIONS.worldgenDensityNode, sectionName);
+    try {
+      return routerFunction.compute(point);
+    } finally {
+      endWorkerSection();
+    }
+  }
+
+  private resolveSubstance(context: FunctionContext, density: number): number {
+    this.substanceLookups++;
     const blockX = context.blockX;
     const blockY = context.blockY;
     const blockZ = context.blockZ;
@@ -136,6 +187,8 @@ export class NoiseBasedAquifer {
     let nearestIndex = 0;
     let secondIndex = 0;
     let thirdIndex = 0;
+    // Only the center search is timed: the fluid status work below can trigger rare heavy children, which would skew a sampled estimate.
+    if (this.isProfiling) startWorkerSampledSection("aquifer.findNearestCenters", NEAREST_CENTERS_SAMPLE_EVERY);
     for (let offsetX = 0; offsetX <= 1; offsetX++) {
       for (let offsetY = -1; offsetY <= 1; offsetY++) {
         for (let offsetZ = 0; offsetZ <= 1; offsetZ++) {
@@ -149,6 +202,7 @@ export class NoiseBasedAquifer {
             this.locationY[index] = gridY * Y_SPACING + random.nextIntBounded(Y_RANGE);
             this.locationZ[index] = gridZ * Z_SPACING + random.nextIntBounded(Z_RANGE);
             this.locationKnown[index] = 1;
+            this.locationMisses++;
           }
           const deltaX = this.locationX[index]! - blockX;
           const deltaY = this.locationY[index]! - blockY;
@@ -173,6 +227,8 @@ export class NoiseBasedAquifer {
         }
       }
     }
+
+    if (this.isProfiling) endWorkerSection();
 
     this.ensureStatus(nearestIndex);
     const nearestFluid = this.fluidAtStatus(nearestIndex, blockY);
@@ -204,6 +260,7 @@ export class NoiseBasedAquifer {
   }
 
   private calculatePressure(context: FunctionContext, firstIndex: number, secondIndex: number): number {
+    this.pressureCalculations++;
     const blockY = context.blockY;
     const firstFluid = this.fluidAtStatus(firstIndex, blockY);
     const secondFluid = this.fluidAtStatus(secondIndex, blockY);
@@ -228,15 +285,19 @@ export class NoiseBasedAquifer {
     }
     let barrierValue = 0;
     if (!(gradient < -2 || gradient > 2)) {
-      if (Number.isNaN(this.cachedBarrierValue)) this.cachedBarrierValue = this.params.barrier.compute(context);
+      if (Number.isNaN(this.cachedBarrierValue)) this.cachedBarrierValue = this.computeRouterFunction(this.params.barrier, context, "router.barrier");
       barrierValue = this.cachedBarrierValue;
     }
     return 2 * (barrierValue + gradient);
   }
 
   private ensureStatus(index: number): void {
+    this.statusLookups++;
     if (this.statusKnown[index] !== 0) return;
+    this.statusMisses++;
+    if (this.isProfiling) startWorkerSection("aquifer.computeFluid");
     this.computeFluid(this.locationX[index]!, this.locationY[index]!, this.locationZ[index]!);
+    if (this.isProfiling) endWorkerSection();
     this.statusLevel[index] = this.computedLevel;
     this.statusFluid[index] = this.computedFluid;
     this.statusKnown[index] = 1;
@@ -291,7 +352,7 @@ export class NoiseBasedAquifer {
     } else {
       const distanceBelowSurface = lowestSurface + 8 - blockY;
       const surfaceProximity = fluidAtCentreSurface ? clampedMap(distanceBelowSurface, 0, 64, 1, 0) : 0;
-      const floodedness = Math.min(1, Math.max(-1, this.params.fluidLevelFloodedness.compute(point)));
+      const floodedness = Math.min(1, Math.max(-1, this.computeRouterFunction(this.params.fluidLevelFloodedness, point, "router.fluidLevelFloodedness")));
       const floodedCutoff = map(surfaceProximity, 1, 0, -0.3, 0.8);
       const randomizedCutoff = map(surfaceProximity, 1, 0, -0.8, 0.4);
       randomizedThreshold = floodedness - randomizedCutoff;
@@ -303,7 +364,10 @@ export class NoiseBasedAquifer {
   }
 
   private isDeepDarkRegion(point: SinglePointContext): boolean {
-    return this.params.erosion.compute(point) < Math.fround(-0.225) && this.params.depth.compute(point) > Math.fround(0.9);
+    return (
+      this.computeRouterFunction(this.params.erosion, point, "router.erosion") < Math.fround(-0.225) &&
+      this.computeRouterFunction(this.params.depth, point, "router.depth") > Math.fround(0.9)
+    );
   }
 
   private computeRandomizedFluidSurfaceLevel(blockX: number, blockY: number, blockZ: number, lowestSurface: number): number {
@@ -311,15 +375,18 @@ export class NoiseBasedAquifer {
     const cellY = Math.floor(blockY / 40);
     const cellZ = Math.floor(blockZ / 16);
     const cellCentreY = cellY * 40 + 20;
-    const spread = this.params.fluidLevelSpread.compute(new SinglePointContext(cellX, cellY, cellZ)) * 10;
+    const spread =
+      this.computeRouterFunction(this.params.fluidLevelSpread, new SinglePointContext(cellX, cellY, cellZ), "router.fluidLevelSpread") * 10;
     const quantizedSpread = Math.floor(spread / 3) * 3;
     return Math.min(lowestSurface, cellCentreY + quantizedSpread);
   }
 
   private computeFluidType(blockX: number, blockY: number, blockZ: number, globalFluid: number, surfaceLevel: number): number {
     if (surfaceLevel <= -10 && surfaceLevel !== WAY_BELOW_MIN_Y && globalFluid !== BLOCK_LAVA) {
-      const lavaNoise = this.params.lava.compute(
+      const lavaNoise = this.computeRouterFunction(
+        this.params.lava,
         new SinglePointContext(Math.floor(blockX / 64), Math.floor(blockY / 40), Math.floor(blockZ / 64)),
+        "router.lava",
       );
       if (Math.abs(lavaNoise) > 0.3) return BLOCK_LAVA;
     }

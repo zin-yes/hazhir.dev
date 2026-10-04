@@ -32,6 +32,11 @@ export class MultiNoiseBiomeSource {
     return this.searchTree.search(targetToParameterArray(target));
   }
 
+  /** R-tree searches and node distance evaluations since the last call (profiler counters), then resets them. */
+  drainSearchStatistics(): { searches: number; nodeDistanceEvaluations: number } {
+    return this.searchTree.drainSearchStatistics();
+  }
+
   /** Exhaustive reference search (lowest index wins ties), exposed for verification. */
   findBiomeBruteForce(target: TargetPoint): { index: number; biome: string; fitness: number } {
     const best = findBestParameterPointBruteForce(this.parameterPoints, target);

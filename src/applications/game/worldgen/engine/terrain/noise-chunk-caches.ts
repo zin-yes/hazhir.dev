@@ -12,7 +12,14 @@ import {
   SinglePointContext,
 } from "../density/density-function";
 import { MarkerNode, type MarkerType } from "../density/nodes/structural-nodes";
+import { densityCacheTypeIndex, noteDensityCacheHit, noteDensityEvaluation } from "../density/density-evaluation-counter";
 import type { NoiseChunk } from "./noise-chunk";
+
+const INTERPOLATED_TYPE_INDEX = densityCacheTypeIndex("interpolated");
+const FLAT_CACHE_TYPE_INDEX = densityCacheTypeIndex("flat_cache");
+const CACHE_2D_TYPE_INDEX = densityCacheTypeIndex("cache_2d");
+const CACHE_ONCE_TYPE_INDEX = densityCacheTypeIndex("cache_once");
+const CACHE_ALL_IN_CELL_TYPE_INDEX = densityCacheTypeIndex("cache_all_in_cell");
 
 function lerp(delta: number, start: number, end: number): number {
   return start + delta * (end - start);
@@ -119,9 +126,13 @@ export class NoiseInterpolator extends NoiseChunkCache {
 
   compute(context: FunctionContext): number {
     const chunk = this.chunk;
+    noteDensityEvaluation(INTERPOLATED_TYPE_INDEX);
     if (context !== chunk) return this.wrapped.compute(context);
     if (!chunk.interpolating) throw new Error("Trying to sample interpolator outside the interpolation loop");
-    if (!chunk.fillingCell) return this.value;
+    if (!chunk.fillingCell) {
+      noteDensityCacheHit(INTERPOLATED_TYPE_INDEX);
+      return this.value;
+    }
     // Mth.lerp3(dx, dy, dz, ...) = lerp(dz, lerp2(dx, dy, c000, c100, c010, c110), lerp2(dx, dy, c001, c101, c011, c111)).
     const deltaX = chunk.inCellX / chunk.cellWidth;
     const deltaY = chunk.inCellY / chunk.cellHeight;
@@ -161,9 +172,12 @@ export class FlatCache extends NoiseChunkCache {
     const quartOffsetX = (context.blockX >> 2) - this.chunk.firstNoiseX;
     const quartOffsetZ = (context.blockZ >> 2) - this.chunk.firstNoiseZ;
     const sideLength = this.sideLength;
-    return quartOffsetX >= 0 && quartOffsetZ >= 0 && quartOffsetX < sideLength && quartOffsetZ < sideLength
-      ? this.values[quartOffsetX * sideLength + quartOffsetZ]
-      : this.wrapped.compute(context);
+    noteDensityEvaluation(FLAT_CACHE_TYPE_INDEX);
+    if (quartOffsetX >= 0 && quartOffsetZ >= 0 && quartOffsetX < sideLength && quartOffsetZ < sideLength) {
+      noteDensityCacheHit(FLAT_CACHE_TYPE_INDEX);
+      return this.values[quartOffsetX * sideLength + quartOffsetZ];
+    }
+    return this.wrapped.compute(context);
   }
 }
 
@@ -180,7 +194,11 @@ export class Cache2D extends NoiseChunkCache {
   compute(context: FunctionContext): number {
     const blockX = context.blockX;
     const blockZ = context.blockZ;
-    if (blockX === this.lastBlockX && blockZ === this.lastBlockZ) return this.lastValue;
+    noteDensityEvaluation(CACHE_2D_TYPE_INDEX);
+    if (blockX === this.lastBlockX && blockZ === this.lastBlockZ) {
+      noteDensityCacheHit(CACHE_2D_TYPE_INDEX);
+      return this.lastValue;
+    }
     this.lastBlockX = blockX;
     this.lastBlockZ = blockZ;
     const value = this.wrapped.compute(context);
@@ -206,11 +224,16 @@ export class CacheOnce extends NoiseChunkCache {
 
   compute(context: FunctionContext): number {
     const chunk = this.chunk;
+    noteDensityEvaluation(CACHE_ONCE_TYPE_INDEX);
     if (context !== chunk) return this.wrapped.compute(context);
     if (this.lastArray !== null && this.lastArrayCounter === chunk.arrayInterpolationCounter) {
+      noteDensityCacheHit(CACHE_ONCE_TYPE_INDEX);
       return this.lastArray[chunk.arrayIndex];
     }
-    if (this.lastCounter === chunk.interpolationCounter) return this.lastValue;
+    if (this.lastCounter === chunk.interpolationCounter) {
+      noteDensityCacheHit(CACHE_ONCE_TYPE_INDEX);
+      return this.lastValue;
+    }
     this.lastCounter = chunk.interpolationCounter;
     const value = this.wrapped.compute(context);
     this.lastValue = value;
@@ -241,6 +264,7 @@ export class CacheAllInCell extends NoiseChunkCache {
 
   compute(context: FunctionContext): number {
     const chunk = this.chunk;
+    noteDensityEvaluation(CACHE_ALL_IN_CELL_TYPE_INDEX);
     if (context !== chunk) return this.wrapped.compute(context);
     if (!chunk.interpolating) throw new Error("Trying to sample interpolator outside the interpolation loop");
     const inCellX = chunk.inCellX;
@@ -248,8 +272,10 @@ export class CacheAllInCell extends NoiseChunkCache {
     const inCellZ = chunk.inCellZ;
     const cellWidth = chunk.cellWidth;
     const cellHeight = chunk.cellHeight;
-    return inCellX >= 0 && inCellY >= 0 && inCellZ >= 0 && inCellX < cellWidth && inCellY < cellHeight && inCellZ < cellWidth
-      ? this.values[((cellHeight - 1 - inCellY) * cellWidth + inCellX) * cellWidth + inCellZ]
-      : this.wrapped.compute(context);
+    if (inCellX >= 0 && inCellY >= 0 && inCellZ >= 0 && inCellX < cellWidth && inCellY < cellHeight && inCellZ < cellWidth) {
+      noteDensityCacheHit(CACHE_ALL_IN_CELL_TYPE_INDEX);
+      return this.values[((cellHeight - 1 - inCellY) * cellWidth + inCellX) * cellWidth + inCellZ];
+    }
+    return this.wrapped.compute(context);
   }
 }

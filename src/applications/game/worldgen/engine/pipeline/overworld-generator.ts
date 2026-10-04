@@ -2,6 +2,7 @@
 // (NoiseBasedChunkGenerator: fill noise with aquifers and ore veins -> biomes -> buildSurface -> carvers). Features
 // are a later stage that plugs into `stages`.
 
+import { addWorkerCounter, isWorkerProfiling } from "@/applications/game/profiler/worker-recorder";
 import { BiomeManager, MultiNoiseBiomeSource } from "../biome-source";
 import { createCarverSystem } from "../carvers";
 import { BlockPalette, ChunkBlocks, blockNameOf } from "../chunk";
@@ -14,6 +15,7 @@ import { ChunkBiomeStore } from "./chunk-biome-store";
 import type { ColumnStage, ColumnStageContext } from "./column-stage";
 import { createCarverStage, createNoiseFillStage, createSeedSurfaceSystem, createSurfaceStage } from "./default-stages";
 import { createPointBiomeSampler } from "./point-biome-sampler";
+import { runStagesWithProfiling } from "./profiled-stage-runner";
 import { readOverworldSettings, type OverworldSettings } from "./noise-settings-reader";
 
 const MAX_CACHED_COLUMNS = 64;
@@ -86,10 +88,20 @@ export function createOverworldGenerator(params: OverworldGeneratorParams): Over
   const generateBaseColumn = (chunkX: number, chunkZ: number): ChunkBlocks => {
     const key = `${chunkX},${chunkZ}`;
     const cached = columnCache.get(key);
-    if (cached !== undefined) return cached;
+    const isProfiling = isWorkerProfiling();
+    if (cached !== undefined) {
+      if (isProfiling) addWorkerCounter("baseColumnCacheHits", 1);
+      return cached;
+    }
     const column = new ChunkBlocks(chunkX, chunkZ, settings.minY, settings.height, palette);
     const context: ColumnStageContext = { chunkX, chunkZ, seed, settings, registries, router, aquifer: undefined, rawBiomeAtQuart, biomeAt };
-    for (const stage of stages) stage.run(column, context);
+    if (isProfiling) {
+      addWorkerCounter("baseColumnCacheMisses", 1);
+      runStagesWithProfiling(stages, column, context);
+      biomeStore.drainProfileCounters();
+    } else {
+      for (const stage of stages) stage.run(column, context);
+    }
     if (context.carvingMask !== undefined) carvingMaskByColumn.set(column, CarvingMask.fromByteMask(settings.minY, settings.height, context.carvingMask));
     columnCache.set(key, column);
     return column;

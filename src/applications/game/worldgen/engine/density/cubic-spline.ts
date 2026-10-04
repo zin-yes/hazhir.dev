@@ -3,6 +3,9 @@
 
 import type { DensityNode, DensityVisitor, FunctionContext, StructuralIdLookup } from "./density-function";
 import { numberSignature } from "./density-function";
+import { densityNodeTypeIndex, noteDensityEvaluation } from "./density-evaluation-counter";
+
+const SPLINE_SEGMENT_TYPE_INDEX = densityNodeTypeIndex("spline_segment");
 
 const fround = Math.fround;
 
@@ -146,6 +149,7 @@ export class MultipointSpline implements CubicSpline {
   }
 
   apply(context: FunctionContext): number {
+    noteDensityEvaluation(SPLINE_SEGMENT_TYPE_INDEX);
     const coordinateValue = fround(this.coordinate.compute(context));
     const intervalStart = findIntervalStart(this.locations, coordinateValue);
     const lastIndex = this.locations.length - 1;

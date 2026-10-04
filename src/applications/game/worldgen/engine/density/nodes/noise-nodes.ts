@@ -12,6 +12,15 @@ import {
   numberSignature,
   type StructuralIdLookup,
 } from "../density-function";
+import { densityNodeTypeIndex, noteDensityEvaluation } from "../density-evaluation-counter";
+
+const NOISE_TYPE_INDEX = densityNodeTypeIndex("noise");
+const SHIFTED_NOISE_TYPE_INDEX = densityNodeTypeIndex("shifted_noise");
+const SHIFT_A_TYPE_INDEX = densityNodeTypeIndex("shift_a");
+const SHIFT_B_TYPE_INDEX = densityNodeTypeIndex("shift_b");
+const SHIFT_TYPE_INDEX = densityNodeTypeIndex("shift");
+const WEIRD_SCALED_SAMPLER_TYPE_INDEX = densityNodeTypeIndex("weird_scaled_sampler");
+const OLD_BLENDED_NOISE_TYPE_INDEX = densityNodeTypeIndex("old_blended_noise");
 
 export class NoiseNode extends DensityNode {
   constructor(
@@ -31,6 +40,7 @@ export class NoiseNode extends DensityNode {
   }
 
   compute(context: FunctionContext): number {
+    noteDensityEvaluation(NOISE_TYPE_INDEX);
     return this.noise.getValue(context.blockX * this.xzScale, context.blockY * this.yScale, context.blockZ * this.xzScale);
   }
 
@@ -68,6 +78,7 @@ export class ShiftedNoiseNode extends DensityNode {
   }
 
   compute(context: FunctionContext): number {
+    noteDensityEvaluation(SHIFTED_NOISE_TYPE_INDEX);
     const sampleX = context.blockX * this.xzScale + this.shiftX.compute(context);
     const sampleY = context.blockY * this.yScale + this.shiftY.compute(context);
     const sampleZ = context.blockZ * this.xzScale + this.shiftZ.compute(context);
@@ -122,10 +133,13 @@ export class ShiftNode extends DensityNode {
   compute(context: FunctionContext): number {
     switch (this.type) {
       case "shift_a":
+        noteDensityEvaluation(SHIFT_A_TYPE_INDEX);
         return this.sampleShift(context.blockX, 0, context.blockZ);
       case "shift_b":
+        noteDensityEvaluation(SHIFT_B_TYPE_INDEX);
         return this.sampleShift(context.blockZ, context.blockX, 0);
       case "shift":
+        noteDensityEvaluation(SHIFT_TYPE_INDEX);
         return this.sampleShift(context.blockX, context.blockY, context.blockZ);
     }
   }
@@ -181,6 +195,7 @@ export class WeirdScaledSamplerNode extends DensityNode {
   }
 
   compute(context: FunctionContext): number {
+    noteDensityEvaluation(WEIRD_SCALED_SAMPLER_TYPE_INDEX);
     return this.transform(context, this.input.compute(context));
   }
 
@@ -241,6 +256,7 @@ export class OldBlendedNoiseNode extends DensityNode {
 
   compute(context: FunctionContext): number {
     if (this.sampler === null) throw new Error("old_blended_noise evaluated before RandomState wiring");
+    noteDensityEvaluation(OLD_BLENDED_NOISE_TYPE_INDEX);
     return this.sampler.compute(context.blockX, context.blockY, context.blockZ);
   }
 
