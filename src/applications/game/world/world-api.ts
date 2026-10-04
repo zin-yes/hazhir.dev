@@ -22,6 +22,10 @@ export interface VoxelWorldApi {
   /** Counts, queue sizes and memory of the chunk pipeline, or null before a world is loaded. */
   stats(): Record<string, number> | null;
   getBlock(x: number, y: number, z: number): number | null;
+  /** Moves the camera (and player); yaw and pitch in radians. */
+  setCamera(position: BlockPosition, yaw: number, pitch: number): void;
+  /** Runs the simulation without pointer lock (true) or pauses it, flying or walking. */
+  setPlaying(playing: boolean, flying?: boolean): void;
 }
 
 declare global {

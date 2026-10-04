@@ -671,6 +671,16 @@ export default function Game() {
         setRenderSettings: applyRenderSettings,
         stats: () => pipelineRef.current?.stats() ?? null,
         getBlock: (x, y, z) => getBlock(x, y, z),
+        setCamera: (position, yaw, pitch) => {
+          camera.position.set(position.x, position.y, position.z);
+          camera.quaternion.setFromEuler(new THREE.Euler(pitch, yaw, 0, "YXZ"));
+          playerControlsRef.current?.resetMotion();
+        },
+        setPlaying: (playing, flying = true) => {
+          playerControlsRef.current?.resetMotion();
+          playerControlsRef.current?.setFlying(flying);
+          setPhase(playing ? "playing" : "paused");
+        },
       });
       let hasCalibratedStructuredClone = false;
       const calibrateStructuredCloneOnce = () => {
