@@ -76,8 +76,21 @@ import {
   type RenderSettings,
 } from "./world/render-settings";
 import { packColumnKey } from "./world/chunk-key";
-import { installVoxelWorldApi, summarizeEdit } from "./world/world-api";
+import { installVoxelWorldApi, summarizeEdit, type WorldEditSummary } from "./world/world-api";
 import { castVoxelRay } from "./voxel-ray";
+import { BrushPreview } from "./brush/brush-preview";
+import {
+  BRUSH_DEFAULT_RADIUS,
+  BRUSH_REACH_BLOCKS,
+  brushCenterFor,
+  brushModeFor,
+  clampBrushRadius,
+  hasDragMovedEnough,
+  steppedBrushRadius,
+  type BrushAction,
+  type BrushModifiers,
+  type BrushSettings,
+} from "./brush/sphere-brush";
 import {
   recordEditsOutsideLoadedChunks,
   recordSavedEdits,
@@ -319,6 +332,15 @@ export default function Game() {
   const hotbarSlotsRef = useRef(hotbarSlots);
   const [isInventoryOpen, setIsInventoryOpen] = useState(false);
   const isInventoryOpenRef = useRef(false);
+  const brushRef = useRef<BrushSettings>({ enabled: false, radius: BRUSH_DEFAULT_RADIUS });
+  const brushStrokeRef = useRef<{
+    action: BrushAction;
+    modifiers: BrushModifiers;
+    lastCenter: BlockPosition | null;
+  } | null>(null);
+  const brushPreviewRef = useRef<BrushPreview | null>(null);
+  const lastBrushEditRef = useRef<WorldEditSummary | null>(null);
+  const [brushHud, setBrushHud] = useState<BrushSettings>({ enabled: false, radius: BRUSH_DEFAULT_RADIUS });
   const [isDebugVisible, setIsDebugVisible] = useState(false);
   const isDebugVisibleRef = useRef(false);
   const [isMobile, setIsMobile] = useState(false);
@@ -447,6 +469,15 @@ export default function Game() {
         }
       }
 
+      if (event.code === "KeyB" && phaseRef.current === "playing" && !isInventoryOpen) {
+        setBrush({ enabled: !brushRef.current.enabled });
+        return;
+      }
+      if (brushRef.current.enabled && (event.code === "BracketLeft" || event.code === "BracketRight")) {
+        setBrush({ radius: steppedBrushRadius(brushRef.current.radius, event.code === "BracketRight" ? 1 : -1) });
+        return;
+      }
+
       if (!isInventoryOpen && playerControlsRef.current?.controls.isLocked) {
         const keyNum = parseInt(event.key);
         if (!Number.isNaN(keyNum) && keyNum >= 1 && keyNum <= HOTBAR_SIZE) {
@@ -457,6 +488,12 @@ export default function Game() {
 
     const onWheel = (event: WheelEvent) => {
       profiler.addCounter("game.input.wheel");
+      if (brushRef.current.enabled && event.shiftKey) {
+        // Shift turns a vertical wheel into a horizontal one on macOS.
+        const wheelDelta = event.deltaY || event.deltaX;
+        if (wheelDelta !== 0) setBrush({ radius: steppedBrushRadius(brushRef.current.radius, wheelDelta < 0 ? 1 : -1) });
+        return;
+      }
       if (!isInventoryOpen && playerControlsRef.current?.controls.isLocked) {
         const direction = Math.sign(event.deltaY);
         setSelectedSlot((prev) => {
@@ -527,6 +564,21 @@ export default function Game() {
       return edits;
     },
   };
+
+  /** Turns the sphere brush on or off and sets its radius (1..64); the HUD follows. */
+  function setBrush(settings: Partial<BrushSettings>): BrushSettings {
+    const next: BrushSettings = {
+      enabled: settings.enabled ?? brushRef.current.enabled,
+      radius: clampBrushRadius(settings.radius ?? brushRef.current.radius),
+    };
+    brushRef.current = next;
+    if (!next.enabled) {
+      brushStrokeRef.current = null;
+      brushPreviewRef.current?.hide();
+    }
+    setBrushHud(next);
+    return { ...next };
+  }
 
   function streamChunksAroundCamera() {
     const pipeline = pipelineRef.current;
@@ -648,6 +700,8 @@ export default function Game() {
 
       const indicatorMesh = new BlockHighlighter();
       scene.add(indicatorMesh);
+      brushPreviewRef.current = new BrushPreview();
+      scene.add(brushPreviewRef.current);
 
       const sky = new Sky();
       sky.name = "sky";
@@ -694,6 +748,8 @@ export default function Game() {
         setRenderSettings: applyRenderSettings,
         stats: () => pipelineRef.current?.stats() ?? null,
         lodStats: () => lodBridgeRef.current?.stats() ?? null,
+        setBrush,
+        getBrush: () => ({ ...brushRef.current, lastEdit: lastBrushEditRef.current }),
         getBlock: (x, y, z) => getBlock(x, y, z),
         setCamera: (position, yaw, pitch) => {
           camera.position.set(position.x, position.y, position.z);
@@ -939,6 +995,14 @@ export default function Game() {
       };
 
       const onMouseDown = (event: MouseEvent) => {
+        if (brushRef.current.enabled && phaseRef.current === "playing" && (event.button === 0 || event.button === 2)) {
+          brushStrokeRef.current = {
+            action: event.button === 0 ? "erase" : "paint",
+            modifiers: { replaceOnly: event.ctrlKey, airOnly: event.altKey },
+            lastCenter: null,
+          };
+          return;
+        }
         if (!playerControlsRef.current?.controls.isLocked) return;
         const mouseDownToken = profiler.begin(
           "main.input.mouseDown",
@@ -959,9 +1023,14 @@ export default function Game() {
         }
       };
 
+      const onMouseUp = () => {
+        brushStrokeRef.current = null;
+      };
+
       const container = containerRef.current;
       container.addEventListener("contextmenu", onContextMenu);
       container.addEventListener("mousedown", onMouseDown);
+      window.addEventListener("mouseup", onMouseUp);
 
       // document.addEventListener("keydown", onKeyDown);
       document.addEventListener("keyup", onKeyUp);
@@ -1081,6 +1150,9 @@ export default function Game() {
           container.removeEventListener("contextmenu", onContextMenu);
           container.removeEventListener("mousedown", onMouseDown);
         }
+        window.removeEventListener("mouseup", onMouseUp);
+        brushPreviewRef.current?.dispose();
+        brushPreviewRef.current = null;
 
         nm.disconnect();
 
@@ -1150,7 +1222,7 @@ export default function Game() {
     point: THREE.Vector3;
   }
 
-  function castCameraRay(): VoxelRayHit | null {
+  function castCameraRay(reach: number = MAX_REACH_IN_BLOCKS): VoxelRayHit | null {
     camera.getWorldDirection(rayDirection);
     const hit = castVoxelRay(
       [camera.position.x, camera.position.y, camera.position.z],
@@ -1159,7 +1231,7 @@ export default function Game() {
         const block = getBlock(x, y, z);
         return block !== null && block !== BlockType.AIR;
       },
-      MAX_REACH_IN_BLOCKS,
+      reach,
       () => raycastStepsRef.current++,
     );
     if (!hit) return null;
@@ -2172,6 +2244,46 @@ export default function Game() {
     return result;
   }
 
+  /** Moves the brush preview and, while a button is held, paints or erases at most one sphere per frame. */
+  function updateBrush() {
+    const preview = brushPreviewRef.current;
+    if (!brushRef.current.enabled || phaseRef.current !== "playing" || !preview) {
+      preview?.hide();
+      return;
+    }
+    const brushToken = profiler.begin("main.frame.brush");
+    try {
+      const stroke = brushStrokeRef.current;
+      const action: BrushAction = stroke?.action ?? "erase";
+      const hit = castCameraRay(BRUSH_REACH_BLOCKS);
+      flushRaycastSteps();
+      camera.getWorldDirection(rayDirection);
+      const center = brushCenterFor(
+        action,
+        hit ? { cell: [hit.x, hit.y, hit.z], faceNormal: [hit.normal.x, hit.normal.y, hit.normal.z] } : null,
+        camera.position,
+        rayDirection,
+      );
+      const { radius } = brushRef.current;
+      preview.show(center, radius, stroke?.action === "erase");
+      if (!stroke || !hasDragMovedEnough(stroke.lastCenter, center, radius)) return;
+      stroke.lastCenter = center;
+      const block = hotbarSlotsRef.current[selectedSlotRef.current] ?? BlockType.STONE;
+      applyBrushSphere(center, radius, block, brushModeFor(action, stroke.modifiers));
+    } finally {
+      profiler.end(brushToken);
+    }
+  }
+
+  /** One brush sphere through the bulk edit path; the summary lands in lastBrushEditRef for the API and tests. */
+  function applyBrushSphere(center: BlockPosition, radius: number, block: number, mode: BrushMode) {
+    const startedAtMs = performance.now();
+    const result = applySphere(center, radius, block, mode);
+    void summarizeEdit(result, startedAtMs).then((summary) => {
+      lastBrushEditRef.current = summary;
+    });
+  }
+
   let lastPlantDetailUpdateMs = 0;
 
   const render = () => {
@@ -2202,6 +2314,7 @@ export default function Game() {
     }
 
     updateIndicator();
+    updateBrush();
 
     if (time - lastPlantDetailUpdateMs >= PLANT_DETAIL_UPDATE_INTERVAL_MS) {
       lastPlantDetailUpdateMs = time;
@@ -2373,6 +2486,7 @@ export default function Game() {
           debugInfo={debugInfo}
           isDebugVisible={isDebugVisible}
           isMobile={isMobile}
+          brushRadius={brushHud.enabled ? brushHud.radius : undefined}
         />
         {isMobile && phase === "playing" && (
           <MobileControls

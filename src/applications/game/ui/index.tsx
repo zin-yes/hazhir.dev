@@ -51,6 +51,7 @@ interface UILayerProps {
   debugInfo?: DebugInfo;
   isDebugVisible?: boolean;
   isMobile?: boolean;
+  brushRadius?: number;
 }
 
 export default function UILayer({
@@ -82,6 +83,7 @@ export default function UILayer({
   debugInfo,
   isDebugVisible,
   isMobile,
+  brushRadius,
 }: UILayerProps) {
   useProfiledRender("uiLayer");
   const isInWorld = phase === "playing" || phase === "paused";
@@ -113,6 +115,7 @@ export default function UILayer({
           selectedSlot={selectedSlot}
           slots={hotbarSlots}
           onSelectSlot={onSelectSlot}
+          brushRadius={brushRadius}
         />
       )}
       <Inventory

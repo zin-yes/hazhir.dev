@@ -5,12 +5,19 @@ interface HotbarProps {
   selectedSlot: number;
   slots: BlockType[];
   onSelectSlot?: (index: number) => void;
+  /** The sphere brush radius while the brush is on (B), otherwise undefined. */
+  brushRadius?: number;
 }
 
-export function Hotbar({ selectedSlot, slots, onSelectSlot }: HotbarProps) {
+export function Hotbar({ selectedSlot, slots, onSelectSlot, brushRadius }: HotbarProps) {
   useProfiledRender("hotbar");
   return (
     <div className="absolute bottom-4 left-1/2 flex max-w-[calc(100vw-1rem)] -translate-x-1/2 gap-1 border-4 border-[#0d0b14] bg-[#171327]/90 p-1 sm:gap-1.5 sm:p-1.5">
+      {brushRadius !== undefined && (
+        <div className="pointer-events-none absolute bottom-full left-1/2 mb-2 -translate-x-1/2 whitespace-nowrap border-4 border-[#0d0b14] bg-[#171327]/90 px-2 py-1 text-[10px] text-[#b6f24a] sm:text-xs">
+          BRUSH R{brushRadius} <span className="text-[#6e6590]">[ ] radius / LMB erase / RMB paint</span>
+        </div>
+      )}
       {slots.map((block, index) => {
         const isSelected = selectedSlot === index;
         return (

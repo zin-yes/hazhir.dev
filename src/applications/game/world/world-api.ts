@@ -5,6 +5,7 @@ import type { BlockEdit, BlockPosition, BrushMode } from "../edits/block-edit-ba
 import type { PipelineEditResult } from "./chunk-pipeline";
 import type { LodStats } from "../lod/manager/lod-stats";
 import type { RenderSettings } from "./render-settings";
+import type { BrushSettings } from "../brush/sphere-brush";
 
 export interface WorldEditSummary {
   blocksChanged: number;
@@ -22,6 +23,10 @@ export interface VoxelWorldApi {
   setRenderSettings(settings: Partial<RenderSettings>): RenderSettings;
   /** Counts, queue sizes and memory of the chunk pipeline, or null before a world is loaded. */
   stats(): Record<string, number> | null;
+  /** Turns the sphere brush on or off and sets its radius (1..64). */
+  setBrush(settings: Partial<BrushSettings>): BrushSettings;
+  /** The brush settings and the summary of its last finished sphere. */
+  getBrush(): BrushSettings & { lastEdit: WorldEditSummary | null };
   /** Far terrain (LOD) tiles, builds, cache and timings, or null while it is off. */
   lodStats(): LodStats | null;
   getBlock(x: number, y: number, z: number): number | null;
