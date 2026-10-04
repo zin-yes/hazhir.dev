@@ -19,6 +19,8 @@ export interface FeatureChunkGenerator {
   readonly seaLevel: number;
   /** getBiomeGenerationSettings(biome).hasFeature(placedFeature): any step of the biome lists the feature. */
   biomeHasFeature(biomeId: string, feature: PlacedFeature): boolean;
+  /** Biome.getTemperature(pos): base temperature, TemperatureModifier and the above-y-80 adjustment (used by freeze_top_layer). */
+  biomeTemperature?(biomeId: string, x: number, y: number, z: number): number;
 }
 
 export interface FeaturePlaceContext<Config> {

@@ -9,6 +9,7 @@
 import { BlockStateCatalog, BlockTagIndex, type BlockTagRegistry, SurvivalRules } from "../../block-state";
 import { ChunkBlocks } from "../../chunk";
 import type { WorldgenRegistries } from "../../registry/datapack-loader";
+import { BiomeTemperatureSampler, createBiomeClimateLookup } from "../../surface/biome-temperature";
 import { BlockPos } from "../core/block-pos";
 import { createDecorationRandom } from "../core/worldgen-random";
 import { FeatureDiagnostics, FeatureResolver } from "../feature/feature-parser";
@@ -107,7 +108,9 @@ export class FeatureDecorator {
     this.possibleBiomes = new Set(params.possibleBiomes);
     this.originCache = new OriginCache(params.maxCachedOrigins ?? 48);
     const biomeFeatures = this.biomeFeatures;
+    const temperatureSampler = new BiomeTemperatureSampler(createBiomeClimateLookup(params.registries.biome));
     this.generator = {
+      biomeTemperature: (biomeId, x, y, z) => temperatureSampler.getTemperature(biomeId, x, y, z),
       minY: params.source.settings.minY,
       genDepth: params.source.settings.height,
       seaLevel: params.source.settings.seaLevel,
