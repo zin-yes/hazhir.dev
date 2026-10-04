@@ -302,7 +302,12 @@ export default function Game() {
     [],
   );
 
-  const scene = useMemo(() => new THREE.Scene(), []);
+  const scene = useMemo(() => {
+    const gameScene = new THREE.Scene();
+    // The scene root never moves; with auto update on, its own matrix update would force every child to recompute.
+    gameScene.matrixAutoUpdate = false;
+    return gameScene;
+  }, []);
 
   const camera = useMemo(
     () =>
@@ -1475,8 +1480,11 @@ export default function Game() {
       chunkY * CHUNK_HEIGHT - 0.5,
       chunkZ * CHUNK_LENGTH - 0.5,
     );
+    // Chunk meshes never move: compute the world matrix once and keep the per-frame scene update from visiting them.
     mesh.matrixAutoUpdate = false;
+    mesh.matrixWorldAutoUpdate = false;
     mesh.updateMatrix();
+    mesh.matrixWorld.copy(mesh.matrix);
     mesh.frustumCulled = true;
     mesh.name = name;
     mesh.renderOrder = renderOrder;

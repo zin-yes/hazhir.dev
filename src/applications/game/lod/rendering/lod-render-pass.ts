@@ -19,6 +19,7 @@ export class LodRenderPass {
 
   constructor() {
     this.scene.name = "lod";
+    this.scene.matrixAutoUpdate = false;
     this.tiles.name = "lod-tiles";
     this.scene.add(this.tiles);
   }
