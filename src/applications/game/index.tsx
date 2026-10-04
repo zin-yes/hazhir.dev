@@ -15,17 +15,10 @@ import { Sky } from "three/addons/objects/Sky.js";
 import {
   CHUNK_HEIGHT,
   CHUNK_LENGTH,
-  CHUNK_PRUNING_DISTANCE,
   CHUNK_WIDTH,
-  NEGATIVE_X_RENDER_DISTANCE,
-  NEGATIVE_Y_RENDER_DISTANCE,
-  NEGATIVE_Z_RENDER_DISTANCE,
-  POSITIVE_X_RENDER_DISTANCE,
-  POSITIVE_Y_RENDER_DISTANCE,
-  POSITIVE_Z_RENDER_DISTANCE,
   TEXTURE_SIZE,
 } from "./config";
-import { WorkerPool, chunkColumnAffinityKey } from "./worker-pool";
+import { WorkerPool } from "./worker-pool";
 
 import * as THREE from "three";
 
@@ -37,6 +30,7 @@ import {
   getBlockLightLevel,
   getBoundingBox,
   isReplaceable,
+  isWater,
 } from "@/applications/game/blocks";
 import { BlockHighlighter } from "./block-highlighter";
 import { HOTBAR_SIZE, normalizeHotbar } from "./constants";
@@ -61,13 +55,27 @@ import {
   VERTEX_SHADER,
 } from "./shaders/chunk";
 import { TickableBlockIndex, pickTickedBlocks } from "./random-tick";
-import { type BorderFace, extractBorderSlab } from "./chunk-borders";
-import {
-  type ChunkCoordinate,
-  type LightChunkSource,
-  relightAfterBlockChange,
-} from "./light-engine";
+import { trackLightPhaseInProfiler } from "./light-engine";
 import { LightEditTrace, classifyLightEdit } from "./profiler/light-trace";
+import {
+  BlockEditBatch,
+  sphereEdits,
+  type BlockEdit,
+  type BlockPosition,
+  type BrushMode,
+} from "./edits/block-edit-batch";
+import { ChunkPipeline, type PipelineEditResult } from "./world/chunk-pipeline";
+import type { ChunkRecord } from "./world/chunk-record";
+import { createWorkerBackends } from "./world/worker-backends";
+import {
+  BORDER_RING_CHUNKS,
+  DEFAULT_RENDER_SETTINGS,
+  UNLOAD_HYSTERESIS_CHUNKS,
+  normalizeRenderSettings,
+  type RenderSettings,
+} from "./world/render-settings";
+import { packColumnKey } from "./world/chunk-key";
+import { installVoxelWorldApi, summarizeEdit } from "./world/world-api";
 import { castVoxelRay } from "./voxel-ray";
 import type { ChunkMeshResult } from "./workers/mesh-types";
 import { MobileControls } from "./ui/mobile-controls";
@@ -111,6 +119,20 @@ import {
 import { sampleSceneMemory } from "./profiler/scene-memory-sampler";
 
 const FLYING_SPEED = 10;
+const STREAMING_INTERVAL_MS = 100;
+const LIGHTING_WORKER_COUNT = 2;
+const MESH_WORKER_COUNT = 2;
+/** Terrain generation is the slowest stage, so it gets every core the other pools and the main thread leave. */
+const GENERATION_WORKER_COUNT = Math.min(
+  6,
+  Math.max(
+    2,
+    (typeof navigator === "undefined" ? 6 : navigator.hardwareConcurrency || 6) -
+      LIGHTING_WORKER_COUNT -
+      MESH_WORKER_COUNT -
+      1,
+  ),
+);
 const RANDOM_TICKS_PER_CHUNK = 100;
 // Chunks whose centers are farther than this from the camera draw plants as flat sheets.
 const PLANT_VOXEL_DETAIL_DISTANCE = 72;
@@ -162,7 +184,6 @@ export default function Game() {
   const textureArrayBytesRef = useRef(0);
   const raycastStepsRef = useRef(0);
   const getBlockCallsRef = useRef(0);
-  const pendingEditStartedAtRef = useRef<Map<string, number>>(new Map());
 
   // const stats = new Stats();
   // stats.showPanel(0); // 0: fps, 1: ms, 2: mb, 3+: custom
@@ -177,13 +198,11 @@ export default function Game() {
   const connectedToHostRef = useRef(false);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  const chunkPositions = useRef<
-    { chunkX: number; chunkY: number; chunkZ: number }[]
-  >([]);
-  const chunks = useRef<{ [chunkName: string]: Uint8Array }>({});
-  const lightChunks = useRef<{ [chunkName: string]: Uint8Array }>({});
-  const chunkVersions = useRef<{ [chunkName: string]: number }>({});
+  const pipelineRef = useRef<ChunkPipeline | null>(null);
+  const renderSettingsRef = useRef<RenderSettings>({ ...DEFAULT_RENDER_SETTINGS });
   const modifiedChunks = useRef<Map<string, Map<number, number>>>(new Map());
+  /** Highest chunk y holding a saved edit, per column key, so tall builds are never skipped as sky. */
+  const editedColumnTopsRef = useRef<Map<number, number>>(new Map());
   const pendingWaterUpdates = useRef<Set<string>>(new Set());
   const generationWorkerPool = useMemo(
     () =>
@@ -192,7 +211,7 @@ export default function Game() {
           new Worker(new URL("./workers/unified-worker.ts", import.meta.url), {
             name: "generation",
           }),
-        3,
+        GENERATION_WORKER_COUNT,
         "generation",
       ),
     [],
@@ -204,7 +223,7 @@ export default function Game() {
           new Worker(new URL("./workers/unified-worker.ts", import.meta.url), {
             name: "lighting",
           }),
-        2,
+        LIGHTING_WORKER_COUNT,
         "lighting",
       ),
     [],
@@ -216,7 +235,7 @@ export default function Game() {
           new Worker(new URL("./workers/unified-worker.ts", import.meta.url), {
             name: "mesh",
           }),
-        3,
+        MESH_WORKER_COUNT,
         "mesh",
       ),
     [],
@@ -450,374 +469,111 @@ export default function Game() {
   }>({});
   const chunkMeshesRef = useRef(new Map<string, THREE.Mesh[]>());
   const plantDetailRef = useRef(new Map<string, PlantDetailMeshes>());
-  const lightChunkSource: LightChunkSource = {
-    getBlocks: (chunkX, chunkY, chunkZ) =>
-      chunks.current[generateChunkName(chunkX, chunkY, chunkZ)],
-    getLight: (chunkX, chunkY, chunkZ) =>
-      lightChunks.current[generateChunkName(chunkX, chunkY, chunkZ)],
-  };
   const pendingLightEditsRef = useRef(0);
   const lightIdleResolversRef = useRef<Array<() => void>>([]);
-  const queuedMeshRequestsRef = useRef(new Map<string, Promise<void>>());
   const tickableBlocksRef = useRef(new TickableBlockIndex());
+  const cameraForward = useMemo(() => new THREE.Vector3(), []);
 
-  const NEIGHBOR_CHUNK_OFFSETS: {
-    key: string;
-    dx: number;
-    dy: number;
-    dz: number;
-    borderFacingUs: BorderFace;
-  }[] = [
-    { key: "-1,0,0", dx: -1, dy: 0, dz: 0, borderFacingUs: "left" },
-    { key: "1,0,0", dx: 1, dy: 0, dz: 0, borderFacingUs: "right" },
-    { key: "0,1,0", dx: 0, dy: 1, dz: 0, borderFacingUs: "top" },
-    { key: "0,-1,0", dx: 0, dy: -1, dz: 0, borderFacingUs: "bottom" },
-    { key: "0,0,1", dx: 0, dy: 0, dz: 1, borderFacingUs: "front" },
-    { key: "0,0,-1", dx: 0, dy: 0, dz: -1, borderFacingUs: "back" },
-  ];
+  function chunkNameOf(chunkX: number, chunkY: number, chunkZ: number) {
+    return `${chunkX},${chunkY},${chunkZ}`;
+  }
 
-  function applySavedEditsToChunk(chunkName: string, chunk: Uint8Array) {
-    const savedEdits = modifiedChunks.current.get(chunkName);
-    if (!savedEdits) return;
-    const applyEditsToken = profiler.begin(
-      "main.chunk.applySavedEdits",
-      DIMENSIONS.simulationSystem,
-      "chunk.applySavedEdits",
-    );
-    savedEdits.forEach((type, index) => {
-      chunk[index] = type;
+  function highestEditedChunkY(chunkX: number, chunkZ: number) {
+    return editedColumnTopsRef.current.get(packColumnKey(chunkX, chunkZ));
+  }
+
+  function rebuildEditedColumnTops() {
+    editedColumnTopsRef.current.clear();
+    modifiedChunks.current.forEach((_edits, chunkName) => {
+      const [chunkX, chunkY, chunkZ] = chunkName.split(",").map(Number);
+      noteEditedChunk(chunkX, chunkY, chunkZ);
     });
-    profiler.addCounter("game.chunks.savedEditsApplied", savedEdits.size);
-    profiler.end(applyEditsToken);
   }
 
-  /** The six face neighbors' blocks and light, which the light spread reads and the worker copies. */
-  function gatherNeighborLightInputs(
-    chunkX: number,
-    chunkY: number,
-    chunkZ: number,
-  ) {
-    const gatherToken = profiler.begin("main.light.gatherNeighborInputs");
-    const neighbors: { [key: string]: ArrayBuffer | undefined } = {};
-    const neighborLights: { [key: string]: ArrayBuffer | undefined } = {};
-    for (const { key, dx, dy, dz } of NEIGHBOR_CHUNK_OFFSETS) {
-      const name = generateChunkName(chunkX + dx, chunkY + dy, chunkZ + dz);
-      neighbors[key] = chunks.current[name]?.buffer as ArrayBuffer | undefined;
-      neighborLights[key] = lightChunks.current[name]?.buffer as
-        | ArrayBuffer
-        | undefined;
-    }
-    profiler.end(gatherToken);
-    return { neighbors, neighborLights };
-  }
-
-  /**
-   * A chunk where every open cell already has full sky light can only gain block
-   * light, and only from a neighbor that has some next to it. With none, spreading
-   * light through the chunk changes nothing, so the whole worker round trip is skipped.
-   */
-  function canSkipLightSpread(
-    chunkX: number,
-    chunkY: number,
-    chunkZ: number,
-  ): boolean {
-    const skipCheckToken = profiler.begin("main.light.canSkipSpread");
-    try {
-      return canSkipLightSpreadUnprofiled(chunkX, chunkY, chunkZ);
-    } finally {
-      profiler.end(skipCheckToken);
+  function noteEditedChunk(chunkX: number, chunkY: number, chunkZ: number) {
+    const columnKey = packColumnKey(chunkX, chunkZ);
+    const highest = editedColumnTopsRef.current.get(columnKey);
+    if (highest === undefined || chunkY > highest) {
+      editedColumnTopsRef.current.set(columnKey, chunkY);
     }
   }
 
-  function canSkipLightSpreadUnprofiled(
-    chunkX: number,
-    chunkY: number,
-    chunkZ: number,
-  ): boolean {
-    for (const { dx, dy, dz, borderFacingUs } of NEIGHBOR_CHUNK_OFFSETS) {
-      const neighborLight =
-        lightChunks.current[
-          generateChunkName(chunkX + dx, chunkY + dy, chunkZ + dz)
-        ];
-      if (!neighborLight) continue;
-      const border = new Uint8Array(extractBorderSlab(neighborLight, borderFacingUs));
-      for (let index = 0; index < border.length; index++) {
-        if ((border[index] & 0xf) !== 0) return false;
-      }
+  /** Remembers an edit for saving and for chunks that load later. */
+  function recordSavedEdit(x: number, y: number, z: number, block: number) {
+    const chunkX = Math.floor(x / CHUNK_WIDTH);
+    const chunkY = Math.floor(y / CHUNK_HEIGHT);
+    const chunkZ = Math.floor(z / CHUNK_LENGTH);
+    const chunkName = chunkNameOf(chunkX, chunkY, chunkZ);
+    let edits = modifiedChunks.current.get(chunkName);
+    if (!edits) {
+      edits = new Map();
+      modifiedChunks.current.set(chunkName, edits);
     }
-    return true;
+    edits.set(
+      calculateOffset(x - chunkX * CHUNK_WIDTH, y - chunkY * CHUNK_HEIGHT, z - chunkZ * CHUNK_LENGTH),
+      block,
+    );
+    noteEditedChunk(chunkX, chunkY, chunkZ);
+  }
+
+  function streamChunksAroundCamera() {
+    const pipeline = pipelineRef.current;
+    if (!pipeline) return;
+    const streamingToken = profiler.begin("main.interval.chunkStreaming");
+    pipeline.update(camera.position, camera.getWorldDirection(cameraForward));
+    profiler.end(streamingToken);
   }
 
   function startWorldGeneration(currentSeed: number) {
     if (intervalRef.current) clearInterval(intervalRef.current);
-
-    // Clear chunks
-    Object.keys(chunks.current).forEach((key) => pruneChunkMesh(key));
-    chunks.current = {};
-    lightChunks.current = {};
-    chunkPositions.current = [];
-
+    pipelineRef.current?.dispose();
     loadTracker.resetWorldStages();
-    const loadStartedAtMs = profiler.now();
 
-    let initialLoadTasks =
-      (POSITIVE_X_RENDER_DISTANCE + NEGATIVE_X_RENDER_DISTANCE) *
-      (POSITIVE_Y_RENDER_DISTANCE + NEGATIVE_Y_RENDER_DISTANCE) *
-      (POSITIVE_Z_RENDER_DISTANCE + NEGATIVE_Z_RENDER_DISTANCE);
-
-    let tasksDone = 0;
-    let chunksGenerated = 0;
-    let chunksLit = 0;
-    let chunksSpread = 0;
-
-    const chunksToGenerate: { x: number; y: number; z: number }[] = [];
-
-    const spawnPosition = playerControlsRef.current?.controls.object.position;
-    const centerChunkX = Math.round((spawnPosition?.x ?? 0) / CHUNK_WIDTH);
-    const centerChunkY = Math.round((spawnPosition?.y ?? 0) / CHUNK_HEIGHT);
-    const centerChunkZ = Math.round((spawnPosition?.z ?? 0) / CHUNK_LENGTH);
-
-    for (
-      let chunkX = centerChunkX - NEGATIVE_X_RENDER_DISTANCE;
-      chunkX < centerChunkX + POSITIVE_X_RENDER_DISTANCE;
-      chunkX++
-    ) {
-      for (
-        let chunkY = centerChunkY + POSITIVE_Y_RENDER_DISTANCE;
-        chunkY > centerChunkY - NEGATIVE_Y_RENDER_DISTANCE;
-        chunkY--
-      ) {
-        for (
-          let chunkZ = centerChunkZ - NEGATIVE_Z_RENDER_DISTANCE;
-          chunkZ < centerChunkZ + POSITIVE_Z_RENDER_DISTANCE;
-          chunkZ++
-        ) {
-          chunksToGenerate.push({ x: chunkX, y: chunkY, z: chunkZ });
-          chunkPositions.current.push({ chunkX, chunkY, chunkZ });
-        }
-      }
-    }
-
-    // 1. Generate Blocks
-    Promise.all(
-      chunksToGenerate.map(async ({ x, y, z }) => {
-        const result = await generationWorkerPool.exec(
-          "generateChunk",
-          [currentSeed, x, y, z],
-          undefined,
-          { affinityKey: chunkColumnAffinityKey(x, z) },
-        );
-        const chunk = new Uint8Array(result);
-        const chunkName = generateChunkName(x, y, z);
-        chunks.current[chunkName] = chunk;
-
-        applySavedEditsToChunk(chunkName, chunk);
-
-        profiler.recordTimer(
-          "chunk.pipeline.generate",
-          profiler.now() - loadStartedAtMs,
-          "latency",
-        );
-        profiler.addCounter("game.chunks.generated");
-        chunksGenerated++;
-        loadTracker.report("terrain", chunksGenerated / initialLoadTasks);
-      }),
-    ).then(async () => {
-      profiler.recordTimer(
-        "chunk.load.terrain",
-        profiler.now() - loadStartedAtMs,
-        "latency",
-      );
-      const lightingStartedAtMs = profiler.now();
-      // 2. Initialize Light
-      const queues: { [key: string]: Uint32Array } = {};
-      const fullySunlitChunks = new Set<string>();
-
-      // A chunk's sky light comes from the chunk above it, so each column of chunks is
-      // lit top-down. Columns are independent of each other and run side by side.
-      const chunkColumns = new Map<string, { x: number; y: number; z: number }[]>();
-      chunksToGenerate.forEach((chunkPosition) => {
-        const columnKey = `${chunkPosition.x},${chunkPosition.z}`;
-        chunkColumns.set(columnKey, [
-          ...(chunkColumns.get(columnKey) ?? []),
-          chunkPosition,
-        ]);
-      });
-
-      await Promise.all(
-        Array.from(chunkColumns.values()).map(async (column) => {
-          const topDown = [...column].sort((first, second) => second.y - first.y);
-          for (const { x, y, z } of topDown) {
-            const chunkName = generateChunkName(x, y, z);
-            const chunk = chunks.current[chunkName];
-
-            const topChunkName = generateChunkName(x, y + 1, z);
-            const topChunk = chunks.current[topChunkName]?.buffer;
-            const topChunkLight = lightChunks.current[topChunkName]?.buffer;
-
-            const { light, queue, isFullySunlit } = await lightingWorkerPool.exec(
-              "initializeChunkLight",
-              [chunk.buffer, currentSeed, x, y, z, topChunk, topChunkLight],
-            );
-            lightChunks.current[chunkName] = light;
-            queues[chunkName] = queue;
-            if (isFullySunlit) fullySunlitChunks.add(chunkName);
-
-            profiler.recordTimer(
-              "chunk.pipeline.initLight",
-              profiler.now() - lightingStartedAtMs,
-              "latency",
-            );
-            chunksLit++;
-            loadTracker.report("lighting", chunksLit / initialLoadTasks);
-          }
-        }),
-      );
-
-      profiler.recordTimer(
-        "chunk.load.lighting",
-        profiler.now() - lightingStartedAtMs,
-        "latency",
-      );
-      const lightSpreadStartedAtMs = profiler.now();
-      // 3. Propagate Light
-      const lightUpdates: { [key: string]: Uint8Array[] } = {};
-
-      await Promise.all(
-        chunksToGenerate.map(async ({ x, y, z }) => {
-          const chunkName = generateChunkName(x, y, z);
-          const light = lightChunks.current[chunkName];
-          const chunk = chunks.current[chunkName];
-          const queue = queues[chunkName];
-
-          const { centerLight, neighborLightUpdates } =
-            fullySunlitChunks.has(chunkName) && canSkipLightSpread(x, y, z)
-              ? { centerLight: light, neighborLightUpdates: {} }
-              : await lightingWorkerPool.exec("propagateChunkLight", [
-                  chunk.buffer,
-                  light.buffer,
-                  ...Object.values(gatherNeighborLightInputs(x, y, z)),
-                  queue,
-                ]);
-
-          if (!lightUpdates[chunkName]) lightUpdates[chunkName] = [];
-          lightUpdates[chunkName].push(centerLight);
-
-          profiler.recordTimer(
-            "chunk.pipeline.propagateLight",
-            profiler.now() - lightSpreadStartedAtMs,
-            "latency",
-          );
-          chunksSpread++;
-          loadTracker.report("light-spread", chunksSpread / initialLoadTasks);
-
-          Object.entries(neighborLightUpdates).forEach(([key, update]) => {
-            const [dx, dy, dz] = key.split(",").map(Number);
-            const neighborName = generateChunkName(x + dx, y + dy, z + dz);
-            if (!lightUpdates[neighborName]) lightUpdates[neighborName] = [];
-            lightUpdates[neighborName].push(update as Uint8Array);
-          });
-        }),
-      );
-
-      profiler.recordTimer(
-        "chunk.load.lightSpread",
-        profiler.now() - lightSpreadStartedAtMs,
-        "latency",
-      );
-      // Merge updates
-      const mergeInitialToken = profiler.begin("main.light.mergeInitial");
-      Object.keys(lightUpdates).forEach((chunkName) => {
-        const updates = lightUpdates[chunkName];
-        if (updates.length === 0) return;
-
-        const merged = new Uint8Array(updates[0]);
-        for (let i = 1; i < updates.length; i++) {
-          const update = updates[i];
-          for (let j = 0; j < merged.length; j++) {
-            merged[j] = Math.max(merged[j], update[j]);
-          }
-        }
-        lightChunks.current[chunkName] = merged;
-      });
-      profiler.end(mergeInitialToken);
-
-      const meshingStartedAtMs = profiler.now();
-      // 4. Generate Mesh
-      chunksToGenerate.forEach(({ x, y, z }) => {
-        const chunkName = generateChunkName(x, y, z);
-        const chunk = chunks.current[chunkName];
-        const light = lightChunks.current[chunkName];
-
-        if (!light) return;
-
-        const { borders, borderLights } = getChunkBorders(x, y, z);
-
-        meshWorkerPool
-          .exec("generateMesh", [
-            chunk.buffer,
-            light.buffer,
-            borders,
-            borderLights,
-            currentSeed,
-            x,
-            y,
-            z,
-          ])
-          .then(
-            (meshResult: ChunkMeshResult | null) => {
-              if (!meshResult) return;
-              addChunkMesh(meshResult, chunkName, x, y, z);
-
-              profiler.recordTimer(
-                "chunk.pipeline.mesh",
-                profiler.now() - meshingStartedAtMs,
-                "latency",
-              );
-              profiler.recordTimer(
-                "chunk.pipeline.total",
-                profiler.now() - loadStartedAtMs,
-                "latency",
-              );
-              tasksDone++;
-
-              loadTracker.report("meshing", tasksDone / initialLoadTasks);
-              if (tasksDone >= initialLoadTasks) {
-                profiler.recordTimer(
-                  "chunk.load.meshing",
-                  profiler.now() - meshingStartedAtMs,
-                  "latency",
-                );
-                profiler.recordTimer(
-                  "chunk.load.total",
-                  profiler.now() - loadStartedAtMs,
-                  "latency",
-                );
-                loadTracker.finish();
-              }
-            },
-          )
-          .catch((err) => {
-            console.error(err);
-          });
-      });
+    pipelineRef.current = new ChunkPipeline({
+      renderSettings: renderSettingsRef.current,
+      ...createWorkerBackends(
+        {
+          generation: generationWorkerPool,
+          generationWorkerCount: GENERATION_WORKER_COUNT,
+          lighting: lightingWorkerPool,
+          lightingWorkerCount: LIGHTING_WORKER_COUNT,
+          meshing: meshWorkerPool,
+          meshWorkerCount: MESH_WORKER_COUNT,
+        },
+        currentSeed,
+      ),
+      events: {
+        onMeshReady: (record, mesh) => {
+          const chunkName = chunkNameOf(record.chunkX, record.chunkY, record.chunkZ);
+          if (mesh) addChunkMesh(mesh, chunkName, record.chunkX, record.chunkY, record.chunkZ);
+          else pruneChunkMesh(chunkName);
+        },
+        onChunkUnloaded: (record) => {
+          profiler.addCounter("game.chunks.pruned");
+          pruneChunkMesh(chunkNameOf(record.chunkX, record.chunkY, record.chunkZ));
+        },
+        savedEditsFor: (chunkX, chunkY, chunkZ) =>
+          modifiedChunks.current.get(chunkNameOf(chunkX, chunkY, chunkZ)),
+        highestEditedChunkY,
+        onStartAreaProgress: ({ generated, lit, meshed }) => {
+          loadTracker.report("terrain", generated);
+          loadTracker.report("lighting", lit);
+          loadTracker.report("light-spread", lit);
+          loadTracker.report("meshing", meshed);
+        },
+        onStartAreaReady: () => loadTracker.finish(),
+      },
     });
 
-    intervalRef.current = setInterval(() => {
-      const streamingToken = profiler.begin("main.interval.chunkStreaming");
-      const playerChunkX = Math.round(camera.position.x / CHUNK_WIDTH);
-      const playerChunkY = Math.round(camera.position.y / CHUNK_HEIGHT);
-      const playerChunkZ = Math.round(camera.position.z / CHUNK_LENGTH);
+    streamChunksAroundCamera();
+    intervalRef.current = setInterval(streamChunksAroundCamera, STREAMING_INTERVAL_MS);
+  }
 
-      const pruneToken = profiler.begin("main.interval.chunkStreaming.prune");
-      pruneChunks(playerChunkX, playerChunkY, playerChunkZ);
-      profiler.end(pruneToken);
-
-      const scanToken = profiler.begin("main.interval.chunkStreaming.scanNearby");
-      generateNearbyChunks(playerChunkX, playerChunkY, playerChunkZ);
-      profiler.end(scanToken);
-      profiler.end(streamingToken);
-    }, 500);
+  /** Changes how far real chunks are drawn; takes effect on the next streaming tick. */
+  function applyRenderSettings(settings: Partial<RenderSettings>) {
+    renderSettingsRef.current = normalizeRenderSettings({ ...renderSettingsRef.current, ...settings });
+    pipelineRef.current?.setRenderSettings(renderSettingsRef.current);
+    return renderSettingsRef.current;
   }
 
   async function loadTextureArray() {
@@ -902,6 +658,20 @@ export default function Game() {
           runBenchmark(createBenchmarkBridge(), options),
       });
       const uninstallBrowserObservers = installBrowserObservers(profiler);
+      const uninstallVoxelWorldApi = installVoxelWorldApi({
+        applyBlockBatch: (edits) => {
+          const startedAtMs = performance.now();
+          return summarizeEdit(applyBlockEditBatch(edits), startedAtMs);
+        },
+        applySphere: (center, radius, block, mode) => {
+          const startedAtMs = performance.now();
+          return summarizeEdit(applySphere(center, radius, block, mode), startedAtMs);
+        },
+        getRenderSettings: () => ({ ...renderSettingsRef.current }),
+        setRenderSettings: applyRenderSettings,
+        stats: () => pipelineRef.current?.stats() ?? null,
+        getBlock: (x, y, z) => getBlock(x, y, z),
+      });
       let hasCalibratedStructuredClone = false;
       const calibrateStructuredCloneOnce = () => {
         if (hasCalibratedStructuredClone || !profiler.enabled) return;
@@ -918,24 +688,35 @@ export default function Game() {
           chunkHeight: CHUNK_HEIGHT,
           chunkLength: CHUNK_LENGTH,
           voxelsPerChunk: CHUNK_WIDTH * CHUNK_HEIGHT * CHUNK_LENGTH,
-          renderDistanceChunksX:
-            POSITIVE_X_RENDER_DISTANCE + NEGATIVE_X_RENDER_DISTANCE,
+          renderDistanceChunksX: renderSettingsRef.current.horizontalRadius * 2 + 1,
           renderDistanceChunksY:
-            POSITIVE_Y_RENDER_DISTANCE + NEGATIVE_Y_RENDER_DISTANCE,
-          renderDistanceChunksZ:
-            POSITIVE_Z_RENDER_DISTANCE + NEGATIVE_Z_RENDER_DISTANCE,
-          chunkPruningDistance: CHUNK_PRUNING_DISTANCE,
-          generationWorkers: 3,
-          lightingWorkers: 2,
-          meshWorkers: 3,
+            renderSettingsRef.current.verticalUp + renderSettingsRef.current.verticalDown + 1,
+          renderDistanceChunksZ: renderSettingsRef.current.horizontalRadius * 2 + 1,
+          chunkPruningDistance:
+            renderSettingsRef.current.horizontalRadius + BORDER_RING_CHUNKS + UNLOAD_HYSTERESIS_CHUNKS,
+          generationWorkers: GENERATION_WORKER_COUNT,
+          lightingWorkers: LIGHTING_WORKER_COUNT,
+          meshWorkers: MESH_WORKER_COUNT,
           textureCount: Object.values(Texture).length,
         },
       });
       const removeSceneMemorySampler = profiler.addSampler(() =>
         sampleSceneMemory({
           getScene: () => scene,
-          getChunks: () => chunks.current,
-          getLightChunks: () => lightChunks.current,
+          getChunkDataByteLengths: () => {
+            const byteLengths: number[] = [];
+            pipelineRef.current?.forEachChunk((record) => {
+              if (record.ownsBlocks && record.blocks) byteLengths.push(record.blocks.byteLength);
+            });
+            return byteLengths;
+          },
+          getLightDataByteLengths: () => {
+            const byteLengths: number[] = [];
+            pipelineRef.current?.forEachChunk((record) => {
+              if (record.ownsLight && record.light) byteLengths.push(record.light.byteLength);
+            });
+            return byteLengths;
+          },
           getModifiedChunks: () => modifiedChunks.current,
           getTextureArrayBytes: () => textureArrayBytesRef.current,
         }),
@@ -968,33 +749,14 @@ export default function Game() {
         }
       });
 
-      for (
-        let chunkX = -NEGATIVE_X_RENDER_DISTANCE;
-        chunkX < POSITIVE_X_RENDER_DISTANCE;
-        chunkX++
-      ) {
-        for (
-          let chunkY = POSITIVE_Y_RENDER_DISTANCE;
-          chunkY > -NEGATIVE_Y_RENDER_DISTANCE;
-          chunkY--
-        ) {
-          for (
-            let chunkZ = -NEGATIVE_Z_RENDER_DISTANCE;
-            chunkZ < POSITIVE_Z_RENDER_DISTANCE;
-            chunkZ++
-          ) {
-            chunkPositions.current.push({ chunkX, chunkY, chunkZ });
-          }
-        }
-      }
-
       const bootWorkerPools = [
         generationWorkerPool,
         lightingWorkerPool,
         meshWorkerPool,
         textureArrayWorkerPool,
       ];
-      const totalBootWorkers = 3 + 2 + 3 + 1;
+      const totalBootWorkers =
+        GENERATION_WORKER_COUNT + LIGHTING_WORKER_COUNT + MESH_WORKER_COUNT + 1;
       let bootWorkersReady = 0;
       bootWorkerPools.forEach((pool) =>
         pool.warmUp(() => {
@@ -1256,74 +1018,10 @@ export default function Game() {
           const applyWorldStateToken = profiler.begin(
             "main.network.applyWorldState",
           );
-          const chunksToUpdate = new Set<string>();
-          data.blocks.forEach((b) => {
-            const chunkX = Math.floor(b.x / CHUNK_WIDTH);
-            const chunkY = Math.floor(b.y / CHUNK_HEIGHT);
-            const chunkZ = Math.floor(b.z / CHUNK_LENGTH);
-            const chunkName = generateChunkName(chunkX, chunkY, chunkZ);
-            const blockChunkX = b.x - chunkX * CHUNK_WIDTH;
-            const blockChunkY = b.y - chunkY * CHUNK_HEIGHT;
-            const blockChunkZ = b.z - chunkZ * CHUNK_LENGTH;
-            const index = calculateOffset(
-              blockChunkX,
-              blockChunkY,
-              blockChunkZ,
-            );
-
-            if (!modifiedChunks.current.has(chunkName)) {
-              modifiedChunks.current.set(chunkName, new Map());
-            }
-            modifiedChunks.current.get(chunkName)!.set(index, b.blockType);
-
-            if (chunks.current[chunkName]) {
-              const previousBlock = chunks.current[chunkName][index];
-              chunks.current[chunkName][index] = b.blockType;
-              chunksToUpdate.add(chunkName);
-              relightAfterBlockChange(
-                lightChunkSource,
-                b.x,
-                b.y,
-                b.z,
-                previousBlock,
-              ).chunksToRemesh.forEach((chunk) =>
-                chunksToUpdate.add(generateChunkName(chunk.x, chunk.y, chunk.z)),
-              );
-
-              if (blockChunkX === 0)
-                chunksToUpdate.add(
-                  generateChunkName(chunkX - 1, chunkY, chunkZ),
-                );
-              if (blockChunkX === CHUNK_WIDTH - 1)
-                chunksToUpdate.add(
-                  generateChunkName(chunkX + 1, chunkY, chunkZ),
-                );
-              if (blockChunkY === 0)
-                chunksToUpdate.add(
-                  generateChunkName(chunkX, chunkY - 1, chunkZ),
-                );
-              if (blockChunkY === CHUNK_HEIGHT - 1)
-                chunksToUpdate.add(
-                  generateChunkName(chunkX, chunkY + 1, chunkZ),
-                );
-              if (blockChunkZ === 0)
-                chunksToUpdate.add(
-                  generateChunkName(chunkX, chunkY, chunkZ - 1),
-                );
-              if (blockChunkZ === CHUNK_LENGTH - 1)
-                chunksToUpdate.add(
-                  generateChunkName(chunkX, chunkY, chunkZ + 1),
-                );
-            }
-          });
-
-          chunksToUpdate.forEach((chunkName) => {
-            const [cx, cy, cz] = chunkName.split(",").map(Number);
-            if (!chunkVersions.current[chunkName])
-              chunkVersions.current[chunkName] = 0;
-            chunkVersions.current[chunkName]++;
-            regenerateChunkMesh(cx, cy, cz);
-          });
+          applyBlockEditBatch(
+            data.blocks.map(({ x, y, z, blockType }) => ({ x, y, z, block: blockType })),
+            false,
+          );
           profiler.end(applyWorldStateToken);
         }
 
@@ -1335,6 +1033,8 @@ export default function Game() {
 
       return () => {
         if (intervalRef.current) clearInterval(intervalRef.current);
+        pipelineRef.current?.dispose();
+        pipelineRef.current = null;
 
         document.removeEventListener("keyup", onKeyUp);
         if (container) {
@@ -1349,6 +1049,7 @@ export default function Game() {
         removeSceneMemorySampler();
         stopCalibrationListener();
         uninstallBrowserObservers();
+        uninstallVoxelWorldApi();
         unmountProfilerOverlay();
 
         renderer.setAnimationLoop(null);
@@ -1380,157 +1081,6 @@ export default function Game() {
       };
     }
   }, [containerRef]);
-
-  function addChunkToQueue(chunkX: number, chunkY: number, chunkZ: number) {
-    chunkPositions.current.push({ chunkX, chunkY, chunkZ });
-    const requestedAtMs = profiler.now();
-
-    generationWorkerPool
-      .exec(
-        "generateChunk",
-        [seedRef.current, chunkX, chunkY, chunkZ],
-        undefined,
-        { affinityKey: chunkColumnAffinityKey(chunkX, chunkZ) },
-      )
-      .then(async (result: ArrayBuffer) => {
-        const generatedAtMs = profiler.now();
-        profiler.recordTimer(
-          "chunk.pipeline.generate",
-          generatedAtMs - requestedAtMs,
-          "latency",
-        );
-        profiler.addCounter("game.chunks.generated");
-        const chunk = new Uint8Array(result);
-        const chunkName = generateChunkName(chunkX, chunkY, chunkZ);
-        chunks.current[chunkName] = chunk;
-
-        applySavedEditsToChunk(chunkName, chunk);
-
-        // Initialize Light
-        const topChunkName = generateChunkName(chunkX, chunkY + 1, chunkZ);
-        const topChunk = chunks.current[topChunkName]?.buffer;
-        const topChunkLight = lightChunks.current[topChunkName]?.buffer;
-
-        const { light, queue, isFullySunlit } = await lightingWorkerPool.exec(
-          "initializeChunkLight",
-          [
-            chunk.buffer,
-            seedRef.current,
-            chunkX,
-            chunkY,
-            chunkZ,
-            topChunk,
-            topChunkLight,
-          ],
-        );
-        lightChunks.current[chunkName] = light;
-        const lightInitializedAtMs = profiler.now();
-        profiler.recordTimer(
-          "chunk.pipeline.initLight",
-          lightInitializedAtMs - generatedAtMs,
-          "latency",
-        );
-
-        // Propagate Light
-        const { centerLight, neighborLightUpdates } =
-          isFullySunlit && canSkipLightSpread(chunkX, chunkY, chunkZ)
-            ? { centerLight: lightChunks.current[chunkName], neighborLightUpdates: {} }
-            : await lightingWorkerPool.exec("propagateChunkLight", [
-                chunk.buffer,
-                lightChunks.current[chunkName].buffer,
-                ...Object.values(
-                  gatherNeighborLightInputs(chunkX, chunkY, chunkZ),
-                ),
-                queue,
-              ]);
-        lightChunks.current[chunkName] = centerLight;
-        profiler.recordTimer(
-          "chunk.pipeline.propagateLight",
-          profiler.now() - lightInitializedAtMs,
-          "latency",
-        );
-
-        // Apply neighbor updates
-        const mergeNeighborToken = profiler.begin("main.light.mergeNeighbor");
-        Object.entries(neighborLightUpdates).forEach(([key, update]) => {
-          const [dx, dy, dz] = key.split(",").map(Number);
-          const neighborName = generateChunkName(
-            chunkX + dx,
-            chunkY + dy,
-            chunkZ + dz,
-          );
-          if (lightChunks.current[neighborName]) {
-            const current = lightChunks.current[neighborName];
-            const u = update as Uint8Array;
-            for (let i = 0; i < current.length; i++) {
-              current[i] = Math.max(current[i], u[i]);
-            }
-          }
-        });
-        profiler.end(mergeNeighborToken);
-
-        const adjChunks = {
-          left: chunks.current[generateChunkName(chunkX - 1, chunkY, chunkZ)],
-          right: chunks.current[generateChunkName(chunkX + 1, chunkY, chunkZ)],
-          bottom: chunks.current[generateChunkName(chunkX, chunkY - 1, chunkZ)],
-          top: chunks.current[generateChunkName(chunkX, chunkY + 1, chunkZ)],
-          back: chunks.current[generateChunkName(chunkX, chunkY, chunkZ - 1)],
-          front: chunks.current[generateChunkName(chunkX, chunkY, chunkZ + 1)],
-        };
-
-        if (adjChunks.left) regenerateChunkMesh(chunkX - 1, chunkY, chunkZ);
-        if (adjChunks.right) regenerateChunkMesh(chunkX + 1, chunkY, chunkZ);
-        if (adjChunks.bottom) regenerateChunkMesh(chunkX, chunkY - 1, chunkZ);
-        if (adjChunks.top) regenerateChunkMesh(chunkX, chunkY + 1, chunkZ);
-        if (adjChunks.back) regenerateChunkMesh(chunkX, chunkY, chunkZ - 1);
-        if (adjChunks.front) regenerateChunkMesh(chunkX, chunkY, chunkZ + 1);
-
-        const { borders, borderLights } = getChunkBorders(
-          chunkX,
-          chunkY,
-          chunkZ,
-        );
-
-        const meshStartedAtMs = profiler.now();
-        meshWorkerPool
-          .exec("generateMesh", [
-            result,
-            lightChunks.current[chunkName].buffer,
-            borders,
-            borderLights,
-            seedRef.current,
-            chunkX,
-            chunkY,
-            chunkZ,
-          ])
-          .then(
-            (meshResult: ChunkMeshResult | null) => {
-              if (!meshResult) return;
-              addChunkMesh(meshResult, chunkName,
-                chunkX,
-                chunkY,
-                chunkZ,
-              );
-              profiler.recordTimer(
-                "chunk.pipeline.mesh",
-                profiler.now() - meshStartedAtMs,
-                "latency",
-              );
-              profiler.recordTimer(
-                "chunk.pipeline.total",
-                profiler.now() - requestedAtMs,
-                "latency",
-              );
-            },
-          )
-          .catch((err) => {
-            console.error(err);
-          });
-      })
-      .catch((err) => {
-        console.error(err);
-      });
-  }
 
   function flushRaycastSteps() {
     profiler.addCounter("game.raycast.steps", raycastStepsRef.current);
@@ -1926,20 +1476,7 @@ export default function Game() {
 
   function getBlock(x: number, y: number, z: number) {
     getBlockCallsRef.current++;
-    const chunkX = Math.floor(x / CHUNK_WIDTH);
-    const chunkY = Math.floor(y / CHUNK_HEIGHT);
-    const chunkZ = Math.floor(z / CHUNK_LENGTH);
-
-    const chunkName = generateChunkName(chunkX, chunkY, chunkZ);
-    const chunk = chunks.current[chunkName];
-
-    if (!chunk) return null;
-
-    const blockChunkX = x - chunkX * CHUNK_WIDTH;
-    const blockChunkY = y - chunkY * CHUNK_HEIGHT;
-    const blockChunkZ = z - chunkZ * CHUNK_LENGTH;
-
-    return chunk[calculateOffset(blockChunkX, blockChunkY, blockChunkZ)];
+    return pipelineRef.current?.getBlock(x, y, z) ?? null;
   }
 
   function scheduleWaterUpdate(x: number, y: number, z: number) {
@@ -1976,253 +1513,167 @@ export default function Game() {
     type: number,
     broadcast: boolean = true,
   ) {
-    profiler.addCounter("game.setBlock.calls");
     const scopeToken = profiler.begin(
       "main.edit.setBlock",
       DIMENSIONS.simulationSystem,
       "edit.setBlock",
     );
     try {
-      return setBlockUnprofiled(x, y, z, type, broadcast);
+      applyBlockEditBatch([{ x, y, z, block: type }], broadcast);
     } finally {
       profiler.end(scopeToken);
     }
   }
 
-  function setBlockUnprofiled(
-    x: number,
-    y: number,
-    z: number,
-    type: number,
+  /**
+   * Applies block edits as one batch: writes them, relights once, rebuilds the touched chunks ahead of streaming
+   * work, saves them, wakes nearby water and tells peers. Edits in chunks that are not loaded are saved and show
+   * up when the chunk loads.
+   */
+  function applyBlockEditBatch(
+    edits: BlockEditBatch | ArrayLike<BlockEdit>,
     broadcast: boolean = true,
-  ) {
-    const chunkX = Math.floor(x / CHUNK_WIDTH);
-    const chunkY = Math.floor(y / CHUNK_HEIGHT);
-    const chunkZ = Math.floor(z / CHUNK_LENGTH);
+  ): PipelineEditResult | null {
+    const batch = edits instanceof BlockEditBatch ? edits : BlockEditBatch.fromEdits(edits);
+    profiler.addCounter("game.setBlock.calls", batch.length);
+    const pipeline = pipelineRef.current;
+    rememberEditsOutsideLoadedChunks(batch, pipeline);
+    if (!pipeline || batch.length === 0) return null;
 
-    const chunkName = generateChunkName(chunkX, chunkY, chunkZ);
-
-    const blockChunkX = x - chunkX * CHUNK_WIDTH;
-    const blockChunkY = y - chunkY * CHUNK_HEIGHT;
-    const blockChunkZ = z - chunkZ * CHUNK_LENGTH;
-
-    const blockIndex = calculateOffset(blockChunkX, blockChunkY, blockChunkZ);
-
-    if (!modifiedChunks.current.has(chunkName)) {
-      modifiedChunks.current.set(chunkName, new Map());
-    }
-    modifiedChunks.current.get(chunkName)!.set(blockIndex, type);
-
-    const chunk = chunks.current[chunkName];
-
-    if (!chunk) return BlockType.AIR;
-    if (profiler.enabled) {
-      pendingEditStartedAtRef.current.set(chunkName, profiler.now());
-    }
-
-    // Get old block before modifying for light change detection
-    const oldBlock = chunk[blockIndex];
-
-    chunk[blockIndex] = type;
-
-    scheduleWaterUpdate(x, y, z);
-    scheduleWaterUpdate(x + 1, y, z);
-    scheduleWaterUpdate(x - 1, y, z);
-    scheduleWaterUpdate(x, y + 1, z);
-    scheduleWaterUpdate(x, y - 1, z);
-    scheduleWaterUpdate(x, y, z + 1);
-    scheduleWaterUpdate(x, y, z - 1);
-
-    if (!chunkVersions.current[chunkName]) chunkVersions.current[chunkName] = 0;
-    chunkVersions.current[chunkName]++;
-
-    // Light is patched in place around the edit, then only the chunks it touched are re-meshed.
+    const firstOldBlock = pipeline.getBlock(batch.xs[0], batch.ys[0], batch.zs[0]) ?? BlockType.AIR;
+    const firstNewBlock = batch.blocks[0];
     const trace = new LightEditTrace(
       profiler,
       classifyLightEdit(
-        getBlockLightLevel(oldBlock),
-        getBlockLightLevel(type),
-        type === BlockType.AIR,
+        getBlockLightLevel(firstOldBlock),
+        getBlockLightLevel(firstNewBlock),
+        firstNewBlock === BlockType.AIR,
       ),
     );
-    pendingLightEditsRef.current++;
-    (async () => {
+    const editStartedAtMs = profiler.now();
+    const edited: { result: PipelineEditResult | null } = { result: null };
+    void trace.stage("relight", () => {
+      const relightToken = profiler.begin("main.light.relight");
       try {
-        const relight = await trace.stage("relight", () => {
-          const relightToken = profiler.begin("main.light.relight");
-          try {
-            return relightAfterBlockChange(
-              lightChunkSource,
-              x,
-              y,
-              z,
-              oldBlock,
-            );
-          } finally {
-            profiler.end(relightToken);
-          }
+        edited.result = pipeline.applyBlockEdits(batch, {
+          onPhase: profiler.enabled ? trackLightPhaseInProfiler : undefined,
         });
-        trace.markRelit();
-        trace.count("cellsRemoved", relight.stats.cellsRemoved);
-        trace.count("cellsLit", relight.stats.cellsLit);
-        trace.count("cellsVisited", relight.stats.cellsVisited);
-        trace.count("chunksRelit", relight.chunksToRemesh.length);
-        profiler.addCounter("game.light.cellsVisited", relight.stats.cellsVisited);
-
-        // The edited chunk goes first so the change shows up as soon as possible.
-        const chunksToRemesh = new Map<string, ChunkCoordinate>();
-        const requestRemesh = (chunk: ChunkCoordinate) =>
-          chunksToRemesh.set(generateChunkName(chunk.x, chunk.y, chunk.z), chunk);
-        requestRemesh({ x: chunkX, y: chunkY, z: chunkZ });
-        // Block data next to a chunk edge is part of the neighbor's mesh too.
-        if (blockChunkX === 0) requestRemesh({ x: chunkX - 1, y: chunkY, z: chunkZ });
-        if (blockChunkX === CHUNK_WIDTH - 1)
-          requestRemesh({ x: chunkX + 1, y: chunkY, z: chunkZ });
-        if (blockChunkY === 0) requestRemesh({ x: chunkX, y: chunkY - 1, z: chunkZ });
-        if (blockChunkY === CHUNK_HEIGHT - 1)
-          requestRemesh({ x: chunkX, y: chunkY + 1, z: chunkZ });
-        if (blockChunkZ === 0) requestRemesh({ x: chunkX, y: chunkY, z: chunkZ - 1 });
-        if (blockChunkZ === CHUNK_LENGTH - 1)
-          requestRemesh({ x: chunkX, y: chunkY, z: chunkZ + 1 });
-        relight.chunksToRemesh.forEach(requestRemesh);
-
-        await trace.stage("queueMeshes", () => {
-          chunksToRemesh.forEach((chunk) =>
-            trace.trackMesh(regenerateChunkMesh(chunk.x, chunk.y, chunk.z)),
-          );
-        });
-        await trace.finish();
       } finally {
-        pendingLightEditsRef.current--;
-        if (pendingLightEditsRef.current === 0) {
-          lightIdleResolversRef.current.splice(0).forEach((resolve) => resolve());
-        }
+        profiler.end(relightToken);
       }
-    })();
+    });
+    const result = edited.result as PipelineEditResult | null;
+    if (!result) return null;
 
-    if (broadcast && networkManager.current.myPeerId) {
-      networkManager.current.send({
-        type: "BLOCK_UPDATE",
-        x,
-        y,
-        z,
-        blockType: type,
-      });
+    pendingLightEditsRef.current++;
+    trace.markRelit();
+    const { stats } = result;
+    trace.count("cellsRemoved", stats.cellsRemoved);
+    trace.count("cellsLit", stats.cellsLit);
+    trace.count("cellsVisited", stats.cellsVisited);
+    trace.count("chunksRelit", result.chunksToRemesh.length);
+    profiler.addCounter("game.light.cellsVisited", stats.cellsVisited);
+    profiler.addCounter("game.light.cellsRemoved", stats.cellsRemoved);
+    profiler.addCounter("game.light.cellsLit", stats.cellsLit);
+    profiler.addCounter("game.light.chunksToRemesh", result.chunksToRemesh.length);
+    void trace.stage("queueMeshes", () => {
+      result.meshesApplied.forEach((meshApplied) => trace.trackMesh(meshApplied));
+    });
+    void trace.finish().finally(() => {
+      profiler.recordTimer("chunk.pipeline.edit", profiler.now() - editStartedAtMs, "latency");
+      pendingLightEditsRef.current--;
+      if (pendingLightEditsRef.current === 0) {
+        lightIdleResolversRef.current.splice(0).forEach((resolve) => resolve());
+      }
+    });
+
+    applyEditSideEffects(result, broadcast);
+    return result;
+  }
+
+  /** Every block of a sphere at once (modes: fill, erase, fillAirOnly, replaceNonAirOnly). */
+  function applySphere(
+    center: BlockPosition,
+    radius: number,
+    block: number,
+    mode: BrushMode = "fill",
+  ): PipelineEditResult | null {
+    const sphereToken = profiler.begin("main.edit.sphere");
+    try {
+      return applyBlockEditBatch(sphereEdits(center, radius, block, mode));
+    } finally {
+      profiler.end(sphereToken);
     }
   }
 
-  function getChunkBorders(chunkX: number, chunkY: number, chunkZ: number) {
-    const extractBordersToken = profiler.begin("main.chunk.extractBorders");
-    const borders: { [face in BorderFace]?: ArrayBuffer } = {};
-    const borderLights: { [face in BorderFace]?: ArrayBuffer } = {};
+  function rememberEditsOutsideLoadedChunks(
+    batch: BlockEditBatch,
+    pipeline: ChunkPipeline | null,
+  ) {
+    if (batch.replaceRule !== "any") return;
+    for (let position = 0; position < batch.length; position++) {
+      const x = batch.xs[position];
+      const y = batch.ys[position];
+      const z = batch.zs[position];
+      if (!pipeline?.hasBlocksAt(x, y, z)) recordSavedEdit(x, y, z, batch.blocks[position]);
+    }
+  }
 
-    const extractBorder = (
-      neighborX: number,
-      neighborY: number,
-      neighborZ: number,
-      face: BorderFace,
-    ) => {
-      const name = generateChunkName(neighborX, neighborY, neighborZ);
-      const chunk = chunks.current[name];
-      const light = lightChunks.current[name];
-      if (chunk) borders[face] = extractBorderSlab(chunk, face);
-      if (light) borderLights[face] = extractBorderSlab(light, face);
+  function isWaterAround(x: number, y: number, z: number) {
+    const isWaterAt = (blockX: number, blockY: number, blockZ: number) => {
+      const block = getBlock(blockX, blockY, blockZ);
+      return block !== null && isWater(block);
     };
-
-    extractBorder(chunkX, chunkY + 1, chunkZ, "top");
-    extractBorder(chunkX, chunkY - 1, chunkZ, "bottom");
-    extractBorder(chunkX, chunkY, chunkZ + 1, "front");
-    extractBorder(chunkX, chunkY, chunkZ - 1, "back");
-    extractBorder(chunkX + 1, chunkY, chunkZ, "right");
-    extractBorder(chunkX - 1, chunkY, chunkZ, "left");
-
-    profiler.end(extractBordersToken);
-    if (profiler.enabled) {
-      profiler.recordBytes(
-        "bytes.borders.perMesh",
-        estimateTransferBytes([borders, borderLights]),
-      );
-    }
-    return { borders, borderLights };
-  }
-
-  function collectBorderBuffers(
-    ...borderGroups: { [face: string]: ArrayBuffer | undefined }[]
-  ): ArrayBuffer[] {
-    return borderGroups.flatMap((group) =>
-      Object.values(group).filter((buffer): buffer is ArrayBuffer => !!buffer),
+    return (
+      isWaterAt(x, y, z) ||
+      isWaterAt(x + 1, y, z) ||
+      isWaterAt(x - 1, y, z) ||
+      isWaterAt(x, y + 1, z) ||
+      isWaterAt(x, y - 1, z) ||
+      isWaterAt(x, y, z + 1) ||
+      isWaterAt(x, y, z - 1)
     );
   }
 
-  // Several neighbors finishing in a row each ask for a re-mesh of the same chunk.
-  // Only one request waits per chunk, and it reads the newest data when a worker is free.
-  function regenerateChunkMesh(
-    chunkX: number,
-    chunkY: number,
-    chunkZ: number,
-  ): Promise<void> {
-    if (!materialsRef.current.opaque || !materialsRef.current.transparent)
-      return Promise.resolve();
-    const chunkName = generateChunkName(chunkX, chunkY, chunkZ);
-    if (!lightChunks.current[chunkName]) return Promise.resolve();
-    const alreadyQueued = queuedMeshRequestsRef.current.get(chunkName);
-    if (alreadyQueued) {
-      profiler.addCounter("game.mesh.regenerationsMerged");
-      return alreadyQueued;
+  /** Saves every changed block, wakes the water next to it and sends the changes to peers. */
+  function applyEditSideEffects(result: PipelineEditResult, broadcast: boolean) {
+    const { changes } = result;
+    for (let position = 0; position < changes.count; position++) {
+      const x = changes.x[position];
+      const y = changes.y[position];
+      const z = changes.z[position];
+      recordSavedEdit(x, y, z, changes.newBlock[position]);
+      if (isWater(changes.oldBlock[position]) || isWaterAround(x, y, z)) {
+        scheduleWaterUpdate(x, y, z);
+        scheduleWaterUpdate(x + 1, y, z);
+        scheduleWaterUpdate(x - 1, y, z);
+        scheduleWaterUpdate(x, y + 1, z);
+        scheduleWaterUpdate(x, y - 1, z);
+        scheduleWaterUpdate(x, y, z + 1);
+        scheduleWaterUpdate(x, y, z - 1);
+      }
     }
-    profiler.addCounter("game.mesh.regenerations");
-
-    let hasBeenDispatched = false;
-    let versionAtDispatch = chunkVersions.current[chunkName];
-    const meshApplied: Promise<void> = meshWorkerPool
-      .execLazy("generateMesh", () => {
-        hasBeenDispatched = true;
-        queuedMeshRequestsRef.current.delete(chunkName);
-        const chunk = chunks.current[chunkName];
-        const light = lightChunks.current[chunkName];
-        if (!chunk || !light) return null;
-
-        versionAtDispatch = chunkVersions.current[chunkName];
-        const regenerateToken = profiler.begin("main.chunk.regenerateBookkeeping");
-        const { borders, borderLights } = getChunkBorders(chunkX, chunkY, chunkZ);
-        profiler.end(regenerateToken);
-        return {
-          params: [
-            chunk,
-            light.buffer,
-            borders,
-            borderLights,
-            seedRef.current,
-            chunkX,
-            chunkY,
-            chunkZ,
-          ],
-          transfer: collectBorderBuffers(borders, borderLights),
-        };
-      })
-      .then((meshResult: ChunkMeshResult | null) => {
-        if (!meshResult) return;
-        if (chunkVersions.current[chunkName] !== versionAtDispatch) return;
-        addChunkMesh(meshResult, chunkName, chunkX, chunkY, chunkZ);
-        const editStartedAtMs = pendingEditStartedAtRef.current.get(chunkName);
-        if (editStartedAtMs !== undefined) {
-          pendingEditStartedAtRef.current.delete(chunkName);
-          profiler.recordTimer(
-            "chunk.pipeline.edit",
-            profiler.now() - editStartedAtMs,
-            "latency",
-          );
-        }
-      })
-      .catch((err) => {
-        console.error(err);
+    if (!broadcast || !networkManager.current.myPeerId || changes.count === 0) return;
+    if (changes.count === 1) {
+      networkManager.current.send({
+        type: "BLOCK_UPDATE",
+        x: changes.x[0],
+        y: changes.y[0],
+        z: changes.z[0],
+        blockType: changes.newBlock[0],
       });
-    if (!hasBeenDispatched) queuedMeshRequestsRef.current.set(chunkName, meshApplied);
-    return meshApplied;
-  }
-
-  function generateChunkName(chunkX: number, chunkY: number, chunkZ: number) {
-    return `${chunkX},${chunkY},${chunkZ}`;
+      return;
+    }
+    const blocks: { x: number; y: number; z: number; blockType: number }[] = [];
+    for (let position = 0; position < changes.count; position++) {
+      blocks.push({
+        x: changes.x[position],
+        y: changes.y[position],
+        z: changes.z[position],
+        blockType: changes.newBlock[position],
+      });
+    }
+    networkManager.current.send({ type: "WORLD_STATE", blocks });
   }
 
   let prevTime = performance.now();
@@ -2243,146 +1694,66 @@ export default function Game() {
     profiler.end(disposeToken);
   }
 
-  function pruneChunks(
-    playerChunkX: number,
-    playerChunkY: number,
-    playerChunkZ: number,
-  ) {
-    let prunedChunkPositions: typeof chunkPositions.current = [];
-    let prunedChunks: typeof chunks.current = {};
-    chunkPositions.current.forEach((chunkPosition) => {
-      const chunkName = generateChunkName(
-        chunkPosition.chunkX,
-        chunkPosition.chunkY,
-        chunkPosition.chunkZ,
-      );
-      if (
-        new THREE.Vector3(
-          chunkPosition.chunkX,
-          chunkPosition.chunkY,
-          chunkPosition.chunkZ,
-        ).distanceTo(
-          new THREE.Vector3(playerChunkX, playerChunkY, playerChunkZ),
-        ) > CHUNK_PRUNING_DISTANCE
-      ) {
-        pruneChunkMesh(chunkName);
-        profiler.addCounter("game.chunks.pruned");
-      } else {
-        prunedChunkPositions.push(chunkPosition);
-        if (chunks.current[chunkName]) {
-          prunedChunks[chunkName] = chunks.current[chunkName];
-        }
-      }
-    });
-    chunks.current = prunedChunks;
-    chunkPositions.current = prunedChunkPositions;
-    profiler.addCounter("game.streaming.positionsChecked", prunedChunkPositions.length);
-  }
-
-  function generateNearbyChunks(
-    _chunkX: number,
-    _chunkY: number,
-    _chunkZ: number,
-  ) {
-    let candidateChunks = 0;
-    for (
-      let chunkX = _chunkX - NEGATIVE_X_RENDER_DISTANCE;
-      chunkX < _chunkX + POSITIVE_X_RENDER_DISTANCE;
-      chunkX++
-    ) {
-      for (
-        let chunkY = _chunkY + POSITIVE_Y_RENDER_DISTANCE;
-        chunkY > _chunkY - NEGATIVE_Y_RENDER_DISTANCE;
-        chunkY--
-      ) {
-        for (
-          let chunkZ = _chunkZ - NEGATIVE_Z_RENDER_DISTANCE;
-          chunkZ < _chunkZ + POSITIVE_Z_RENDER_DISTANCE;
-          chunkZ++
-        ) {
-          let foundAMatch = false;
-          candidateChunks++;
-          chunkPositions.current.forEach((chunkPosition) => {
-            if (
-              chunkPosition.chunkX === chunkX &&
-              chunkPosition.chunkY === chunkY &&
-              chunkPosition.chunkZ === chunkZ
-            ) {
-              foundAMatch = true;
-              return;
-            }
-          });
-          if (!foundAMatch) {
-            addChunkToQueue(chunkX, chunkY, chunkZ);
-          }
-        }
-      }
-    }
-    profiler.addCounter("game.streaming.candidateChunks", candidateChunks);
-    profiler.addCounter(
-      "game.streaming.positionComparisons",
-      candidateChunks * chunkPositions.current.length,
-    );
-  }
-
   function growTree(x: number, y: number, z: number) {
     const height = 4 + Math.floor(Math.random() * 3); // 4 to 6
+    const edits: BlockEdit[] = [];
 
     // Trunk
     for (let i = 0; i < height; i++) {
-      setBlock(x, y + i, z, BlockType.LOG);
+      edits.push({ x, y: y + i, z, block: BlockType.LOG });
     }
 
     // Leaves
     // Top (y+height)
-    setBlock(x, y + height, z, BlockType.LEAVES);
-    setBlock(x + 1, y + height, z, BlockType.LEAVES);
-    setBlock(x - 1, y + height, z, BlockType.LEAVES);
-    setBlock(x, y + height, z + 1, BlockType.LEAVES);
-    setBlock(x, y + height, z - 1, BlockType.LEAVES);
+    edits.push({ x, y: y + height, z, block: BlockType.LEAVES });
+    edits.push({ x: x + 1, y: y + height, z, block: BlockType.LEAVES });
+    edits.push({ x: x - 1, y: y + height, z, block: BlockType.LEAVES });
+    edits.push({ x, y: y + height, z: z + 1, block: BlockType.LEAVES });
+    edits.push({ x, y: y + height, z: z - 1, block: BlockType.LEAVES });
 
-    // Layer 2 (y+height-1)
-    for (let dx = -2; dx <= 2; dx++) {
-      for (let dz = -2; dz <= 2; dz++) {
-        if (Math.abs(dx) === 2 && Math.abs(dz) === 2) {
-          if (Math.random() > 0.5) continue;
+    // Layers 2 and 3 (y+height-1, y+height-2)
+    for (const layerY of [y + height - 1, y + height - 2]) {
+      for (let dx = -2; dx <= 2; dx++) {
+        for (let dz = -2; dz <= 2; dz++) {
+          if (Math.abs(dx) === 2 && Math.abs(dz) === 2) {
+            if (Math.random() > 0.5) continue;
+          }
+          if (dx === 0 && dz === 0) continue; // Trunk
+          edits.push({ x: x + dx, y: layerY, z: z + dz, block: BlockType.LEAVES });
         }
-        if (dx === 0 && dz === 0) continue; // Trunk
-        setBlock(x + dx, y + height - 1, z + dz, BlockType.LEAVES);
       }
     }
-
-    // Layer 3 (y+height-2)
-    for (let dx = -2; dx <= 2; dx++) {
-      for (let dz = -2; dz <= 2; dz++) {
-        if (Math.abs(dx) === 2 && Math.abs(dz) === 2) {
-          if (Math.random() > 0.5) continue;
-        }
-        if (dx === 0 && dz === 0) continue; // Trunk
-        setBlock(x + dx, y + height - 2, z + dz, BlockType.LEAVES);
-      }
-    }
+    applyBlockEditBatch(edits);
   }
 
   function reactsToRandomTicks(block: number) {
     return block === BlockType.SAPLING || block === BlockType.GRASS;
   }
 
+  /** Drawn chunks with mixed blocks: uniform chunks hold no grass or saplings, far ones are not simulated. */
+  function collectRandomTickedChunks() {
+    const tickedChunks: ChunkRecord[] = [];
+    pipelineRef.current?.forEachChunk((record) => {
+      if (record.blocks && record.uniformBlock < 0 && record.appliedMeshVersion >= 0) {
+        tickedChunks.push(record);
+      }
+    });
+    return tickedChunks;
+  }
+
   function tickChunks() {
     if (connectedToHostRef.current) return;
+    const tickedChunks = collectRandomTickedChunks();
     if (profiler.enabled) {
-      profiler.addCounter(
-        "game.randomTicks",
-        Object.keys(chunks.current).length * RANDOM_TICKS_PER_CHUNK,
-      );
+      profiler.addCounter("game.randomTicks", tickedChunks.length * RANDOM_TICKS_PER_CHUNK);
     }
-    Object.keys(chunks.current).forEach((chunkName) => {
-      const chunk = chunks.current[chunkName];
+    tickedChunks.forEach((record) => {
+      const chunk = record.blocks;
       if (!chunk) return;
       profiler.addCounter("game.randomTick.chunksVisited");
       const tickableIndices = tickableBlocksRef.current.indicesFor(
         chunk,
-        chunkVersions.current[chunkName] ?? 0,
+        record.editVersion,
         reactsToRandomTicks,
       );
       const tickedIndices = pickTickedBlocks(
@@ -2393,7 +1764,7 @@ export default function Game() {
       if (tickedIndices.length === 0) return;
       profiler.addCounter("game.randomTick.blocksTicked", tickedIndices.length);
 
-      const [chunkX, chunkY, chunkZ] = chunkName.split(",").map(Number);
+      const { chunkX, chunkY, chunkZ } = record;
       for (const blockIndex of tickedIndices) {
         const z = blockIndex % CHUNK_HEIGHT;
         const y = Math.floor(blockIndex / CHUNK_HEIGHT) % CHUNK_HEIGHT;
@@ -2574,6 +1945,7 @@ export default function Game() {
         new Map(edits),
       ]),
     );
+    rebuildEditedColumnTops();
     profiler.end(deserializeToken);
     profiler.addCounter("game.load.modifiedChunksRestored", world.modifiedChunks.length);
     setHotbarSlots(normalizeHotbar(world.hotbarSlots ?? DEFAULT_HOTBAR_BLOCKS));
@@ -2656,6 +2028,7 @@ export default function Game() {
   function joinHostedWorld(hostId: string) {
     activeWorldRef.current = null;
     modifiedChunks.current = new Map();
+    editedColumnTopsRef.current.clear();
     setHotbarSlots(normalizeHotbar(DEFAULT_HOTBAR_BLOCKS));
     setSelectedSlot(0);
     setActiveWorldName("Hosted world");
@@ -2794,7 +2167,15 @@ export default function Game() {
     const time = performance.now();
     const delta = (time - prevTime) / 1000;
 
-    profiler.sampleGauge("game.chunks.tracked", chunkPositions.current.length);
+    const pipeline = pipelineRef.current;
+    if (profiler.enabled && pipeline) {
+      const gauges = pipeline.queueGauges();
+      profiler.sampleGauge("game.chunks.tracked", gauges.loadedChunks);
+      profiler.sampleGauge("queue.chunks.columnGenerations", gauges.queuedColumnGenerations);
+      profiler.sampleGauge("queue.chunks.lightings", gauges.queuedLightings);
+      profiler.sampleGauge("queue.chunks.meshes", gauges.queuedMeshes);
+      profiler.sampleGauge("game.chunks.waitingForMesh", gauges.chunksWaitingForMesh);
+    }
     profiler.sampleGauge("game.chunks.meshed", chunkMeshesRef.current.size);
     profiler.sampleGauge("game.remotePlayers", remotePlayers.current.size);
     profiler.sampleGauge("game.water.pendingUpdates", pendingWaterUpdates.current.size);
@@ -2836,23 +2217,8 @@ export default function Game() {
           const litX = hit.x + hit.normal.x;
           const litY = hit.y + hit.normal.y;
           const litZ = hit.z + hit.normal.z;
-          const chunkX = Math.floor(litX / CHUNK_WIDTH);
-          const chunkY = Math.floor(litY / CHUNK_HEIGHT);
-          const chunkZ = Math.floor(litZ / CHUNK_LENGTH);
-          const lightChunk =
-            lightChunks.current[generateChunkName(chunkX, chunkY, chunkZ)];
-          let lightLevel = 0;
-          if (lightChunk) {
-            const rawLight =
-              lightChunk[
-                calculateOffset(
-                  litX - chunkX * CHUNK_WIDTH,
-                  litY - chunkY * CHUNK_HEIGHT,
-                  litZ - chunkZ * CHUNK_LENGTH,
-                )
-              ];
-            lightLevel = (rawLight >> 4) & 0xf;
-          }
+          const rawLight = pipelineRef.current?.getLight(litX, litY, litZ) ?? 0;
+          const lightLevel = (rawLight >> 4) & 0xf;
           blockAtCursor = {
             type: getBlock(hit.x, hit.y, hit.z) as number,
             light: lightLevel,
@@ -2872,7 +2238,7 @@ export default function Game() {
           y: playerChunkY,
           z: playerChunkZ,
         },
-        loadedChunks: Object.keys(chunks.current).length,
+        loadedChunks: pipelineRef.current?.store.size ?? 0,
         blockAtCursor,
         lookingAt: lookingAtBlock,
         seed: seedRef.current,
