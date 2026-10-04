@@ -1,6 +1,7 @@
 // One priority queue per worker, for work that runs faster on the worker that did its neighbors (worldgen caches
-// the terrain around each column). A key always lands in the queue of its preferred worker; a worker whose queue
-// is empty takes the best entry of another worker's queue rather than idle.
+// the terrain around each column). A key always lands in the queue of its preferred worker; a worker takes the
+// best entry of another worker's queue when its own is empty, or when its own best is more than
+// maxPriorityGapForAffinity behind, so near work never waits on a busy worker while far work runs.
 
 import { PriorityScheduler } from "./priority-scheduler";
 
@@ -10,6 +11,7 @@ export class AffinityQueues {
   constructor(
     readonly workerCount: number,
     private readonly preferredWorkerOf: (key: number) => number,
+    private readonly maxPriorityGapForAffinity = Number.POSITIVE_INFINITY,
   ) {
     this.queues = Array.from({ length: workerCount }, () => new PriorityScheduler<number>());
   }
@@ -40,10 +42,9 @@ export class AffinityQueues {
     for (const queue of this.queues) queue.reprioritizeAll((key) => computePriority(key));
   }
 
-  /** The best key for this worker: its own queue first, else the best of any other queue. */
+  /** The best key for this worker: its own queue first, unless another queue holds much more urgent work. */
   takeFor(workerIndex: number): number | undefined {
     const ownQueue = this.queues[workerIndex]!;
-    if (ownQueue.size > 0) return ownQueue.pop();
     let bestQueue: PriorityScheduler<number> | undefined;
     let bestPriority = Number.POSITIVE_INFINITY;
     for (const queue of this.queues) {
@@ -52,6 +53,10 @@ export class AffinityQueues {
         bestPriority = priority;
         bestQueue = queue;
       }
+    }
+    const ownPriority = ownQueue.peekPriority();
+    if (ownPriority !== undefined && ownPriority - bestPriority <= this.maxPriorityGapForAffinity) {
+      return ownQueue.pop();
     }
     return bestQueue?.pop();
   }

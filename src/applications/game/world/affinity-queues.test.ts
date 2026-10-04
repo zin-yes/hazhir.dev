@@ -33,4 +33,15 @@ describe("AffinityQueues", () => {
     expect([queues.takeFor(1), queues.takeFor(1), queues.takeFor(1)]).toEqual([103, 102, 100]);
     expect(queues.size).toBe(0);
   });
+
+  test("a worker leaves its own far work for a much more urgent key of another queue", () => {
+    const queues = new AffinityQueues(3, preferredWorker, 2);
+    queues.schedule(110, 9);
+    queues.schedule(111, 3.5);
+    queues.schedule(220, 1);
+    expect(queues.takeFor(1)).toBe(220);
+    expect(queues.takeFor(1)).toBe(111);
+    queues.schedule(230, 8);
+    expect(queues.takeFor(1)).toBe(110);
+  });
 });
