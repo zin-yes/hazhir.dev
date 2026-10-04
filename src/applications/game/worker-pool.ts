@@ -31,9 +31,16 @@ export interface ExecOptions {
   affinityKey?: number;
 }
 
-/** Spreads the chunk columns of a rectangular area evenly over a small pool; vertical neighbours share a key. */
+const AFFINITY_TILE_SIZE_IN_CHUNKS = 3;
+
+/**
+ * Groups chunk columns into square tiles that share a worker, so the neighbor terrain that decoration needs is
+ * cached once per tile instead of once per worker; vertical neighbours share a key.
+ */
 export function chunkColumnAffinityKey(chunkX: number, chunkZ: number): number {
-  return chunkX + chunkZ * 2;
+  const tileX = Math.floor(chunkX / AFFINITY_TILE_SIZE_IN_CHUNKS);
+  const tileZ = Math.floor(chunkZ / AFFINITY_TILE_SIZE_IN_CHUNKS);
+  return tileX + tileZ * 2;
 }
 
 function mod(value: number, divisor: number): number {
