@@ -160,6 +160,37 @@ describe("generateMesh greedy merging", () => {
   });
 });
 
+describe("generateMesh buried chunks", () => {
+  const stoneChunk = () => new Uint8Array(CHUNK_WIDTH * CHUNK_HEIGHT * CHUNK_LENGTH).fill(BlockType.STONE);
+  const solidSlab = (cells: number) => new Uint8Array(cells).fill(BlockType.STONE).buffer;
+  const slabs = {
+    top: solidSlab(CHUNK_WIDTH * CHUNK_LENGTH),
+    bottom: solidSlab(CHUNK_WIDTH * CHUNK_LENGTH),
+    left: solidSlab(CHUNK_HEIGHT * CHUNK_LENGTH),
+    right: solidSlab(CHUNK_HEIGHT * CHUNK_LENGTH),
+    front: solidSlab(CHUNK_WIDTH * CHUNK_HEIGHT),
+    back: solidSlab(CHUNK_WIDTH * CHUNK_HEIGHT),
+  };
+
+  function meshStone(borders: typeof slabs | Partial<typeof slabs>) {
+    const chunk = stoneChunk();
+    return generateMesh(chunk.buffer, new Uint8Array(chunk.length).fill(FULL_LIGHT).buffer, borders);
+  }
+
+  test("a solid chunk walled in by solid neighbors has no surface", () => {
+    const mesh = meshStone(slabs);
+    expect(mesh.opaque.byteLength).toBe(0);
+    expect(mesh.transparent.byteLength).toBe(0);
+  });
+
+  test("a solid chunk shows exactly the face toward a neighbor that is not loaded", () => {
+    const { top: _unloaded, ...loadedSlabs } = slabs;
+    const quads = decodeSurfaceQuads(meshStone(loadedSlabs).opaque);
+    expect(quads.length).toBe(1);
+    expect(quads[0].corners.every((corner) => corner.y === CHUNK_HEIGHT)).toBe(true);
+  });
+});
+
 describe("generateMesh plants", () => {
   function meshWithSaplingOnStone(light: number) {
     const chunk = new Uint8Array(CHUNK_WIDTH * CHUNK_HEIGHT * CHUNK_LENGTH);

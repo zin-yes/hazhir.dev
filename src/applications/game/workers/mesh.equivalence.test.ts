@@ -201,6 +201,7 @@ function kitchenSinkInput(): MeshInput {
     borderLights: {
       top: lightSlab(CHUNK_WIDTH * CHUNK_LENGTH),
       front: lightSlab(CHUNK_WIDTH * CHUNK_HEIGHT),
+      right: lightSlab(CHUNK_HEIGHT * CHUNK_LENGTH),
     },
   };
 }
