@@ -12,6 +12,7 @@ import {
 import { MarkerNode } from "../density/nodes/structural-nodes";
 import type { NoiseRouter } from "../density/router-wiring";
 import { CacheAllInCell, Cache2D, CacheOnce, FlatCache, NoiseInterpolator } from "./noise-chunk-caches";
+import { cornerColumnSamplerFor } from "./corner-column-sampler";
 import { getNoiseChunkTemplate, type NoiseChunkTemplate } from "./noise-chunk-template";
 
 export interface NoiseChunkSettings {
@@ -38,7 +39,12 @@ class NoiseChunkWiringVisitor extends DensityVisitor {
   }
 
   map(node: DensityNode): DensityNode {
-    return this.template.containsMarker(node) ? super.map(node) : node;
+    if (!this.template.containsMarker(node)) return node;
+    const mapped = super.map(node);
+    if (node instanceof MarkerNode && node.type === "interpolated" && mapped instanceof NoiseInterpolator) {
+      mapped.templateWrapped ??= node.wrapped;
+    }
+    return mapped;
   }
 
   apply(node: DensityNode): DensityNode {
@@ -122,6 +128,10 @@ export class NoiseChunk implements FunctionContext, ContextProvider {
       if (wiredFields.has(fieldName)) this.router[fieldName] = wiringVisitor.map(template.router[fieldName]);
     }
     this.finalDensityForFill = wiringVisitor.map(template.finalDensityForFill);
+    for (const interpolator of this.interpolators) {
+      if (interpolator.templateWrapped === undefined) continue;
+      interpolator.cornerSampler = cornerColumnSamplerFor(interpolator.templateWrapped, this.cellNoiseMinY, this.cellHeight, this.cellCountY + 1);
+    }
   }
 
   get blockX(): number {
@@ -191,8 +201,10 @@ export class NoiseChunk implements FunctionContext, ContextProvider {
       this.inCellZ = 0;
       this.arrayInterpolationCounter++;
       for (const interpolator of this.interpolators) {
-        const column = (firstSlice ? interpolator.slice0 : interpolator.slice1)[cellOffsetZ];
-        interpolator.fillArray(column, this.sliceFillingContextProvider);
+        const column = (firstSlice ? interpolator.slice0 : interpolator.slice1)[cellOffsetZ]!;
+        const cornerSampler = interpolator.cornerSampler;
+        if (cornerSampler === null) interpolator.fillArray(column, this.sliceFillingContextProvider);
+        else cornerSampler.fill(column, this.cellStartBlockX, this.cellStartBlockZ);
       }
     }
     this.arrayInterpolationCounter++;

@@ -13,6 +13,7 @@ import {
 } from "../density/density-function";
 import { MarkerNode, type MarkerType } from "../density/nodes/structural-nodes";
 import { densityCacheTypeIndex, noteDensityCacheHit, noteDensityEvaluation } from "../density/density-evaluation-counter";
+import type { CornerColumnSampler } from "./corner-column-sampler";
 import type { NoiseChunk } from "./noise-chunk";
 
 const INTERPOLATED_TYPE_INDEX = densityCacheTypeIndex("interpolated");
@@ -63,6 +64,10 @@ abstract class NoiseChunkCache extends DensityNode {
 export class NoiseInterpolator extends NoiseChunkCache {
   slice0: Float64Array[];
   slice1: Float64Array[];
+  /** The template subtree this interpolator was wired from (before per-chunk caches replaced its markers). */
+  templateWrapped: DensityNode | undefined;
+  /** Fills corner columns directly when that is exact for the subtree; otherwise slices go through fillArray. */
+  cornerSampler: CornerColumnSampler | null = null;
   private noise000 = 0;
   private noise001 = 0;
   private noise100 = 0;
