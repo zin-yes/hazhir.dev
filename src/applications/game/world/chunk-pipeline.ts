@@ -69,6 +69,7 @@ const REPRIORITIZE_TURN_COSINE = Math.cos((30 * Math.PI) / 180);
 /** Columns examined per lighting dispatch while skipping ones next to a column being lit. */
 const MAX_LIGHTING_CANDIDATES_PER_DISPATCH = 16;
 const MAX_GENERATION_ATTEMPTS = 3;
+const NO_FORWARD: PlannerForwardVector = { x: 0, y: 0, z: 0 };
 
 export interface ChunkPipelineOptions {
   renderSettings?: Partial<RenderSettings>;
@@ -169,8 +170,10 @@ export class ChunkPipeline {
   }
 
   /** Streams around the camera. Cheap when the player stays in the same chunk; call it often. */
-  update(position: Position3, forward: PlannerForwardVector): void {
+  update(position: Position3, cameraForward: PlannerForwardVector): void {
     if (this.isDisposed) return;
+    // Until the start area is on screen it loads as a disc around the player, not a cone ahead of the camera.
+    const forward = this.startArea?.isReady ? cameraForward : NO_FORWARD;
     const playerChunk = {
       chunkX: Math.floor(position.x / CHUNK_WIDTH),
       chunkY: Math.floor(position.y / CHUNK_HEIGHT),
@@ -260,6 +263,21 @@ export class ChunkPipeline {
     this.store.forEach(visit);
   }
 
+  /** Queue sizes for per-frame gauges; constant time. */
+  queueGauges() {
+    return {
+      loadedChunks: this.store.size,
+      queuedColumnGenerations: this.generationQueues.size,
+      busyGenerationWorkers: this.countBusyGenerationWorkers(),
+      queuedLightings: this.lightingQueue.size,
+      columnsBeingLit: this.columnsBeingLit.size,
+      queuedMeshes: this.meshes.queuedCount,
+      meshBuildsInFlight: this.meshes.inFlightCount,
+      chunksWaitingForMesh: this.meshes.waitingCount,
+    };
+  }
+
+  /** Counts and memory; walks every loaded chunk, so not for every frame. */
   stats() {
     let generatedChunks = 0;
     let litChunks = 0;
@@ -273,24 +291,23 @@ export class ChunkPipeline {
       if (record.ownsLight && record.light) ownedBytes += record.light.byteLength;
     });
     return {
-      loadedChunks: this.store.size,
+      ...this.queueGauges(),
       columns: this.columns.size,
       generatedChunks,
       litChunks,
       meshedChunks,
       ownedChunkDataBytes: ownedBytes,
-      queuedColumnGenerations: this.generationQueues.size,
-      busyGenerationWorkers: this.generationWorkerBusy.filter(Boolean).length,
-      queuedLightings: this.lightingQueue.size,
-      columnsBeingLit: this.columnsBeingLit.size,
-      queuedMeshes: this.meshes.queuedCount,
-      meshBuildsInFlight: this.meshes.inFlightCount,
-      chunksWaitingForMesh: this.meshes.waitingCount,
       ...this.counters,
       meshBuilds: this.meshes.counters.builds,
       meshesSkippedUniform: this.meshes.counters.skippedUniform,
       staleMeshesDropped: this.meshes.counters.staleDropped,
     };
+  }
+
+  private countBusyGenerationWorkers(): number {
+    let busyWorkers = 0;
+    for (const isBusy of this.generationWorkerBusy) if (isBusy) busyWorkers++;
+    return busyWorkers;
   }
 
   /** Drops every chunk (each one reported through onChunkUnloaded) and ignores whatever workers still return. */

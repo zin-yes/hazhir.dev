@@ -61,29 +61,38 @@ function createPipeline(options: {
 const horizontalDistance = (chunkX: number, chunkZ: number) => Math.hypot(chunkX, chunkZ);
 
 describe("ChunkPipeline streaming", () => {
-  test("generates whole columns, nearest first, preferring the view direction among equals", async () => {
-    const { pipeline, generation } = createPipeline();
+  test("loads the start area as a disc, nearest column first, then prefers what the camera faces", async () => {
+    const { pipeline, generation, lighting, meshing, startAreaReady } = createPipeline();
     pipeline.update(GROUND_POSITION, FACING_POSITIVE_X);
     const order: [number, number][] = [];
+    let startAreaReadyAtColumn = -1;
     while (generation.calls.pending.length > 0) {
       const call = generation.calls.pending[0]!;
       order.push([call.request.chunkX, call.request.chunkZ]);
       call.release();
       await flushPromises();
+      lighting.calls.releaseAll();
+      meshing.calls.releaseAll();
+      await flushPromises();
+      if (startAreaReady() === 1 && startAreaReadyAtColumn < 0) startAreaReadyAtColumn = order.length;
+      pipeline.update(GROUND_POSITION, FACING_POSITIVE_X);
     }
     expect(order.length).toBe(37);
     expect(order[0]).toEqual([0, 0]);
     const positionOf = (chunkX: number, chunkZ: number) =>
       order.findIndex(([orderX, orderZ]) => orderX === chunkX && orderZ === chunkZ);
-    expect(positionOf(1, 0)).toBe(1);
-    expect(positionOf(-1, 0)).toBeGreaterThan(positionOf(2, 0));
+    const nearestFive = order.slice(0, 5).map(([chunkX, chunkZ]) => horizontalDistance(chunkX, chunkZ));
+    expect(Math.max(...nearestFive)).toBe(1);
+    expect(positionOf(-1, 0)).toBeLessThan(positionOf(1, 1));
+    expect(startAreaReadyAtColumn).toBeGreaterThan(0);
+    expect(startAreaReadyAtColumn).toBeLessThan(positionOf(3, 0));
+    expect(positionOf(3, 0)).toBeLessThan(positionOf(-3, 0));
     const isNearestFirst = (columns: [number, number][]) =>
       columns.every(
         ([chunkX, chunkZ], index) =>
           index === 0 || horizontalDistance(chunkX, chunkZ) >= horizontalDistance(...columns[index - 1]!) - 1e-9,
       );
     expect(isNearestFirst(order.filter(([chunkX, chunkZ]) => chunkZ === 0 && chunkX > 0))).toBe(true);
-    expect(isNearestFirst(order.filter(([chunkX, chunkZ]) => chunkZ === 0 && chunkX < 0))).toBe(true);
     expect(isNearestFirst(order.filter(([chunkX, chunkZ]) => chunkX === 0 && chunkZ > 0))).toBe(true);
     expect(generation.calls.history[0]!.chunkYs.slice().sort()).toEqual([-1, 0, 1, 2, 3]);
   });
