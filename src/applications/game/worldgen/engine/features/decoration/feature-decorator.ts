@@ -30,7 +30,7 @@ import {
   startSampledDecorationSection,
   stepSectionName,
 } from "../profiling/feature-profiling";
-import { type ColumnPatch, DecorationRegion } from "../level/decoration-region";
+import { BaseHeightmapCache, type ColumnPatch, DecorationRegion } from "../level/decoration-region";
 import { BiomeFeatureIndex, DECORATION_STEPS } from "./biome-features";
 import { buildFeaturesPerStep, type StepFeatureData } from "./feature-sorter";
 
@@ -99,6 +99,7 @@ export class FeatureDecorator {
   private readonly possibleBiomeOrder: readonly string[];
   private readonly strict: boolean;
   private readonly originCache: OriginCache;
+  private readonly baseHeightmaps = new BaseHeightmapCache();
   private stepData: StepFeatureData[] | undefined;
 
   constructor(params: FeatureDecoratorParams) {
@@ -168,6 +169,7 @@ export class FeatureDecorator {
       blockStates: this.blockStates,
       blockTags: this.blockTags,
       survival: this.survival,
+      baseHeightmaps: this.baseHeightmaps,
     });
   }
 

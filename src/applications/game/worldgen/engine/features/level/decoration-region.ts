@@ -15,6 +15,36 @@ import { VOID_AIR_STATE, type WorldGenLevel } from "./world-gen-level";
 const WRITE_RADIUS = 1;
 const LAYER_SIZE = 256;
 
+/**
+ * Heightmaps primed on untouched base columns, shared by every region that reads the same base column: the *_WG
+ * heightmaps are frozen during decoration, and the others start from these values until the region writes there.
+ */
+export class BaseHeightmapCache {
+  private readonly heightmapsByColumn = new WeakMap<ChunkBlocks, Map<HeightmapType, ChunkHeightmap>>();
+
+  heightmapOf(base: ChunkBlocks, type: HeightmapType, paletteInfo: PaletteBlockInfo): ChunkHeightmap {
+    let heightmaps = this.heightmapsByColumn.get(base);
+    if (heightmaps === undefined) {
+      heightmaps = new Map();
+      this.heightmapsByColumn.set(base, heightmaps);
+    }
+    let heightmap = heightmaps.get(type);
+    if (heightmap === undefined) {
+      startDecorationSection("region.heightmap.prime");
+      const minY = base.minY;
+      const baseBlocks = base.blocks;
+      heightmap = new ChunkHeightmap(type, {
+        minY,
+        maxYExclusive: minY + base.height,
+        infoAt: (localX, y, localZ) => paletteInfo.info(baseBlocks[(y - minY) * LAYER_SIZE + localZ * 16 + localX]!),
+      });
+      heightmaps.set(type, heightmap);
+      endDecorationSection();
+    }
+    return heightmap;
+  }
+}
+
 class RegionColumn {
   blocks: Uint16Array;
   private copied = false;
@@ -24,6 +54,7 @@ class RegionColumn {
   constructor(
     readonly base: ChunkBlocks,
     private readonly paletteInfo: PaletteBlockInfo,
+    private readonly baseHeightmaps: BaseHeightmapCache,
   ) {
     this.blocks = base.blocks;
   }
@@ -40,20 +71,21 @@ class RegionColumn {
   heightmap(type: HeightmapType): ChunkHeightmap {
     let heightmap = this.heightmaps.get(type);
     if (!heightmap) {
-      startDecorationSection("region.heightmap.prime");
-      const useBaseBlocks = isWorldgenHeightmap(type);
-      const minY = this.base.minY;
-      const reader: HeightmapColumnReader = {
-        minY,
-        maxYExclusive: minY + this.base.height,
-        infoAt: (localX, y, localZ) => {
-          const index = (y - minY) * LAYER_SIZE + localZ * 16 + localX;
-          return this.paletteInfo.info(useBaseBlocks ? this.base.blocks[index]! : this.blocks[index]!);
-        },
-      };
-      heightmap = new ChunkHeightmap(type, reader);
+      const baseHeightmap = this.baseHeightmaps.heightmapOf(this.base, type, this.paletteInfo);
+      if (isWorldgenHeightmap(type)) {
+        heightmap = baseHeightmap;
+      } else {
+        const minY = this.base.minY;
+        const reader: HeightmapColumnReader = {
+          minY,
+          maxYExclusive: minY + this.base.height,
+          infoAt: (localX, y, localZ) => this.paletteInfo.info(this.blocks[(y - minY) * LAYER_SIZE + localZ * 16 + localX]!),
+        };
+        startDecorationSection("region.heightmap.prime");
+        heightmap = new ChunkHeightmap(type, reader, this.copied ? undefined : baseHeightmap);
+        endDecorationSection();
+      }
       this.heightmaps.set(type, heightmap);
-      endDecorationSection();
     }
     return heightmap;
   }
@@ -83,6 +115,8 @@ export interface DecorationRegionParams {
   blockStates: BlockStateCatalog;
   blockTags: BlockTagIndex;
   survival?: SurvivalRules;
+  /** Heightmaps of untouched base columns shared across regions (FeatureDecorator passes one; default: per region). */
+  baseHeightmaps?: BaseHeightmapCache;
 }
 
 export class DecorationRegion implements WorldGenLevel {
@@ -98,6 +132,9 @@ export class DecorationRegion implements WorldGenLevel {
   private readonly source: BaseColumnSource;
   private readonly columns = new Map<number, RegionColumn>();
   private readonly carvingMasks = new Map<string, CarvingMask>();
+  private readonly baseHeightmaps: BaseHeightmapCache;
+  private lastColumnKey = Number.NaN;
+  private lastColumn: RegionColumn | undefined;
   private palette: BlockPalette | undefined;
   private paletteInfo: PaletteBlockInfo | undefined;
   private readonly normalizedStateById: string[] = [];
@@ -118,6 +155,7 @@ export class DecorationRegion implements WorldGenLevel {
     this.blockStates = params.blockStates;
     this.blockTags = params.blockTags;
     this.survival = params.survival ?? new SurvivalRules(params.blockStates);
+    this.baseHeightmaps = params.baseHeightmaps ?? new BaseHeightmapCache();
   }
 
   private static columnKey(chunkX: number, chunkZ: number): number {
@@ -128,6 +166,7 @@ export class DecorationRegion implements WorldGenLevel {
   private column(chunkX: number, chunkZ: number): RegionColumn {
     const key = DecorationRegion.columnKey(chunkX, chunkZ);
     this.columnLookups++;
+    if (key === this.lastColumnKey) return this.lastColumn!;
     let column = this.columns.get(key);
     if (!column) {
       this.columnLoads++;
@@ -140,9 +179,11 @@ export class DecorationRegion implements WorldGenLevel {
       } else if (base.palette !== this.palette) {
         throw new Error("BaseColumnSource columns must share one BlockPalette");
       }
-      column = new RegionColumn(base, this.paletteInfo!);
+      column = new RegionColumn(base, this.paletteInfo!, this.baseHeightmaps);
       this.columns.set(key, column);
     }
+    this.lastColumnKey = key;
+    this.lastColumn = column;
     return column;
   }
 

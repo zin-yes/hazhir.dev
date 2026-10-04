@@ -82,6 +82,7 @@ export class BlockStateCatalog {
   /** Unknown block name -> number of distinct states classified with the solid fallback. */
   readonly unknownBlockCounts = new Map<string, number>();
   private readonly infoByState = new Map<string, BlockStateInfo>();
+  private readonly paletteInfoByPalette = new WeakMap<BlockPalette, PaletteBlockInfo>();
   private readonly defaultPropertiesByName = new Map<string, Record<string, string>>();
   private readonly propertiesByState = new Map<string, Readonly<Record<string, string>>>();
   private readonly normalizedByState = new Map<string, string>();
@@ -211,7 +212,12 @@ export class BlockStateCatalog {
 
   /** Per-palette classification cache for hot paths that hold palette ids. */
   forPalette(palette: BlockPalette): PaletteBlockInfo {
-    return new PaletteBlockInfo(palette, this);
+    let paletteInfo = this.paletteInfoByPalette.get(palette);
+    if (paletteInfo === undefined) {
+      paletteInfo = new PaletteBlockInfo(palette, this);
+      this.paletteInfoByPalette.set(palette, paletteInfo);
+    }
+    return paletteInfo;
   }
 }
 
