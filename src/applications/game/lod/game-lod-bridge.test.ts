@@ -86,13 +86,15 @@ describe("game LOD bridge", () => {
     console.log(`bridge toggle test: ${(performance.now() - startedAt).toFixed(1)} ms`);
   });
 
-  test("an edit re-summarizes each chunk whose blocks changed once, not chunks that only changed light", () => {
+  test("an edit re-summarizes each chunk whose blocks changed once, on a later frame, not chunks that only changed light", () => {
     const { managers, createManager } = createRecordingFactory();
     const bridge = new GameLodBridge({ createWorker: createFakeWorker, workerCount: 1, background: new THREE.Object3D(), createManager });
     bridge.startWorld(7, 128);
     const chunks = fakeChunkSource([fakeRecord(0, 3, 0, true), fakeRecord(-1, 3, 0, true), fakeRecord(0, 4, 0, true)]);
     const changes = { count: 3, x: Int32Array.from([5, 6, -1]), y: Int32Array.from([100, 100, 101]), z: Int32Array.from([5, 5, 31]) };
     bridge.onBlocksEdited({ changes, changedChunks: [{ x: 0, y: 4, z: 0 }] } as never, chunks);
+    expect(managers[0]!.calls.filter((call) => call.startsWith("edited"))).toEqual([]);
+    bridge.flushEditedChunks(1000);
     expect(managers[0]!.calls.filter((call) => call.startsWith("edited")).sort()).toEqual(["edited -1,3,0", "edited 0,3,0"]);
     bridge.dispose();
   });

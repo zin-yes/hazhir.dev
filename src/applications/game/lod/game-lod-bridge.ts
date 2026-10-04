@@ -16,6 +16,9 @@ export interface LodChunkSource {
   store: { get(chunkX: number, chunkY: number, chunkZ: number): ChunkRecord | undefined };
 }
 
+/** Main-thread time per frame for re-summarizing edited chunks. */
+const EDITED_CHUNK_BUDGET_MILLISECONDS = 1.5;
+
 export interface GameLodBridgeOptions {
   /** Creates one LOD worker (keep the `new Worker(new URL(...))` literal at the call site for the bundler). */
   createWorker: () => Worker;
@@ -30,6 +33,8 @@ export class GameLodBridge {
   private seed: number | null = null;
   private renderDistanceChunks = 0;
   private hasCapturedHaze = false;
+  private readonly pendingEditedChunks = new Map<string, [number, number, number]>();
+  private editedChunkSource: LodChunkSource | null = null;
   private readonly createManager: typeof createLodManager;
   /** Started with the game, so the workers have decoded the worldgen registries before the first world. */
   private readonly executor: TileBuildExecutor & { terminateShared(): void };
@@ -76,21 +81,37 @@ export class GameLodBridge {
     this.manager?.onRealChunkUnloaded(record.chunkX, record.chunkY, record.chunkZ);
   }
 
-  /** Re-summarizes every chunk whose blocks an edit changed (light-only changes do not matter to the LOD). */
+  /**
+   * Queues every chunk whose blocks an edit changed (light-only changes do not matter to the LOD). The summaries run
+   * a few per frame in `renderPass`, so a brush stroke over dozens of chunks never stalls the edit itself.
+   */
   onBlocksEdited(result: PipelineEditResult, chunks: LodChunkSource): void {
-    const manager = this.manager;
-    if (!manager || result.changes.count === 0) return;
-    const editedChunks = new Map<string, [number, number, number]>();
+    if (!this.manager || result.changes.count === 0) return;
+    this.editedChunkSource = chunks;
     const { changes } = result;
+    let lastKey = "";
     for (let position = 0; position < changes.count; position++) {
       const chunkX = Math.floor(changes.x[position] / CHUNK_WIDTH);
       const chunkY = Math.floor(changes.y[position] / CHUNK_HEIGHT);
       const chunkZ = Math.floor(changes.z[position] / CHUNK_LENGTH);
-      editedChunks.set(`${chunkX},${chunkY},${chunkZ}`, [chunkX, chunkY, chunkZ]);
+      const key = `${chunkX},${chunkY},${chunkZ}`;
+      if (key === lastKey) continue;
+      lastKey = key;
+      this.pendingEditedChunks.set(key, [chunkX, chunkY, chunkZ]);
     }
-    for (const [chunkX, chunkY, chunkZ] of editedChunks.values()) {
+  }
+
+  /** Summarizes queued edited chunks until the time budget runs out (at least one per call). */
+  flushEditedChunks(budgetMilliseconds = EDITED_CHUNK_BUDGET_MILLISECONDS): void {
+    const manager = this.manager;
+    const chunks = this.editedChunkSource;
+    if (!manager || !chunks || this.pendingEditedChunks.size === 0) return;
+    const startedAt = performance.now();
+    for (const [key, [chunkX, chunkY, chunkZ]] of this.pendingEditedChunks) {
+      this.pendingEditedChunks.delete(key);
       const blocks = chunks.store.get(chunkX, chunkY, chunkZ)?.blocks;
       if (blocks) manager.onBlocksEdited(chunkX, chunkY, chunkZ, blocks);
+      if (performance.now() - startedAt >= budgetMilliseconds) break;
     }
   }
 
@@ -102,6 +123,7 @@ export class GameLodBridge {
       manager.captureBackgroundHaze(renderer);
       this.hasCapturedHaze = true;
     }
+    this.flushEditedChunks();
     manager.update(camera, renderer.domElement.clientHeight);
     manager.render(renderer, camera);
   }
@@ -140,6 +162,7 @@ export class GameLodBridge {
   }
 
   private disposeManager(): void {
+    this.pendingEditedChunks.clear();
     this.manager?.dispose();
     this.manager = null;
   }
