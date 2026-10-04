@@ -18,6 +18,21 @@ function columnKeyOf(chunkX: number, chunkZ: number): number {
   return (chunkX + COLUMN_KEY_OFFSET) * COLUMN_KEY_STRIDE + (chunkZ + COLUMN_KEY_OFFSET);
 }
 
+function isSameArray(first: ArrayLike<number>, second: ArrayLike<number>): boolean {
+  for (let index = 0; index < first.length; index++) if (first[index] !== second[index]) return false;
+  return true;
+}
+
+/** Edits below the surface (mining, caves) leave the summary unchanged and must not rebuild any tile. */
+function isSameSummary(first: ChunkSurfaceSummary, second: ChunkSurfaceSummary): boolean {
+  return (
+    isSameArray(first.solidTops, second.solidTops) &&
+    isSameArray(first.topBlocks, second.topBlocks) &&
+    isSameArray(first.sideBlocks, second.sideBlocks) &&
+    isSameArray(first.waterTops, second.waterTops)
+  );
+}
+
 export interface RealOverlaySnapshot {
   surface: SerializedTileSurface;
   coveredCells: Uint8Array;
@@ -50,9 +65,12 @@ export class RealDataTracker {
         column = { chunkX, chunkZ, summaries: new Map() };
         this.summariesByColumn.set(key, column);
       }
-      column.summaries.set(chunkY, summarizeChunk(blocks, chunkY));
-      this.dirtyColumns.set(key, { chunkX, chunkZ });
+      const summary = summarizeChunk(blocks, chunkY);
+      const previous = column.summaries.get(chunkY);
+      column.summaries.set(chunkY, summary);
       this.summarizedChunks++;
+      if (previous !== undefined && isSameSummary(previous, summary)) return;
+      this.dirtyColumns.set(key, { chunkX, chunkZ });
     } finally {
       profiler.end(token);
     }
