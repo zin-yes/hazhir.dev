@@ -3,11 +3,26 @@
 import { useEffect, useRef, useState } from "react";
 import { profiler } from "../profiler";
 import { DIMENSIONS } from "../profiler/dimensions";
+import type { GameSettings } from "../settings/game-settings";
+import { TouchButton } from "./touch/touch-button";
+import { TouchJoystick } from "./touch/touch-joystick";
+import {
+  FIXED_JOYSTICK_BOTTOM_INSET,
+  FIXED_JOYSTICK_EDGE_INSET,
+  isJoystickSide,
+  touchLayoutFor,
+} from "./touch/touch-layout";
 import { useProfiledRender } from "./use-profiled-render";
+
+type TouchSettings = Pick<
+  GameSettings,
+  "touchControlSize" | "touchHandedness" | "touchOpacity" | "touchJoystickMode"
+>;
 
 interface MobileControlsProps {
   containerRef: React.RefObject<HTMLDivElement | null>;
   enabled?: boolean;
+  settings: TouchSettings;
   onMovement: (
     forward: boolean,
     backward: boolean,
@@ -23,13 +38,35 @@ interface MobileControlsProps {
   onToggleInventory: () => void;
 }
 
-const JOYSTICK_MAX_DIST = 50;
-const STICK_SIZE = 40;
 const DEAD_ZONE = 0.2;
+/** In fixed mode only touches this many joystick radii from the base steer; the rest of that side looks around. */
+const FIXED_JOYSTICK_GRAB_RADII = 1.6;
+
+const ACTION_COLORS = {
+  fly: "#6ec6ff",
+  inventory: "#ffc857",
+  break: "#ff6b7a",
+  place: "#b6f24a",
+  jump: "#f1ecff",
+};
+
+/** Where the fixed joystick's center is on screen, in client coordinates. */
+function fixedJoystickCenter(
+  rect: DOMRect,
+  handedness: TouchSettings["touchHandedness"],
+  radius: number,
+) {
+  const horizontalInset = FIXED_JOYSTICK_EDGE_INSET + radius;
+  return {
+    x: handedness === "right" ? rect.left + horizontalInset : rect.right - horizontalInset,
+    y: rect.bottom - FIXED_JOYSTICK_BOTTOM_INSET - radius,
+  };
+}
 
 export function MobileControls({
   containerRef,
   enabled = true,
+  settings,
   onMovement,
   onCameraRotate,
   onJumpStart,
@@ -50,8 +87,9 @@ export function MobileControls({
     y: number;
   } | null>(null);
 
-  const refs = useRef({ onMovement, onCameraRotate, enabled });
-  refs.current = { onMovement, onCameraRotate, enabled };
+  const layout = touchLayoutFor(settings.touchControlSize);
+  const refs = useRef({ onMovement, onCameraRotate, enabled, settings, layout });
+  refs.current = { onMovement, onCameraRotate, enabled, settings, layout };
 
   useEffect(() => {
     const el = containerRef.current;
@@ -60,6 +98,28 @@ export function MobileControls({
     const isUI = (target: EventTarget | null) => {
       if (!target || !(target instanceof HTMLElement)) return false;
       return !!target.closest("[data-mobile-ui]");
+    };
+
+    const updateStick = (clientX: number, clientY: number) => {
+      const maxDistance = refs.current.layout.joystickRadius;
+      const dx = clientX - joystickOrigin.current.x;
+      const dy = clientY - joystickOrigin.current.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      const clamped = Math.min(dist, maxDistance);
+      const angle = Math.atan2(dy, dx);
+      const cx = dist > 0 ? Math.cos(angle) * clamped : 0;
+      const cy = dist > 0 ? Math.sin(angle) * clamped : 0;
+
+      setStickOffset({ x: cx, y: cy });
+
+      const nx = cx / maxDistance;
+      const ny = cy / maxDistance;
+      refs.current.onMovement(
+        ny < -DEAD_ZONE,
+        ny > DEAD_ZONE,
+        nx < -DEAD_ZONE,
+        nx > DEAD_ZONE,
+      );
     };
 
     const handleTouchStart = (e: TouchEvent) => {
@@ -71,15 +131,39 @@ export function MobileControls({
         e.preventDefault();
 
         const rect = el.getBoundingClientRect();
-        const relX = (touch.clientX - rect.left) / rect.width;
+        const { settings: touchSettings, layout: touchLayout } = refs.current;
+        const isFixedJoystick = touchSettings.touchJoystickMode === "fixed";
+        const horizontalFraction = (touch.clientX - rect.left) / rect.width;
 
-        if (relX < 0.4 && joystickTouchId.current === null) {
+        let joystickOriginPoint = { x: touch.clientX, y: touch.clientY };
+        let startsJoystick =
+          joystickTouchId.current === null &&
+          isJoystickSide(horizontalFraction, touchSettings.touchHandedness);
+        if (startsJoystick && isFixedJoystick) {
+          joystickOriginPoint = fixedJoystickCenter(
+            rect,
+            touchSettings.touchHandedness,
+            touchLayout.joystickRadius,
+          );
+          const distanceFromBase = Math.hypot(
+            touch.clientX - joystickOriginPoint.x,
+            touch.clientY - joystickOriginPoint.y,
+          );
+          startsJoystick =
+            distanceFromBase <= touchLayout.joystickRadius * FIXED_JOYSTICK_GRAB_RADII;
+        }
+
+        if (startsJoystick) {
           joystickTouchId.current = touch.identifier;
-          joystickOrigin.current = { x: touch.clientX, y: touch.clientY };
-          setJoystickCenter({
-            x: touch.clientX - rect.left,
-            y: touch.clientY - rect.top,
-          });
+          joystickOrigin.current = joystickOriginPoint;
+          if (isFixedJoystick) {
+            updateStick(touch.clientX, touch.clientY);
+          } else {
+            setJoystickCenter({
+              x: touch.clientX - rect.left,
+              y: touch.clientY - rect.top,
+            });
+          }
         } else if (cameraTouchId.current === null) {
           cameraTouchId.current = touch.identifier;
           lastCameraPos.current = { x: touch.clientX, y: touch.clientY };
@@ -94,24 +178,7 @@ export function MobileControls({
 
         if (touch.identifier === joystickTouchId.current) {
           e.preventDefault();
-          const dx = touch.clientX - joystickOrigin.current.x;
-          const dy = touch.clientY - joystickOrigin.current.y;
-          const dist = Math.sqrt(dx * dx + dy * dy);
-          const clamped = Math.min(dist, JOYSTICK_MAX_DIST);
-          const angle = Math.atan2(dy, dx);
-          const cx = dist > 0 ? Math.cos(angle) * clamped : 0;
-          const cy = dist > 0 ? Math.sin(angle) * clamped : 0;
-
-          setStickOffset({ x: cx, y: cy });
-
-          const nx = cx / JOYSTICK_MAX_DIST;
-          const ny = cy / JOYSTICK_MAX_DIST;
-          refs.current.onMovement(
-            ny < -DEAD_ZONE,
-            ny > DEAD_ZONE,
-            nx < -DEAD_ZONE,
-            nx > DEAD_ZONE,
-          );
+          updateStick(touch.clientX, touch.clientY);
         }
 
         if (touch.identifier === cameraTouchId.current) {
@@ -173,99 +240,82 @@ export function MobileControls({
     };
   }, [containerRef]);
 
-  const btnClass =
-    "flex items-center justify-center rounded-xl bg-black/40 border-2 border-white/30 text-white active:bg-white/20 select-none";
-
   if (!enabled) return null;
 
+  const isFixedJoystick = settings.touchJoystickMode === "fixed";
+  const buttonsOnRight = settings.touchHandedness === "right";
+  const joystickPosition = isFixedJoystick
+    ? {
+        bottom: FIXED_JOYSTICK_BOTTOM_INSET,
+        ...(buttonsOnRight
+          ? { left: FIXED_JOYSTICK_EDGE_INSET }
+          : { right: FIXED_JOYSTICK_EDGE_INSET }),
+      }
+    : joystickCenter && {
+        left: joystickCenter.x - layout.joystickRadius,
+        top: joystickCenter.y - layout.joystickRadius,
+      };
+
   return (
-    <div className="absolute inset-0 pointer-events-none z-30 select-none">
-      {/* Floating joystick */}
-      {joystickCenter && (
-        <div
-          className="absolute pointer-events-none"
-          style={{
-            width: JOYSTICK_MAX_DIST * 2,
-            height: JOYSTICK_MAX_DIST * 2,
-            left: joystickCenter.x - JOYSTICK_MAX_DIST,
-            top: joystickCenter.y - JOYSTICK_MAX_DIST,
-          }}
-        >
-          <div className="absolute inset-0 rounded-full border-2 border-white/20 bg-white/5" />
-          <div
-            className="absolute rounded-full bg-white/40 border-2 border-white/60"
-            style={{
-              width: STICK_SIZE,
-              height: STICK_SIZE,
-              left: JOYSTICK_MAX_DIST - STICK_SIZE / 2 + stickOffset.x,
-              top: JOYSTICK_MAX_DIST - STICK_SIZE / 2 + stickOffset.y,
-            }}
-          />
-        </div>
+    <div
+      className="absolute inset-0 pointer-events-none z-30 select-none"
+      style={{ opacity: settings.touchOpacity }}
+    >
+      {joystickPosition && (
+        <TouchJoystick
+          radius={layout.joystickRadius}
+          stickSize={layout.stickSize}
+          stickOffset={stickOffset}
+          position={joystickPosition}
+        />
       )}
 
-      {/* Right-side action buttons */}
       <div
-        className="absolute bottom-28 right-3 flex flex-col items-center gap-2 pointer-events-auto"
+        className={`absolute bottom-28 flex flex-col items-center gap-2 pointer-events-auto ${
+          buttonsOnRight ? "right-3" : "left-3"
+        }`}
         data-mobile-ui
       >
         <div className="flex gap-2">
-          <button
-            className={btnClass + " w-11 h-11 text-lg"}
-            onTouchStart={(e) => {
-              e.stopPropagation();
-              onToggleFly();
-            }}
-          >
-            ✈
-          </button>
-          <button
-            className={btnClass + " w-11 h-11 text-lg"}
-            onTouchStart={(e) => {
-              e.stopPropagation();
-              onToggleInventory();
-            }}
-          >
-            ≡
-          </button>
+          <TouchButton
+            icon="fly"
+            label="Toggle flying"
+            sizePixels={layout.smallButton}
+            accentColor={ACTION_COLORS.fly}
+            onPress={onToggleFly}
+          />
+          <TouchButton
+            icon="inventory"
+            label="Inventory"
+            sizePixels={layout.smallButton}
+            accentColor={ACTION_COLORS.inventory}
+            onPress={onToggleInventory}
+          />
         </div>
         <div className="flex gap-2">
-          <button
-            className={btnClass + " w-14 h-14 text-2xl border-red-400/40"}
-            onTouchStart={(e) => {
-              e.stopPropagation();
-              onBreak();
-            }}
-          >
-            ⛏
-          </button>
-          <button
-            className={btnClass + " w-14 h-14 text-2xl border-blue-400/40"}
-            onTouchStart={(e) => {
-              e.stopPropagation();
-              onPlace();
-            }}
-          >
-            ▣
-          </button>
+          <TouchButton
+            icon="break"
+            label="Break block"
+            sizePixels={layout.mediumButton}
+            accentColor={ACTION_COLORS.break}
+            onPress={onBreak}
+          />
+          <TouchButton
+            icon="place"
+            label="Place block"
+            sizePixels={layout.mediumButton}
+            accentColor={ACTION_COLORS.place}
+            onPress={onPlace}
+          />
         </div>
-        <button
-          className={btnClass + " w-16 h-16 text-2xl"}
-          onTouchStart={(e) => {
-            e.stopPropagation();
-            onJumpStart();
-          }}
-          onTouchEnd={(e) => {
-            e.stopPropagation();
-            onJumpEnd();
-          }}
-          onTouchCancel={(e) => {
-            e.stopPropagation();
-            onJumpEnd();
-          }}
-        >
-          ▲
-        </button>
+        <TouchButton
+          icon="jump"
+          label="Jump"
+          sizePixels={layout.jumpButton}
+          accentColor={ACTION_COLORS.jump}
+          onPress={onJumpStart}
+          onRelease={onJumpEnd}
+        />
       </div>
     </div>
   );

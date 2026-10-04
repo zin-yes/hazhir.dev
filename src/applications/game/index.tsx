@@ -76,6 +76,7 @@ import {
   type RenderSettings,
 } from "./world/render-settings";
 import { packColumnKey } from "./world/chunk-key";
+import { useGameSettings } from "./settings/use-game-settings";
 import { browserStorage, loadStoredRenderSettings, storeRenderSettings } from "./world/render-settings-storage";
 import { installVoxelWorldApi, summarizeEdit, type WorldEditSummary } from "./world/world-api";
 import { castVoxelRay } from "./voxel-ray";
@@ -226,6 +227,7 @@ export default function Game() {
   const remotePlayers = useRef<Map<string, RemotePlayer>>(new Map());
   const [peerId, setPeerId] = useState<string>("");
   const [connectedToHost, setConnectedToHost] = useState(false);
+  const [connectedPlayerCount, setConnectedPlayerCount] = useState(0);
   const connectedToHostRef = useRef(false);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -306,10 +308,12 @@ export default function Game() {
     return gameScene;
   }, []);
 
+  const { settings: gameSettings, settingsRef: gameSettingsRef, updateSettings: updateGameSettings } = useGameSettings();
+
   const camera = useMemo(
     () =>
       new THREE.PerspectiveCamera(
-        85,
+        gameSettingsRef.current.fieldOfViewDegrees,
         window.innerWidth / window.innerHeight,
         0.1,
         10000,
@@ -335,6 +339,11 @@ export default function Game() {
       }),
     [containerRef, camera, renderer],
   );
+
+  useEffect(() => {
+    camera.fov = gameSettings.fieldOfViewDegrees;
+    camera.updateProjectionMatrix();
+  }, [camera, gameSettings.fieldOfViewDegrees]);
 
   const [selectedSlot, setSelectedSlot] = useState(0);
   const selectedSlotRef = useRef(0);
@@ -441,6 +450,10 @@ export default function Game() {
   const fpsFrames = useRef<number[]>([]);
 
   const playerControlsRef = useRef<PlayerControls | null>(null);
+
+  useEffect(() => {
+    playerControlsRef.current?.setLookSensitivity(gameSettings.lookSensitivity);
+  }, [gameSettings.lookSensitivity]);
 
   useEffect(() => {
     isDebugVisibleRef.current = isDebugVisible;
@@ -853,6 +866,8 @@ export default function Game() {
         physics,
       );
 
+      playerControlsRef.current.setLookSensitivity(gameSettingsRef.current.lookSensitivity);
+
       const isMobileDevice = window.matchMedia(
         "(pointer: coarse) and (hover: none)",
       ).matches;
@@ -1065,6 +1080,7 @@ export default function Game() {
 
       nm.onPlayerJoin = (id) => {
         console.log("Player joined:", id);
+        setConnectedPlayerCount(nm.connectedPeerCount);
         // Send handshake
         nm.send(
           {
@@ -1110,6 +1126,7 @@ export default function Game() {
       };
 
       nm.onPlayerLeave = (id) => {
+        setConnectedPlayerCount(nm.connectedPeerCount);
         const rp = remotePlayers.current.get(id);
         if (rp) {
           rp.dispose(scene);
@@ -2164,6 +2181,7 @@ export default function Game() {
     networkManager.current.myPeerId = "";
     connectedToHostRef.current = false;
     setConnectedToHost(false);
+    setConnectedPlayerCount(0);
     setPeerId("");
     activeWorldRef.current = null;
     await refreshWorlds();
@@ -2185,6 +2203,8 @@ export default function Game() {
       networkManager.current.myPeerId = "";
       connectedToHostRef.current = false;
       setConnectedToHost(false);
+      setConnectedPlayerCount(0);
+      setPeerId("");
       setPhase("title");
       toast.error(reason);
     };
@@ -2542,12 +2562,10 @@ export default function Game() {
         style={{ touchAction: "none" }}
       >
         <UILayer
-          onHost={() => {
-            networkManager.current.hostGame().then((id) => setPeerId(id));
+          onHost={async () => {
+            setPeerId(await networkManager.current.hostGame());
           }}
-          onJoin={(id) => {
-            networkManager.current.joinGame(id);
-          }}
+          onJoin={(id) => networkManager.current.joinGame(id)}
           phase={phase}
           loadProgress={loadProgress}
           loadStageLabel={loadStageLabel}
@@ -2565,6 +2583,8 @@ export default function Game() {
           onSaveNow={() => saveActiveWorld(true)}
           onExitToWorlds={exitToWorlds}
           peerId={peerId}
+          connectedPlayerCount={connectedPlayerCount}
+          isConnectedToHost={connectedToHost}
           selectedSlot={selectedSlot}
           hotbarSlots={hotbarSlots}
           isInventoryOpen={isInventoryOpen}
@@ -2591,18 +2611,33 @@ export default function Game() {
           videoSettings={{
             renderDistanceChunks: renderSettingsRef.current.horizontalRadius,
             farTerrainChunks: renderSettingsRef.current.lodRenderDistanceChunks,
+            verticalUpChunks: renderSettingsRef.current.verticalUp,
+            verticalDownChunks: renderSettingsRef.current.verticalDown,
+            volumeShape: renderSettingsRef.current.shape,
           }}
-          onVideoSettingsChange={({ renderDistanceChunks, farTerrainChunks }) => {
+          onVideoSettingsChange={({
+            renderDistanceChunks,
+            farTerrainChunks,
+            verticalUpChunks,
+            verticalDownChunks,
+            volumeShape,
+          }) => {
             const applied = applyRenderSettings({
               ...(renderDistanceChunks !== undefined ? { horizontalRadius: renderDistanceChunks } : {}),
               ...(farTerrainChunks !== undefined ? { lodRenderDistanceChunks: farTerrainChunks } : {}),
+              ...(verticalUpChunks !== undefined ? { verticalUp: verticalUpChunks } : {}),
+              ...(verticalDownChunks !== undefined ? { verticalDown: verticalDownChunks } : {}),
+              ...(volumeShape !== undefined ? { shape: volumeShape } : {}),
             });
             storeRenderSettings(browserStorage(), applied);
           }}
+          gameSettings={gameSettings}
+          onGameSettingsChange={updateGameSettings}
         />
         {isMobile && phase === "playing" && (
           <MobileControls
             containerRef={containerRef}
+            settings={gameSettings}
             enabled={!isInventoryOpen}
             onMovement={(forward, backward, left, right) => {
               playerControlsRef.current?.setMoveState({

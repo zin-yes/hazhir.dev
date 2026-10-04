@@ -20,6 +20,7 @@ export class PlayerControls {
   private isFlying = false;
   private isShifting = false;
   public isMobile = false;
+  private lookSensitivity = 1;
 
   private readonly speed = 5;
   private readonly jumpForce = 9.5;
@@ -163,12 +164,18 @@ export class PlayerControls {
     if (state.shifting !== undefined) this.isShifting = state.shifting;
   }
 
+  /** Scales both mouse and touch look; 1 is the original speed. */
+  public setLookSensitivity(multiplier: number) {
+    this.lookSensitivity = multiplier;
+    this.controls.pointerSpeed = multiplier;
+  }
+
   public rotateCamera(deltaX: number, deltaY: number) {
     profiler.addCounter("game.input.cameraRotations");
     const euler = new THREE.Euler(0, 0, 0, "YXZ");
     euler.setFromQuaternion(this.controls.object.quaternion);
-    euler.y -= deltaX * 0.003;
-    euler.x -= deltaY * 0.003;
+    euler.y -= deltaX * 0.003 * this.lookSensitivity;
+    euler.x -= deltaY * 0.003 * this.lookSensitivity;
     euler.x = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, euler.x));
     this.controls.object.quaternion.setFromEuler(euler);
   }

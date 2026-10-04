@@ -18,6 +18,10 @@ export class NetworkManager {
 
   constructor() {}
 
+  public get connectedPeerCount(): number {
+    return this.connections.size;
+  }
+
   public async initialize(id?: string): Promise<string> {
     return new Promise((resolve, reject) => {
       // Create Peer instance

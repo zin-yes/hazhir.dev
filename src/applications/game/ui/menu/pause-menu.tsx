@@ -1,17 +1,21 @@
 import { useState } from "react";
+import type { GameSettings } from "../../settings/game-settings";
 import { PixelButton, PixelFrame } from "../pixel/pixel-ui";
-import { ControlsList } from "./controls-list";
+import { ControlsSettings } from "./controls-settings";
 import { MenuBackdrop } from "./menu-primitives";
 import { MultiplayerPanel } from "./multiplayer-panel";
+import { SettingsHint } from "./setting-rows";
+import { TouchSettings } from "./touch-settings";
 import { useProfiledRender } from "../use-profiled-render";
 import { VideoSettings, type VideoSettingsValues } from "./video-settings";
 
-type PauseMenuTab = "game" | "video" | "controls" | "multiplayer";
+type PauseMenuTab = "game" | "video" | "controls" | "touch" | "multiplayer";
 
 const TAB_LABELS: Record<PauseMenuTab, string> = {
   game: "Game",
   video: "Video",
-  controls: "Keys",
+  controls: "Input",
+  touch: "Touch",
   multiplayer: "Friends",
 };
 
@@ -19,19 +23,25 @@ interface PauseMenuProps {
   worldName: string;
   isMobile: boolean;
   peerId?: string;
+  connectedPlayerCount: number;
+  isConnectedToHost: boolean;
   onResume: () => void;
   onSaveNow: () => void;
   onExitToWorlds: () => void;
-  onHost?: () => void;
-  onJoin?: (hostId: string) => void;
+  onHost?: () => Promise<unknown> | void;
+  onJoin?: (hostId: string) => Promise<unknown> | void;
   videoSettings: VideoSettingsValues;
   onVideoSettingsChange: (values: Partial<VideoSettingsValues>) => void;
+  gameSettings: GameSettings;
+  onGameSettingsChange: (changes: Partial<GameSettings>) => void;
 }
 
 export function PauseMenu({
   worldName,
   isMobile,
   peerId,
+  connectedPlayerCount,
+  isConnectedToHost,
   onResume,
   onSaveNow,
   onExitToWorlds,
@@ -39,9 +49,14 @@ export function PauseMenu({
   onJoin,
   videoSettings,
   onVideoSettingsChange,
+  gameSettings,
+  onGameSettingsChange,
 }: PauseMenuProps) {
   useProfiledRender("pauseMenu");
   const [activeTab, setActiveTab] = useState<PauseMenuTab>("game");
+  // Video values live in the game as a ref, so the menu keeps its own copy for the sliders to follow.
+  const [videoValues, setVideoValues] = useState(videoSettings);
+  const visibleTabs = (Object.keys(TAB_LABELS) as PauseMenuTab[]).filter((tab) => tab !== "touch" || isMobile);
 
   return (
     <MenuBackdrop withVeil onBackdropClick={isMobile ? undefined : onResume}>
@@ -55,10 +70,11 @@ export function PauseMenu({
           </h2>
         </header>
 
-        <div className="mb-5 grid grid-cols-4 gap-2">
-          {(Object.keys(TAB_LABELS) as PauseMenuTab[]).map((tab) => (
+        <div className="mb-5 flex flex-wrap gap-2">
+          {visibleTabs.map((tab) => (
             <PixelButton
               key={tab}
+              className="min-w-[5.5rem] flex-1"
               tone={activeTab === tab ? "tabActive" : "tab"}
               onClick={() => setActiveTab(tab)}
             >
@@ -78,18 +94,38 @@ export function PauseMenu({
             <PixelButton className="w-full" onClick={onExitToWorlds}>
               Save and switch world
             </PixelButton>
-            <p className="pt-1 text-center text-[0.65rem] leading-relaxed text-[#6e6590]">
-              Autosaves every time you pause. The world is frozen while this
-              menu is open.
-            </p>
+            <SettingsHint>
+              Autosaves every time you pause. The world is frozen while this menu is open.
+            </SettingsHint>
           </div>
         )}
         {activeTab === "video" && (
-          <VideoSettings initialValues={videoSettings} onChange={onVideoSettingsChange} />
+          <VideoSettings
+            values={videoValues}
+            onChange={(changes) => {
+              setVideoValues((previous) => ({ ...previous, ...changes }));
+              onVideoSettingsChange(changes);
+            }}
+            fieldOfViewDegrees={gameSettings.fieldOfViewDegrees}
+            onFieldOfViewChange={(fieldOfViewDegrees) => onGameSettingsChange({ fieldOfViewDegrees })}
+          />
         )}
-        {activeTab === "controls" && <ControlsList />}
+        {activeTab === "controls" && (
+          <ControlsSettings
+            lookSensitivity={gameSettings.lookSensitivity}
+            onLookSensitivityChange={(lookSensitivity) => onGameSettingsChange({ lookSensitivity })}
+            isMobile={isMobile}
+          />
+        )}
+        {activeTab === "touch" && <TouchSettings settings={gameSettings} onChange={onGameSettingsChange} />}
         {activeTab === "multiplayer" && (
-          <MultiplayerPanel peerId={peerId} onHost={onHost} onJoin={onJoin} />
+          <MultiplayerPanel
+            peerId={peerId}
+            connectedPlayerCount={connectedPlayerCount}
+            isConnectedToHost={isConnectedToHost}
+            onHost={onHost}
+            onJoin={onJoin}
+          />
         )}
       </PixelFrame>
     </MenuBackdrop>

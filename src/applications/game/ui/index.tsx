@@ -5,6 +5,7 @@ import type { LoadStageStatus } from "../load-progress";
 import type { StoredWorld } from "../worlds/world-store";
 import { DebugInfo, DebugOverlay } from "./debug-overlay";
 import { Hotbar } from "./hotbar";
+import type { GameSettings } from "../settings/game-settings";
 import type { VideoSettingsValues } from "./menu/video-settings";
 import { Inventory } from "./inventory";
 import { LoadingHud } from "./menu/loading-hud";
@@ -40,9 +41,11 @@ interface UILayerProps {
   onOpenPauseMenu: () => void;
   onSaveNow: () => void;
   onExitToWorlds: () => void;
-  onHost?: () => void;
-  onJoin?: (id: string) => void;
+  onHost?: () => Promise<unknown> | void;
+  onJoin?: (id: string) => Promise<unknown> | void;
   peerId?: string;
+  connectedPlayerCount: number;
+  isConnectedToHost: boolean;
   selectedSlot: number;
   hotbarSlots: BlockType[];
   isInventoryOpen: boolean;
@@ -55,6 +58,8 @@ interface UILayerProps {
   brushRadius?: number;
   videoSettings: VideoSettingsValues;
   onVideoSettingsChange: (values: Partial<VideoSettingsValues>) => void;
+  gameSettings: GameSettings;
+  onGameSettingsChange: (changes: Partial<GameSettings>) => void;
 }
 
 export default function UILayer({
@@ -77,6 +82,8 @@ export default function UILayer({
   onHost,
   onJoin,
   peerId,
+  connectedPlayerCount,
+  isConnectedToHost,
   selectedSlot,
   hotbarSlots,
   isInventoryOpen,
@@ -89,6 +96,8 @@ export default function UILayer({
   brushRadius,
   videoSettings,
   onVideoSettingsChange,
+  gameSettings,
+  onGameSettingsChange,
 }: UILayerProps) {
   useProfiledRender("uiLayer");
   const isInWorld = phase === "playing" || phase === "paused";
@@ -175,6 +184,8 @@ export default function UILayer({
           worldName={activeWorldName}
           isMobile={isMobile ?? false}
           peerId={peerId}
+          connectedPlayerCount={connectedPlayerCount}
+          isConnectedToHost={isConnectedToHost}
           onResume={onResume}
           onSaveNow={onSaveNow}
           onExitToWorlds={onExitToWorlds}
@@ -182,6 +193,8 @@ export default function UILayer({
           onJoin={onJoin}
           videoSettings={videoSettings}
           onVideoSettingsChange={onVideoSettingsChange}
+          gameSettings={gameSettings}
+          onGameSettingsChange={onGameSettingsChange}
         />
       )}
 
