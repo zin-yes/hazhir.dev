@@ -8,6 +8,7 @@
 
 import { BlockStateCatalog, BlockTagIndex, type BlockTagRegistry, SurvivalRules } from "../../block-state";
 import { ChunkBlocks } from "../../chunk";
+import { BoundedLruCache, packChunkColumnKey } from "../../pipeline/bounded-lru-cache";
 import type { WorldgenRegistries } from "../../registry/datapack-loader";
 import { BiomeTemperatureSampler, createBiomeClimateLookup } from "../../surface/biome-temperature";
 import { BlockPos } from "../core/block-pos";
@@ -30,7 +31,7 @@ import {
   startSampledDecorationSection,
   stepSectionName,
 } from "../profiling/feature-profiling";
-import { type ColumnPatch, DecorationRegion } from "../level/decoration-region";
+import { BaseHeightmapCache, type ColumnPatch, DecorationRegion } from "../level/decoration-region";
 import { BiomeFeatureIndex, DECORATION_STEPS } from "./biome-features";
 import { buildFeaturesPerStep, type StepFeatureData } from "./feature-sorter";
 
@@ -65,26 +66,6 @@ export interface OriginDecorationTrace {
   readonly placed: boolean;
 }
 
-class OriginCache {
-  private readonly entries = new Map<string, OriginDecoration>();
-
-  constructor(private readonly maxEntries: number) {}
-
-  get(key: string): OriginDecoration | undefined {
-    const value = this.entries.get(key);
-    if (value) {
-      this.entries.delete(key);
-      this.entries.set(key, value);
-    }
-    return value;
-  }
-
-  set(key: string, value: OriginDecoration): void {
-    this.entries.set(key, value);
-    if (this.entries.size > this.maxEntries) this.entries.delete(this.entries.keys().next().value as string);
-  }
-}
-
 export class FeatureDecorator {
   readonly blockStates: BlockStateCatalog;
   readonly blockTags: BlockTagIndex;
@@ -98,7 +79,8 @@ export class FeatureDecorator {
   private readonly possibleBiomes: ReadonlySet<string>;
   private readonly possibleBiomeOrder: readonly string[];
   private readonly strict: boolean;
-  private readonly originCache: OriginCache;
+  private readonly originCache: BoundedLruCache<number, OriginDecoration>;
+  private readonly baseHeightmaps = new BaseHeightmapCache();
   private stepData: StepFeatureData[] | undefined;
 
   constructor(params: FeatureDecoratorParams) {
@@ -119,7 +101,7 @@ export class FeatureDecorator {
     });
     this.possibleBiomeOrder = [...params.possibleBiomes];
     this.possibleBiomes = new Set(params.possibleBiomes);
-    this.originCache = new OriginCache(params.maxCachedOrigins ?? 48);
+    this.originCache = new BoundedLruCache(params.maxCachedOrigins ?? 48);
     const biomeFeatures = this.biomeFeatures;
     const temperatureSampler = new BiomeTemperatureSampler(createBiomeClimateLookup(params.registries.biome));
     this.generator = {
@@ -146,7 +128,7 @@ export class FeatureDecorator {
 
   /** Decorates one origin chunk against base terrain and returns its clipped writes (cached). */
   decorateOrigin(chunkX: number, chunkZ: number, trace?: OriginDecorationTrace[]): OriginDecoration {
-    const cacheKey = `${chunkX},${chunkZ}`;
+    const cacheKey = packChunkColumnKey(chunkX, chunkZ);
     const cached = trace ? undefined : this.originCache.get(cacheKey);
     if (cached) {
       addFeatureCounter("decoration.originCacheHits", 1);
@@ -155,6 +137,7 @@ export class FeatureDecorator {
     addFeatureCounter("decoration.originCacheMisses", 1);
     const region = this.createRegion(chunkX, chunkZ);
     const decoration = this.decorateInRegion(region, trace);
+    region.releaseColumnCopies();
     this.originCache.set(cacheKey, decoration);
     return decoration;
   }
@@ -168,6 +151,7 @@ export class FeatureDecorator {
       blockStates: this.blockStates,
       blockTags: this.blockTags,
       survival: this.survival,
+      baseHeightmaps: this.baseHeightmaps,
     });
   }
 

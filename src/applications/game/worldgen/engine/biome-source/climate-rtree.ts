@@ -3,6 +3,15 @@
 import { CLIMATE_DIMENSION_COUNT, type ParameterPoint } from "./climate-parameter-list";
 
 const CHILDREN_PER_NODE = 6;
+if (CLIMATE_DIMENSION_COUNT !== 7) throw new Error("ClimateRTree's distance is unrolled for 7 climate dimensions");
+
+/** One dimension of the squared distance from a target to a box ([minimum, maximum]), added in dimension order. */
+function boxDistanceTerm(target: number, minimum: number, maximum: number): number {
+  const above = target - maximum;
+  if (above > 0) return above * above;
+  const below = minimum - target;
+  return below > 0 ? below * below : 0;
+}
 
 interface TreeNode {
   /** Flat [min0, max0, min1, max1, ...] bounding box over all 7 dimensions. */
@@ -126,7 +135,13 @@ export class ClimateRTree {
   private readonly nodeChildCount: Int32Array;
   private readonly childNodeIds: Int32Array;
   private readonly rootNodeId: number;
-  private readonly searchTarget = new Float64Array(CLIMATE_DIMENSION_COUNT);
+  private searchTarget0 = 0;
+  private searchTarget1 = 0;
+  private searchTarget2 = 0;
+  private searchTarget3 = 0;
+  private searchTarget4 = 0;
+  private searchTarget5 = 0;
+  private searchTarget6 = 0;
   private bestDistance = 0;
   private bestNodeId = -1;
 
@@ -187,8 +202,27 @@ export class ClimateRTree {
 
   /** Index (into the construction list) of the leaf with minimal fitness; vanilla tie behavior except the last-leaf cache. */
   search(targetArray: number[]): number {
+    return this.searchClimate(targetArray[0]!, targetArray[1]!, targetArray[2]!, targetArray[3]!, targetArray[4]!, targetArray[5]!, targetArray[6]!);
+  }
+
+  /** `search` with the 7 target values passed directly (no array per query). */
+  searchClimate(
+    temperature: number,
+    humidity: number,
+    continentalness: number,
+    erosion: number,
+    depth: number,
+    weirdness: number,
+    offset: number,
+  ): number {
     this.searchCount++;
-    for (let dimension = 0; dimension < CLIMATE_DIMENSION_COUNT; dimension++) this.searchTarget[dimension] = targetArray[dimension];
+    this.searchTarget0 = temperature;
+    this.searchTarget1 = humidity;
+    this.searchTarget2 = continentalness;
+    this.searchTarget3 = erosion;
+    this.searchTarget4 = depth;
+    this.searchTarget5 = weirdness;
+    this.searchTarget6 = offset;
     this.bestDistance = Infinity;
     this.bestNodeId = -1;
     if (this.reuseLastLeaf && this.lastLeafNodeId >= 0) {
@@ -210,17 +244,16 @@ export class ClimateRTree {
 
   private nodeDistance(nodeId: number): number {
     this.nodeDistanceCount++;
-    let distance = 0;
+    const bounds = this.nodeBounds;
     const boundsBase = nodeId * CLIMATE_DIMENSION_COUNT * 2;
-    for (let dimension = 0; dimension < CLIMATE_DIMENSION_COUNT; dimension++) {
-      const target = this.searchTarget[dimension];
-      const above = target - this.nodeBounds[boundsBase + dimension * 2 + 1];
-      if (above > 0) distance += above * above;
-      else {
-        const below = this.nodeBounds[boundsBase + dimension * 2] - target;
-        if (below > 0) distance += below * below;
-      }
-    }
+    let distance = 0;
+    distance += boxDistanceTerm(this.searchTarget0, bounds[boundsBase]!, bounds[boundsBase + 1]!);
+    distance += boxDistanceTerm(this.searchTarget1, bounds[boundsBase + 2]!, bounds[boundsBase + 3]!);
+    distance += boxDistanceTerm(this.searchTarget2, bounds[boundsBase + 4]!, bounds[boundsBase + 5]!);
+    distance += boxDistanceTerm(this.searchTarget3, bounds[boundsBase + 6]!, bounds[boundsBase + 7]!);
+    distance += boxDistanceTerm(this.searchTarget4, bounds[boundsBase + 8]!, bounds[boundsBase + 9]!);
+    distance += boxDistanceTerm(this.searchTarget5, bounds[boundsBase + 10]!, bounds[boundsBase + 11]!);
+    distance += boxDistanceTerm(this.searchTarget6, bounds[boundsBase + 12]!, bounds[boundsBase + 13]!);
     return distance;
   }
 

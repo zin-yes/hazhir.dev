@@ -23,6 +23,8 @@ export interface ColumnStageContext {
   carvingMask?: Uint8Array;
   rawBiomeAtQuart(quartX: number, quartY: number, quartZ: number): string;
   biomeAt(blockX: number, blockY: number, blockZ: number): string;
+  /** Every biome stored in the 3x3 chunks around (chunkX, chunkZ): all biomeAt can return for blocks of that chunk. */
+  biomesNearChunk?(chunkX: number, chunkZ: number): ReadonlySet<string>;
 }
 
 export interface ColumnStage {

@@ -11,6 +11,7 @@ import {
 import type { FunctionContext } from "../density/density-function";
 import type { DensityNode } from "../density/density-function";
 import type { PositionalRandomFactory } from "../random";
+import { transientRandomAt } from "../random/xoroshiro-random-source";
 import {
   BLOCK_COPPER_ORE,
   BLOCK_DEEPSLATE_IRON_ORE,
@@ -62,6 +63,11 @@ export class OreVeinifier {
     private readonly positionalRandomFactory: PositionalRandomFactory,
   ) {}
 
+  /** False where compute is NO_VEIN whatever the noise (outside both vein height ranges). */
+  mayHoldVeinAt(blockY: number): boolean {
+    return blockY <= COPPER_VEIN.maxY && blockY >= IRON_VEIN.minY;
+  }
+
   /** The BlockStateFiller of OreVeinifier.create: the vein block at the context's position, or NO_VEIN. */
   compute(context: FunctionContext): number {
     if (!this.isProfiling) return this.computeVein(context);
@@ -74,8 +80,10 @@ export class OreVeinifier {
   }
 
   private computeVein(context: FunctionContext): number {
-    const toggle = this.veinToggle.compute(context);
     const blockY = context.blockY;
+    // Outside both vein height ranges the answer is NO_VEIN whatever the toggle (an interpolated read, no side effects).
+    if (blockY > COPPER_VEIN.maxY || blockY < IRON_VEIN.minY) return NO_VEIN;
+    const toggle = this.veinToggle.compute(context);
     const vein = toggle > 0 ? COPPER_VEIN : IRON_VEIN;
     const magnitude = Math.abs(toggle);
     const distanceToTop = vein.maxY - blockY;
@@ -84,7 +92,7 @@ export class OreVeinifier {
     const distanceToEdge = Math.min(distanceToTop, distanceToBottom);
     const edgeRoundoff = clampedMap(distanceToEdge, 0, EDGE_ROUNDOFF_BEGIN, -MAX_EDGE_ROUNDOFF, 0);
     if (magnitude + edgeRoundoff < VEININESS_THRESHOLD) return NO_VEIN;
-    const random = this.positionalRandomFactory.at(context.blockX, blockY, context.blockZ);
+    const random = transientRandomAt(this.positionalRandomFactory, context.blockX, blockY, context.blockZ);
     if (random.nextFloat() > VEIN_SOLIDNESS) return NO_VEIN;
     if (this.veinRidged.compute(context) >= 0) return NO_VEIN;
     const richness = clampedMap(magnitude, VEININESS_THRESHOLD, MAX_RICHNESS_THRESHOLD, MIN_RICHNESS, MAX_RICHNESS);

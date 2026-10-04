@@ -7,62 +7,229 @@
 import { type BlockStateCatalog, type BlockStateInfo, type BlockTagIndex, PaletteBlockInfo, SurvivalRules } from "../../block-state";
 import type { BlockPalette, ChunkBlocks } from "../../chunk";
 import { CarvingMask, type CarvingStep } from "../core/carving-mask";
-import { ChunkHeightmap, HEIGHTMAP_TYPES, type HeightmapColumnReader, type HeightmapType, isWorldgenHeightmap } from "../core/heightmap";
+import {
+  ChunkHeightmap,
+  HEIGHTMAP_TYPES,
+  type HeightmapColumnReader,
+  type HeightmapType,
+  isHeightmapOpaque,
+  isWorldgenHeightmap,
+} from "../core/heightmap";
 import { addFeatureCounter, endDecorationSection, startDecorationSection } from "../profiling/feature-profiling";
 import type { BaseColumnSource } from "./base-column-source";
 import { VOID_AIR_STATE, type WorldGenLevel } from "./world-gen-level";
 
+/** Position of a heightmap type in HEIGHTMAP_TYPES (string literals compare by identity first). */
+function heightmapTypeIndex(type: HeightmapType): number {
+  switch (type) {
+    case "WORLD_SURFACE_WG":
+      return 0;
+    case "WORLD_SURFACE":
+      return 1;
+    case "OCEAN_FLOOR_WG":
+      return 2;
+    case "OCEAN_FLOOR":
+      return 3;
+    case "MOTION_BLOCKING":
+      return 4;
+    case "MOTION_BLOCKING_NO_LEAVES":
+      return 5;
+  }
+}
+
 const WRITE_RADIUS = 1;
 const LAYER_SIZE = 256;
+// Written columns get a private copy of their base blocks; regions decorating one origin after another reuse them.
+const MAX_POOLED_COLUMN_COPIES = 16;
+const pooledColumnCopies: Uint16Array[] = [];
+
+/**
+ * Heightmaps primed on untouched base columns, shared by every region that reads the same base column: the *_WG
+ * heightmaps are frozen during decoration, and the others start from these values until the region writes there.
+ */
+export class BaseHeightmapCache {
+  private readonly heightmapsByColumn = new WeakMap<ChunkBlocks, Map<HeightmapType, ChunkHeightmap>>();
+  /** Bit `typeIndex` of HEIGHTMAP_TYPES set where the palette id is opaque for that heightmap; -1 = not classified yet. */
+  private opacityBitsByPaletteId = new Int16Array(64).fill(-1);
+
+  private opacityBitsOf(paletteId: number, paletteInfo: PaletteBlockInfo): number {
+    if (paletteId >= this.opacityBitsByPaletteId.length) {
+      const grown = new Int16Array(Math.max(paletteId + 1, this.opacityBitsByPaletteId.length * 2)).fill(-1);
+      grown.set(this.opacityBitsByPaletteId);
+      this.opacityBitsByPaletteId = grown;
+    }
+    let bits = this.opacityBitsByPaletteId[paletteId]!;
+    if (bits === -1) {
+      const info = paletteInfo.info(paletteId);
+      bits = 0;
+      for (let typeIndex = 0; typeIndex < HEIGHTMAP_TYPES.length; typeIndex++) {
+        if (isHeightmapOpaque(HEIGHTMAP_TYPES[typeIndex]!, info)) bits |= 1 << typeIndex;
+      }
+      this.opacityBitsByPaletteId[paletteId] = bits;
+    }
+    return bits;
+  }
+
+  heightmapOf(base: ChunkBlocks, type: HeightmapType, paletteInfo: PaletteBlockInfo): ChunkHeightmap {
+    let heightmaps = this.heightmapsByColumn.get(base);
+    if (heightmaps === undefined) {
+      heightmaps = new Map();
+      this.heightmapsByColumn.set(base, heightmaps);
+    }
+    let heightmap = heightmaps.get(type);
+    if (heightmap === undefined) {
+      startDecorationSection("region.heightmap.prime");
+      const minY = base.minY;
+      const baseBlocks = base.blocks;
+      const reader: HeightmapColumnReader = {
+        minY,
+        maxYExclusive: minY + base.height,
+        infoAt: (localX, y, localZ) => paletteInfo.info(baseBlocks[(y - minY) * LAYER_SIZE + localZ * 16 + localX]!),
+      };
+      heightmap = new ChunkHeightmap(type, reader, this.primeFirstAvailable(baseBlocks, minY, base.height, type, paletteInfo));
+      heightmaps.set(type, heightmap);
+      endDecorationSection();
+    }
+    return heightmap;
+  }
+
+  /**
+   * Priming of a written column without a full scan: the base heightmap stays right except where a write put an opaque
+   * block above it (the top moves up) or replaced its top block with a non-opaque one (that column is scanned).
+   */
+  primeWrittenColumn(
+    base: ChunkBlocks,
+    blocks: Uint16Array,
+    writtenIndices: Iterable<number>,
+    type: HeightmapType,
+    paletteInfo: PaletteBlockInfo,
+  ): Int32Array {
+    const typeBit = 1 << heightmapTypeIndex(type);
+    const baseHeightmap = this.heightmapOf(base, type, paletteInfo);
+    const firstAvailable = new Int32Array(LAYER_SIZE);
+    for (let columnIndex = 0; columnIndex < LAYER_SIZE; columnIndex++) {
+      firstAvailable[columnIndex] = baseHeightmap.getFirstAvailable(columnIndex & 15, columnIndex >> 4);
+    }
+    let columnsToScan: Uint8Array | undefined;
+    for (const index of writtenIndices) {
+      const columnIndex = index & (LAYER_SIZE - 1);
+      const y = base.minY + (index >> 8);
+      const paletteId = blocks[index]!;
+      const isOpaque = paletteId !== 0 && (this.opacityBitsOf(paletteId, paletteInfo) & typeBit) !== 0;
+      if (isOpaque) {
+        if (y + 1 > firstAvailable[columnIndex]!) firstAvailable[columnIndex] = y + 1;
+      } else if (y === baseHeightmap.getFirstAvailable(columnIndex & 15, columnIndex >> 4) - 1) {
+        columnsToScan ??= new Uint8Array(LAYER_SIZE);
+        columnsToScan[columnIndex] = 1;
+      }
+    }
+    if (columnsToScan !== undefined) {
+      const topLayerStart = (base.height - 1) * LAYER_SIZE;
+      for (let columnIndex = 0; columnIndex < LAYER_SIZE; columnIndex++) {
+        if (columnsToScan[columnIndex] === 0) continue;
+        let columnHeight = base.minY;
+        for (let index = topLayerStart + columnIndex, y = base.minY + base.height - 1; index >= 0; index -= LAYER_SIZE, y--) {
+          const paletteId = blocks[index]!;
+          if (paletteId !== 0 && (this.opacityBitsOf(paletteId, paletteInfo) & typeBit) !== 0) {
+            columnHeight = y + 1;
+            break;
+          }
+        }
+        firstAvailable[columnIndex] = columnHeight;
+      }
+    }
+    return firstAvailable;
+  }
+
+  /** Heightmap priming straight on palette ids: the highest opaque block + 1 per column, or minY (as scanDown). */
+  primeFirstAvailable(blocks: Uint16Array, minY: number, height: number, type: HeightmapType, paletteInfo: PaletteBlockInfo): Int32Array {
+    const typeBit = 1 << heightmapTypeIndex(type);
+    const firstAvailable = new Int32Array(LAYER_SIZE);
+    const topLayerStart = (height - 1) * LAYER_SIZE;
+    for (let columnIndex = 0; columnIndex < LAYER_SIZE; columnIndex++) {
+      let columnHeight = minY;
+      for (let index = topLayerStart + columnIndex, y = minY + height - 1; index >= 0; index -= LAYER_SIZE, y--) {
+        const paletteId = blocks[index]!;
+        if (paletteId !== 0 && (this.opacityBitsOf(paletteId, paletteInfo) & typeBit) !== 0) {
+          columnHeight = y + 1;
+          break;
+        }
+      }
+      firstAvailable[columnIndex] = columnHeight;
+    }
+    return firstAvailable;
+  }
+}
 
 class RegionColumn {
   blocks: Uint16Array;
   private copied = false;
   readonly writtenIndices = new Set<number>();
-  private readonly heightmaps = new Map<HeightmapType, ChunkHeightmap>();
+  /** Indexed like HEIGHTMAP_TYPES. */
+  private readonly heightmaps: (ChunkHeightmap | undefined)[] = [undefined, undefined, undefined, undefined, undefined, undefined];
 
   constructor(
     readonly base: ChunkBlocks,
     private readonly paletteInfo: PaletteBlockInfo,
+    private readonly baseHeightmaps: BaseHeightmapCache,
   ) {
     this.blocks = base.blocks;
   }
 
   write(index: number, paletteId: number): void {
     if (!this.copied) {
-      this.blocks = new Uint16Array(this.base.blocks);
+      const pooled = pooledColumnCopies.pop();
+      if (pooled !== undefined && pooled.length === this.base.blocks.length) {
+        pooled.set(this.base.blocks);
+        this.blocks = pooled;
+      } else {
+        this.blocks = new Uint16Array(this.base.blocks);
+      }
       this.copied = true;
     }
     this.blocks[index] = paletteId;
     this.writtenIndices.add(index);
   }
 
+  /** Hands the private copy back to the pool; the column reads the base blocks again afterwards. */
+  releaseCopy(): void {
+    if (!this.copied) return;
+    if (pooledColumnCopies.length < MAX_POOLED_COLUMN_COPIES) pooledColumnCopies.push(this.blocks);
+    this.blocks = this.base.blocks;
+    this.copied = false;
+  }
+
   heightmap(type: HeightmapType): ChunkHeightmap {
-    let heightmap = this.heightmaps.get(type);
+    const typeIndex = heightmapTypeIndex(type);
+    let heightmap = this.heightmaps[typeIndex];
     if (!heightmap) {
-      startDecorationSection("region.heightmap.prime");
-      const useBaseBlocks = isWorldgenHeightmap(type);
-      const minY = this.base.minY;
-      const reader: HeightmapColumnReader = {
-        minY,
-        maxYExclusive: minY + this.base.height,
-        infoAt: (localX, y, localZ) => {
-          const index = (y - minY) * LAYER_SIZE + localZ * 16 + localX;
-          return this.paletteInfo.info(useBaseBlocks ? this.base.blocks[index]! : this.blocks[index]!);
-        },
-      };
-      heightmap = new ChunkHeightmap(type, reader);
-      this.heightmaps.set(type, heightmap);
-      endDecorationSection();
+      const baseHeightmap = this.baseHeightmaps.heightmapOf(this.base, type, this.paletteInfo);
+      if (isWorldgenHeightmap(type)) {
+        heightmap = baseHeightmap;
+      } else {
+        const minY = this.base.minY;
+        const reader: HeightmapColumnReader = {
+          minY,
+          maxYExclusive: minY + this.base.height,
+          infoAt: (localX, y, localZ) => this.paletteInfo.info(this.blocks[(y - minY) * LAYER_SIZE + localZ * 16 + localX]!),
+        };
+        startDecorationSection("region.heightmap.prime");
+        const primedFrom = this.copied
+          ? this.baseHeightmaps.primeWrittenColumn(this.base, this.blocks, this.writtenIndices, type, this.paletteInfo)
+          : baseHeightmap;
+        heightmap = new ChunkHeightmap(type, reader, primedFrom);
+        endDecorationSection();
+      }
+      this.heightmaps[typeIndex] = heightmap;
     }
     return heightmap;
   }
 
   /** ProtoChunk.setBlockState: POST_FEATURES heightmaps that exist are updated (missing ones prime lazily later). */
   updateHeightmaps(localX: number, y: number, localZ: number, info: BlockStateInfo): void {
-    for (const type of HEIGHTMAP_TYPES) {
-      if (isWorldgenHeightmap(type)) continue;
-      this.heightmaps.get(type)?.update(localX, y, localZ, info);
+    for (let typeIndex = 0; typeIndex < HEIGHTMAP_TYPES.length; typeIndex++) {
+      if (isWorldgenHeightmap(HEIGHTMAP_TYPES[typeIndex]!)) continue;
+      this.heightmaps[typeIndex]?.update(localX, y, localZ, info);
     }
   }
 }
@@ -83,6 +250,8 @@ export interface DecorationRegionParams {
   blockStates: BlockStateCatalog;
   blockTags: BlockTagIndex;
   survival?: SurvivalRules;
+  /** Heightmaps of untouched base columns shared across regions (FeatureDecorator passes one; default: per region). */
+  baseHeightmaps?: BaseHeightmapCache;
 }
 
 export class DecorationRegion implements WorldGenLevel {
@@ -98,6 +267,9 @@ export class DecorationRegion implements WorldGenLevel {
   private readonly source: BaseColumnSource;
   private readonly columns = new Map<number, RegionColumn>();
   private readonly carvingMasks = new Map<string, CarvingMask>();
+  private readonly baseHeightmaps: BaseHeightmapCache;
+  private lastColumnKey = Number.NaN;
+  private lastColumn: RegionColumn | undefined;
   private palette: BlockPalette | undefined;
   private paletteInfo: PaletteBlockInfo | undefined;
   private readonly normalizedStateById: string[] = [];
@@ -118,6 +290,7 @@ export class DecorationRegion implements WorldGenLevel {
     this.blockStates = params.blockStates;
     this.blockTags = params.blockTags;
     this.survival = params.survival ?? new SurvivalRules(params.blockStates);
+    this.baseHeightmaps = params.baseHeightmaps ?? new BaseHeightmapCache();
   }
 
   private static columnKey(chunkX: number, chunkZ: number): number {
@@ -128,6 +301,7 @@ export class DecorationRegion implements WorldGenLevel {
   private column(chunkX: number, chunkZ: number): RegionColumn {
     const key = DecorationRegion.columnKey(chunkX, chunkZ);
     this.columnLookups++;
+    if (key === this.lastColumnKey) return this.lastColumn!;
     let column = this.columns.get(key);
     if (!column) {
       this.columnLoads++;
@@ -140,9 +314,11 @@ export class DecorationRegion implements WorldGenLevel {
       } else if (base.palette !== this.palette) {
         throw new Error("BaseColumnSource columns must share one BlockPalette");
       }
-      column = new RegionColumn(base, this.paletteInfo!);
+      column = new RegionColumn(base, this.paletteInfo!, this.baseHeightmaps);
       this.columns.set(key, column);
     }
+    this.lastColumnKey = key;
+    this.lastColumn = column;
     return column;
   }
 
@@ -243,6 +419,14 @@ export class DecorationRegion implements WorldGenLevel {
   /** The palette shared by every column (available once any block has been read). */
   get blockPalette(): BlockPalette | undefined {
     return this.palette;
+  }
+
+  /** Recycles the written columns' block copies. The region must not be used afterwards. */
+  releaseColumnCopies(): void {
+    for (const column of this.columns.values()) column.releaseCopy();
+    this.columns.clear();
+    this.lastColumnKey = Number.NaN;
+    this.lastColumn = undefined;
   }
 
   /** Everything written into the writable 3x3 chunks, as final values per position. */

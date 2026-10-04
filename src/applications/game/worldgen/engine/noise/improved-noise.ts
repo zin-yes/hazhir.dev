@@ -46,67 +46,82 @@ export class ImprovedNoise {
     this.permutation = permutation;
   }
 
-  /** Java `noise(x, y, z)`. */
-  noise(x: number, y: number, z: number): number {
+  // The x and z halves of the lattice lookup for the last (x, z) sampled. Density functions sample corner columns
+  // (fixed x and z, many y), so most samples reuse them; the values are the ones sampleAndLerp would compute.
+  private memoX = Number.NaN;
+  private memoZ = Number.NaN;
+  private memoCellZ = 0;
+  private memoLocalX = 0;
+  private memoLocalZ = 0;
+  private memoHashX0 = 0;
+  private memoHashX1 = 0;
+  private memoSmoothX = 0;
+  private memoSmoothZ = 0;
+
+  private prepareColumn(x: number, z: number): void {
     const shiftedX = x + this.xOffset;
-    const shiftedY = y + this.yOffset;
     const shiftedZ = z + this.zOffset;
     const cellX = Math.floor(shiftedX);
-    const cellY = Math.floor(shiftedY);
     const cellZ = Math.floor(shiftedZ);
+    const localX = shiftedX - cellX;
+    const localZ = shiftedZ - cellZ;
+    this.memoX = x;
+    this.memoZ = z;
+    this.memoCellZ = cellZ;
+    this.memoLocalX = localX;
+    this.memoLocalZ = localZ;
+    this.memoHashX0 = this.permutation[cellX & 255]!;
+    this.memoHashX1 = this.permutation[(cellX + 1) & 255]!;
+    this.memoSmoothX = smoothstep(localX);
+    this.memoSmoothZ = smoothstep(localZ);
+  }
+
+  /** Java `noise(x, y, z)`. */
+  noise(x: number, y: number, z: number): number {
+    if (x !== this.memoX || z !== this.memoZ) this.prepareColumn(x, z);
+    const shiftedY = y + this.yOffset;
+    const cellY = Math.floor(shiftedY);
     const localY = shiftedY - cellY;
-    return this.sampleAndLerp(cellX, cellY, cellZ, shiftedX - cellX, localY, shiftedZ - cellZ, localY);
+    return this.sampleAndLerp(cellY, localY, localY);
   }
 
   /** Java's deprecated `noise(x, y, z, yScale, yMax)`, used by BlendedNoise to smear the y lattice. */
   noiseWithYScale(x: number, y: number, z: number, yScale: number, yMax: number): number {
-    const shiftedX = x + this.xOffset;
+    if (x !== this.memoX || z !== this.memoZ) this.prepareColumn(x, z);
     const shiftedY = y + this.yOffset;
-    const shiftedZ = z + this.zOffset;
-    const cellX = Math.floor(shiftedX);
     const cellY = Math.floor(shiftedY);
-    const cellZ = Math.floor(shiftedZ);
     const localY = shiftedY - cellY;
     let yShift = 0.0;
     if (yScale !== 0.0) {
       const clampedY = yMax >= 0.0 && yMax < localY ? yMax : localY;
       yShift = Math.floor(clampedY / yScale + SHIFT_UP_EPSILON) * yScale;
     }
-    return this.sampleAndLerp(cellX, cellY, cellZ, shiftedX - cellX, localY - yShift, shiftedZ - cellZ, localY);
+    return this.sampleAndLerp(cellY, localY - yShift, localY);
   }
 
-  private sampleAndLerp(
-    cellX: number,
-    cellY: number,
-    cellZ: number,
-    localX: number,
-    localY: number,
-    localZ: number,
-    localYForSmoothing: number,
-  ): number {
+  /** ImprovedNoise.sampleAndLerp for the prepared (x, z) column. */
+  private sampleAndLerp(cellY: number, localY: number, localYForSmoothing: number): number {
     const permutation = this.permutation;
-    const hashX0 = permutation[cellX & 255];
-    const hashX1 = permutation[(cellX + 1) & 255];
-    const hashX0Y0 = permutation[(hashX0 + cellY) & 255];
-    const hashX0Y1 = permutation[(hashX0 + cellY + 1) & 255];
-    const hashX1Y0 = permutation[(hashX1 + cellY) & 255];
-    const hashX1Y1 = permutation[(hashX1 + cellY + 1) & 255];
-    const corner000 = gradientDot(permutation[(hashX0Y0 + cellZ) & 255], localX, localY, localZ);
-    const corner100 = gradientDot(permutation[(hashX1Y0 + cellZ) & 255], localX - 1.0, localY, localZ);
-    const corner010 = gradientDot(permutation[(hashX0Y1 + cellZ) & 255], localX, localY - 1.0, localZ);
-    const corner110 = gradientDot(permutation[(hashX1Y1 + cellZ) & 255], localX - 1.0, localY - 1.0, localZ);
-    const corner001 = gradientDot(permutation[(hashX0Y0 + cellZ + 1) & 255], localX, localY, localZ - 1.0);
-    const corner101 = gradientDot(permutation[(hashX1Y0 + cellZ + 1) & 255], localX - 1.0, localY, localZ - 1.0);
-    const corner011 = gradientDot(permutation[(hashX0Y1 + cellZ + 1) & 255], localX, localY - 1.0, localZ - 1.0);
-    const corner111 = gradientDot(
-      permutation[(hashX1Y1 + cellZ + 1) & 255],
-      localX - 1.0,
-      localY - 1.0,
-      localZ - 1.0,
-    );
-    const smoothX = smoothstep(localX);
+    const cellZ = this.memoCellZ;
+    const localX = this.memoLocalX;
+    const localZ = this.memoLocalZ;
+    const hashX0 = this.memoHashX0;
+    const hashX1 = this.memoHashX1;
+    const hashX0Y0 = permutation[(hashX0 + cellY) & 255]!;
+    const hashX0Y1 = permutation[(hashX0 + cellY + 1) & 255]!;
+    const hashX1Y0 = permutation[(hashX1 + cellY) & 255]!;
+    const hashX1Y1 = permutation[(hashX1 + cellY + 1) & 255]!;
+    const corner000 = gradientDot(permutation[(hashX0Y0 + cellZ) & 255]!, localX, localY, localZ);
+    const corner100 = gradientDot(permutation[(hashX1Y0 + cellZ) & 255]!, localX - 1.0, localY, localZ);
+    const corner010 = gradientDot(permutation[(hashX0Y1 + cellZ) & 255]!, localX, localY - 1.0, localZ);
+    const corner110 = gradientDot(permutation[(hashX1Y1 + cellZ) & 255]!, localX - 1.0, localY - 1.0, localZ);
+    const corner001 = gradientDot(permutation[(hashX0Y0 + cellZ + 1) & 255]!, localX, localY, localZ - 1.0);
+    const corner101 = gradientDot(permutation[(hashX1Y0 + cellZ + 1) & 255]!, localX - 1.0, localY, localZ - 1.0);
+    const corner011 = gradientDot(permutation[(hashX0Y1 + cellZ + 1) & 255]!, localX, localY - 1.0, localZ - 1.0);
+    const corner111 = gradientDot(permutation[(hashX1Y1 + cellZ + 1) & 255]!, localX - 1.0, localY - 1.0, localZ - 1.0);
+    const smoothX = this.memoSmoothX;
     const smoothY = smoothstep(localYForSmoothing);
-    const smoothZ = smoothstep(localZ);
+    const smoothZ = this.memoSmoothZ;
     // Mth.lerp3(dx, dy, dz, ...) = lerp(dz, lerp2(dx, dy, z0 corners), lerp2(dx, dy, z1 corners))
     return lerp(
       smoothZ,

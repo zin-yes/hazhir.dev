@@ -7,10 +7,10 @@ import { BiomeManager, MultiNoiseBiomeSource } from "../biome-source";
 import { createCarverSystem } from "../carvers";
 import { BlockPalette, ChunkBlocks, blockNameOf } from "../chunk";
 import { CarvingMask, type CarvingStep } from "../features/core/carving-mask";
-import { createSeededNoiseSources, wireNoiseRouter } from "../density";
+import { createSeededNoiseSources, type NoiseRouter, wireNoiseRouter } from "../density";
 import { createRootRandomFactory } from "../noise";
 import type { JsonObject, TagRegistry, WorldgenRegistries } from "../registry/datapack-loader";
-import { BoundedLruCache } from "./bounded-lru-cache";
+import { BoundedLruCache, packChunkColumnKey } from "./bounded-lru-cache";
 import { ChunkBiomeStore } from "./chunk-biome-store";
 import type { ColumnStage, ColumnStageContext } from "./column-stage";
 import { createCarverStage, createNoiseFillStage, createSeedSurfaceSystem, createSurfaceStage } from "./default-stages";
@@ -19,7 +19,8 @@ import { runStagesWithProfiling } from "./profiled-stage-runner";
 import { readOverworldSettings, type OverworldSettings } from "./noise-settings-reader";
 
 const MAX_CACHED_COLUMNS = 64;
-const MAX_CACHED_BIOME_CHUNKS = 64;
+// A biome grid is about 3 KB; decoration and surface rules read biomes a few chunks around every base column.
+const MAX_CACHED_BIOME_CHUNKS = 1024;
 
 export type HeightmapType = "WORLD_SURFACE_WG" | "OCEAN_FLOOR_WG";
 
@@ -37,12 +38,16 @@ export interface OverworldGeneratorParams {
 
 export interface OverworldGenerator {
   readonly settings: Pick<OverworldSettings, "minY" | "height" | "seaLevel" | "defaultBlock">;
+  /** The seeded noise router every stage samples (density functions with markers, outside any NoiseChunk). */
+  readonly router: NoiseRouter;
   /** Ordered per-column stages. Mutate before the first generateBaseColumn call (cached columns are not regenerated). */
   readonly stages: ColumnStage[];
   /** Noise fill + surface (+ any added stages) for one chunk column. The result is cached: treat it as read-only. */
   generateBaseColumn(chunkX: number, chunkZ: number): ChunkBlocks;
   rawBiomeAtQuart(quartX: number, quartY: number, quartZ: number): string;
   biomeAt(blockX: number, blockY: number, blockZ: number): string;
+  /** The distinct biomes a chunk's sections hold (what decoration's biome set reads). */
+  chunkBiomes(chunkX: number, chunkZ: number): string[];
   /** The carvers' air mask of a base column (undefined for the liquid step and when the carvers stage is absent). */
   carvingMask(chunkX: number, chunkZ: number, step: CarvingStep): CarvingMask | undefined;
   /** First free y above the highest matching block (Heightmap value), computed on the generated base column. */
@@ -69,8 +74,18 @@ export function createOverworldGenerator(params: OverworldGeneratorParams): Over
     maxCachedChunks: MAX_CACHED_BIOME_CHUNKS,
   });
   const rawBiomeAtQuart = (quartX: number, quartY: number, quartZ: number) => biomeStore.rawBiomeAtQuart(quartX, quartY, quartZ);
-  const biomeManager = new BiomeManager(rawBiomeAtQuart, seed);
+  const biomeManager = new BiomeManager(rawBiomeAtQuart, seed, (quartX, quartZ) => biomeStore.hasQuartColumn(quartX, quartZ));
   const biomeAt = (blockX: number, blockY: number, blockZ: number) => biomeManager.getBiome(blockX, blockY, blockZ);
+  const chunkBiomes = (chunkX: number, chunkZ: number) => biomeStore.chunkBiomes(chunkX, chunkZ);
+  const biomesNearChunk = (chunkX: number, chunkZ: number): ReadonlySet<string> => {
+    const biomes = new Set<string>();
+    for (let offsetX = -1; offsetX <= 1; offsetX++) {
+      for (let offsetZ = -1; offsetZ <= 1; offsetZ++) {
+        for (const biome of biomeStore.chunkBiomes(chunkX + offsetX, chunkZ + offsetZ)) biomes.add(biome);
+      }
+    }
+    return biomes;
+  };
 
   const palette = new BlockPalette();
   const rootRandomFactory = createRootRandomFactory(seed);
@@ -81,12 +96,12 @@ export function createOverworldGenerator(params: OverworldGeneratorParams): Over
     const carverSystem = createCarverSystem({ registries, blockTags, seed, rawBiomeAtQuart: carverBiomeSampler });
     stages.push(createCarverStage({ carverSystem, seedSurface, settings, router }));
   }
-  const columnCache = new BoundedLruCache<string, ChunkBlocks>(params.maxCachedColumns ?? MAX_CACHED_COLUMNS);
+  const columnCache = new BoundedLruCache<number, ChunkBlocks>(params.maxCachedColumns ?? MAX_CACHED_COLUMNS);
   const carvingMaskByColumn = new WeakMap<ChunkBlocks, CarvingMask>();
   const motionBlockingByPaletteId: boolean[] = [];
 
   const generateBaseColumn = (chunkX: number, chunkZ: number): ChunkBlocks => {
-    const key = `${chunkX},${chunkZ}`;
+    const key = packChunkColumnKey(chunkX, chunkZ);
     const cached = columnCache.get(key);
     const isProfiling = isWorkerProfiling();
     if (cached !== undefined) {
@@ -94,7 +109,18 @@ export function createOverworldGenerator(params: OverworldGeneratorParams): Over
       return cached;
     }
     const column = new ChunkBlocks(chunkX, chunkZ, settings.minY, settings.height, palette);
-    const context: ColumnStageContext = { chunkX, chunkZ, seed, settings, registries, router, aquifer: undefined, rawBiomeAtQuart, biomeAt };
+    const context: ColumnStageContext = {
+      chunkX,
+      chunkZ,
+      seed,
+      settings,
+      registries,
+      router,
+      aquifer: undefined,
+      rawBiomeAtQuart,
+      biomeAt,
+      biomesNearChunk,
+    };
     if (isProfiling) {
       addWorkerCounter("baseColumnCacheMisses", 1);
       runStagesWithProfiling(stages, column, context);
@@ -118,10 +144,12 @@ export function createOverworldGenerator(params: OverworldGeneratorParams): Over
 
   return {
     settings: { minY: settings.minY, height: settings.height, seaLevel: settings.seaLevel, defaultBlock: settings.defaultBlock },
+    router,
     stages,
     generateBaseColumn,
     rawBiomeAtQuart,
     biomeAt,
+    chunkBiomes,
     carvingMask: (chunkX, chunkZ, step) => (step === "air" ? carvingMaskByColumn.get(generateBaseColumn(chunkX, chunkZ)) : undefined),
     surfaceHeight(blockX, blockZ, heightmap) {
       const column = generateBaseColumn(blockX >> 4, blockZ >> 4);

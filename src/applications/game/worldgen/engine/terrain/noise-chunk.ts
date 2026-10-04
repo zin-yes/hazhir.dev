@@ -12,6 +12,8 @@ import {
 import { MarkerNode } from "../density/nodes/structural-nodes";
 import type { NoiseRouter } from "../density/router-wiring";
 import { CacheAllInCell, Cache2D, CacheOnce, FlatCache, NoiseInterpolator } from "./noise-chunk-caches";
+import { cellFillProgramFor } from "./cell-fill-compiler";
+import { cornerColumnSamplerFor } from "./corner-column-sampler";
 import { getNoiseChunkTemplate, type NoiseChunkTemplate } from "./noise-chunk-template";
 
 export interface NoiseChunkSettings {
@@ -38,7 +40,12 @@ class NoiseChunkWiringVisitor extends DensityVisitor {
   }
 
   map(node: DensityNode): DensityNode {
-    return this.template.containsMarker(node) ? super.map(node) : node;
+    if (!this.template.containsMarker(node)) return node;
+    const mapped = super.map(node);
+    if (node instanceof MarkerNode && node.type === "interpolated" && mapped instanceof NoiseInterpolator) {
+      mapped.templateWrapped ??= node.wrapped;
+    }
+    return mapped;
   }
 
   apply(node: DensityNode): DensityNode {
@@ -76,6 +83,10 @@ export class NoiseChunk implements FunctionContext, ContextProvider {
   interpolationCounter = 0;
   arrayInterpolationCounter = 0;
   arrayIndex = 0;
+  /** The interpolation deltas of the last updateForY / updateForX / updateForZ (interpolators read them lazily). */
+  deltaY = 0;
+  deltaX = 0;
+  deltaZ = 0;
 
   readonly sliceFillingContextProvider: ContextProvider;
 
@@ -118,6 +129,29 @@ export class NoiseChunk implements FunctionContext, ContextProvider {
       if (wiredFields.has(fieldName)) this.router[fieldName] = wiringVisitor.map(template.router[fieldName]);
     }
     this.finalDensityForFill = wiringVisitor.map(template.finalDensityForFill);
+    for (const interpolator of this.interpolators) {
+      if (interpolator.templateWrapped === undefined) continue;
+      interpolator.cornerSampler = cornerColumnSamplerFor(interpolator.templateWrapped, this.cellNoiseMinY, this.cellHeight, this.cellCountY + 1);
+    }
+    if (this.finalDensityForFill instanceof CacheAllInCell) this.attachCompiledFill(this.finalDensityForFill, template.finalDensityForFill, wiredFields);
+  }
+
+  private attachCompiledFill(cellCache: CacheAllInCell, templateRoot: DensityNode, wiredFields: ReadonlySet<string>): void {
+    const program = cellFillProgramFor(templateRoot, cellCache.wrapped, this.cellWidth, this.cellHeight, [...wiredFields].join(","));
+    if (program === null) return;
+    const interpolatorByTemplate = new Map<DensityNode, NoiseInterpolator>();
+    for (const interpolator of this.interpolators) {
+      if (interpolator.templateWrapped !== undefined) interpolatorByTemplate.set(interpolator.templateWrapped, interpolator);
+    }
+    const interpolators: NoiseInterpolator[] = [];
+    for (const interpolatorTemplate of program.interpolatorTemplates) {
+      const interpolator = interpolatorByTemplate.get(interpolatorTemplate);
+      if (interpolator === undefined) return;
+      interpolators.push(interpolator);
+    }
+    cellCache.compiledFill = program.fill;
+    cellCache.compiledFillInterpolators = interpolators;
+    cellCache.compiledFillCorners = new Float64Array(interpolators.length * 8);
   }
 
   get blockX(): number {
@@ -187,8 +221,10 @@ export class NoiseChunk implements FunctionContext, ContextProvider {
       this.inCellZ = 0;
       this.arrayInterpolationCounter++;
       for (const interpolator of this.interpolators) {
-        const column = (firstSlice ? interpolator.slice0 : interpolator.slice1)[cellOffsetZ];
-        interpolator.fillArray(column, this.sliceFillingContextProvider);
+        const column = (firstSlice ? interpolator.slice0 : interpolator.slice1)[cellOffsetZ]!;
+        const cornerSampler = interpolator.cornerSampler;
+        if (cornerSampler === null) interpolator.fillArray(column, this.sliceFillingContextProvider);
+        else cornerSampler.fill(column, this.cellStartBlockX, this.cellStartBlockZ);
       }
     }
     this.arrayInterpolationCounter++;
@@ -212,25 +248,49 @@ export class NoiseChunk implements FunctionContext, ContextProvider {
     this.cellStartBlockY = (cellY + this.cellNoiseMinY) * this.cellHeight;
     this.cellStartBlockZ = (this.firstCellZ + cellOffsetZ) * this.cellWidth;
     this.arrayInterpolationCounter++;
-    for (const cellCache of this.cellCaches) cellCache.wrapped.fillArray(cellCache.values, this);
+    for (const cellCache of this.cellCaches) {
+      const compiledFill = cellCache.compiledFill;
+      if (compiledFill === undefined) {
+        cellCache.wrapped.fillArray(cellCache.values, this);
+        continue;
+      }
+      const corners = cellCache.compiledFillCorners!;
+      const interpolators = cellCache.compiledFillInterpolators;
+      for (let index = 0; index < interpolators.length; index++) interpolators[index]!.writeCorners(corners, index * 8);
+      compiledFill(cellCache.values, corners, this.cellStartBlockY);
+    }
     this.arrayInterpolationCounter++;
     this.fillingCell = false;
   }
 
+  /**
+   * updateForY, updateForX and updateForZ in one step, for loops that only need the chunk as a context at some blocks:
+   * the interpolation counter advances once per positioned block, so cache_once still sees every block as new.
+   */
+  moveToBlockInCell(inCellX: number, inCellY: number, inCellZ: number): void {
+    this.inCellX = inCellX;
+    this.inCellY = inCellY;
+    this.inCellZ = inCellZ;
+    this.deltaX = inCellX / this.cellWidth;
+    this.deltaY = inCellY / this.cellHeight;
+    this.deltaZ = inCellZ / this.cellWidth;
+    this.interpolationCounter++;
+  }
+
   updateForY(blockY: number, deltaY: number): void {
     this.inCellY = blockY - this.cellStartBlockY;
-    for (const interpolator of this.interpolators) interpolator.updateForY(deltaY);
+    this.deltaY = deltaY;
   }
 
   updateForX(blockX: number, deltaX: number): void {
     this.inCellX = blockX - this.cellStartBlockX;
-    for (const interpolator of this.interpolators) interpolator.updateForX(deltaX);
+    this.deltaX = deltaX;
   }
 
   updateForZ(blockZ: number, deltaZ: number): void {
     this.inCellZ = blockZ - this.cellStartBlockZ;
     this.interpolationCounter++;
-    for (const interpolator of this.interpolators) interpolator.updateForZ(deltaZ);
+    this.deltaZ = deltaZ;
   }
 
   swapSlices(): void {

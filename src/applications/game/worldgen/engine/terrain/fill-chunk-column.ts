@@ -9,10 +9,12 @@ import {
   isWorkerProfiling,
   startWorkerSection,
 } from "@/applications/game/profiler/worker-recorder";
+import type { DensityNode } from "../density/density-function";
 import type { NoiseRouter } from "../density/router-wiring";
 import type { PositionalRandomFactory } from "../random";
-import { NoiseBasedAquifer, NULL_SUBSTANCE } from "./aquifer";
+import { NoiseBasedAquifer, NULL_SUBSTANCE, UNRESOLVED_SUBSTANCE } from "./aquifer";
 import { NoiseChunk } from "./noise-chunk";
+import { CacheAllInCell } from "./noise-chunk-caches";
 import { NO_VEIN, OreVeinifier } from "./ore-veinifier";
 import { getPreliminarySurfaceLevelCache } from "./preliminary-surface-level";
 import { BLOCK_AIR, BLOCK_DEFAULT_BLOCK, BLOCK_DEFAULT_FLUID, BLOCK_LAVA } from "./terrain-blocks";
@@ -227,6 +229,8 @@ interface InterpolationSettings {
 function interpolateColumn(noiseChunk: NoiseChunk, settings: InterpolationSettings): Uint8Array {
   const { aquifer, oreVeinifier, minY, height, seaLevel, chunkMinBlockX, chunkMinBlockZ, isProfiling } = settings;
   const density = noiseChunk.finalDensityForFill;
+  // doFill reads the cache_all_in_cell wrapper of the final density; its values are filled when a cell is selected.
+  const cellValues = density instanceof CacheAllInCell ? density.values : undefined;
   const cellWidth = noiseChunk.cellWidth;
   const cellHeight = noiseChunk.cellHeight;
   const cellsPerChunkSide = 16 / cellWidth;
@@ -249,30 +253,10 @@ function interpolateColumn(noiseChunk: NoiseChunk, settings: InterpolationSettin
           endWorkerSection();
           startWorkerSection("noise.interpolateBlocks");
         }
-        for (let yInCell = cellHeight - 1; yInCell >= 0; yInCell--) {
-          const blockY = (minCellY + cellY) * cellHeight + yInCell;
-          noiseChunk.updateForY(blockY, yInCell / cellHeight);
-          const rowOffset = (blockY - minY) * 256;
-          for (let xInCell = 0; xInCell < cellWidth; xInCell++) {
-            const localX = cellX * cellWidth + xInCell;
-            noiseChunk.updateForX(chunkMinBlockX + localX, xInCell / cellWidth);
-            for (let zInCell = 0; zInCell < cellWidth; zInCell++) {
-              const localZ = cellZ * cellWidth + zInCell;
-              noiseChunk.updateForZ(chunkMinBlockZ + localZ, zInCell / cellWidth);
-              const densityValue = density.compute(noiseChunk);
-              let symbol: number;
-              if (aquifer === undefined) {
-                symbol = densityValue > 0 ? BLOCK_DEFAULT_BLOCK : fluidAt(blockY, seaLevel);
-              } else {
-                symbol = aquifer.computeSubstance(noiseChunk, densityValue);
-                if (symbol === NULL_SUBSTANCE) {
-                  symbol = oreVeinifier === undefined ? NO_VEIN : oreVeinifier.compute(noiseChunk);
-                  if (symbol === NO_VEIN) symbol = BLOCK_DEFAULT_BLOCK;
-                }
-              }
-              blocks[rowOffset + localZ * 16 + localX] = symbol;
-            }
-          }
+        if (aquifer === undefined) {
+          fillCellWithoutAquifer(blocks, cellValues, noiseChunk, density, cellX, cellY, cellZ, minCellY, minY, seaLevel, chunkMinBlockX, chunkMinBlockZ);
+        } else {
+          fillCellWithAquifer(blocks, cellValues, noiseChunk, density, aquifer, oreVeinifier, cellX, cellY, cellZ, minCellY, minY, chunkMinBlockX, chunkMinBlockZ);
         }
         if (isProfiling) endWorkerSection();
       }
@@ -281,4 +265,101 @@ function interpolateColumn(noiseChunk: NoiseChunk, settings: InterpolationSettin
   }
   noiseChunk.stopInterpolation();
   return blocks;
+}
+
+/** The aquifer-free material rule for one cell's blocks (Aquifer.createDisabled with the generator's fluid picker). */
+function fillCellWithoutAquifer(
+  blocks: Uint8Array,
+  cellValues: Float64Array | undefined,
+  noiseChunk: NoiseChunk,
+  density: DensityNode,
+  cellX: number,
+  cellY: number,
+  cellZ: number,
+  minCellY: number,
+  minY: number,
+  seaLevel: number,
+  chunkMinBlockX: number,
+  chunkMinBlockZ: number,
+): void {
+  const cellWidth = noiseChunk.cellWidth;
+  const cellHeight = noiseChunk.cellHeight;
+  for (let yInCell = cellHeight - 1; yInCell >= 0; yInCell--) {
+    const blockY = (minCellY + cellY) * cellHeight + yInCell;
+    noiseChunk.updateForY(blockY, yInCell / cellHeight);
+    const rowOffset = (blockY - minY) * 256;
+    const fluid = fluidAt(blockY, seaLevel);
+    const cellRowStart = (cellHeight - 1 - yInCell) * cellWidth;
+    for (let xInCell = 0; xInCell < cellWidth; xInCell++) {
+      const localX = cellX * cellWidth + xInCell;
+      noiseChunk.updateForX(chunkMinBlockX + localX, xInCell / cellWidth);
+      const cellLineStart = (cellRowStart + xInCell) * cellWidth;
+      for (let zInCell = 0; zInCell < cellWidth; zInCell++) {
+        const localZ = cellZ * cellWidth + zInCell;
+        noiseChunk.updateForZ(chunkMinBlockZ + localZ, zInCell / cellWidth);
+        const densityValue = cellValues === undefined ? density.compute(noiseChunk) : cellValues[cellLineStart + zInCell]!;
+        blocks[rowOffset + localZ * 16 + localX] = densityValue > 0 ? BLOCK_DEFAULT_BLOCK : fluid;
+      }
+    }
+  }
+}
+
+/**
+ * doFill's material rules (aquifer, then ore veins, then the default block) for one cell's blocks. The chunk is only
+ * positioned as a context for the blocks that evaluate density functions through it (non-uniform aquifer cells and
+ * vein heights); every other block is decided from the cell values and the aquifer's cached statuses alone.
+ */
+function fillCellWithAquifer(
+  blocks: Uint8Array,
+  cellValues: Float64Array | undefined,
+  noiseChunk: NoiseChunk,
+  density: DensityNode,
+  aquifer: NoiseBasedAquifer,
+  oreVeinifier: OreVeinifier | undefined,
+  cellX: number,
+  cellY: number,
+  cellZ: number,
+  minCellY: number,
+  minY: number,
+  chunkMinBlockX: number,
+  chunkMinBlockZ: number,
+): void {
+  const cellWidth = noiseChunk.cellWidth;
+  const cellHeight = noiseChunk.cellHeight;
+  for (let yInCell = cellHeight - 1; yInCell >= 0; yInCell--) {
+    const blockY = (minCellY + cellY) * cellHeight + yInCell;
+    const rowOffset = (blockY - minY) * 256;
+    const rowMayHoldVeins = oreVeinifier !== undefined && oreVeinifier.mayHoldVeinAt(blockY);
+    const cellRowStart = (cellHeight - 1 - yInCell) * cellWidth;
+    for (let xInCell = 0; xInCell < cellWidth; xInCell++) {
+      const localX = cellX * cellWidth + xInCell;
+      const blockX = chunkMinBlockX + localX;
+      const cellLineStart = (cellRowStart + xInCell) * cellWidth;
+      for (let zInCell = 0; zInCell < cellWidth; zInCell++) {
+        const localZ = cellZ * cellWidth + zInCell;
+        const blockZ = chunkMinBlockZ + localZ;
+        let densityValue: number;
+        if (cellValues === undefined) {
+          noiseChunk.moveToBlockInCell(xInCell, yInCell, zInCell);
+          densityValue = density.compute(noiseChunk);
+        } else {
+          densityValue = cellValues[cellLineStart + zInCell]!;
+        }
+        let symbol = densityValue > 0 ? NULL_SUBSTANCE : aquifer.openBlockSubstanceWithoutContext(blockX, blockY, blockZ);
+        if (symbol === UNRESOLVED_SUBSTANCE) {
+          noiseChunk.moveToBlockInCell(xInCell, yInCell, zInCell);
+          symbol = aquifer.computeSubstanceAt(noiseChunk, densityValue, blockX, blockY, blockZ);
+        }
+        if (symbol === NULL_SUBSTANCE) {
+          symbol = BLOCK_DEFAULT_BLOCK;
+          if (rowMayHoldVeins) {
+            noiseChunk.moveToBlockInCell(xInCell, yInCell, zInCell);
+            const vein = oreVeinifier!.compute(noiseChunk);
+            if (vein !== NO_VEIN) symbol = vein;
+          }
+        }
+        blocks[rowOffset + localZ * 16 + localX] = symbol;
+      }
+    }
+  }
 }

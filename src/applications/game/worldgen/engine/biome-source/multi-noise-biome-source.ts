@@ -28,6 +28,11 @@ export class MultiNoiseBiomeSource {
     return this.parameterPoints[this.findParameterPointIndex(target)].biome;
   }
 
+  /** findBiome for quantized climate values passed directly (the offset dimension targets 0, as in TargetPoint). */
+  findBiomeForClimate(temperature: number, humidity: number, continentalness: number, erosion: number, depth: number, weirdness: number): string {
+    return this.parameterPoints[this.searchTree.searchClimate(temperature, humidity, continentalness, erosion, depth, weirdness, 0)].biome;
+  }
+
   findParameterPointIndex(target: TargetPoint): number {
     return this.searchTree.search(targetToParameterArray(target));
   }

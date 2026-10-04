@@ -28,7 +28,8 @@ export class XoroshiroRandomSource implements RandomSource {
   /** Result of the last `advance()`, as int32 halves. */
   private resultHigh = 0;
   private resultLow = 0;
-  private readonly gaussianSource = new MarsagliaPolarGaussian(this);
+  /** Created on first use: most random sources (positional ones especially) never draw a gaussian. */
+  private gaussianSource: MarsagliaPolarGaussian | undefined;
 
   /** Java `new XoroshiroRandomSource(long seed)`: upgrades the seed to 128 bits with mixStafford13. */
   constructor(seed: bigint);
@@ -154,7 +155,7 @@ export class XoroshiroRandomSource implements RandomSource {
   }
 
   nextGaussian(): number {
-    return this.gaussianSource.nextGaussian();
+    return (this.gaussianSource ??= new MarsagliaPolarGaussian(this)).nextGaussian();
   }
 
   triangle(center: number, spread: number): number {
@@ -183,11 +184,19 @@ export class XoroshiroRandomSource implements RandomSource {
 
   setSeed(seed: bigint): void {
     this.setSeedWithoutGaussianReset(seed);
-    this.gaussianSource.reset();
+    this.gaussianSource?.reset();
+  }
+
+  /** Puts this source in the state `new XoroshiroRandomSource(seedLowHigh, ...)` starts in. */
+  resetToRawState(seedLowHigh: number, seedLowLow: number, seedHighHigh: number, seedHighLow: number): void {
+    this.setRawState(seedLowHigh, seedLowLow, seedHighHigh, seedHighLow);
+    this.gaussianSource?.reset();
   }
 }
 
 const positionalScratch: Int64Halves = { high: 0, low: 0 };
+/** The source `reusedAt` hands out: one per thread, re-seeded on every call. */
+const reusedPositionalSource = new XoroshiroRandomSource(0, 0, 0, 0);
 
 /** Mirrors XoroshiroRandomSource.XoroshiroPositionalRandomFactory. */
 export class XoroshiroPositionalRandomFactory implements PositionalRandomFactory {
@@ -227,6 +236,21 @@ export class XoroshiroPositionalRandomFactory implements PositionalRandomFactory
     );
   }
 
+  /**
+   * `at(x, y, z)` without allocating: the same draws, from a shared source that the next `reusedAt` call (on any
+   * factory) re-seeds. Only for callers that finish drawing before anything else can ask for a positional random.
+   */
+  reusedAt(x: number, y: number, z: number): XoroshiroRandomSource {
+    positionalSeedInto(x, y, z, positionalScratch);
+    reusedPositionalSource.resetToRawState(
+      positionalScratch.high ^ this.seedLowHigh,
+      positionalScratch.low ^ this.seedLowLow,
+      this.seedHighHigh,
+      this.seedHighLow,
+    );
+    return reusedPositionalSource;
+  }
+
   fromHashOf(name: string): XoroshiroRandomSource {
     const words = seedWordsFromHashOf(name);
     return new XoroshiroRandomSource(
@@ -246,4 +270,13 @@ export class XoroshiroPositionalRandomFactory implements PositionalRandomFactory
       this.seedHighLow,
     );
   }
+}
+
+/**
+ * `factory.at(x, y, z)` for draws that finish right away: Xoroshiro factories hand out their shared reused source
+ * (see reusedAt), other factories a new one. The draws are identical either way.
+ */
+export function transientRandomAt<Source>(factory: { at(x: number, y: number, z: number): Source }, x: number, y: number, z: number): Source {
+  // A Xoroshiro factory's `at` returns XoroshiroRandomSource, so the reused source has the same type.
+  return factory instanceof XoroshiroPositionalRandomFactory ? (factory.reusedAt(x, y, z) as Source) : factory.at(x, y, z);
 }

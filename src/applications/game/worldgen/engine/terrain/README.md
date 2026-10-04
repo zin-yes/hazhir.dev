@@ -23,4 +23,19 @@ Noise-based terrain fill for the Terralith worldgen port, bit-identical to Minec
 The chunk-independent part of the wiring (holder unwrapping, constant folding, structural merging of markers) is done
 once per router in `noise-chunk-template.ts`; per chunk only the marker-carrying subgraph is rebuilt.
 
+Exact fast paths (each falls back to the NoiseChunk machinery when its premise does not hold for the router):
+- `corner-column-sampler.ts`: an interpolator's cell-corner columns are pure functions of the corner position when no
+  cache inside it can return a stale or quantized value (`isCornerSamplingExact`), so they are evaluated directly with
+  compiled code, and columns on chunk borders are shared with the neighbouring chunks.
+- `cell-fill-compiler.ts`: the cache_all_in_cell fill (final density from the interpolators' lerp3) as generated code.
+- `NoiseInterpolator` computes its incremental value lazily from the chunk's deltas (the same lerps), and the fill
+  loop positions the chunk as a context only for blocks that evaluate density functions through it.
+- `aquifer.ts`: an origin cell whose 12 candidate centres share one fluid status answers that fluid directly (all
+  pressures are 0); statuses are pure per chunk, so classifying them up front changes nothing.
+- `FlatCache` fills its slots on first read; `preliminary-surface-level.ts` evaluates a compiled, column-memoized
+  initial density.
+- `terrain-height-sampler.ts`: `TerrainHeightSampler.create(router, settings)` answers OCEAN_FLOOR_WG /
+  WORLD_SURFACE_WG of the aquifer-free fill for one block column from its four corner columns, evaluated lazily from
+  the top down (`terrain-height-sampler.test.ts` compares it with filled columns).
+
 Structures are not generated yet, so the beardifier evaluates to 0 (with the infinite bounds of the real `Beardifier`).

@@ -2,7 +2,8 @@
 // sampled at a slightly scaled input, normalized so the result has roughly a target deviation of 1/3.
 
 import type { RandomSource } from "../random/random-source";
-import { PerlinNoise } from "./perlin-noise";
+import { buildGeneratedFunction } from "../generated-function";
+import { PerlinNoise, wrapNoiseCoordinate } from "./perlin-noise";
 
 /** The `minecraft:noise` registry entry shape. */
 export interface NoiseParameters {
@@ -25,6 +26,7 @@ export class NormalNoise {
   private readonly valueFactor: number;
   private readonly first: PerlinNoise;
   private readonly second: PerlinNoise;
+  private compiled: ((x: number, y: number, z: number) => number) | undefined;
 
   static create(random: RandomSource, parameters: NoiseParameters): NormalNoise {
     return new NormalNoise(random, parameters, true);
@@ -51,6 +53,31 @@ export class NormalNoise {
     const octaveSpan = (highestNonZeroIndex - lowestNonZeroIndex) | 0;
     this.valueFactor = TARGET_DEVIATION_HALF / expectedDeviation(octaveSpan);
     this.maxValue = (this.first.maxValue + this.second.maxValue) * this.valueFactor;
+  }
+
+  /**
+   * getValue as one generated function with both octave stacks unrolled (the same operations in the same order), for
+   * callers that sample this noise in hot loops. Built on first use.
+   */
+  compiledGetValue(): (x: number, y: number, z: number) => number {
+    if (this.compiled === undefined) {
+      const first = this.first.unrolledSource("firstTotal", "x", "y", "z", "octaves", 0);
+      const second = this.second.unrolledSource("secondTotal", "scaledX", "scaledY", "scaledZ", "octaves", first.octaves.length);
+      const source = `return function normalNoise(x, y, z) {
+const scaledX = x * ${INPUT_FACTOR};
+const scaledY = y * ${INPUT_FACTOR};
+const scaledZ = z * ${INPUT_FACTOR};
+${first.source}
+${second.source}
+return (firstTotal + secondTotal) * ${String(this.valueFactor)};
+};`;
+      this.compiled =
+        buildGeneratedFunction<(x: number, y: number, z: number) => number>(["octaves", "wrap"], source, [
+          [...first.octaves, ...second.octaves],
+          wrapNoiseCoordinate,
+        ]) ?? ((x, y, z) => this.getValue(x, y, z));
+    }
+    return this.compiled;
   }
 
   getValue(x: number, y: number, z: number): number {

@@ -5,17 +5,22 @@ export type BlockTagRegistry = Record<string, string[]>;
 
 export class BlockTagIndex {
   private readonly membersByTag = new Map<string, ReadonlySet<string>>();
+  /** Members by the tag id exactly as callers spell it, so repeated lookups skip normalization. */
+  private readonly membersByTagSpelling = new Map<string, ReadonlySet<string>>();
 
   constructor(private readonly tags: BlockTagRegistry) {}
 
   /** Accepts "minecraft:dirt", "#minecraft:dirt" or "dirt". Unknown tags are empty, as in vanilla. */
   members(tagId: string): ReadonlySet<string> {
+    const known = this.membersByTagSpelling.get(tagId);
+    if (known !== undefined) return known;
     const normalizedTagId = normalizeTagId(tagId);
     let members = this.membersByTag.get(normalizedTagId);
     if (!members) {
       members = new Set(this.tags[normalizedTagId] ?? []);
       this.membersByTag.set(normalizedTagId, members);
     }
+    this.membersByTagSpelling.set(tagId, members);
     return members;
   }
 

@@ -1,5 +1,5 @@
 export type { PositionalRandomFactory, RandomSource } from "./random-source";
-export { XoroshiroPositionalRandomFactory, XoroshiroRandomSource } from "./xoroshiro-random-source";
+export { transientRandomAt, XoroshiroPositionalRandomFactory, XoroshiroRandomSource } from "./xoroshiro-random-source";
 export { LegacyPositionalRandomFactory, LegacyRandomSource } from "./legacy-random-source";
 export { MarsagliaPolarGaussian } from "./marsaglia-polar-gaussian";
 export {

@@ -10,14 +10,20 @@ import {
   startWorkerSection,
 } from "@/applications/game/profiler/worker-recorder";
 import type { ChunkBlocks } from "../chunk";
+import { createColumnMemoizedDensity } from "../density/column-memoization";
+import { transientRandomAt } from "../random/xoroshiro-random-source";
+import { compileDensityFunction } from "../density/density-codegen";
+import { DensityNode } from "../density/density-function";
 import type { JsonObject } from "../registry/datapack-loader";
 import { generateClayBands, CLAY_BAND_COUNT } from "./clay-bands";
 import { BiomeTemperatureSampler } from "./biome-temperature";
 import { NO_WATER_HEIGHT, SurfaceRuleContext, type SurfaceContextServices } from "./surface-rule-context";
+import type { GeneratedSurfaceRule } from "./surface-rule-codegen";
 import { compileSurfaceRules, NO_RULE_MATCH, SurfaceResultTable, type SurfaceRule } from "./surface-rule-compiler";
 import type {
   BiomeAtBlock,
   BiomeClimateLookup,
+  DensityPoint,
   SurfaceNoiseRegistry,
   SurfaceNoiseRouter,
   SurfaceNoiseSource,
@@ -60,6 +66,8 @@ export interface SurfaceChunkInputs {
   chunk: ChunkBlocks;
   router: SurfaceNoiseRouter;
   biomeAt: BiomeAtBlock;
+  /** Every biome stored in the 3x3 chunks around the chunk (lets rules skip biome checks that cannot match). */
+  biomesNearChunk?: ReadonlySet<string>;
 }
 
 export class SurfaceSystem {
@@ -82,6 +90,8 @@ export class SurfaceSystem {
   private readonly temperatureSampler: BiomeTemperatureSampler;
   private readonly preliminarySurfaceLevels = new Map<number, number>();
   private preliminaryRouter: SurfaceNoiseRouter | undefined;
+  private preliminaryDensity: SurfaceNoiseRouter["initialDensityWithoutJaggedness"] | undefined;
+  private readonly preliminaryProbe: DensityPoint = { blockX: 0, blockY: 0, blockZ: 0 };
 
   constructor(private readonly config: SurfaceSystemConfig) {
     this.minY = config.minY ?? -64;
@@ -143,7 +153,7 @@ export class SurfaceSystem {
 
   getSurfaceDepth(blockX: number, blockZ: number): number {
     const noiseValue = this.surfaceNoise.getValue(blockX, 0, blockZ);
-    const jitter = this.config.randomFactory.at(blockX, 0, blockZ).nextDouble();
+    const jitter = transientRandomAt(this.config.randomFactory, blockX, 0, blockZ).nextDouble();
     return Math.trunc(noiseValue * 2.75 + 3 + jitter * 0.25);
   }
 
@@ -156,6 +166,13 @@ export class SurfaceSystem {
     if (this.preliminaryRouter !== router) {
       this.preliminaryRouter = router;
       this.preliminarySurfaceLevels.clear();
+      const density = router.initialDensityWithoutJaggedness;
+      if (density instanceof DensityNode) {
+        const evaluate = compileDensityFunction(createColumnMemoizedDensity(density));
+        this.preliminaryDensity = { compute: (point) => evaluate(point.blockX, point.blockY, point.blockZ) };
+      } else {
+        this.preliminaryDensity = density;
+      }
     }
     const quartAlignedX = (blockX >> 2) << 2;
     const quartAlignedZ = (blockZ >> 2) << 2;
@@ -171,8 +188,13 @@ export class SurfaceSystem {
       startWorkerSection("surface.preliminaryLevel");
     }
     let level = 2147483647;
+    const density = this.preliminaryDensity!;
+    const probe = this.preliminaryProbe;
+    probe.blockX = quartAlignedX;
+    probe.blockZ = quartAlignedZ;
     for (let blockY = this.minY + this.height; blockY >= this.minY; blockY -= PRELIMINARY_SURFACE_CELL_HEIGHT) {
-      if (router.initialDensityWithoutJaggedness.compute({ blockX: quartAlignedX, blockY, blockZ: quartAlignedZ }) > INITIAL_DENSITY_SURFACE_THRESHOLD) {
+      probe.blockY = blockY;
+      if (density.compute(probe) > INITIAL_DENSITY_SURFACE_THRESHOLD) {
         level = blockY;
         break;
       }
@@ -224,6 +246,23 @@ export class SurfaceSystem {
         this.temperatureSampler.isColdEnoughToSnow(biomeId, blockX, blockY, blockZ),
     };
     const context = new SurfaceRuleContext(services, access.heightmap, biomeAt);
+    const biomeConditionSets = (this.rule as Partial<GeneratedSurfaceRule>).biomeConditionSets;
+    if (biomeConditionSets !== undefined) {
+      context.biomeConditionPossible = new Uint8Array(biomeConditionSets.length).fill(1);
+      const biomesNearChunk = inputs.biomesNearChunk;
+      if (biomesNearChunk !== undefined) {
+        biomeConditionSets.forEach((biomeIds, conditionIndex) => {
+          let isPossible = false;
+          for (const biomeId of biomeIds) {
+            if (biomesNearChunk.has(biomeId)) {
+              isPossible = true;
+              break;
+            }
+          }
+          context.biomeConditionPossible[conditionIndex] = isPossible ? 1 : 0;
+        });
+      }
+    }
     return { access, defaultBlockId, resultIdOf, context };
   }
 
@@ -235,6 +274,8 @@ export class SurfaceSystem {
     const chunkMinBlockX = chunk.chunkX * 16;
     const chunkMinBlockZ = chunk.chunkZ * 16;
     const minY = chunk.minY;
+    const maxY = chunk.maxY;
+    const blocks = chunk.blocks;
     let ruleEvaluations = 0;
     let solidBlocksScanned = 0;
 
@@ -254,8 +295,9 @@ export class SurfaceSystem {
         let stoneDepthAbove = 0;
         let waterHeight = NO_WATER_HEIGHT;
         let stoneRegionBottom = 2147483647;
+        const columnIndex = localZ * 16 + localX;
         for (let y = startY; y >= minY; y--) {
-          const blockId = access.getBlockId(localX, y, localZ);
+          const blockId = y > maxY ? 0 : blocks[(y - minY) * 256 + columnIndex]!;
           const kind = access.kindOf(blockId);
           if (kind === BLOCK_KIND_AIR) {
             stoneDepthAbove = 0;
@@ -269,7 +311,8 @@ export class SurfaceSystem {
           if (stoneRegionBottom >= y) {
             stoneRegionBottom = WAY_BELOW_MIN_Y;
             for (let belowY = y - 1; belowY >= minY - 1; belowY--) {
-              if (access.kindOf(access.getBlockId(localX, belowY, localZ)) !== BLOCK_KIND_SOLID) {
+              const belowBlockId = belowY < minY ? 0 : blocks[(belowY - minY) * 256 + columnIndex]!;
+              if (access.kindOf(belowBlockId) !== BLOCK_KIND_SOLID) {
                 stoneRegionBottom = belowY + 1;
                 break;
               }

@@ -4,11 +4,17 @@
 
 import type { RandomSource } from "../random/random-source";
 import type { ImprovedNoise } from "./improved-noise";
+import { buildGeneratedFunction } from "../generated-function";
 import { PerlinNoise, wrapNoiseCoordinate } from "./perlin-noise";
 
 const BASE_SCALE = 684.412;
 const LIMIT_OCTAVES = [-15, -14, -13, -12, -11, -10, -9, -8, -7, -6, -5, -4, -3, -2, -1, 0];
 const MAIN_OCTAVES = [-7, -6, -5, -4, -3, -2, -1, 0];
+
+function numberLiteral(value: number): string {
+  if (!Number.isFinite(value)) throw new Error(`Blended noise constant ${value} is not finite`);
+  return Object.is(value, -0) ? "(-0)" : `(${String(value)})`;
+}
 
 function clampedLerp(start: number, end: number, delta: number): number {
   if (delta < 0.0) return start;
@@ -46,8 +52,87 @@ export class BlendedNoise {
     this.minValue = -this.maxValue;
   }
 
+  private compiled: ((blockX: number, blockY: number, blockZ: number) => number) | undefined;
+
   /** Java `compute(FunctionContext)` at integer block coordinates. */
   compute(blockX: number, blockY: number, blockZ: number): number {
+    this.compiled ??= this.compileCompute();
+    return this.compiled(blockX, blockY, blockZ);
+  }
+
+  /**
+   * computeInterpreted with the octave loops unrolled: the frequencies (powers of two) and the null checks become
+   * literals, the operations and their order stay the same.
+   */
+  private compileCompute(): (blockX: number, blockY: number, blockZ: number) => number {
+    const octaves: ImprovedNoise[] = [];
+    const octaveReference = (noise: ImprovedNoise): string => {
+      octaves.push(noise);
+      return `octaves[${octaves.length - 1}]`;
+    };
+    const lines: string[] = [
+      `const limitX = blockX * ${numberLiteral(this.xzMultiplier)};`,
+      `const limitY = blockY * ${numberLiteral(this.yMultiplier)};`,
+      `const limitZ = blockZ * ${numberLiteral(this.xzMultiplier)};`,
+      `const mainX = limitX / ${numberLiteral(this.xzFactor)};`,
+      `const mainY = limitY / ${numberLiteral(this.yFactor)};`,
+      `const mainZ = limitZ / ${numberLiteral(this.xzFactor)};`,
+      `const limitSmear = ${numberLiteral(this.yMultiplier)} * ${numberLiteral(this.smearScaleMultiplier)};`,
+      `const mainSmear = limitSmear / ${numberLiteral(this.yFactor)};`,
+      "let minLimitTotal = 0.0;",
+      "let maxLimitTotal = 0.0;",
+      "let mainTotal = 0.0;",
+    ];
+    let frequency = 1.0;
+    for (let octave = 0; octave < 8; octave++) {
+      const noise = this.mainOctaves[octave];
+      if (noise !== null && noise !== undefined) {
+        const factor = numberLiteral(frequency);
+        lines.push(
+          `mainTotal += ${octaveReference(noise)}.noiseWithYScale(wrap(mainX * ${factor}), wrap(mainY * ${factor}), wrap(mainZ * ${factor}), mainSmear * ${factor}, mainY * ${factor}) / ${factor};`,
+        );
+      }
+      frequency /= 2.0;
+    }
+    lines.push("const blendFactor = (mainTotal / 10.0 + 1.0) / 2.0;");
+    lines.push("const onlyMaxLimit = blendFactor >= 1.0;");
+    lines.push("const onlyMinLimit = blendFactor <= 0.0;");
+    frequency = 1.0;
+    for (let octave = 0; octave < 16; octave++) {
+      const factor = numberLiteral(frequency);
+      lines.push("{");
+      lines.push(`const wrappedX = wrap(limitX * ${factor});`);
+      lines.push(`const wrappedY = wrap(limitY * ${factor});`);
+      lines.push(`const wrappedZ = wrap(limitZ * ${factor});`);
+      lines.push(`const smear = limitSmear * ${factor};`);
+      const minLimitNoise = this.minLimitOctaves[octave];
+      if (minLimitNoise !== null && minLimitNoise !== undefined) {
+        lines.push(
+          `if (!onlyMaxLimit) minLimitTotal += ${octaveReference(minLimitNoise)}.noiseWithYScale(wrappedX, wrappedY, wrappedZ, smear, limitY * ${factor}) / ${factor};`,
+        );
+      }
+      const maxLimitNoise = this.maxLimitOctaves[octave];
+      if (maxLimitNoise !== null && maxLimitNoise !== undefined) {
+        lines.push(
+          `if (!onlyMinLimit) maxLimitTotal += ${octaveReference(maxLimitNoise)}.noiseWithYScale(wrappedX, wrappedY, wrappedZ, smear, limitY * ${factor}) / ${factor};`,
+        );
+      }
+      lines.push("}");
+      frequency /= 2.0;
+    }
+    lines.push("return clampedLerp(minLimitTotal / 512.0, maxLimitTotal / 512.0, blendFactor) / 128.0;");
+    const source = `return function blendedNoise(blockX, blockY, blockZ) {\n${lines.join("\n")}\n};`;
+    return (
+      buildGeneratedFunction<(blockX: number, blockY: number, blockZ: number) => number>(
+        ["octaves", "wrap", "clampedLerp"],
+        source,
+        [octaves, wrapNoiseCoordinate, clampedLerp],
+      ) ?? ((blockX, blockY, blockZ) => this.computeInterpreted(blockX, blockY, blockZ))
+    );
+  }
+
+  /** The loop form of compute (reference for compileCompute). */
+  computeInterpreted(blockX: number, blockY: number, blockZ: number): number {
     const limitX = blockX * this.xzMultiplier;
     const limitY = blockY * this.yMultiplier;
     const limitZ = blockZ * this.xzMultiplier;

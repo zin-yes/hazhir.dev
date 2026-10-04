@@ -13,7 +13,7 @@ import {
   isWorkerProfiling,
   startWorkerSection,
 } from "@/applications/game/profiler/worker-recorder";
-import { BoundedLruCache } from "./engine/pipeline/bounded-lru-cache";
+import { BoundedLruCache, packChunkColumnKey } from "./engine/pipeline/bounded-lru-cache";
 import { toGameBlockOrAir } from "./engine/blocks/lenient-block-map";
 import { blockNameOf, CHUNK_COLUMN_SIZE, type ChunkBlocks } from "./engine/chunk";
 import { GAME_Y_OFFSET } from "./constants";
@@ -33,7 +33,7 @@ type GameColumn = Map<number, Uint8Array>;
 
 class SeedChunkSource {
   private readonly world: FullWorld;
-  private readonly gameColumns = new BoundedLruCache<string, GameColumn>(MAX_CACHED_GAME_COLUMNS);
+  private readonly gameColumns = new BoundedLruCache<number, GameColumn>(MAX_CACHED_GAME_COLUMNS);
   private readonly gameBlockByPaletteId: BlockType[] = [];
   private readonly unknownByPaletteId: boolean[] = [];
 
@@ -157,7 +157,7 @@ class SeedChunkSource {
       return new Uint8Array(GAME_CHUNK_VOLUME);
     }
 
-    const key = `${chunkX},${chunkZ}`;
+    const key = packChunkColumnKey(chunkX, chunkZ);
     let gameColumn = this.gameColumns.get(key);
     if (gameColumn === undefined) {
       addWorkerCounter("gameColumnCacheMisses", 1);

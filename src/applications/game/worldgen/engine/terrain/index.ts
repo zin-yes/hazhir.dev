@@ -25,3 +25,4 @@ export {
 export { NoiseBasedAquifer, NULL_SUBSTANCE } from "./aquifer";
 export { NoiseChunk, type NoiseChunkSettings } from "./noise-chunk";
 export { getPreliminarySurfaceLevelCache } from "./preliminary-surface-level";
+export { TerrainHeightSampler, type TerrainHeightSamplerSettings } from "./terrain-height-sampler";

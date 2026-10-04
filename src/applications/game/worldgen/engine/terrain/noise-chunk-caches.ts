@@ -13,6 +13,8 @@ import {
 } from "../density/density-function";
 import { MarkerNode, type MarkerType } from "../density/nodes/structural-nodes";
 import { densityCacheTypeIndex, noteDensityCacheHit, noteDensityEvaluation } from "../density/density-evaluation-counter";
+import type { CompiledCellFill } from "./cell-fill-compiler";
+import type { CornerColumnSampler } from "./corner-column-sampler";
 import type { NoiseChunk } from "./noise-chunk";
 
 const INTERPOLATED_TYPE_INDEX = densityCacheTypeIndex("interpolated");
@@ -63,6 +65,10 @@ abstract class NoiseChunkCache extends DensityNode {
 export class NoiseInterpolator extends NoiseChunkCache {
   slice0: Float64Array[];
   slice1: Float64Array[];
+  /** The template subtree this interpolator was wired from (before per-chunk caches replaced its markers). */
+  templateWrapped: DensityNode | undefined;
+  /** Fills corner columns directly when that is exact for the subtree; otherwise slices go through fillArray. */
+  cornerSampler: CornerColumnSampler | null = null;
   private noise000 = 0;
   private noise001 = 0;
   private noise100 = 0;
@@ -71,13 +77,6 @@ export class NoiseInterpolator extends NoiseChunkCache {
   private noise011 = 0;
   private noise110 = 0;
   private noise111 = 0;
-  private valueXZ00 = 0;
-  private valueXZ10 = 0;
-  private valueXZ01 = 0;
-  private valueXZ11 = 0;
-  private valueZ0 = 0;
-  private valueZ1 = 0;
-  private value = 0;
 
   constructor(chunk: NoiseChunk, wrapped: DensityNode) {
     super(chunk, "interpolated", wrapped);
@@ -91,6 +90,18 @@ export class NoiseInterpolator extends NoiseChunkCache {
     return slice;
   }
 
+  /** The selected cell's corners in lerp3 order: 000, 100, 010, 110, 001, 101, 011, 111. */
+  writeCorners(target: Float64Array, offset: number): void {
+    target[offset] = this.noise000;
+    target[offset + 1] = this.noise100;
+    target[offset + 2] = this.noise010;
+    target[offset + 3] = this.noise110;
+    target[offset + 4] = this.noise001;
+    target[offset + 5] = this.noise101;
+    target[offset + 6] = this.noise011;
+    target[offset + 7] = this.noise111;
+  }
+
   selectCellYZ(cellY: number, cellZ: number): void {
     this.noise000 = this.slice0[cellZ][cellY];
     this.noise001 = this.slice0[cellZ + 1][cellY];
@@ -102,20 +113,21 @@ export class NoiseInterpolator extends NoiseChunkCache {
     this.noise111 = this.slice1[cellZ + 1][cellY + 1];
   }
 
-  updateForY(deltaY: number): void {
-    this.valueXZ00 = lerp(deltaY, this.noise000, this.noise010);
-    this.valueXZ10 = lerp(deltaY, this.noise100, this.noise110);
-    this.valueXZ01 = lerp(deltaY, this.noise001, this.noise011);
-    this.valueXZ11 = lerp(deltaY, this.noise101, this.noise111);
-  }
-
-  updateForX(deltaX: number): void {
-    this.valueZ0 = lerp(deltaX, this.valueXZ00, this.valueXZ10);
-    this.valueZ1 = lerp(deltaX, this.valueXZ01, this.valueXZ11);
-  }
-
-  updateForZ(deltaZ: number): void {
-    this.value = lerp(deltaZ, this.valueZ0, this.valueZ1);
+  /**
+   * The value Java's updateForY / updateForX / updateForZ leave behind, computed on demand from the chunk's current
+   * deltas (the same lerps in the same order, so the same doubles).
+   */
+  private incrementalValue(): number {
+    const chunk = this.chunk;
+    const deltaY = chunk.deltaY;
+    const deltaX = chunk.deltaX;
+    const valueXZ00 = lerp(deltaY, this.noise000, this.noise010);
+    const valueXZ10 = lerp(deltaY, this.noise100, this.noise110);
+    const valueXZ01 = lerp(deltaY, this.noise001, this.noise011);
+    const valueXZ11 = lerp(deltaY, this.noise101, this.noise111);
+    const valueZ0 = lerp(deltaX, valueXZ00, valueXZ10);
+    const valueZ1 = lerp(deltaX, valueXZ01, valueXZ11);
+    return lerp(chunk.deltaZ, valueZ0, valueZ1);
   }
 
   swapSlices(): void {
@@ -131,7 +143,7 @@ export class NoiseInterpolator extends NoiseChunkCache {
     if (!chunk.interpolating) throw new Error("Trying to sample interpolator outside the interpolation loop");
     if (!chunk.fillingCell) {
       noteDensityCacheHit(INTERPOLATED_TYPE_INDEX);
-      return this.value;
+      return this.incrementalValue();
     }
     // Mth.lerp3(dx, dy, dz, ...) = lerp(dz, lerp2(dx, dy, c000, c100, c010, c110), lerp2(dx, dy, c001, c101, c011, c111)).
     const deltaX = chunk.inCellX / chunk.cellWidth;
@@ -148,34 +160,40 @@ export class NoiseInterpolator extends NoiseChunkCache {
   }
 }
 
-/** NoiseChunk.FlatCache: the wrapped function sampled once per quart column at (quartX * 4, 0, quartZ * 4). */
+/**
+ * NoiseChunk.FlatCache: the wrapped function sampled once per quart column at (quartX * 4, 0, quartZ * 4). Java fills
+ * every slot when the chunk is wired; the wrapped function is pure, so a filling cache computes each slot on its first
+ * read instead (many flat caches are only read by cell-corner columns, which are sampled without the chunk's caches).
+ */
 export class FlatCache extends NoiseChunkCache {
   readonly values: Float64Array;
+  private readonly slotIsPending: Uint8Array;
   private readonly sideLength: number;
 
   constructor(chunk: NoiseChunk, wrapped: DensityNode, fill: boolean) {
     super(chunk, "flat_cache", wrapped);
     this.sideLength = chunk.noiseSizeXZ + 1;
     this.values = new Float64Array(this.sideLength * this.sideLength);
-    if (fill) {
-      for (let quartOffsetX = 0; quartOffsetX < this.sideLength; quartOffsetX++) {
-        const blockX = (chunk.firstNoiseX + quartOffsetX) << 2;
-        for (let quartOffsetZ = 0; quartOffsetZ < this.sideLength; quartOffsetZ++) {
-          const blockZ = (chunk.firstNoiseZ + quartOffsetZ) << 2;
-          this.values[quartOffsetX * this.sideLength + quartOffsetZ] = wrapped.compute(new SinglePointContext(blockX, 0, blockZ));
-        }
-      }
-    }
+    this.slotIsPending = new Uint8Array(this.sideLength * this.sideLength).fill(fill ? 1 : 0);
   }
 
   compute(context: FunctionContext): number {
-    const quartOffsetX = (context.blockX >> 2) - this.chunk.firstNoiseX;
-    const quartOffsetZ = (context.blockZ >> 2) - this.chunk.firstNoiseZ;
+    const chunk = this.chunk;
+    const quartOffsetX = (context.blockX >> 2) - chunk.firstNoiseX;
+    const quartOffsetZ = (context.blockZ >> 2) - chunk.firstNoiseZ;
     const sideLength = this.sideLength;
     noteDensityEvaluation(FLAT_CACHE_TYPE_INDEX);
     if (quartOffsetX >= 0 && quartOffsetZ >= 0 && quartOffsetX < sideLength && quartOffsetZ < sideLength) {
-      noteDensityCacheHit(FLAT_CACHE_TYPE_INDEX);
-      return this.values[quartOffsetX * sideLength + quartOffsetZ];
+      const slot = quartOffsetX * sideLength + quartOffsetZ;
+      if (this.slotIsPending[slot] === 1) {
+        const blockX = (chunk.firstNoiseX + quartOffsetX) << 2;
+        const blockZ = (chunk.firstNoiseZ + quartOffsetZ) << 2;
+        this.values[slot] = this.wrapped.compute(new SinglePointContext(blockX, 0, blockZ));
+        this.slotIsPending[slot] = 0;
+      } else {
+        noteDensityCacheHit(FLAT_CACHE_TYPE_INDEX);
+      }
+      return this.values[slot]!;
     }
     return this.wrapped.compute(context);
   }
@@ -256,6 +274,10 @@ export class CacheOnce extends NoiseChunkCache {
 /** NoiseChunk.CacheAllInCell: every block of the current cell, filled in bulk when the cell is selected. */
 export class CacheAllInCell extends NoiseChunkCache {
   readonly values: Float64Array;
+  /** Compiled whole-cell fill and the interpolators whose corners it reads (see cell-fill-compiler.ts). */
+  compiledFill: CompiledCellFill | undefined;
+  compiledFillInterpolators: NoiseInterpolator[] = [];
+  compiledFillCorners: Float64Array | undefined;
 
   constructor(chunk: NoiseChunk, wrapped: DensityNode) {
     super(chunk, "cache_all_in_cell", wrapped);

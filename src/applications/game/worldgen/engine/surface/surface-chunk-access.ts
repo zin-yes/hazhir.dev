@@ -12,7 +12,8 @@ export type BlockKind = 0 | 1 | 2 | 3;
 
 export class SurfaceChunkAccess {
   readonly heightmap: ChunkWorldSurfaceHeightmap;
-  private readonly kindsById: BlockKind[] = [];
+  /** BlockKind per palette id; BLOCK_KIND_UNKNOWN until classified. */
+  private kindsById = new Uint8Array(64);
   private readonly namesById: string[] = [];
 
   constructor(readonly chunk: ChunkBlocks) {
@@ -34,14 +35,22 @@ export class SurfaceChunkAccess {
 
   /** Air, fluid or solid, where "solid" means any block that is neither air nor a fluid (SurfaceSystem.isStone). */
   kindOf(blockId: number): BlockKind {
-    let kind = this.kindsById[blockId] ?? BLOCK_KIND_UNKNOWN;
-    if (kind === BLOCK_KIND_UNKNOWN) {
-      const name = this.nameOf(blockId);
-      if (name === "minecraft:air" || name === "minecraft:cave_air" || name === "minecraft:void_air") kind = BLOCK_KIND_AIR;
-      else if (name === "minecraft:water" || name === "minecraft:lava") kind = BLOCK_KIND_FLUID;
-      else kind = BLOCK_KIND_SOLID;
-      this.kindsById[blockId] = kind;
+    const kind = blockId < this.kindsById.length ? (this.kindsById[blockId] as BlockKind) : BLOCK_KIND_UNKNOWN;
+    return kind === BLOCK_KIND_UNKNOWN ? this.classify(blockId) : kind;
+  }
+
+  private classify(blockId: number): BlockKind {
+    const name = this.nameOf(blockId);
+    let kind: BlockKind;
+    if (name === "minecraft:air" || name === "minecraft:cave_air" || name === "minecraft:void_air") kind = BLOCK_KIND_AIR;
+    else if (name === "minecraft:water" || name === "minecraft:lava") kind = BLOCK_KIND_FLUID;
+    else kind = BLOCK_KIND_SOLID;
+    if (blockId >= this.kindsById.length) {
+      const grown = new Uint8Array(Math.max(blockId + 1, this.kindsById.length * 2));
+      grown.set(this.kindsById);
+      this.kindsById = grown;
     }
+    this.kindsById[blockId] = kind;
     return kind;
   }
 
