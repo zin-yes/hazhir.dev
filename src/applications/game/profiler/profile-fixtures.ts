@@ -153,6 +153,15 @@ function ingestSimulatedTask(profiler: Profiler, task: SimulatedWorkerTask, comp
       executionMs: task.executionMs,
       sectionSelfMs: task.sectionSelfMs,
       counters: task.counters,
+      callTree: Object.entries(task.sectionSelfMs).map(([path, selfMs]) => ({
+        path,
+        calls: 1,
+        totalMs: selfMs,
+        selfMs,
+        maxMs: selfMs,
+        estimated: false,
+      })),
+      breakdowns: {},
     },
   });
 }

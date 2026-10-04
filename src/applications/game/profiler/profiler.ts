@@ -1,9 +1,14 @@
+import { CallTreeRecorder } from "./call-tree-recorder";
 import { MeshRegistry } from "./mesh-aggregate";
 import { RollingStat } from "./rolling-stat";
 import {
   PROFILE_SCHEMA_VERSION,
+  type BreakdownEntry,
+  type BreakdownSummary,
   type BrowserEvent,
   type ByteSummary,
+  type CallTree,
+  type CallTreeNode,
   type CounterSummary,
   type FrameNotes,
   type FrameSummary,
@@ -12,8 +17,11 @@ import {
   type MetricDomain,
   type ProfileSnapshot,
   type ProfilerSettings,
+  type SamplingSummary,
   type SessionInfo,
   type TimerSummary,
+  type TraceCapture,
+  type TraceTrack,
   type WorkerPoolSummary,
   type WorstFrame,
 } from "./types";
@@ -26,6 +34,8 @@ const EVENT_CAPACITY = 200;
 const GAUGE_HISTORY_CAPACITY = 120;
 const SAMPLER_INTERVAL_MS = 1000;
 const MAX_STACK_DEPTH = 64;
+const MAX_MAIN_TRACE_SPANS = 60000;
+const MAX_WORKER_TRACE_SPANS_PER_TRACK = 20000;
 
 interface TimerEntry {
   name: string;
@@ -60,6 +70,7 @@ interface PoolEntry {
 
 export type ProfilerClock = () => number;
 
+
 /**
  * Main-thread profiler. Every recording method is a cheap early return while
  * the profiler is disabled, so instrumentation can stay in production code.
@@ -92,6 +103,15 @@ export class Profiler {
   private stackChildMs = new Float64Array(MAX_STACK_DEPTH);
   private depth = 0;
 
+  private mainTree: CallTreeRecorder;
+  private workerTrees = new Map<string, CallTreeRecorder>();
+  private workerBreakdowns: CallTreeRecorder;
+  private traceEnabled = false;
+  private traceOriginEpochMs = 0;
+  private traceTracks = new Map<string, TraceTrack>();
+  private traceDroppedSpans = 0;
+  private samplingSummaryProvider: (() => SamplingSummary | null) | null = null;
+
   private frameId = 0;
   private lastFrameBeginMs: number | null = null;
   private frameCallbackStartedAtMs = 0;
@@ -115,6 +135,8 @@ export class Profiler {
 
   constructor(clock: ProfilerClock = () => performance.now()) {
     this.clock = clock;
+    this.mainTree = new CallTreeRecorder(clock);
+    this.workerBreakdowns = new CallTreeRecorder(clock);
   }
 
   now(): number {
@@ -131,6 +153,7 @@ export class Profiler {
       this.startSamplers();
     } else {
       this.stopSamplers();
+      this.mainTree.endTo(0);
       this.depth = 0;
     }
     this.enabledListeners.forEach((listener) => listener(enabled));
@@ -157,6 +180,12 @@ export class Profiler {
     this.gauges.clear();
     this.events = [];
     this.meshes.reset();
+    this.mainTree = new CallTreeRecorder(() => this.clock(), this.mainTreeOptions());
+    this.workerTrees.clear();
+    this.workerBreakdowns.reset();
+    this.traceTracks.clear();
+    this.traceDroppedSpans = 0;
+    this.traceOriginEpochMs = performance.timeOrigin + this.startedAtMs;
     this.pools.forEach((pool) => {
       pool.tasksCompleted = 0;
       pool.tasksFailed = 0;
@@ -181,12 +210,13 @@ export class Profiler {
   // ------------------------------------------------------------------- scopes
 
   /** Starts a synchronous main-thread scope. Returns a token for end(). */
-  begin(name: string): number {
+  begin(name: string, dimension?: string, key?: string): number {
     if (!this.enabled || this.depth >= MAX_STACK_DEPTH) return 0;
     const slot = this.depth++;
     this.stackNames[slot] = name;
-    this.stackStartedAtMs[slot] = this.clock();
     this.stackChildMs[slot] = 0;
+    this.mainTree.begin(name, dimension, key);
+    this.stackStartedAtMs[slot] = this.clock();
     return this.depth;
   }
 
@@ -197,9 +227,9 @@ export class Profiler {
     this.closeTopScope(now);
   }
 
-  measure<Result>(name: string, run: () => Result): Result {
+  measure<Result>(name: string, run: () => Result, dimension?: string, key?: string): Result {
     if (!this.enabled) return run();
-    const token = this.begin(name);
+    const token = this.begin(name, dimension, key);
     try {
       return run();
     } finally {
@@ -247,7 +277,78 @@ export class Profiler {
       entry.parent = this.stackNames[this.depth - 1];
       this.stackChildMs[this.depth - 1] += durationMs;
     }
+    this.mainTree.addLeaf(name, durationMs);
     this.addFrameSelf(name, durationMs);
+  }
+
+  // -------------------------------------------- breakdowns, call trees, trace
+
+  /** Attributes units of work and/or time to a key of a breakdown dimension (per biome, per block, ...). */
+  recordBreakdown(
+    dimension: string,
+    key: string,
+    amounts: { units?: number; calls?: number; selfMs?: number; totalMs?: number },
+  ) {
+    if (!this.enabled) return;
+    this.mainTree.addKeyed(dimension, key, amounts);
+  }
+
+  /** Merges a finished worker call tree into the tree for `<pool>.<method>`. */
+  ingestWorkerCallTree(root: string, nodes: CallTreeNode[]) {
+    if (!this.enabled || nodes.length === 0) return;
+    this.workerRecorderFor(root).mergeNodes(nodes);
+  }
+
+  ingestWorkerBreakdowns(breakdowns: { [dimension: string]: BreakdownEntry[] }) {
+    if (!this.enabled) return;
+    for (const [dimension, entries] of Object.entries(breakdowns)) {
+      this.workerBreakdowns.mergeBreakdowns(dimension, entries);
+    }
+  }
+
+  get isTracing(): boolean {
+    return this.traceEnabled;
+  }
+
+  /** Starts or stops capturing timeline spans. Takes effect from the next reset or enable. */
+  setTracing(enabled: boolean) {
+    this.traceEnabled = enabled;
+    this.mainTree = new CallTreeRecorder(() => this.clock(), this.mainTreeOptions());
+    this.traceTracks.clear();
+    this.traceDroppedSpans = 0;
+    this.traceOriginEpochMs = performance.timeOrigin + this.clock();
+  }
+
+  /**
+   * Adds a worker task's spans to the timeline. `executionStartedAtEpochMs`
+   * places the task's relative spans on the shared epoch clock.
+   */
+  ingestWorkerSpans(
+    trackName: string,
+    executionStartedAtEpochMs: number,
+    spans: { name: string; startMs: number; durationMs: number; depth: number }[],
+    droppedSpans: number,
+  ) {
+    if (!this.enabled || !this.traceEnabled) return;
+    let track = this.traceTracks.get(trackName);
+    if (!track) {
+      track = { name: trackName, spans: [] };
+      this.traceTracks.set(trackName, track);
+    }
+    const offsetMs = executionStartedAtEpochMs - this.traceOriginEpochMs;
+    for (const span of spans) {
+      if (track.spans.length >= MAX_WORKER_TRACE_SPANS_PER_TRACK) {
+        this.traceDroppedSpans++;
+        continue;
+      }
+      track.spans.push({ ...span, startMs: span.startMs + offsetMs });
+    }
+    this.traceDroppedSpans += droppedSpans;
+  }
+
+  /** Registers the provider of JS Self-Profiling results included in snapshots. */
+  setSamplingSummaryProvider(provider: (() => SamplingSummary | null) | null) {
+    this.samplingSummaryProvider = provider;
   }
 
   // ------------------------------------------------- counters, gauges, bytes
@@ -423,6 +524,10 @@ export class Profiler {
       workerPools: this.buildPoolSummaries(now),
       meshes: this.meshes.summary(now),
       events: [...this.events],
+      callTrees: this.buildCallTrees(),
+      breakdowns: this.buildBreakdowns(),
+      trace: this.buildTrace(),
+      sampling: this.samplingSummaryProvider?.() ?? null,
     };
   }
 
@@ -431,6 +536,7 @@ export class Profiler {
   private closeTopScope(now: number) {
     const slot = this.depth - 1;
     const name = this.stackNames[slot];
+    this.mainTree.end();
     const durationMs = now - this.stackStartedAtMs[slot];
     const selfMs = Math.max(0, durationMs - this.stackChildMs[slot]);
     this.depth--;
@@ -443,6 +549,48 @@ export class Profiler {
       this.stackChildMs[slot - 1] += durationMs;
     }
     this.addFrameSelf(name, selfMs);
+  }
+
+  private mainTreeOptions() {
+    return { maxSpans: this.traceEnabled ? MAX_MAIN_TRACE_SPANS : 0 };
+  }
+
+  private workerRecorderFor(root: string): CallTreeRecorder {
+    let recorder = this.workerTrees.get(root);
+    if (!recorder) {
+      recorder = new CallTreeRecorder(() => this.clock());
+      this.workerTrees.set(root, recorder);
+    }
+    return recorder;
+  }
+
+  private buildCallTrees(): CallTree[] {
+    const trees: CallTree[] = [];
+    const main = this.mainTree.toCallTree("main", "main");
+    if (main.nodes.length > 0) trees.push(main);
+    for (const [root, recorder] of this.workerTrees) {
+      trees.push(recorder.toCallTree(root, "worker"));
+    }
+    return trees;
+  }
+
+  private buildBreakdowns(): BreakdownSummary[] {
+    return [
+      ...this.mainTree.toBreakdowns("main"),
+      ...this.workerBreakdowns.toBreakdowns("worker"),
+    ];
+  }
+
+  private buildTrace(): TraceCapture | null {
+    if (!this.traceEnabled) return null;
+    const main = this.mainTree.peekSpans();
+    const tracks: TraceTrack[] = [{ name: "main", spans: main.spans }];
+    this.traceTracks.forEach((track) => tracks.push(track));
+    return {
+      originEpochMs: this.traceOriginEpochMs,
+      tracks,
+      droppedSpans: this.traceDroppedSpans + main.droppedSpans,
+    };
   }
 
   private getTimer(name: string, domain: MetricDomain): TimerEntry {

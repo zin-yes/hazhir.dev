@@ -63,6 +63,7 @@ export class WorkerPool {
       id: number;
       method: string;
       isProfiled: boolean;
+      workerTrackName: string;
       enqueuedAtMs: number;
       queueDepthAtEnqueue: number;
       dispatchedAtMs: number;
@@ -213,6 +214,7 @@ export class WorkerPool {
       id,
       method: task.method,
       isProfiled,
+      workerTrackName: `${this.name} worker ${this.workers.indexOf(worker)}`,
       enqueuedAtMs: task.enqueuedAtMs || dispatchedAtMs,
       queueDepthAtEnqueue: task.queueDepthAtEnqueue,
       dispatchedAtMs,
@@ -226,7 +228,13 @@ export class WorkerPool {
         `main.workerPost.${this.name}.${task.method}`,
       );
       worker.postMessage(
-        { id, method: task.method, params: request.params, profile: true },
+        {
+          id,
+          method: task.method,
+          params: request.params,
+          profile: true,
+          trace: profiler.isTracing,
+        },
         transfer,
       );
       profiler.end(postScope);
@@ -290,6 +298,7 @@ export class WorkerPool {
           queueDepthAtEnqueue: task.queueDepthAtEnqueue,
           workerProfile: profile ?? null,
           workerResultPostMs: null,
+          workerTrackName: task.workerTrackName,
         };
         const isTailExpected = profile && !error;
         if (isTailExpected) {

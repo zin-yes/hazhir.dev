@@ -44,6 +44,8 @@ function plausibleWorkerProfile(executionMs: number): WorkerTaskProfile {
     executionFinishedAtEpochMs: nowEpochMs + executionMs,
     executionMs,
     sectionSelfMs: { faceGeneration: executionMs * 0.8 },
+    callTree: [],
+    breakdowns: {},
     counters: { facesEmitted: 120 },
   };
 }

@@ -150,6 +150,8 @@ describe("ingestWorkerTask", () => {
         executionFinishedAtEpochMs: 5044,
         executionMs: 40,
         sectionSelfMs: { faceLoop: 30, pack: 10 },
+        callTree: [],
+        breakdowns: {},
         counters: { facesEmitted: 5000 },
       },
     };

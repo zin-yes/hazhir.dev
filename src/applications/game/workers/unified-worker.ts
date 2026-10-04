@@ -14,7 +14,7 @@ const workerScope = self as unknown as {
 addEventListener("message", async (event: MessageEvent) => {
   const { id, method, params } = event.data;
   const isProfiling = event.data.profile === true;
-  beginWorkerTask(isProfiling);
+  beginWorkerTask(isProfiling, event.data.trace === true);
   try {
     let result;
     let transfer: Transferable[] = [];

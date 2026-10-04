@@ -9,10 +9,15 @@
  *   const profile = finishWorkerTask(); // null when profiling was not requested
  *
  * When profiling is off every call is a cheap no-op, so sections can stay in
- * production code. Do not wrap sub-0.1ms operations in sections: browsers
- * clamp performance.now() (typically 100 microseconds), so wrap whole phases
- * and use counters for per-item work.
+ * production code. Browsers clamp performance.now() (typically 100
+ * microseconds), so wrap whole phases with workerSection, wrap hot loops that
+ * run thousands of times with workerSampledSection (exact call counts, timing
+ * on a sample, rest estimated), and use counters for per-item work. Pass a
+ * dimension and key to attribute a section to a biome, feature, block, etc.
  */
+
+import { CallTreeRecorder } from "./call-tree-recorder";
+import type { BreakdownEntry, CallTreeNode, TraceSpan } from "./types";
 
 export interface WorkerTaskProfile {
   /** Epoch milliseconds when the worker's message handler started. */
@@ -24,6 +29,13 @@ export interface WorkerTaskProfile {
   sectionSelfMs: { [sectionName: string]: number };
   /** Units of work done by the task (blocks scanned, faces emitted, ...). */
   counters: { [counterName: string]: number };
+  /** Every section as a call tree: calls, inclusive and self time per path. */
+  callTree: CallTreeNode[];
+  /** Cost grouped by domain key, by dimension (e.g. "worldgen.biome"). */
+  breakdowns: { [dimension: string]: BreakdownEntry[] };
+  /** Section intervals relative to executionStartedAtEpochMs; present only when tracing. */
+  spans?: TraceSpan[];
+  droppedSpans?: number;
 }
 
 /** Sent by the worker right after a result message has been posted. */
@@ -37,6 +49,8 @@ export interface WorkerRequestMessage {
   params?: unknown[];
   /** True when the main thread wants a WorkerTaskProfile with the result. */
   profile?: boolean;
+  /** True when the profile should also carry timeline spans. */
+  trace?: boolean;
 }
 
 export interface WorkerResponseMessage {
@@ -48,18 +62,14 @@ export interface WorkerResponseMessage {
   resultTail?: WorkerResultTail;
 }
 
-interface ActiveSection {
-  name: string;
-  startedAtMs: number;
-  childMs: number;
-}
+const MAX_TRACE_SPANS_PER_TASK = 2000;
 
 interface ActiveTask {
   receivedAtEpochMs: number;
   executionStartedAtMs: number;
-  sections: { [sectionName: string]: number };
+  recorder: CallTreeRecorder;
   counters: { [counterName: string]: number };
-  stack: ActiveSection[];
+  isTracing: boolean;
 }
 
 let activeTask: ActiveTask | null = null;
@@ -72,44 +82,80 @@ export function isWorkerProfiling(): boolean {
   return activeTask !== null;
 }
 
-export function beginWorkerTask(profilingRequested: boolean) {
+export function beginWorkerTask(profilingRequested: boolean, traceRequested = false) {
   if (!profilingRequested) {
     activeTask = null;
     return;
   }
+  const executionStartedAtMs = performance.now();
   activeTask = {
     receivedAtEpochMs: workerEpochMs(),
-    executionStartedAtMs: performance.now(),
-    sections: {},
+    executionStartedAtMs,
+    recorder: new CallTreeRecorder(() => performance.now(), {
+      maxSpans: traceRequested ? MAX_TRACE_SPANS_PER_TASK : 0,
+    }),
     counters: {},
-    stack: [],
+    isTracing: traceRequested,
   };
 }
 
-export function startWorkerSection(name: string) {
-  if (!activeTask) return;
-  activeTask.stack.push({ name, startedAtMs: performance.now(), childMs: 0 });
+/**
+ * Opens a section. Pass `dimension` and `key` to also attribute the section's
+ * self time to a breakdown, for example ("worldgen.biome", biomeName). Both
+ * are plain strings so no object is allocated on the hot path.
+ */
+export function startWorkerSection(name: string, dimension?: string, key?: string) {
+  activeTask?.recorder.begin(name, dimension, key);
+}
+
+/**
+ * Opens a section on a loop too hot to time on every call (under about 10
+ * microseconds per call). Counts every call, times one in `sampleEvery`, and
+ * reports the rest as estimates from the running mean.
+ */
+export function startWorkerSampledSection(
+  name: string,
+  sampleEvery = 32,
+  dimension?: string,
+  key?: string,
+) {
+  activeTask?.recorder.begin(name, dimension, key, sampleEvery);
 }
 
 export function endWorkerSection() {
-  const task = activeTask;
-  if (!task) return;
-  const section = task.stack.pop();
-  if (!section) return;
-  const durationMs = performance.now() - section.startedAtMs;
-  task.sections[section.name] =
-    (task.sections[section.name] ?? 0) + (durationMs - section.childMs);
-  const parent = task.stack[task.stack.length - 1];
-  if (parent) parent.childMs += durationMs;
+  activeTask?.recorder.end();
 }
 
-export function workerSection<Result>(name: string, run: () => Result): Result {
-  if (!activeTask) return run();
-  startWorkerSection(name);
+export function workerSection<Result>(
+  name: string,
+  run: () => Result,
+  dimension?: string,
+  key?: string,
+): Result {
+  const task = activeTask;
+  if (!task) return run();
+  task.recorder.begin(name, dimension, key);
   try {
     return run();
   } finally {
-    endWorkerSection();
+    task.recorder.end();
+  }
+}
+
+export function workerSampledSection<Result>(
+  name: string,
+  run: () => Result,
+  sampleEvery = 32,
+  dimension?: string,
+  key?: string,
+): Result {
+  const task = activeTask;
+  if (!task) return run();
+  task.recorder.begin(name, dimension, key, sampleEvery);
+  try {
+    return run();
+  } finally {
+    task.recorder.end();
   }
 }
 
@@ -118,18 +164,44 @@ export function addWorkerCounter(name: string, amount: number) {
   activeTask.counters[name] = (activeTask.counters[name] ?? 0) + amount;
 }
 
+/** Attributes units of work to a breakdown key without timing anything (blocks per type, placements per feature). */
+export function addWorkerKeyedUnits(dimension: string, key: string, units: number) {
+  activeTask?.recorder.addKeyed(dimension, key, { units });
+}
+
 export function finishWorkerTask(): WorkerTaskProfile | null {
   const task = activeTask;
   activeTask = null;
   if (!task) return null;
+  task.recorder.endTo(0);
   const finishedAtMs = performance.now();
-  return {
+  const callTree = task.recorder.toCallTree("task", "worker").nodes;
+
+  const sectionSelfMs: { [sectionName: string]: number } = {};
+  for (const node of callTree) {
+    const leafName = node.path.slice(node.path.lastIndexOf(">") + 1);
+    sectionSelfMs[leafName] = (sectionSelfMs[leafName] ?? 0) + node.selfMs;
+  }
+
+  const breakdowns: WorkerTaskProfile["breakdowns"] = {};
+  for (const summary of task.recorder.toBreakdowns("worker")) {
+    breakdowns[summary.dimension] = summary.entries;
+  }
+
+  const profile: WorkerTaskProfile = {
     receivedAtEpochMs: task.receivedAtEpochMs,
-    executionStartedAtEpochMs:
-      performance.timeOrigin + task.executionStartedAtMs,
+    executionStartedAtEpochMs: performance.timeOrigin + task.executionStartedAtMs,
     executionFinishedAtEpochMs: performance.timeOrigin + finishedAtMs,
     executionMs: finishedAtMs - task.executionStartedAtMs,
-    sectionSelfMs: task.sections,
+    sectionSelfMs,
     counters: task.counters,
+    callTree,
+    breakdowns,
   };
+  if (task.isTracing) {
+    const { spans, droppedSpans } = task.recorder.takeSpans();
+    profile.spans = spans;
+    profile.droppedSpans = droppedSpans;
+  }
+  return profile;
 }

@@ -22,6 +22,8 @@ export interface WorkerTaskRecord {
   workerProfile: WorkerTaskProfile | null;
   /** Worker time spent inside postMessage for the result (structured clone). */
   workerResultPostMs: number | null;
+  /** Timeline track for the worker that ran the task, e.g. "mesh worker 2". */
+  workerTrackName?: string;
 }
 
 /**
@@ -50,6 +52,16 @@ export function ingestWorkerTask(profiler: Profiler, record: WorkerTaskRecord) {
   }
 
   profiler.recordPoolTask(record.poolName, workerProfile.executionMs, record.failed);
+  profiler.ingestWorkerCallTree(prefix, workerProfile.callTree);
+  profiler.ingestWorkerBreakdowns(workerProfile.breakdowns);
+  if (workerProfile.spans) {
+    profiler.ingestWorkerSpans(
+      record.workerTrackName ?? `${record.poolName} worker`,
+      workerProfile.executionStartedAtEpochMs,
+      workerProfile.spans,
+      workerProfile.droppedSpans ?? 0,
+    );
+  }
   profiler.recordTimer(`worker.${prefix}.exec`, workerProfile.executionMs, "worker-cpu");
   for (const [sectionName, selfMs] of Object.entries(workerProfile.sectionSelfMs)) {
     profiler.recordTimer(`worker.${prefix}.${sectionName}`, selfMs, "worker-cpu");

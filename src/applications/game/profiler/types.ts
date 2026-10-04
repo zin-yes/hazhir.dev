@@ -4,7 +4,7 @@
  * overlay, posted to the dev API route, and read by an agent from disk.
  */
 
-export const PROFILE_SCHEMA_VERSION = 1;
+export const PROFILE_SCHEMA_VERSION = 2;
 
 /**
  * Where a measured cost lands:
@@ -176,6 +176,87 @@ export interface SessionInfo {
   game: { [key: string]: number | string };
 }
 
+/**
+ * One node of an aggregated call tree. `path` joins ancestor names with ">",
+ * so the node tree is rebuilt by splitting on it. Times are milliseconds.
+ */
+export interface CallTreeNode {
+  path: string;
+  calls: number;
+  totalMs: number;
+  selfMs: number;
+  maxMs: number;
+  /** True when the time was extrapolated from sampled calls instead of timed on every call. */
+  estimated: boolean;
+}
+
+/** Aggregated call tree of one thread or one worker pool method. */
+export interface CallTree {
+  /** "main" or "<pool>.<method>". */
+  root: string;
+  thread: "main" | "worker";
+  nodes: CallTreeNode[];
+  /** Nodes that did not fit in the node cap; their time is in `<other>`. */
+  droppedNodes: number;
+}
+
+export interface BreakdownEntry {
+  key: string;
+  calls: number;
+  selfMs: number;
+  totalMs: number;
+  /** Units of work attributed to the key (blocks, placements, columns, ...). */
+  units: number;
+}
+
+/**
+ * Cost grouped by a domain key: per biome, per feature type, per block type,
+ * per carver. Dimension names are dotted, e.g. `worldgen.biome`.
+ */
+export interface BreakdownSummary {
+  dimension: string;
+  thread: "main" | "worker";
+  entries: BreakdownEntry[];
+  totalSelfMs: number;
+  totalUnits: number;
+  /** Keys folded into `<other>` because the dimension hit its key cap. */
+  droppedKeys: number;
+}
+
+/** One timed interval for the trace (timeline) export. */
+export interface TraceSpan {
+  name: string;
+  /** Milliseconds since the profiler started (main) or since the task began (worker, before ingest). */
+  startMs: number;
+  durationMs: number;
+  depth: number;
+}
+
+export interface TraceTrack {
+  /** Display name such as "main", "mesh worker 2", "gpu". */
+  name: string;
+  spans: TraceSpan[];
+}
+
+export interface TraceCapture {
+  /** Epoch millisecond that startMs values are relative to. */
+  originEpochMs: number;
+  tracks: TraceTrack[];
+  /** Spans dropped because a buffer was full. */
+  droppedSpans: number;
+}
+
+/** Hot functions found by the JS Self-Profiling sampler (main thread only). */
+export interface SamplingSummary {
+  sampleIntervalMs: number;
+  totalSamples: number;
+  durationMs: number;
+  /** Top functions by self samples. */
+  topSelf: { functionName: string; resource: string; line: number; samples: number; selfMs: number }[];
+  /** Top stacks (root first) by samples. */
+  topStacks: { frames: string[]; samples: number }[];
+}
+
 export interface ProfileSnapshot {
   schemaVersion: number;
   capturedAtIso: string;
@@ -190,6 +271,12 @@ export interface ProfileSnapshot {
   workerPools: WorkerPoolSummary[];
   meshes: MeshAggregate;
   events: BrowserEvent[];
+  callTrees: CallTree[];
+  breakdowns: BreakdownSummary[];
+  /** Present only while trace capture was on. */
+  trace: TraceCapture | null;
+  /** Present only while the sampling profiler was on. */
+  sampling: SamplingSummary | null;
 }
 
 /** One ranked line of the optimization-target list produced by report.ts. */
