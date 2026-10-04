@@ -10,7 +10,7 @@ import { CarvingMask, type CarvingStep } from "../features/core/carving-mask";
 import { createSeededNoiseSources, wireNoiseRouter } from "../density";
 import { createRootRandomFactory } from "../noise";
 import type { JsonObject, TagRegistry, WorldgenRegistries } from "../registry/datapack-loader";
-import { BoundedLruCache } from "./bounded-lru-cache";
+import { BoundedLruCache, packChunkColumnKey } from "./bounded-lru-cache";
 import { ChunkBiomeStore } from "./chunk-biome-store";
 import type { ColumnStage, ColumnStageContext } from "./column-stage";
 import { createCarverStage, createNoiseFillStage, createSeedSurfaceSystem, createSurfaceStage } from "./default-stages";
@@ -82,12 +82,12 @@ export function createOverworldGenerator(params: OverworldGeneratorParams): Over
     const carverSystem = createCarverSystem({ registries, blockTags, seed, rawBiomeAtQuart: carverBiomeSampler });
     stages.push(createCarverStage({ carverSystem, seedSurface, settings, router }));
   }
-  const columnCache = new BoundedLruCache<string, ChunkBlocks>(params.maxCachedColumns ?? MAX_CACHED_COLUMNS);
+  const columnCache = new BoundedLruCache<number, ChunkBlocks>(params.maxCachedColumns ?? MAX_CACHED_COLUMNS);
   const carvingMaskByColumn = new WeakMap<ChunkBlocks, CarvingMask>();
   const motionBlockingByPaletteId: boolean[] = [];
 
   const generateBaseColumn = (chunkX: number, chunkZ: number): ChunkBlocks => {
-    const key = `${chunkX},${chunkZ}`;
+    const key = packChunkColumnKey(chunkX, chunkZ);
     const cached = columnCache.get(key);
     const isProfiling = isWorkerProfiling();
     if (cached !== undefined) {

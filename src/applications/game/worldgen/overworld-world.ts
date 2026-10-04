@@ -9,7 +9,7 @@ import {
 } from "@/applications/game/profiler/worker-recorder";
 import type { ChunkBlocks } from "./engine/chunk";
 import { FeatureDecorator, possibleBiomesOfDimension } from "./engine/features";
-import { BoundedLruCache } from "./engine/pipeline/bounded-lru-cache";
+import { BoundedLruCache, packChunkColumnKey } from "./engine/pipeline/bounded-lru-cache";
 import {
   createNoiseFillStage,
   createOverworldGenerator,
@@ -98,12 +98,12 @@ function createFullWorld(seed: number): FullWorld {
     possibleBiomes: possibleBiomesOfDimension(overworldDimension),
     maxCachedOrigins: CACHED_DECORATION_ORIGINS,
   });
-  const decoratedColumns = new BoundedLruCache<string, ChunkBlocks>(CACHED_DECORATED_COLUMNS);
+  const decoratedColumns = new BoundedLruCache<number, ChunkBlocks>(CACHED_DECORATED_COLUMNS);
   return {
     generator,
     decorator,
     generateDecoratedColumn(chunkX, chunkZ) {
-      const key = `${chunkX},${chunkZ}`;
+      const key = packChunkColumnKey(chunkX, chunkZ);
       let column = decoratedColumns.get(key);
       if (column !== undefined) {
         addWorkerCounter("decoratedColumnCacheHits", 1);

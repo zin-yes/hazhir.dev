@@ -16,14 +16,10 @@ import { SinglePointContext, type DensityNode, type NoiseRouter, quantizeClimate
 import type { TargetPoint } from "../density";
 import { NoiseChunk } from "../terrain";
 import type { MultiNoiseBiomeSource } from "../biome-source";
-import { BoundedLruCache } from "./bounded-lru-cache";
+import { BoundedLruCache, packChunkColumnKey } from "./bounded-lru-cache";
 
 const QUARTS_PER_CHUNK_SIDE = 4;
 
-/** Packs chunk coordinates (well inside +-2^21 for a 30M block world) into one exact number. */
-function chunkColumnKey(chunkX: number, chunkZ: number): number {
-  return (chunkX + 0x200000) * 0x400000 + (chunkZ + 0x200000);
-}
 const CLIMATE_FIELDS = ["temperature", "vegetation", "continents", "erosion", "depth", "ridges"] as const;
 /**
  * Vanilla's last-leaf hint carries over from whatever chunk the worker thread sampled before, which is unknowable.
@@ -178,7 +174,7 @@ export class ChunkBiomeStore {
     if (chunkX === this.lastGridChunkX && chunkZ === this.lastGridChunkZ) {
       grid = this.lastGrid!;
     } else {
-      const key = chunkColumnKey(chunkX, chunkZ);
+      const key = packChunkColumnKey(chunkX, chunkZ);
       grid = this.grids.get(key);
       if (grid === undefined) {
         this.gridMisses++;
