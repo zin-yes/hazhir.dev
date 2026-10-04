@@ -18,14 +18,18 @@ import {
   SURFACE_TEXTURE_SHIFT,
   SURFACE_V_SHIFT,
   UV_BITS,
-  UV_UNITS_PER_TEXTURE,
+  CHUNK_UV_UNITS_PER_BLOCK,
+  PLANT_UV_UNITS_PER_TEXTURE,
 } from "../vertex-format";
 
+const TILE_EDGE_BIAS = "0.0001";
 const mask = (bits: number) => `${(1 << bits) - 1}u`;
 
 // Decodes a packed vertex (see vertex-format.ts) and computes the face shade.
 // The shade is constant per face except for ambient occlusion, which is linear
 // across a face, so doing the math per vertex matches doing it per fragment.
+// Texture coordinates leave the vertex shader unwrapped (a merged quad runs from
+// 0 to its size in blocks); the fragment shader tiles them.
 const VERTEX_DECODING = `
 attribute uvec2 packedVertex;
 
@@ -55,11 +59,11 @@ float decodeAmbientOcclusion(uint surfaceWord) {
   return float((surfaceWord >> ${SURFACE_OCCLUSION_SHIFT}u) & ${mask(SURFACE_OCCLUSION_BITS)});
 }
 
-void decodeSurface(uint surfaceWord) {
+void decodeSurface(uint surfaceWord, float textureUnitsPerWholeCoordinate) {
   TextureCoordinates = vec2(
     float(surfaceWord & ${mask(UV_BITS)}),
     float((surfaceWord >> ${SURFACE_V_SHIFT}u) & ${mask(UV_BITS)})
-  ) * ${(1 / UV_UNITS_PER_TEXTURE).toFixed(6)};
+  ) / textureUnitsPerWholeCoordinate;
   TextureIndex = int((surfaceWord >> ${SURFACE_TEXTURE_SHIFT}u) & ${mask(SURFACE_TEXTURE_BITS)});
 }
 `;
@@ -69,7 +73,7 @@ ${VERTEX_DECODING}
 
 void main() {
   uint surfaceWord = packedVertex.y;
-  decodeSurface(surfaceWord);
+  decodeSurface(surfaceWord, ${CHUNK_UV_UNITS_PER_BLOCK}.0);
   vShade = shadeFor(decodeLight(surfaceWord), decodeAmbientOcclusion(surfaceWord));
 
   vec3 localPosition = decodeVoxelPosition(packedVertex.x) * ${(1 / POSITION_UNITS_PER_BLOCK).toFixed(6)};
@@ -91,7 +95,7 @@ const float NEIGHBOR_SHADOW_REACH = 6.0;
 
 void main() {
   uint surfaceWord = packedVertex.y;
-  decodeSurface(surfaceWord);
+  decodeSurface(surfaceWord, ${PLANT_UV_UNITS_PER_TEXTURE}.0);
 
   vec3 voxelPosition = decodeVoxelPosition(packedVertex.x);
   vec3 blockOrigin = vec3(
@@ -119,6 +123,13 @@ void main() {
 }
 `;
 
+/**
+ * Tiles the unwrapped coordinates: the texture repeats every whole unit. The
+ * tile index is taken just below a boundary so a coordinate that lands on a
+ * quad's far edge keeps sampling the last texel instead of wrapping to the
+ * first. The gradients come from the unwrapped coordinates, which are
+ * continuous across tile boundaries, so mip selection does not jump there.
+ */
 export const FRAGMENT_SHADER = `
 varying vec2 TextureCoordinates;
 varying float vShade;
@@ -130,7 +141,13 @@ uniform int waterTextureIndex;
 void main() {
   vec3 lighting = max(vec3(vShade), vec3(0.05));
 
-  vec4 textureColor = texture(Texture, vec3(TextureCoordinates, TextureIndex));
+  vec2 tileIndex = max(ceil(TextureCoordinates - ${TILE_EDGE_BIAS}) - 1.0, 0.0);
+  vec4 textureColor = textureGrad(
+    Texture,
+    vec3(TextureCoordinates - tileIndex, TextureIndex),
+    dFdx(TextureCoordinates),
+    dFdy(TextureCoordinates)
+  );
 
   if (TextureIndex == waterTextureIndex) {
     textureColor.a = 0.7;

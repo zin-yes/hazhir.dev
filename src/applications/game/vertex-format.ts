@@ -3,9 +3,16 @@
  *
  * A mesh vertex is two uint32 words (8 bytes):
  *   position word: x | y << 10 | z << 20, each in 1/16 block units
- *   surface word:  u | v << 6 | texture << 12 | ambientOcclusion << 20 | light << 22
- *                  (u and v in 1/32 texture units, light in 1/4 levels)
+ *   surface word:  u | v << 7 | texture << 14 | ambientOcclusion << 22 | light << 24
+ *                  (u and v are 7 bits, light is in 1/4 levels, 6 bits)
  * Normals are not stored: the fragment shader never uses them.
+ *
+ * u and v are unwrapped texture coordinates: the texture repeats every whole
+ * unit and the fragment shader takes the fraction. Chunk surfaces use half
+ * block units (CHUNK_UV_UNITS_PER_BLOCK), so a merged quad spans up to 32
+ * blocks (value 64) and a stair step can sit at half a texture. Plant
+ * templates use 1/32 texture units (PLANT_UV_UNITS_PER_TEXTURE) to address
+ * individual pixels of a 16 pixel texture.
  *
  * A plant instance is one uint32:
  *   x | y << 5 | z << 10 | light << 15 | neighborMask << 19
@@ -14,7 +21,9 @@
  */
 
 export const POSITION_UNITS_PER_BLOCK = 16;
-export const UV_UNITS_PER_TEXTURE = 32;
+export const CHUNK_UV_UNITS_PER_BLOCK = 2;
+export const PLANT_UV_UNITS_PER_TEXTURE = 32;
+export const MAX_MERGED_QUAD_BLOCKS = 32;
 export const WORDS_PER_VERTEX = 2;
 export const VERTICES_PER_QUAD = 4;
 export const INDICES_PER_QUAD = 6;
@@ -23,7 +32,7 @@ export const POSITION_AXIS_BITS = 10;
 export const POSITION_Y_SHIFT = POSITION_AXIS_BITS;
 export const POSITION_Z_SHIFT = POSITION_AXIS_BITS * 2;
 
-export const UV_BITS = 6;
+export const UV_BITS = 7;
 export const SURFACE_V_SHIFT = UV_BITS;
 export const SURFACE_TEXTURE_SHIFT = UV_BITS * 2;
 export const SURFACE_TEXTURE_BITS = 8;
@@ -66,15 +75,15 @@ export function packPositionWord(
 }
 
 export function packSurfaceWord(
-  u32: number,
-  v32: number,
+  u: number,
+  v: number,
   textureIndex: number,
   ambientOcclusion: number,
   lightSteps: number,
 ): number {
   return (
-    u32 |
-    (v32 << SURFACE_V_SHIFT) |
+    u |
+    (v << SURFACE_V_SHIFT) |
     (textureIndex << SURFACE_TEXTURE_SHIFT) |
     (ambientOcclusion << SURFACE_OCCLUSION_SHIFT) |
     (lightSteps << SURFACE_LIGHT_SHIFT)
@@ -112,6 +121,7 @@ export interface UnpackedVertex {
 export function unpackVertex(
   positionWord: number,
   surfaceWord: number,
+  uvUnitsPerTexture: number = CHUNK_UV_UNITS_PER_BLOCK,
 ): UnpackedVertex {
   const axisMask = (1 << POSITION_AXIS_BITS) - 1;
   const uvMask = (1 << UV_BITS) - 1;
@@ -123,8 +133,8 @@ export function unpackVertex(
     z:
       ((positionWord >>> POSITION_Z_SHIFT) & axisMask) /
       POSITION_UNITS_PER_BLOCK,
-    u: (surfaceWord & uvMask) / UV_UNITS_PER_TEXTURE,
-    v: ((surfaceWord >>> SURFACE_V_SHIFT) & uvMask) / UV_UNITS_PER_TEXTURE,
+    u: (surfaceWord & uvMask) / uvUnitsPerTexture,
+    v: ((surfaceWord >>> SURFACE_V_SHIFT) & uvMask) / uvUnitsPerTexture,
     textureIndex:
       (surfaceWord >>> SURFACE_TEXTURE_SHIFT) &
       ((1 << SURFACE_TEXTURE_BITS) - 1),

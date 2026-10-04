@@ -4,7 +4,11 @@ import sharp from "sharp";
 import { BLOCK_TEXTURES, BlockType, Texture } from "../blocks";
 import { TEXTURE_SIZE } from "../config";
 import { PLANT_PIXEL_MASKS } from "../data/plant-pixel-masks";
-import { WORDS_PER_VERTEX, unpackVertex } from "../vertex-format";
+import {
+  PLANT_UV_UNITS_PER_TEXTURE,
+  WORDS_PER_VERTEX,
+  unpackVertex,
+} from "../vertex-format";
 import {
   buildPlantBillboardTemplate,
   buildPlantTemplate,
@@ -33,7 +37,11 @@ function templateVertices(block: BlockType) {
   const words = new Uint32Array(template.vertexBuffer);
   const vertices = [];
   for (let vertex = 0; vertex < words.length / WORDS_PER_VERTEX; vertex++) {
-    vertices.push(unpackVertex(words[vertex * 2], words[vertex * 2 + 1]));
+    vertices.push(unpackVertex(
+        words[vertex * 2],
+        words[vertex * 2 + 1],
+        PLANT_UV_UNITS_PER_TEXTURE,
+      ));
   }
   return { template, vertices };
 }
@@ -156,7 +164,11 @@ describe("buildPlantBillboardTemplate", () => {
     );
     const vertices = [];
     for (let vertex = 0; vertex < words.length / WORDS_PER_VERTEX; vertex++) {
-      vertices.push(unpackVertex(words[vertex * 2], words[vertex * 2 + 1]));
+      vertices.push(unpackVertex(
+        words[vertex * 2],
+        words[vertex * 2 + 1],
+        PLANT_UV_UNITS_PER_TEXTURE,
+      ));
     }
     expect(Math.min(...vertices.map((vertex) => vertex.u))).toBe(0);
     expect(Math.max(...vertices.map((vertex) => vertex.u))).toBe(1);

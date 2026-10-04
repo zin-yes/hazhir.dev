@@ -31,7 +31,7 @@ import {
   PLANT_NEIGHBOR_DIRECTIONS,
   LIGHT_STEPS_PER_LEVEL,
   POSITION_UNITS_PER_BLOCK,
-  UV_UNITS_PER_TEXTURE,
+  CHUNK_UV_UNITS_PER_BLOCK,
   VERTICES_PER_QUAD,
   packPlantInstance,
   packPositionWord,
@@ -518,10 +518,10 @@ export function generateMesh(
         const topY16 = bottomY16 + blockHeight16;
 
         let rowTopV = 0;
-        let rowBottomV = UV_UNITS_PER_TEXTURE;
+        let rowBottomV = CHUNK_UV_UNITS_PER_BLOCK;
         if (isSlabBlock) {
-          if (IS_TOP_SLAB[block]) rowBottomV = UV_UNITS_PER_TEXTURE / 2;
-          else rowTopV = UV_UNITS_PER_TEXTURE / 2;
+          if (IS_TOP_SLAB[block]) rowBottomV = CHUNK_UV_UNITS_PER_BLOCK / 2;
+          else rowTopV = CHUNK_UV_UNITS_PER_BLOCK / 2;
         }
 
         const isOnChunkEdge =
@@ -611,9 +611,9 @@ export function generateMesh(
 
             const uvCode = uvCodes[corner];
             cornerSurfaceWords[corner] = packSurfaceWord(
-              uvCode[0] === UV_ONE ? UV_UNITS_PER_TEXTURE : 0,
+              uvCode[0] === UV_ONE ? CHUNK_UV_UNITS_PER_BLOCK : 0,
               uvCode[1] === UV_ONE
-                ? UV_UNITS_PER_TEXTURE
+                ? CHUNK_UV_UNITS_PER_BLOCK
                 : uvCode[1] === UV_ROW_TOP
                 ? rowTopV
                 : uvCode[1] === UV_ROW_BOTTOM
@@ -771,8 +771,8 @@ function emitStairs(
     );
     const surfaceWords = corners.map((_, index) =>
       packSurfaceWord(
-        uv[index * 2] * UV_UNITS_PER_TEXTURE,
-        uv[index * 2 + 1] * UV_UNITS_PER_TEXTURE,
+        uv[index * 2] * CHUNK_UV_UNITS_PER_BLOCK,
+        uv[index * 2 + 1] * CHUNK_UV_UNITS_PER_BLOCK,
         textureIndex,
         FULLY_LIT_AMBIENT_OCCLUSION,
         light * LIGHT_STEPS_PER_LEVEL
