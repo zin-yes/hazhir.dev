@@ -42,3 +42,6 @@ next-env.d.ts
 
 # game profiler output
 /.profiles/
+
+# playwright mcp scratch
+.playwright-mcp/
