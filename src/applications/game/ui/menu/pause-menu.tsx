@@ -3,6 +3,7 @@ import { PixelButton, PixelFrame } from "../pixel/pixel-ui";
 import { ControlsList } from "./controls-list";
 import { MenuBackdrop } from "./menu-primitives";
 import { MultiplayerPanel } from "./multiplayer-panel";
+import { useProfiledRender } from "../use-profiled-render";
 
 type PauseMenuTab = "game" | "controls" | "multiplayer";
 
@@ -33,6 +34,7 @@ export function PauseMenu({
   onHost,
   onJoin,
 }: PauseMenuProps) {
+  useProfiledRender("pauseMenu");
   const [activeTab, setActiveTab] = useState<PauseMenuTab>("game");
 
   return (

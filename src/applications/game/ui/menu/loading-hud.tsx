@@ -4,6 +4,7 @@ import {
   PixelSegmentBar,
   PixelStageMarker,
 } from "../pixel/pixel-ui";
+import { useProfiledRender } from "../use-profiled-render";
 
 interface LoadingHudProps {
   progress: number;
@@ -18,6 +19,7 @@ export function LoadingHud({
   stages,
   worldName,
 }: LoadingHudProps) {
+  useProfiledRender("loadingHud");
   const activeStageIndex = stages.findIndex((stage) => stage.fraction < 1);
 
   return (

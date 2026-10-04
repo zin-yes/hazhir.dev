@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { profiler } from "../profiler";
 
 export class RemotePlayer {
   public id: string;
@@ -7,6 +8,7 @@ export class RemotePlayer {
   private targetRotation: THREE.Quaternion;
 
   constructor(id: string, scene: THREE.Scene, initialPosition: THREE.Vector3) {
+    const createToken = profiler.begin("main.network.remotePlayer.create");
     this.id = id;
     this.targetPosition = initialPosition.clone();
     this.targetRotation = new THREE.Quaternion();
@@ -21,6 +23,7 @@ export class RemotePlayer {
     this.mesh.position.y -= 1.0;
 
     scene.add(this.mesh);
+    profiler.end(createToken);
   }
 
   public updatePosition(
@@ -36,6 +39,7 @@ export class RemotePlayer {
   }
 
   public update(delta: number) {
+    profiler.addCounter("game.remotePlayers.updated");
     // Interpolate position
     this.mesh.position.lerp(this.targetPosition, 10 * delta);
 
@@ -54,8 +58,10 @@ export class RemotePlayer {
   }
 
   public dispose(scene: THREE.Scene) {
+    const disposeToken = profiler.begin("main.network.remotePlayer.dispose");
     scene.remove(this.mesh);
     this.mesh.geometry.dispose();
     (this.mesh.material as THREE.Material).dispose();
+    profiler.end(disposeToken);
   }
 }

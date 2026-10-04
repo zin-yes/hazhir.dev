@@ -1,6 +1,8 @@
 import * as THREE from "three";
 import { PointerLockControls } from "three/addons/controls/PointerLockControls.js";
 import { PhysicsEngine } from "./physics-engine";
+import { profiler } from "./profiler";
+import { DIMENSIONS } from "./profiler/dimensions";
 
 export class PlayerControls {
   public controls: PointerLockControls;
@@ -55,6 +57,7 @@ export class PlayerControls {
 
   private onKeyDown = (event: KeyboardEvent) => {
     if (!this.controls.isLocked) return;
+    profiler.addCounter("game.input.keyDown");
 
     switch (event.code) {
       case "ArrowUp":
@@ -161,6 +164,7 @@ export class PlayerControls {
   }
 
   public rotateCamera(deltaX: number, deltaY: number) {
+    profiler.addCounter("game.input.cameraRotations");
     const euler = new THREE.Euler(0, 0, 0, "YXZ");
     euler.setFromQuaternion(this.controls.object.quaternion);
     euler.y -= deltaX * 0.003;
@@ -170,6 +174,7 @@ export class PlayerControls {
   }
 
   public jump() {
+    profiler.addCounter("game.input.jumps");
     if (this.isFlying) {
       this.moveUp = true;
     } else if (
@@ -216,6 +221,24 @@ export class PlayerControls {
   }
 
   public update(delta: number) {
+    const movementMode = this.isFlying
+      ? "player.fly"
+      : this.canJump
+        ? "player.walk"
+        : "player.airborne";
+    const scopeToken = profiler.begin(
+      "main.player.update",
+      DIMENSIONS.simulationSystem,
+      movementMode,
+    );
+    try {
+      this.updateMovement(delta);
+    } finally {
+      profiler.end(scopeToken);
+    }
+  }
+
+  private updateMovement(delta: number) {
     const lastEyeHeight = this.currentEyeHeight;
     // Interpolate eye height
     const targetEyeHeight = this.isShifting

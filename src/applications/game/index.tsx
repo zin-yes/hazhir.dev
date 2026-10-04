@@ -88,6 +88,7 @@ import {
   profiler,
   type BenchmarkOptions,
 } from "./profiler";
+import { DIMENSIONS } from "./profiler/dimensions";
 import {
   runBenchmark,
   type BenchmarkBridge,
@@ -255,6 +256,7 @@ export default function Game() {
   const resizeObserver = useMemo(
     () =>
       new ResizeObserver(() => {
+        const resizeToken = profiler.begin("main.frame.resize");
         if (containerRef.current) {
           const width = containerRef.current.clientWidth || 1;
           const height = containerRef.current.clientHeight || 1;
@@ -265,6 +267,7 @@ export default function Game() {
           }
           renderer.setSize(width, height);
         }
+        profiler.end(resizeToken);
       }),
     [containerRef, camera, renderer],
   );
@@ -351,6 +354,19 @@ export default function Game() {
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
+      const keyDownToken = profiler.begin(
+        "main.input.keyDown",
+        DIMENSIONS.simulationSystem,
+        "input.keyDown",
+      );
+      try {
+        handleKeyDown(event);
+      } finally {
+        profiler.end(keyDownToken);
+      }
+    };
+
+    const handleKeyDown = (event: KeyboardEvent) => {
       if (event.code === "F3") {
         event.preventDefault();
         setIsDebugVisible((prev) => !prev);
@@ -378,6 +394,7 @@ export default function Game() {
     };
 
     const onWheel = (event: WheelEvent) => {
+      profiler.addCounter("game.input.wheel");
       if (!isInventoryOpen && playerControlsRef.current?.controls.isLocked) {
         const direction = Math.sign(event.deltaY);
         setSelectedSlot((prev) => {
@@ -432,12 +449,28 @@ export default function Game() {
     { key: "0,0,-1", dx: 0, dy: 0, dz: -1, borderFacingUs: "back" },
   ];
 
+  function applySavedEditsToChunk(chunkName: string, chunk: Uint8Array) {
+    const savedEdits = modifiedChunks.current.get(chunkName);
+    if (!savedEdits) return;
+    const applyEditsToken = profiler.begin(
+      "main.chunk.applySavedEdits",
+      DIMENSIONS.simulationSystem,
+      "chunk.applySavedEdits",
+    );
+    savedEdits.forEach((type, index) => {
+      chunk[index] = type;
+    });
+    profiler.addCounter("game.chunks.savedEditsApplied", savedEdits.size);
+    profiler.end(applyEditsToken);
+  }
+
   /** The six face neighbors' blocks and light, which the light spread reads and the worker copies. */
   function gatherNeighborLightInputs(
     chunkX: number,
     chunkY: number,
     chunkZ: number,
   ) {
+    const gatherToken = profiler.begin("main.light.gatherNeighborInputs");
     const neighbors: { [key: string]: ArrayBuffer | undefined } = {};
     const neighborLights: { [key: string]: ArrayBuffer | undefined } = {};
     for (const { key, dx, dy, dz } of NEIGHBOR_CHUNK_OFFSETS) {
@@ -447,6 +480,7 @@ export default function Game() {
         | ArrayBuffer
         | undefined;
     }
+    profiler.end(gatherToken);
     return { neighbors, neighborLights };
   }
 
@@ -456,6 +490,19 @@ export default function Game() {
    * light through the chunk changes nothing, so the whole worker round trip is skipped.
    */
   function canSkipLightSpread(
+    chunkX: number,
+    chunkY: number,
+    chunkZ: number,
+  ): boolean {
+    const skipCheckToken = profiler.begin("main.light.canSkipSpread");
+    try {
+      return canSkipLightSpreadUnprofiled(chunkX, chunkY, chunkZ);
+    } finally {
+      profiler.end(skipCheckToken);
+    }
+  }
+
+  function canSkipLightSpreadUnprofiled(
     chunkX: number,
     chunkY: number,
     chunkZ: number,
@@ -537,11 +584,7 @@ export default function Game() {
         const chunkName = generateChunkName(x, y, z);
         chunks.current[chunkName] = chunk;
 
-        if (modifiedChunks.current.has(chunkName)) {
-          modifiedChunks.current.get(chunkName)!.forEach((type, index) => {
-            chunk[index] = type;
-          });
-        }
+        applySavedEditsToChunk(chunkName, chunk);
 
         profiler.recordTimer(
           "chunk.pipeline.generate",
@@ -739,9 +782,13 @@ export default function Game() {
       const playerChunkY = Math.round(camera.position.y / CHUNK_HEIGHT);
       const playerChunkZ = Math.round(camera.position.z / CHUNK_LENGTH);
 
+      const pruneToken = profiler.begin("main.interval.chunkStreaming.prune");
       pruneChunks(playerChunkX, playerChunkY, playerChunkZ);
+      profiler.end(pruneToken);
 
+      const scanToken = profiler.begin("main.interval.chunkStreaming.scanNearby");
       generateNearbyChunks(playerChunkX, playerChunkY, playerChunkZ);
+      profiler.end(scanToken);
       profiler.end(streamingToken);
     }, 500);
   }
@@ -929,12 +976,15 @@ export default function Game() {
         }),
       );
 
+      let textureSetupToken = 0;
       textureArrayWorkerPool
         .exec("loadTextureArray", [window.location.origin], (fraction) =>
           loadTracker.report("textures", fraction * 0.9),
         )
         .then((result) => {
           if (result) {
+            textureSetupToken = profiler.begin("main.texture.createArrayTexture");
+            profiler.recordBytes("bytes.texture.arrayToGpu", result.data.byteLength);
             textureArrayBytesRef.current = result.data.byteLength;
             textureArray = new THREE.DataArrayTexture(
               result.data,
@@ -1004,6 +1054,8 @@ export default function Game() {
               depthWrite: true,
             });
 
+            profiler.end(textureSetupToken);
+            textureSetupToken = 0;
             loadTracker.report("textures", 1);
             texturesReadyRef.current = true;
             const worldWaitingForTextures = worldWaitingForTexturesRef.current;
@@ -1018,6 +1070,7 @@ export default function Game() {
           }
         })
         .catch((error) => {
+          profiler.end(textureSetupToken);
           console.error(error);
         })
         .then(() => {
@@ -1031,6 +1084,7 @@ export default function Game() {
       //camera.position.y = 3;
 
       const onKeyUp = function (event: KeyboardEvent) {
+        profiler.addCounter("game.input.keyUp");
         switch (event.code) {
           case "Escape":
             if (isInventoryOpenRef.current) {
@@ -1049,13 +1103,22 @@ export default function Game() {
 
       const onMouseDown = (event: MouseEvent) => {
         if (!playerControlsRef.current?.controls.isLocked) return;
-        if (event.button === 0) {
-          breakBlock();
-        } else if (event.button === 2) {
-          const blockType = hotbarSlotsRef.current[selectedSlotRef.current];
-          if (blockType) {
-            placeBlock(blockType);
+        const mouseDownToken = profiler.begin(
+          "main.input.mouseDown",
+          DIMENSIONS.simulationSystem,
+          event.button === 0 ? "input.mouseBreak" : "input.mousePlace",
+        );
+        try {
+          if (event.button === 0) {
+            breakBlock();
+          } else if (event.button === 2) {
+            const blockType = hotbarSlotsRef.current[selectedSlotRef.current];
+            if (blockType) {
+              placeBlock(blockType);
+            }
           }
+        } finally {
+          profiler.end(mouseDownToken);
         }
       };
 
@@ -1080,6 +1143,7 @@ export default function Game() {
           id,
         );
 
+        const buildWorldStateToken = profiler.begin("main.network.buildWorldState");
         const blocks: { x: number; y: number; z: number; blockType: number }[] =
           [];
         modifiedChunks.current.forEach((modifications, chunkName) => {
@@ -1104,6 +1168,8 @@ export default function Game() {
           });
         });
 
+        profiler.end(buildWorldStateToken);
+        profiler.addCounter("game.network.worldStateBlocksSent", blocks.length);
         if (blocks.length > 0) {
           nm.send(
             {
@@ -1311,11 +1377,7 @@ export default function Game() {
         const chunkName = generateChunkName(chunkX, chunkY, chunkZ);
         chunks.current[chunkName] = chunk;
 
-        if (modifiedChunks.current.has(chunkName)) {
-          modifiedChunks.current.get(chunkName)!.forEach((type, index) => {
-            chunk[index] = type;
-          });
-        }
+        applySavedEditsToChunk(chunkName, chunk);
 
         // Initialize Light
         const topChunkName = generateChunkName(chunkX, chunkY + 1, chunkZ);
@@ -1717,6 +1779,7 @@ export default function Game() {
     mesh.frustumCulled = true;
     mesh.name = name;
     mesh.renderOrder = renderOrder;
+    profiler.addCounter("game.chunks.meshObjectsCreated");
     const sceneAddToken = profiler.begin("main.chunk.sceneAdd");
     scene.add(mesh);
     profiler.end(sceneAddToken);
@@ -1731,7 +1794,14 @@ export default function Game() {
   }
 
   function updatePlantDetail() {
+    const plantDetailToken = profiler.begin(
+      "main.frame.plantDetail",
+      DIMENSIONS.simulationSystem,
+      "frame.plantDetail",
+    );
     plantDetailRef.current.forEach(applyPlantDetail);
+    profiler.addCounter("game.plantDetail.chunksUpdated", plantDetailRef.current.size);
+    profiler.end(plantDetailToken);
   }
 
   function addChunkMesh(
@@ -1815,6 +1885,7 @@ export default function Game() {
     }
     plantDetailRef.current.set(chunkName, plantDetail);
     applyPlantDetail(plantDetail);
+    profiler.addCounter("game.chunks.meshApplied");
     if (plantInstanceBytes > 0) {
       recordChunkGeometryStats(chunkName, "plants", {
         vertexCount: plantVertexCount,
@@ -1845,6 +1916,7 @@ export default function Game() {
   }
 
   function scheduleWaterUpdate(x: number, y: number, z: number) {
+    profiler.addCounter("game.water.updatesScheduled");
     pendingWaterUpdates.current.add(`${x},${y},${z}`);
   }
 
@@ -1854,8 +1926,11 @@ export default function Game() {
       if (pendingWaterUpdates.current.size === 0) return;
 
       const waterToken = profiler.begin("main.interval.water");
+      const collectToken = profiler.begin("main.interval.water.collect");
       const updates = Array.from(pendingWaterUpdates.current);
       pendingWaterUpdates.current.clear();
+      profiler.end(collectToken);
+      profiler.addCounter("game.water.updatesProcessed", updates.length);
 
       updates.forEach((key) => {
         const [x, y, z] = key.split(",").map(Number);
@@ -1875,7 +1950,11 @@ export default function Game() {
     broadcast: boolean = true,
   ) {
     profiler.addCounter("game.setBlock.calls");
-    const scopeToken = profiler.begin("main.edit.setBlock");
+    const scopeToken = profiler.begin(
+      "main.edit.setBlock",
+      DIMENSIONS.simulationSystem,
+      "edit.setBlock",
+    );
     try {
       return setBlockUnprofiled(x, y, z, type, broadcast);
     } finally {
@@ -2131,6 +2210,7 @@ export default function Game() {
         releaseChunkGeometry(mesh.geometry);
         mesh.removeFromParent();
       }
+      profiler.addCounter("game.chunks.meshObjectsDisposed", meshes.length);
       chunkMeshesRef.current.delete(chunkName);
     }
     profiler.end(disposeToken);
@@ -2169,6 +2249,7 @@ export default function Game() {
     });
     chunks.current = prunedChunks;
     chunkPositions.current = prunedChunkPositions;
+    profiler.addCounter("game.streaming.positionsChecked", prunedChunkPositions.length);
   }
 
   function generateNearbyChunks(
@@ -2176,6 +2257,7 @@ export default function Game() {
     _chunkY: number,
     _chunkZ: number,
   ) {
+    let candidateChunks = 0;
     for (
       let chunkX = _chunkX - NEGATIVE_X_RENDER_DISTANCE;
       chunkX < _chunkX + POSITIVE_X_RENDER_DISTANCE;
@@ -2192,6 +2274,7 @@ export default function Game() {
           chunkZ++
         ) {
           let foundAMatch = false;
+          candidateChunks++;
           chunkPositions.current.forEach((chunkPosition) => {
             if (
               chunkPosition.chunkX === chunkX &&
@@ -2208,6 +2291,11 @@ export default function Game() {
         }
       }
     }
+    profiler.addCounter("game.streaming.candidateChunks", candidateChunks);
+    profiler.addCounter(
+      "game.streaming.positionComparisons",
+      candidateChunks * chunkPositions.current.length,
+    );
   }
 
   function growTree(x: number, y: number, z: number) {
@@ -2264,6 +2352,7 @@ export default function Game() {
     Object.keys(chunks.current).forEach((chunkName) => {
       const chunk = chunks.current[chunkName];
       if (!chunk) return;
+      profiler.addCounter("game.randomTick.chunksVisited");
       const tickableIndices = tickableBlocksRef.current.indicesFor(
         chunk,
         chunkVersions.current[chunkName] ?? 0,
@@ -2275,6 +2364,7 @@ export default function Game() {
         RANDOM_TICKS_PER_CHUNK,
       );
       if (tickedIndices.length === 0) return;
+      profiler.addCounter("game.randomTick.blocksTicked", tickedIndices.length);
 
       const [chunkX, chunkY, chunkZ] = chunkName.split(",").map(Number);
       for (const blockIndex of tickedIndices) {
@@ -2288,11 +2378,27 @@ export default function Game() {
         const globalZ = chunkZ * CHUNK_LENGTH + z;
 
         if (block === BlockType.SAPLING) {
+          profiler.recordBreakdown(
+            DIMENSIONS.simulationSystem,
+            "randomTick.sapling",
+            { units: 1 },
+          );
           // Tree growth
           if (Math.random() < 0.1) {
+            const growTreeToken = profiler.begin(
+              "main.interval.randomTick.growTree",
+              DIMENSIONS.simulationSystem,
+              "randomTick.growTree",
+            );
             growTree(globalX, globalY, globalZ);
+            profiler.end(growTreeToken);
           }
         } else if (block === BlockType.GRASS) {
+          profiler.recordBreakdown(
+            DIMENSIONS.simulationSystem,
+            "randomTick.grass",
+            { units: 1 },
+          );
           // Grass death
           const blockAbove = getBlock(globalX, globalY + 1, globalZ);
           if (
@@ -2384,11 +2490,21 @@ export default function Game() {
 
   async function saveActiveWorld(shouldAnnounce = false) {
     if (isBenchmarkWorldRef.current) return;
-    const buildSnapshotToken = profiler.begin("main.save.buildSnapshot");
+    const buildSnapshotToken = profiler.begin(
+      "main.save.buildSnapshot",
+      DIMENSIONS.simulationSystem,
+      "save.buildSnapshot",
+    );
     const snapshot = buildSnapshotOfActiveWorld();
     profiler.end(buildSnapshotToken);
     if (!snapshot) return;
     if (profiler.enabled) {
+      profiler.addCounter("game.save.snapshots");
+      profiler.addCounter("game.save.modifiedChunks", snapshot.modifiedChunks.length);
+      profiler.addCounter(
+        "game.save.editedBlocks",
+        snapshot.modifiedChunks.reduce((total, [, edits]) => total + edits.length, 0),
+      );
       profiler.recordBytes(
         "bytes.save.snapshot",
         estimateTransferBytes(snapshot.modifiedChunks),
@@ -2420,12 +2536,19 @@ export default function Game() {
 
     activeWorldRef.current = world;
     seedRef.current = world.seed;
+    const deserializeToken = profiler.begin(
+      "main.load.deserializeModifiedChunks",
+      DIMENSIONS.simulationSystem,
+      "load.deserializeSave",
+    );
     modifiedChunks.current = new Map(
       world.modifiedChunks.map(([chunkName, edits]) => [
         chunkName,
         new Map(edits),
       ]),
     );
+    profiler.end(deserializeToken);
+    profiler.addCounter("game.load.modifiedChunksRestored", world.modifiedChunks.length);
     setHotbarSlots(normalizeHotbar(world.hotbarSlots ?? DEFAULT_HOTBAR_BLOCKS));
     setSelectedSlot(0);
     setActiveWorldName(world.name);
@@ -2644,6 +2767,12 @@ export default function Game() {
     const time = performance.now();
     const delta = (time - prevTime) / 1000;
 
+    profiler.sampleGauge("game.chunks.tracked", chunkPositions.current.length);
+    profiler.sampleGauge("game.chunks.meshed", chunkMeshesRef.current.size);
+    profiler.sampleGauge("game.remotePlayers", remotePlayers.current.size);
+    profiler.sampleGauge("game.water.pendingUpdates", pendingWaterUpdates.current.size);
+    profiler.sampleGauge("game.light.pendingEdits", pendingLightEditsRef.current);
+
     // Update FPS counter
     fpsFrames.current.push(time);
     // Keep only frames from the last second
@@ -2755,7 +2884,11 @@ export default function Game() {
       profiler.end(remotePlayersToken);
     }
 
-    benchmarkFrameCallbacksRef.current.forEach((callback) => callback(delta));
+    if (benchmarkFrameCallbacksRef.current.size > 0) {
+      const benchmarkToken = profiler.begin("main.frame.benchmarkCallbacks");
+      benchmarkFrameCallbacksRef.current.forEach((callback) => callback(delta));
+      profiler.end(benchmarkToken);
+    }
 
     prevTime = time;
 

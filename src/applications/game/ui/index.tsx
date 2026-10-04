@@ -11,6 +11,7 @@ import { PixelSandBackdrop } from "./pixel/pixel-sand-backdrop";
 import { PixelButton } from "./pixel/pixel-ui";
 import { PauseMenu } from "./menu/pause-menu";
 import { TitleMenu } from "./menu/title-menu";
+import { useProfiledRender } from "./use-profiled-render";
 
 const DEFAULT_UI_FONT = Silkscreen({
   weight: ["400", "700"],
@@ -82,6 +83,7 @@ export default function UILayer({
   isDebugVisible,
   isMobile,
 }: UILayerProps) {
+  useProfiledRender("uiLayer");
   const isInWorld = phase === "playing" || phase === "paused";
   const isOnBackdropScreen = phase === "title" || phase === "loading";
   const [isBackdropMounted, setIsBackdropMounted] = useState(true);

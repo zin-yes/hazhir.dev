@@ -1,5 +1,6 @@
 import { BLOCK_ITEM_TEXTURES, BlockType } from "../blocks";
 import { PixelButton, PixelFrame } from "./pixel/pixel-ui";
+import { useProfiledRender } from "./use-profiled-render";
 
 interface InventoryProps {
   isOpen: boolean;
@@ -23,6 +24,7 @@ const HIDDEN_FROM_INVENTORY = new Set<BlockType>([
 ]);
 
 export function Inventory({ isOpen, onSelectBlock, onClose }: InventoryProps) {
+  useProfiledRender("inventory");
   if (!isOpen) return null;
 
   const blocks = (Object.values(BlockType).filter(

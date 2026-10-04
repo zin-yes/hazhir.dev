@@ -1,5 +1,6 @@
 import { BlockType, getWaterLevel, isWater } from "./blocks";
 import { profiler } from "./profiler";
+import { DIMENSIONS } from "./profiler/dimensions";
 
 // Safe version of isWater that handles null
 const safeIsWater = (block: BlockType | null): block is BlockType => {
@@ -21,7 +22,11 @@ export function updateWater(
   scheduleUpdate: (x: number, y: number, z: number) => void
 ) {
   profiler.addCounter("game.water.cellsUpdated");
-  const scopeToken = profiler.begin("main.water.updateWater");
+  const scopeToken = profiler.begin(
+    "main.water.updateWater",
+    DIMENSIONS.simulationSystem,
+    "water.cellUpdate",
+  );
   try {
     updateWaterCell(x, y, z, getBlock, setBlock, scheduleUpdate);
   } finally {
@@ -122,6 +127,7 @@ function updateWaterCell(
       setBlock(x, y, z, newType);
     }
 
+    profiler.addCounter("game.water.stateChanges");
     // Schedule neighbors for update
     scheduleUpdate(x + 1, y, z);
     scheduleUpdate(x - 1, y, z);
@@ -139,6 +145,7 @@ function updateWaterCell(
     // Spread Down
     const blockBelow = getBlock(x, y - 1, z);
     if (blockBelow === BlockType.AIR) {
+      profiler.addCounter("game.water.spreadDown");
       setBlock(x, y - 1, z, BlockType.WATER_FALLING);
       scheduleUpdate(x, y - 1, z);
     } else if (
@@ -155,6 +162,7 @@ function updateWaterCell(
         const spreadTo = (nx: number, ny: number, nz: number) => {
           const neighbor = getBlock(nx, ny, nz);
           if (neighbor === BlockType.AIR) {
+            profiler.addCounter("game.water.spreadSide");
             setBlock(nx, ny, nz, BlockType.WATER_LEVEL_1 + spreadLevel - 1);
             scheduleUpdate(nx, ny, nz);
           }

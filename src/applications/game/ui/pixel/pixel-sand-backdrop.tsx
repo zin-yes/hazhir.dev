@@ -2,6 +2,9 @@ import { useEffect, useRef } from "react";
 import { bayerThreshold } from "./bayer";
 import { loadGrainPalette, packColor } from "./grain-palette";
 import { SandGrid } from "./sand-grid";
+import { profiler } from "../../profiler";
+import { DIMENSIONS } from "../../profiler/dimensions";
+import { useProfiledRender } from "../use-profiled-render";
 
 const CELL_SIZE_PIXELS = 6;
 const SIMULATION_STEPS_PER_FRAME = 2;
@@ -10,6 +13,8 @@ const DISSOLVE_DURATION_MILLISECONDS = 1000;
 const MAX_FILL_WAIT_MILLISECONDS = 1600;
 const FILLED_ENOUGH_TO_DISSOLVE = 0.88;
 const SWEEP_WEIGHT = 0.45;
+
+const BACKDROP_SURFACE = "pixelSandBackdrop";
 
 const BACKGROUND_TOP = packColor(13, 11, 20);
 const BACKGROUND_BOTTOM = packColor(40, 31, 74);
@@ -43,6 +48,7 @@ export function PixelSandBackdrop({
   isFinishing,
   onDissolved,
 }: PixelSandBackdropProps) {
+  useProfiledRender("pixelSandBackdrop");
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const propsRef = useRef({ fillTarget, ambient, isFinishing, onDissolved });
   propsRef.current = { fillTarget, ambient, isFinishing, onDissolved };
@@ -75,6 +81,15 @@ export function PixelSandBackdrop({
     let redrawNow: (() => void) | null = null;
 
     const rebuildGrid = () => {
+      const rebuildToken = profiler.begin("main.ui.pixelBackdrop.rebuildGrid");
+      try {
+        rebuildGridUnprofiled();
+      } finally {
+        profiler.end(rebuildToken);
+      }
+    };
+
+    const rebuildGridUnprofiled = () => {
       const columns = Math.max(
         8,
         Math.ceil(container.clientWidth / CELL_SIZE_PIXELS),
@@ -163,7 +178,14 @@ export function PixelSandBackdrop({
       if (isAmbient && !prefersReducedMotion && frameCounter % 3 === 0) {
         grid.drainBottomGrain();
       }
+      const stepToken = profiler.begin(
+        "main.ui.pixelBackdrop.sandStep",
+        DIMENSIONS.uiSurface,
+        BACKDROP_SURFACE,
+      );
       for (let step = 0; step < SIMULATION_STEPS_PER_FRAME; step++) grid.step();
+      profiler.end(stepToken);
+      profiler.addCounter("game.ui.sandGrains", grid.grainCount);
     };
 
     const draw = (now: number) => {
@@ -171,6 +193,11 @@ export function PixelSandBackdrop({
       const columns = image.width;
       const rows = image.height;
       const cells = grid?.cells;
+      const paintToken = profiler.begin(
+        "main.ui.pixelBackdrop.paintPixels",
+        DIMENSIONS.uiSurface,
+        BACKDROP_SURFACE,
+      );
       for (let row = 0; row < rows; row++) {
         const gradient = (row / rows) * 0.95;
         for (let column = 0; column < columns; column++) {
@@ -191,19 +218,32 @@ export function PixelSandBackdrop({
           }
         }
       }
+      profiler.end(paintToken);
+      profiler.addCounter("game.ui.backdropPixelsPainted", columns * rows);
+      const uploadToken = profiler.begin(
+        "main.ui.pixelBackdrop.putImageData",
+        DIMENSIONS.uiSurface,
+        BACKDROP_SURFACE,
+      );
       context.putImageData(image, 0, 0);
+      profiler.end(uploadToken);
     };
 
     redrawNow = () => draw(performance.now());
 
     const frame = (now: number) => {
       if (isDisposed) return;
+      const frameToken = profiler.begin("main.ui.pixelBackdrop.frame");
       frameCounter++;
       advanceStage(now);
-      if (stage === "done") return;
+      if (stage === "done") {
+        profiler.end(frameToken);
+        return;
+      }
       simulate();
       draw(now);
       animationFrameId = requestAnimationFrame(frame);
+      profiler.end(frameToken);
     };
     animationFrameId = requestAnimationFrame(frame);
 

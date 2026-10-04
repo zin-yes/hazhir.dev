@@ -1,6 +1,9 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { profiler } from "../profiler";
+import { DIMENSIONS } from "../profiler/dimensions";
+import { useProfiledRender } from "./use-profiled-render";
 
 interface MobileControlsProps {
   containerRef: React.RefObject<HTMLDivElement | null>;
@@ -36,6 +39,7 @@ export function MobileControls({
   onToggleFly,
   onToggleInventory,
 }: MobileControlsProps) {
+  useProfiledRender("mobileControls");
   const joystickTouchId = useRef<number | null>(null);
   const cameraTouchId = useRef<number | null>(null);
   const joystickOrigin = useRef({ x: 0, y: 0 });
@@ -137,16 +141,34 @@ export function MobileControls({
       }
     };
 
-    el.addEventListener("touchstart", handleTouchStart, { passive: false });
-    el.addEventListener("touchmove", handleTouchMove, { passive: false });
-    el.addEventListener("touchend", handleTouchEnd);
-    el.addEventListener("touchcancel", handleTouchEnd);
+    const withTouchScope =
+      (scopeName: string, handler: (event: TouchEvent) => void) =>
+      (event: TouchEvent) => {
+        const scopeToken = profiler.begin(
+          scopeName,
+          DIMENSIONS.simulationSystem,
+          "input.touch",
+        );
+        try {
+          handler(event);
+        } finally {
+          profiler.end(scopeToken);
+        }
+      };
+    const onTouchStart = withTouchScope("main.input.touchStart", handleTouchStart);
+    const onTouchMove = withTouchScope("main.input.touchMove", handleTouchMove);
+    const onTouchEnd = withTouchScope("main.input.touchEnd", handleTouchEnd);
+
+    el.addEventListener("touchstart", onTouchStart, { passive: false });
+    el.addEventListener("touchmove", onTouchMove, { passive: false });
+    el.addEventListener("touchend", onTouchEnd);
+    el.addEventListener("touchcancel", onTouchEnd);
 
     return () => {
-      el.removeEventListener("touchstart", handleTouchStart);
-      el.removeEventListener("touchmove", handleTouchMove);
-      el.removeEventListener("touchend", handleTouchEnd);
-      el.removeEventListener("touchcancel", handleTouchEnd);
+      el.removeEventListener("touchstart", onTouchStart);
+      el.removeEventListener("touchmove", onTouchMove);
+      el.removeEventListener("touchend", onTouchEnd);
+      el.removeEventListener("touchcancel", onTouchEnd);
       refs.current.onMovement(false, false, false, false);
     };
   }, [containerRef]);

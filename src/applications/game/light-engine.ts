@@ -1,4 +1,6 @@
 import { TRANSPARENT_BLOCKS, getBlockLightLevel } from "./blocks";
+import { profiler } from "./profiler";
+import { DIMENSIONS } from "./profiler/dimensions";
 import { CHUNK_HEIGHT, CHUNK_LENGTH, CHUNK_WIDTH } from "./config";
 
 /**
@@ -333,6 +335,22 @@ export function relightAfterBlockChange(
   z: number,
   oldBlock: number,
 ): RelightResult {
+  const result = relightAfterBlockChangeUnprofiled(source, x, y, z, oldBlock);
+  if (profiler.enabled) {
+    profiler.addCounter("game.light.cellsRemoved", result.stats.cellsRemoved);
+    profiler.addCounter("game.light.cellsLit", result.stats.cellsLit);
+    profiler.addCounter("game.light.chunksToRemesh", result.chunksToRemesh.length);
+  }
+  return result;
+}
+
+function relightAfterBlockChangeUnprofiled(
+  source: LightChunkSource,
+  x: number,
+  y: number,
+  z: number,
+  oldBlock: number,
+): RelightResult {
   const run = new RelightRun(source);
   run.markChunk(x >> CHUNK_SHIFT, y >> CHUNK_SHIFT, z >> CHUNK_SHIFT);
 
@@ -349,6 +367,7 @@ export function relightAfterBlockChange(
   for (const channel of [SKY_CHANNEL, BLOCK_CHANNEL]) {
     removalQueue.clear();
     refillQueue.clear();
+    const isSkyChannel = channel === SKY_CHANNEL;
 
     const previousValue = run.channelValue(x, y, z, channel);
     if (previousValue > 0) {
@@ -356,7 +375,16 @@ export function relightAfterBlockChange(
       run.stats.cellsRemoved++;
       removalQueue.push(x, y, z);
       removedValues.push(previousValue);
-      run.removeLight(removalQueue, removedValues, channel, refillQueue);
+      const removeToken = profiler.begin(
+        "main.light.relight.removeLight",
+        DIMENSIONS.lightKind,
+        isSkyChannel ? "engine.removeSky" : "engine.removeBlock",
+      );
+      try {
+        run.removeLight(removalQueue, removedValues, channel, refillQueue);
+      } finally {
+        profiler.end(removeToken);
+      }
     }
 
     if (channel === BLOCK_CHANNEL && EMISSION[newBlock] > 0) {
@@ -374,7 +402,16 @@ export function relightAfterBlockChange(
         );
       }
     }
-    run.spreadLight(refillQueue, channel);
+    const spreadToken = profiler.begin(
+      "main.light.relight.spreadLight",
+      DIMENSIONS.lightKind,
+      isSkyChannel ? "engine.spreadSky" : "engine.spreadBlock",
+    );
+    try {
+      run.spreadLight(refillQueue, channel);
+    } finally {
+      profiler.end(spreadToken);
+    }
   }
 
   return { chunksToRemesh: run.collectChangedChunks(), stats: run.stats };

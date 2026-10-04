@@ -1,5 +1,6 @@
 import Peer, { DataConnection } from "peerjs";
 import { estimateTransferBytes, profiler } from "../profiler";
+import { DIMENSIONS } from "../profiler/dimensions";
 import { NetworkPacket } from "./types";
 
 export class NetworkManager {
@@ -68,9 +69,15 @@ export class NetworkManager {
     });
 
     conn.on("data", (data) => {
-      this.recordPacketTraffic("received", data as NetworkPacket);
-      if (this.onData) {
-        this.onData(data as NetworkPacket, conn.peer);
+      const packet = data as NetworkPacket;
+      this.recordPacketTraffic("received", packet);
+      const receiveToken = this.beginPacketScope("main.network.receive", "receive", packet);
+      try {
+        if (this.onData) {
+          this.onData(packet, conn.peer);
+        }
+      } finally {
+        profiler.end(receiveToken);
       }
     });
 
@@ -97,12 +104,34 @@ export class NetworkManager {
     }
   }
 
+  private beginPacketScope(
+    scopeName: string,
+    direction: "send" | "receive",
+    packet: NetworkPacket,
+  ): number {
+    if (!profiler.enabled) return 0;
+    return profiler.begin(
+      scopeName,
+      DIMENSIONS.simulationSystem,
+      `network.${direction}.${packet.type}`,
+    );
+  }
+
   public send(packet: NetworkPacket, targetId?: string) {
     this.recordPacketTraffic(
       "sent",
       packet,
       targetId ? 1 : this.connections.size,
     );
+    const sendToken = this.beginPacketScope("main.network.send", "send", packet);
+    try {
+      this.sendUnprofiled(packet, targetId);
+    } finally {
+      profiler.end(sendToken);
+    }
+  }
+
+  private sendUnprofiled(packet: NetworkPacket, targetId?: string) {
     if (targetId) {
       const conn = this.connections.get(targetId);
       if (conn && conn.open) {
@@ -124,11 +153,20 @@ export class NetworkManager {
       packet,
       excludeId ? Math.max(0, this.connections.size - 1) : this.connections.size,
     );
-    this.connections.forEach((conn, id) => {
-      if (conn.open && id !== excludeId) {
-        conn.send(packet);
-      }
-    });
+    const broadcastToken = this.beginPacketScope(
+      "main.network.broadcast",
+      "send",
+      packet,
+    );
+    try {
+      this.connections.forEach((conn, id) => {
+        if (conn.open && id !== excludeId) {
+          conn.send(packet);
+        }
+      });
+    } finally {
+      profiler.end(broadcastToken);
+    }
   }
 
   public disconnect() {

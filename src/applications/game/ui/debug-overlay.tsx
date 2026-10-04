@@ -1,4 +1,5 @@
 import { Silkscreen } from "next/font/google";
+import { useProfiledRender } from "./use-profiled-render";
 
 const DEBUG_FONT = Silkscreen({
   weight: ["400"],
@@ -21,6 +22,7 @@ interface DebugOverlayProps {
 }
 
 export function DebugOverlay({ isVisible, debugInfo }: DebugOverlayProps) {
+  useProfiledRender("debugOverlay");
   if (!isVisible) return null;
 
   const {

@@ -1,4 +1,5 @@
 import { estimateTransferBytes, profiler } from "../profiler";
+import { DIMENSIONS } from "../profiler/dimensions";
 
 const DATABASE_NAME = "hazhir-dev-voxel-worlds";
 const OBJECT_STORE_NAME = "worlds";
@@ -49,11 +50,25 @@ async function runTransaction<Result>(
     profiler.now() - startedAtMs,
     "latency",
   );
+  const transactionStartedAtMs = profiler.now();
   return new Promise<Result>((resolve, reject) => {
+    const requestToken = profiler.enabled
+      ? profiler.begin(
+          "main.worldStore.issueRequest",
+          DIMENSIONS.simulationSystem,
+          `worldStore.${operationName}`,
+        )
+      : 0;
     const transaction = database.transaction(OBJECT_STORE_NAME, mode);
     const request = operation(transaction.objectStore(OBJECT_STORE_NAME));
+    profiler.end(requestToken);
     transaction.oncomplete = () => {
       database.close();
+      profiler.recordTimer(
+        `main.worldStore.${operationName}.transaction`,
+        profiler.now() - transactionStartedAtMs,
+        "latency",
+      );
       profiler.recordTimer(
         `main.worldStore.${operationName}`,
         profiler.now() - startedAtMs,
@@ -102,11 +117,13 @@ export function createWorldRecord(name: string, seed: number): StoredWorld {
 export function saveWorldRecord(world: StoredWorld): Promise<IDBValidKey> {
   if (profiler.enabled) {
     profiler.recordBytes("bytes.worldStore.put", estimateTransferBytes(world));
+    profiler.addCounter("game.worldStore.modifiedChunksSaved", world.modifiedChunks.length);
   }
   return runTransaction("readwrite", (store) => store.put(world), "put");
 }
 
 export function deleteWorldRecord(worldId: string): Promise<undefined> {
+  profiler.addCounter("game.worldStore.deletes");
   return runTransaction("readwrite", (store) => store.delete(worldId), "delete");
 }
 
@@ -120,7 +137,10 @@ async function importLegacySaveIfPresent(): Promise<void> {
   if (!legacySaveText) return;
 
   try {
-    const legacySave = JSON.parse(legacySaveText);
+    profiler.recordBytes("bytes.worldStore.legacyImport", legacySaveText.length);
+    const legacySave = profiler.measure("main.worldStore.legacyParse", () =>
+      JSON.parse(legacySaveText as string),
+    );
     const importedWorld: StoredWorld = {
       ...createWorldRecord("Old World", legacySave.seed),
       modifiedChunks: legacySave.modifiedChunks ?? [],
@@ -145,5 +165,8 @@ export async function listWorldRecords(): Promise<StoredWorld[]> {
   if (profiler.enabled) {
     profiler.recordBytes("bytes.worldStore.getAll", estimateTransferBytes(worlds));
   }
-  return worlds.sort((a, b) => b.lastPlayedAt - a.lastPlayedAt);
+  profiler.addCounter("game.worldStore.worldsListed", worlds.length);
+  return profiler.measure("main.worldStore.sortWorlds", () =>
+    worlds.sort((a, b) => b.lastPlayedAt - a.lastPlayedAt),
+  );
 }

@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { PixelButton, PixelInput } from "../pixel/pixel-ui";
+import { useProfiledRender } from "../use-profiled-render";
 
 interface MultiplayerPanelProps {
   peerId?: string;
@@ -12,6 +13,7 @@ export function MultiplayerPanel({
   onHost,
   onJoin,
 }: MultiplayerPanelProps) {
+  useProfiledRender("multiplayerPanel");
   const [hostIdInput, setHostIdInput] = useState("");
 
   return (

@@ -8,6 +8,7 @@ import {
 } from "../pixel/pixel-ui";
 import { MenuBackdrop } from "./menu-primitives";
 import { WorldAvatar } from "./world-avatar";
+import { useProfiledRender } from "../use-profiled-render";
 
 interface TitleMenuProps {
   worlds: StoredWorld[];
@@ -43,6 +44,7 @@ export function TitleMenu({
   onDeleteWorld,
   onJoinHostedWorld,
 }: TitleMenuProps) {
+  useProfiledRender("titleMenu");
   const [hostIdInput, setHostIdInput] = useState("");
   const [isCreating, setIsCreating] = useState(false);
   const [newWorldName, setNewWorldName] = useState("");

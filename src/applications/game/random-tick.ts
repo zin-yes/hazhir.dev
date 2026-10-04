@@ -1,3 +1,5 @@
+import { profiler } from "./profiler";
+
 /**
  * Random ticks pick uniformly random blocks, but only a few block types react.
  * Instead of rolling every pick and discarding the misses, this keeps a list of
@@ -16,14 +18,21 @@ export class TickableBlockIndex {
     reactsToTicks: (block: number) => boolean,
   ): Uint32Array {
     const cached = this.cache.get(chunk);
-    if (cached && cached.version === version) return cached.indices;
+    if (cached && cached.version === version) {
+      profiler.addCounter("game.randomTick.indexCacheHits");
+      return cached.indices;
+    }
 
+    const scopeToken = profiler.begin("main.interval.randomTick.rescanTickable");
     const found: number[] = [];
     for (let index = 0; index < chunk.length; index++) {
       if (reactsToTicks(chunk[index])) found.push(index);
     }
     const indices = Uint32Array.from(found);
     this.cache.set(chunk, { version, indices });
+    profiler.addCounter("game.randomTick.indexRescans");
+    profiler.addCounter("game.randomTick.blocksScanned", chunk.length);
+    profiler.end(scopeToken);
     return indices;
   }
 }
@@ -39,6 +48,7 @@ export function pickTickedBlocks(
   random: () => number = Math.random,
 ): number[] {
   const hits: number[] = [];
+  profiler.addCounter("game.randomTick.picksRolled", picks);
   if (tickableIndices.length === 0) return hits;
   const hitChance = tickableIndices.length / blockCount;
   for (let pick = 0; pick < picks; pick++) {

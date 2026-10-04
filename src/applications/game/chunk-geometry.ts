@@ -1,5 +1,7 @@
 import * as THREE from "three";
 import { CHUNK_HEIGHT, CHUNK_LENGTH, CHUNK_WIDTH } from "./config";
+import { profiler } from "./profiler";
+import { DIMENSIONS } from "./profiler/dimensions";
 import {
   INDICES_PER_QUAD,
   VERTICES_PER_QUAD,
@@ -34,6 +36,7 @@ function getSharedQuadIndex(quadCount: number): THREE.BufferAttribute {
   ) {
     return sharedQuadIndex;
   }
+  const growToken = profiler.begin("main.chunk.buildGeometry.growSharedIndex");
   let capacity = sharedQuadIndex
     ? sharedQuadIndex.count / INDICES_PER_QUAD
     : INITIAL_SHARED_QUAD_CAPACITY;
@@ -52,6 +55,9 @@ function getSharedQuadIndex(quadCount: number): THREE.BufferAttribute {
   }
   sharedQuadIndex = new THREE.BufferAttribute(indices, 1);
   sharedQuadIndex.name = SHARED_ATTRIBUTE_NAME;
+  profiler.addCounter("game.geometry.sharedIndexGrowths");
+  profiler.recordBytes("bytes.geometry.sharedQuadIndex", indices.byteLength);
+  profiler.end(growToken);
   return sharedQuadIndex;
 }
 
@@ -71,15 +77,25 @@ export function createChunkSurfaceGeometry(
 ): THREE.BufferGeometry | null {
   const words = new Uint32Array(vertexBuffer);
   if (words.length === 0) return null;
-  const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute(
-    PACKED_VERTEX_ATTRIBUTE,
-    new THREE.BufferAttribute(words, WORDS_PER_VERTEX),
+  const scopeToken = profiler.begin(
+    "main.chunk.buildGeometry.surface",
+    DIMENSIONS.simulationSystem,
+    "geometry.surface",
   );
-  return createQuadGeometry(
-    geometry,
-    words.length / WORDS_PER_VERTEX / VERTICES_PER_QUAD,
-  );
+  try {
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute(
+      PACKED_VERTEX_ATTRIBUTE,
+      new THREE.BufferAttribute(words, WORDS_PER_VERTEX),
+    );
+    profiler.addCounter("game.geometry.surfaceCreated");
+    return createQuadGeometry(
+      geometry,
+      words.length / WORDS_PER_VERTEX / VERTICES_PER_QUAD,
+    );
+  } finally {
+    profiler.end(scopeToken);
+  }
 }
 
 interface PlantTemplateAttribute {
@@ -98,10 +114,12 @@ function getPlantTemplate(
   const key = `${blockType}:${detail}`;
   let template = plantTemplates.get(key);
   if (!template) {
+    const templateToken = profiler.begin("main.chunk.buildGeometry.plantTemplate");
     const built =
       detail === "voxel"
         ? buildPlantTemplate(blockType)
         : buildPlantBillboardTemplate(blockType);
+    profiler.end(templateToken);
     const attribute = new THREE.BufferAttribute(
       new Uint32Array(built.vertexBuffer),
       WORDS_PER_VERTEX,
@@ -123,14 +141,24 @@ export function createPlantInstanceGeometry(
   const template = getPlantTemplate(blockType, detail);
   if (instanceWords.length === 0 || template.quadCount === 0) return null;
 
-  const geometry = new THREE.InstancedBufferGeometry();
-  geometry.setAttribute(PACKED_VERTEX_ATTRIBUTE, template.attribute);
-  geometry.setAttribute(
-    PLANT_INSTANCE_ATTRIBUTE,
-    new THREE.InstancedBufferAttribute(instanceWords, 1),
+  const scopeToken = profiler.begin(
+    "main.chunk.buildGeometry.plants",
+    DIMENSIONS.simulationSystem,
+    "geometry.plants",
   );
-  geometry.instanceCount = instanceWords.length;
-  return createQuadGeometry(geometry, template.quadCount);
+  try {
+    const geometry = new THREE.InstancedBufferGeometry();
+    geometry.setAttribute(PACKED_VERTEX_ATTRIBUTE, template.attribute);
+    geometry.setAttribute(
+      PLANT_INSTANCE_ATTRIBUTE,
+      new THREE.InstancedBufferAttribute(instanceWords, 1),
+    );
+    geometry.instanceCount = instanceWords.length;
+    profiler.addCounter("game.geometry.plantInstancesCreated", instanceWords.length);
+    return createQuadGeometry(geometry, template.quadCount);
+  } finally {
+    profiler.end(scopeToken);
+  }
 }
 
 export function plantTemplateVertexCount(blockType: number): number {
@@ -142,10 +170,13 @@ export function plantTemplateVertexCount(blockType: number): number {
  * chunks are detached first so disposing the geometry cannot delete them.
  */
 export function releaseChunkGeometry(geometry: THREE.BufferGeometry) {
+  const scopeToken = profiler.begin("main.chunk.dispose.releaseGeometry");
   for (const name of Object.keys(geometry.attributes)) {
     if (geometry.attributes[name].name === SHARED_ATTRIBUTE_NAME)
       geometry.deleteAttribute(name);
   }
   if (geometry.index === sharedQuadIndex) geometry.setIndex(null);
   geometry.dispose();
+  profiler.addCounter("game.geometry.released");
+  profiler.end(scopeToken);
 }
