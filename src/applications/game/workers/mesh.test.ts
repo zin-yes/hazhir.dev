@@ -191,6 +191,60 @@ describe("generateMesh buried chunks", () => {
   });
 });
 
+describe("generateMesh special shapes and reuse", () => {
+  test("a stair keeps its step inside the block and its texture inside the texture", () => {
+    const chunk = new Uint8Array(CHUNK_WIDTH * CHUNK_HEIGHT * CHUNK_LENGTH);
+    chunk[calculateOffset(5, 5, 5)] = BlockType.PLANKS_STAIRS_NORTH;
+    const mesh = generateMesh(chunk.buffer, new Uint8Array(chunk.length).fill(FULL_LIGHT).buffer);
+    const quads = decodeSurfaceQuads(mesh.opaque);
+
+    expect(quads.length).toBeGreaterThanOrEqual(8);
+    const heights = new Set(quads.flatMap((quad) => quad.corners.map((corner) => corner.y - 5)));
+    expect(heights).toEqual(new Set([0, 0.5, 1]));
+    for (const corner of quads.flatMap((quad) => quad.corners)) {
+      expect(corner.u).toBeGreaterThanOrEqual(0);
+      expect(corner.u).toBeLessThanOrEqual(1);
+      expect(corner.v).toBeGreaterThanOrEqual(0);
+      expect(corner.v).toBeLessThanOrEqual(1);
+    }
+  });
+
+  test("a checkerboard that exposes every face of 16384 blocks fills the vertex stream without losing quads", () => {
+    const chunk = new Uint8Array(CHUNK_WIDTH * CHUNK_HEIGHT * CHUNK_LENGTH);
+    for (let x = 0; x < CHUNK_WIDTH; x++) {
+      for (let y = 0; y < CHUNK_HEIGHT; y++) {
+        for (let z = 0; z < CHUNK_LENGTH; z++) {
+          if ((x + y + z) % 2 === 0) chunk[calculateOffset(x, y, z)] = BlockType.STONE;
+        }
+      }
+    }
+    const mesh = generateMesh(chunk.buffer, new Uint8Array(chunk.length).fill(FULL_LIGHT).buffer);
+    const quadCount = mesh.opaque.byteLength / (WORDS_PER_VERTEX * 4 * 4);
+    expect(quadCount).toBe(6 * 16384);
+  });
+
+  test("meshing one chunk does not change what the next chunk gets", () => {
+    const floor = new Uint8Array(CHUNK_WIDTH * CHUNK_HEIGHT * CHUNK_LENGTH);
+    const lit = new Uint8Array(floor.length).fill(FULL_LIGHT);
+    for (let x = 0; x < CHUNK_WIDTH; x++) {
+      for (let z = 0; z < CHUNK_LENGTH; z++) floor[calculateOffset(x, 3, z)] = (x + z) % 5 === 0 ? BlockType.DIRT : BlockType.STONE;
+    }
+    floor[calculateOffset(9, 4, 9)] = BlockType.TALL_GRASS;
+    const before = generateMesh(floor.slice().buffer, lit.slice().buffer);
+
+    const other = new Uint8Array(floor.length);
+    for (let x = 0; x < CHUNK_WIDTH; x++) {
+      for (let y = 0; y < 12; y++) other[calculateOffset(x, y, 7)] = BlockType.GRASS;
+    }
+    generateMesh(other.buffer, new Uint8Array(other.length).fill(0x35).buffer, { left: new Uint8Array(1024).fill(BlockType.STONE).buffer });
+
+    const after = generateMesh(floor.slice().buffer, lit.slice().buffer);
+    expect(Buffer.compare(Buffer.from(after.opaque), Buffer.from(before.opaque))).toBe(0);
+    expect(after.plants.length).toBe(before.plants.length);
+    expect(Buffer.compare(Buffer.from(after.plants[0].instances), Buffer.from(before.plants[0].instances))).toBe(0);
+  });
+});
+
 describe("generateMesh plants", () => {
   function meshWithSaplingOnStone(light: number) {
     const chunk = new Uint8Array(CHUNK_WIDTH * CHUNK_HEIGHT * CHUNK_LENGTH);
