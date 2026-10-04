@@ -1,6 +1,14 @@
 import { describe, expect, test } from "bun:test";
 import { BlockType } from "../blocks";
-import { applyBlockEdits, type BulkEditResult } from "./apply-block-edits";
+import {
+  beginWorkerTask,
+  finishWorkerTask,
+} from "../profiler/worker-recorder";
+import {
+  applyBlockEdits,
+  relightAfterBlocksWritten,
+  type BulkEditResult,
+} from "./apply-block-edits";
 import {
   BlockEditBatch,
   boxEdits,
@@ -334,5 +342,64 @@ describe("applyBlockEdits against a from-scratch relight", () => {
     );
     expect(result.stats.blocksChanged).toBe(1);
     expect(result.chunksToRemesh).toEqual([{ x: -1, y: 4, z: -1 }]);
+  });
+
+  test("a large sphere spanning many chunks of a bigger world matches", { timeout: 60000 }, () => {
+    const world = createTerrainWorld({
+      seed: 55,
+      chunkXRange: [-1, 1],
+      chunkYRange: [3, 5],
+      chunkZRange: [-1, 1],
+    });
+    const center = { x: 16, y: 4 * CHUNK_SIZE + 12, z: 16 };
+    const dug = applyAndVerify(world, sphereEdits(center, 26, BlockType.AIR, "erase"), "dig r26");
+    expect(dug.chunksToRemesh.length).toBeGreaterThan(12);
+    const filled = applyAndVerify(world, sphereEdits(center, 20, BlockType.GLOWSTONE, "fill"), "lamp r20");
+    expect(filled.stats.blocksChanged).toBeGreaterThan(30000);
+    applyAndVerify(world, sphereEdits({ x: 30, y: 5 * CHUNK_SIZE + 30, z: -20 }, 24, BlockType.STONE, "fill"), "roof r24");
+  });
+
+  test("a chunk with blocks but no light yet takes the block edit and no light work", () => {
+    const world = smallWorld(4);
+    world.light.delete(chunkName(0, 3, 0));
+    const result = applyBlockEdits(
+      world,
+      sphereEdits({ x: 16, y: 3 * CHUNK_SIZE + 16, z: 16 }, 4, BlockType.GLASS, "fill"),
+    );
+    expect(result.stats.blocksChanged).toBeGreaterThan(100);
+    expect(world.blockAt(16, 3 * CHUNK_SIZE + 16, 16)).toBe(BlockType.GLASS);
+    expect(chunkNames(result.changedChunks).has(chunkName(0, 3, 0))).toBe(true);
+    expect(chunkNames(result.chunksToRemesh).has(chunkName(0, 3, 0))).toBe(false);
+    expect(world.getLight(0, 3, 0)).toBeUndefined();
+  });
+
+  test("relighting after blocks the caller wrote itself matches a full relight", () => {
+    const world = smallWorld(19);
+    const random = createSeededRandom(808);
+    for (let round = 0; round < 6; round++) {
+      const changes: { x: number; y: number; z: number; oldBlock: number }[] = [];
+      for (let edit = 0; edit < 60; edit++) {
+        const x = -30 + Math.floor(random() * 60);
+        const y = 100 + Math.floor(random() * 50);
+        const z = -30 + Math.floor(random() * 60);
+        const block = [BlockType.AIR, BlockType.STONE, BlockType.GLOWSTONE, BlockType.WATER][Math.floor(random() * 4)];
+        changes.push({ x, y, z, oldBlock: world.setBlockAt(x, y, z, block) });
+      }
+      relightAfterBlocksWritten(world, changes);
+      expectLightMatches(world, floodLightFromScratch(world), `caller wrote round ${round}`);
+    }
+  });
+
+  test("records a profile with a section per phase and counters when profiling", () => {
+    const world = smallWorld(7);
+    beginWorkerTask(true);
+    applyBlockEdits(world, sphereEdits({ x: -16, y: 120, z: -16 }, 6, BlockType.STONE, "fill"));
+    const profile = finishWorkerTask()!;
+    const sectionNames = profile.callTree.map((node) => node.path);
+    for (const phase of ["writeBlocks", "seedLightChanges", "removeSkyLight", "removeBlockLight", "refillLight", "collectChunks"]) {
+      expect(sectionNames).toContain(phase);
+    }
+    expect(profile.counters.blocksChanged).toBeGreaterThan(100);
+    expect(profile.counters.chunksToRemesh).toBeGreaterThan(0);
   });
 });
