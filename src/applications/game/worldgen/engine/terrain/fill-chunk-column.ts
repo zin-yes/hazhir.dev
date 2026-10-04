@@ -270,7 +270,10 @@ function interpolateColumn(noiseChunk: NoiseChunk, settings: InterpolationSettin
               if (aquifer === undefined) {
                 symbol = densityValue > 0 ? BLOCK_DEFAULT_BLOCK : fluidWithoutAquifer;
               } else {
-                symbol = densityValue > 0 ? NULL_SUBSTANCE : aquifer.computeSubstance(noiseChunk, densityValue);
+                symbol =
+                  densityValue > 0
+                    ? NULL_SUBSTANCE
+                    : aquifer.computeSubstanceAt(noiseChunk, densityValue, chunkMinBlockX + localX, blockY, chunkMinBlockZ + localZ);
                 if (symbol === NULL_SUBSTANCE) {
                   symbol = oreVeinifier === undefined ? NO_VEIN : oreVeinifier.compute(noiseChunk);
                   if (symbol === NO_VEIN) symbol = BLOCK_DEFAULT_BLOCK;

@@ -145,7 +145,13 @@ export class NoiseBasedAquifer {
   /** Aquifer.computeSubstance: a terrain symbol, or NULL_SUBSTANCE where the block stays solid. */
   computeSubstance(context: FunctionContext, density: number): number {
     if (density > 0) return NULL_SUBSTANCE;
-    return this.resolveSubstance(context, density);
+    return this.resolveSubstance(context, density, context.blockX, context.blockY, context.blockZ);
+  }
+
+  /** computeSubstance for a context known to sit at (blockX, blockY, blockZ), skipping its coordinate getters. */
+  computeSubstanceAt(context: FunctionContext, density: number, blockX: number, blockY: number, blockZ: number): number {
+    if (density > 0) return NULL_SUBSTANCE;
+    return this.resolveSubstance(context, density, blockX, blockY, blockZ);
   }
 
   /** Moves the lookup and cache counters accumulated since the last call into the worker profile. */
@@ -176,17 +182,15 @@ export class NoiseBasedAquifer {
     }
   }
 
-  private resolveSubstance(context: FunctionContext, density: number): number {
+  private resolveSubstance(context: FunctionContext, density: number, blockX: number, blockY: number, blockZ: number): number {
     this.substanceLookups++;
-    const blockX = context.blockX;
-    const blockY = context.blockY;
-    const blockZ = context.blockZ;
-    if (this.globalFluidAt(blockY) === BLOCK_LAVA) return BLOCK_LAVA;
+    if (blockY < this.lavaBelowY) return BLOCK_LAVA;
 
-    const originGridX = Math.floor((blockX - 5) / X_SPACING);
+    // X_SPACING and Z_SPACING are 16: an arithmetic shift is Math.floor of the division for block coordinates.
+    const originGridX = (blockX - 5) >> 4;
     const originGridY = Math.floor((blockY + 1) / Y_SPACING);
-    const originGridZ = Math.floor((blockZ - 5) / Z_SPACING);
-    const originIndex = this.cellIndex(originGridX, originGridY, originGridZ);
+    const originGridZ = (blockZ - 5) >> 4;
+    const originIndex = ((originGridY - this.minGridY) * this.gridSizeZ + (originGridZ - this.minGridZ)) * this.gridSizeX + (originGridX - this.minGridX);
     let uniformity = this.originUniformity[originIndex]!;
     if (uniformity === 0) {
       uniformity = this.classifyOrigin(originGridX, originGridY, originGridZ);
