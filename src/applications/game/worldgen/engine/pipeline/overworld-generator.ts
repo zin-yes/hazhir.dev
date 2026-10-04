@@ -5,6 +5,7 @@
 import { BiomeManager, MultiNoiseBiomeSource } from "../biome-source";
 import { createCarverSystem } from "../carvers";
 import { BlockPalette, ChunkBlocks, blockNameOf } from "../chunk";
+import { CarvingMask, type CarvingStep } from "../features/core/carving-mask";
 import { createSeededNoiseSources, wireNoiseRouter } from "../density";
 import { createRootRandomFactory } from "../noise";
 import type { JsonObject, TagRegistry, WorldgenRegistries } from "../registry/datapack-loader";
@@ -40,6 +41,8 @@ export interface OverworldGenerator {
   generateBaseColumn(chunkX: number, chunkZ: number): ChunkBlocks;
   rawBiomeAtQuart(quartX: number, quartY: number, quartZ: number): string;
   biomeAt(blockX: number, blockY: number, blockZ: number): string;
+  /** The carvers' air mask of a base column (undefined for the liquid step and when the carvers stage is absent). */
+  carvingMask(chunkX: number, chunkZ: number, step: CarvingStep): CarvingMask | undefined;
   /** First free y above the highest matching block (Heightmap value), computed on the generated base column. */
   surfaceHeight(blockX: number, blockZ: number, heightmap: HeightmapType): number;
 }
@@ -77,6 +80,7 @@ export function createOverworldGenerator(params: OverworldGeneratorParams): Over
     stages.push(createCarverStage({ carverSystem, seedSurface, settings, router }));
   }
   const columnCache = new BoundedLruCache<string, ChunkBlocks>(params.maxCachedColumns ?? MAX_CACHED_COLUMNS);
+  const carvingMaskByColumn = new WeakMap<ChunkBlocks, CarvingMask>();
   const motionBlockingByPaletteId: boolean[] = [];
 
   const generateBaseColumn = (chunkX: number, chunkZ: number): ChunkBlocks => {
@@ -86,6 +90,7 @@ export function createOverworldGenerator(params: OverworldGeneratorParams): Over
     const column = new ChunkBlocks(chunkX, chunkZ, settings.minY, settings.height, palette);
     const context: ColumnStageContext = { chunkX, chunkZ, seed, settings, registries, router, aquifer: undefined, rawBiomeAtQuart, biomeAt };
     for (const stage of stages) stage.run(column, context);
+    if (context.carvingMask !== undefined) carvingMaskByColumn.set(column, CarvingMask.fromByteMask(settings.minY, settings.height, context.carvingMask));
     columnCache.set(key, column);
     return column;
   };
@@ -105,6 +110,7 @@ export function createOverworldGenerator(params: OverworldGeneratorParams): Over
     generateBaseColumn,
     rawBiomeAtQuart,
     biomeAt,
+    carvingMask: (chunkX, chunkZ, step) => (step === "air" ? carvingMaskByColumn.get(generateBaseColumn(chunkX, chunkZ)) : undefined),
     surfaceHeight(blockX, blockZ, heightmap) {
       const column = generateBaseColumn(blockX >> 4, blockZ >> 4);
       const localX = blockX & 15;

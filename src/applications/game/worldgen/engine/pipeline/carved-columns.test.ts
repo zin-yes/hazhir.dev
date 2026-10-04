@@ -95,6 +95,26 @@ describe.skipIf(!WORLDGEN_DATA_AVAILABLE)("fully wired columns versus real chunk
     expect(oursLavaBlocks).toBeGreaterThan(0);
   }, 1_800_000);
 
+  test("the air carving mask marks the blocks the carvers emptied, and the liquid mask is empty", () => {
+    const { registries, overworldDimension, blockTags } = loadDatapacks();
+    const generator = createOverworldGenerator({ registries, overworldDimension: overworldDimension!, blockTags, seed: FIXTURE_SEED });
+    let maskedBlocks = 0;
+    let maskedBlocksStillSolid = 0;
+    for (let chunkX = 0; chunkX < 4; chunkX++) {
+      const column = generator.generateBaseColumn(chunkX, 2);
+      const airMask = generator.carvingMask(chunkX, 2, "air");
+      expect(airMask).toBeDefined();
+      for (const position of airMask!.positions(chunkX, 2)) {
+        maskedBlocks++;
+        if (!isOpenBlockName(column.getState(position.x & 15, position.y, position.z & 15).split("[")[0]!)) maskedBlocksStillSolid++;
+      }
+      expect(generator.carvingMask(chunkX, 2, "liquid")).toBeUndefined();
+    }
+    expect(maskedBlocks).toBeGreaterThan(1000);
+    // WorldCarver sets the mask bit before the aquifer may veto the carve (solid aquifer barriers), so a minority stays solid.
+    expect(maskedBlocksStillSolid / maskedBlocks).toBeLessThan(0.2);
+  });
+
   test("the carvers' point biome sampler picks the stored biome at every chunk's source corner", () => {
     const { registries, overworldDimension, blockTags } = loadDatapacks();
     const generator = createOverworldGenerator({ registries, overworldDimension: overworldDimension!, blockTags, seed: FIXTURE_SEED });

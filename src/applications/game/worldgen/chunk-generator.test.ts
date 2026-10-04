@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, test } from "bun:test";
-import { BlockType } from "@/applications/game/blocks";
+import { BlockType, NON_COLLIDABLE_BLOCKS, isCrossBlock } from "@/applications/game/blocks";
 import { CHUNK_HEIGHT, CHUNK_LENGTH, CHUNK_WIDTH } from "@/applications/game/config";
 import { generateChunkBlocks } from "./chunk-generator";
 import { GAME_Y_OFFSET, SEA_LEVEL } from "./constants";
@@ -81,19 +81,53 @@ describe("engine-backed chunk generation", () => {
   test("the surface sampler agrees with the generated blocks and sea level maps to the game's", () => {
     const sampleHeight = createSurfaceHeightSampler(SEED);
     let landColumns = 0;
+    let openColumns = 0;
+    let sampledColumns = 0;
     for (let offsetX = 0; offsetX < CHUNK_WIDTH; offsetX += 5) {
       for (let offsetZ = 0; offsetZ < CHUNK_LENGTH; offsetZ += 5) {
         const gameX = spawnChunkX * CHUNK_WIDTH + offsetX;
         const gameZ = spawnChunkZ * CHUNK_LENGTH + offsetZ;
         const groundY = sampleHeight(gameX, gameZ);
         expect(isSolidGround(blockAt(SEED, gameX, groundY, gameZ))).toBe(true);
+        // The sampler sees bare terrain; decoration (trees, plants, snow layers) may stand on it.
+        let isOpenAbove = true;
         for (let aboveY = groundY + 1; aboveY <= groundY + 3; aboveY++) {
-          expect(isSolidGround(blockAt(SEED, gameX, aboveY, gameZ))).toBe(false);
+          if (isSolidGround(blockAt(SEED, gameX, aboveY, gameZ)) && !NON_COLLIDABLE_BLOCKS.includes(blockAt(SEED, gameX, aboveY, gameZ))) isOpenAbove = false;
         }
+        sampledColumns++;
+        if (isOpenAbove) openColumns++;
         if (groundY > SEA_LEVEL) landColumns++;
       }
     }
     expect(landColumns).toBeGreaterThan(0);
+    expect(openColumns / sampledColumns).toBeGreaterThan(0.6);
+  });
+
+  test("decoration reaches the game: plants stand on the ground around spawn, deterministically", () => {
+    const sampleHeight = createSurfaceHeightSampler(SEED);
+    let plantBlocks = 0;
+    let columnsWithPlant = 0;
+    let sampledColumns = 0;
+    for (let offsetX = -24; offsetX < 24; offsetX += 3) {
+      for (let offsetZ = -24; offsetZ < 24; offsetZ += 3) {
+        const gameX = Math.floor(spawn.x) + offsetX;
+        const gameZ = Math.floor(spawn.z) + offsetZ;
+        const groundY = sampleHeight(gameX, gameZ);
+        let foundPlant = false;
+        for (let aboveY = groundY + 1; aboveY <= groundY + 12; aboveY++) {
+          const block = blockAt(SEED, gameX, aboveY, gameZ);
+          if (isCrossBlock(block) || block === BlockType.LEAVES || block === BlockType.LOG) {
+            plantBlocks++;
+            foundPlant = true;
+          }
+        }
+        sampledColumns++;
+        if (foundPlant) columnsWithPlant++;
+      }
+    }
+    expect(sampledColumns).toBe(256);
+    expect(columnsWithPlant).toBeGreaterThan(10);
+    expect(plantBlocks).toBeGreaterThanOrEqual(columnsWithPlant);
   });
 
   test("spawn is on dry land with open air above and deterministic", () => {

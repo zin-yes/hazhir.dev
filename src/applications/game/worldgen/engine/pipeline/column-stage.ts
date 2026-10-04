@@ -19,6 +19,8 @@ export interface ColumnStageContext {
   readonly router: NoiseRouter;
   /** Set by the noise fill stage when aquifers are enabled, so the carver stage reuses the fill's aquifer for this column. */
   aquifer?: CarverAquifer;
+  /** Set by the carvers stage: the air carving mask of this column (layout of ChunkBlocks, 1 = carved). */
+  carvingMask?: Uint8Array;
   rawBiomeAtQuart(quartX: number, quartY: number, quartZ: number): string;
   biomeAt(blockX: number, blockY: number, blockZ: number): string;
 }

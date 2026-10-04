@@ -103,7 +103,7 @@ export function createCarverStage(params: {
     name: CARVERS_STAGE_NAME,
     run(column, context) {
       if (context.aquifer === undefined) throw new Error("The carvers stage needs the aquifer of the noise fill stage (enable aquifers there)");
-      carverSystem.applyCarvers({
+      context.carvingMask = carverSystem.applyCarvers({
         chunk: column,
         aquifer: context.aquifer,
         symbolStates,

@@ -10,6 +10,7 @@ fill noise (aquifers + ore veins) -> biomes -> `buildSurface` -> carvers.
   Defaults are `noise-fill` (aquifers and ore veins; its aquifer travels in `context.aquifer`), `surface` and, when
   `blockTags` is passed, `carvers` (reuses that aquifer; the cached column is the final carved one). Splice features in
   before the first `generateBaseColumn` call. `createNoiseFillStage()` without options is the aquifer-free fill.
+- `generator.carvingMask(chunkX, chunkZ, "air")` returns the carvers' mask of a base column (packed `CarvingMask`, what the `carving_mask` placement modifier reads); the liquid step is always empty, as in 1.20.6.
 - The carvers read biomes through a memoized point sampler (stripped climate sampler, no chunk grids); `rawBiomeAtQuart`
   and `biomeAt` stay on the exact chunk-grid store.
 - Biomes mirror `doCreateBiomes`: per chunk, a `NoiseChunk`-cached climate sampler is evaluated in

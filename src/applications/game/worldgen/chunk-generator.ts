@@ -11,10 +11,10 @@ import {
   startWorkerSection,
 } from "@/applications/game/profiler/worker-recorder";
 import { BoundedLruCache } from "./engine/pipeline/bounded-lru-cache";
-import { toGameBlock } from "./engine/blocks/minecraft-block-map";
+import { toGameBlockOrAir } from "./engine/blocks/lenient-block-map";
 import { CHUNK_COLUMN_SIZE, type ChunkBlocks } from "./engine/chunk";
 import { GAME_Y_OFFSET } from "./constants";
-import { getFullGenerator } from "./overworld-world";
+import { getFullWorld, type FullWorld } from "./overworld-world";
 
 const GAME_CHUNK_VOLUME = CHUNK_WIDTH * CHUNK_HEIGHT * CHUNK_LENGTH;
 const X_STRIDE = CHUNK_HEIGHT * CHUNK_LENGTH;
@@ -28,19 +28,22 @@ const MAX_CACHED_SEEDS = 2;
 type GameColumn = Map<number, Uint8Array>;
 
 class SeedChunkSource {
-  private readonly generator;
+  private readonly world: FullWorld;
   private readonly gameColumns = new BoundedLruCache<string, GameColumn>(MAX_CACHED_GAME_COLUMNS);
   private readonly gameBlockByPaletteId: BlockType[] = [];
+  private readonly unknownByPaletteId: boolean[] = [];
 
   constructor(seed: number) {
-    this.generator = getFullGenerator(seed);
+    this.world = getFullWorld(seed);
   }
 
   private gameBlockOf(column: ChunkBlocks, paletteId: number): BlockType {
     let gameBlock = this.gameBlockByPaletteId[paletteId];
     if (gameBlock === undefined) {
-      gameBlock = toGameBlock(column.palette.stateOf(paletteId));
+      const lookup = toGameBlockOrAir(column.palette.stateOf(paletteId));
+      gameBlock = lookup.gameBlock;
       this.gameBlockByPaletteId[paletteId] = gameBlock;
+      this.unknownByPaletteId[paletteId] = lookup.isUnknown;
     }
     return gameBlock;
   }
@@ -48,9 +51,10 @@ class SeedChunkSource {
   private buildGameColumn(chunkX: number, chunkZ: number): GameColumn {
     const gameColumn: GameColumn = new Map();
     let solidBlocks = 0;
+    let unknownBlocks = 0;
     for (let columnOffsetX = 0; columnOffsetX < MINECRAFT_COLUMNS_PER_GAME_CHUNK_X; columnOffsetX++) {
       for (let columnOffsetZ = 0; columnOffsetZ < MINECRAFT_COLUMNS_PER_GAME_CHUNK_Z; columnOffsetZ++) {
-        const column = this.generator.generateBaseColumn(
+        const column = this.world.generateDecoratedColumn(
           chunkX * MINECRAFT_COLUMNS_PER_GAME_CHUNK_X + columnOffsetX,
           chunkZ * MINECRAFT_COLUMNS_PER_GAME_CHUNK_Z + columnOffsetZ,
         );
@@ -66,7 +70,10 @@ class SeedChunkSource {
               const paletteId = blocks[layerStart + localColumnZ * CHUNK_COLUMN_SIZE + localColumnX]!;
               if (paletteId === 0) continue;
               const gameBlock = this.gameBlockOf(column, paletteId);
-              if (gameBlock === BlockType.AIR) continue;
+              if (gameBlock === BlockType.AIR) {
+                if (this.unknownByPaletteId[paletteId]) unknownBlocks++;
+                continue;
+              }
               if (chunkBlocks === undefined) {
                 chunkBlocks = new Uint8Array(GAME_CHUNK_VOLUME);
                 gameColumn.set(chunkY, chunkBlocks);
@@ -81,11 +88,12 @@ class SeedChunkSource {
       }
     }
     addWorkerCounter("solidBlocks", solidBlocks);
+    addWorkerCounter("unknownBlockNames", unknownBlocks);
     return gameColumn;
   }
 
   chunkBlocks(chunkX: number, chunkY: number, chunkZ: number): Uint8Array {
-    const { minY, height } = this.generator.settings;
+    const { minY, height } = this.world.generator.settings;
     const lowestGameY = minY + GAME_Y_OFFSET;
     const highestGameY = minY + height - 1 + GAME_Y_OFFSET;
     const isOutsideWorldHeight = (chunkY + 1) * CHUNK_HEIGHT - 1 < lowestGameY || chunkY * CHUNK_HEIGHT > highestGameY;
