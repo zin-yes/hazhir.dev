@@ -6,8 +6,12 @@ import { ImprovedNoise } from "./improved-noise";
 /** PerlinNoise.ROUND_OFF = 2^25: inputs are wrapped into [-2^24, 2^24] to keep precision far from the origin. */
 const ROUND_OFF = 33554432.0;
 
+/** Below this magnitude `value / ROUND_OFF + 0.5` stays inside (0.25, 0.75), so wrap returns the value unchanged. */
+const WRAP_IDENTITY_LIMIT = 8388608.0;
+
 /** Java `PerlinNoise.wrap`. */
 export function wrapNoiseCoordinate(value: number): number {
+  if (value < WRAP_IDENTITY_LIMIT && value > -WRAP_IDENTITY_LIMIT) return value;
   return value - Math.floor(value / ROUND_OFF + 0.5) * ROUND_OFF;
 }
 
