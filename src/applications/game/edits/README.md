@@ -101,3 +101,20 @@ the remesh happens elsewhere.
   and checks that `chunksToRemesh` covers every chunk whose mesh inputs changed.
 - `workers/lighting.differential.test.ts` compares the load pass with the same
   flood on generated terrain.
+
+## Sphere brush (`brush/`)
+
+`B` toggles the brush while playing; `[` / `]` or Shift + mouse wheel set the radius (1..64, default 6). Left mouse
+erases a sphere centered on the targeted block, right mouse paints the selected hotbar block centered on the cell in
+front of the hit face (24 block reach; without a hit, 24 blocks in front of the camera). Ctrl while painting only
+repaints solid blocks, Alt only fills air. Holding a button keeps drawing, at most one sphere per frame and only after
+the center moved a quarter radius. A wireframe sphere (`brush-preview.ts`, one mesh for the session) shows the target.
+
+Every sphere goes through `applySphere` (one relight, one deduplicated rebuild per chunk). Saved edits and water
+wakeups run through `edit-side-effects.ts`, peers get one `BLOCK_BATCH` packet of y runs
+(`network/block-batch-codec.ts`, about 190 KB for a radius 64 sphere). `window.__voxelWorld.setBrush` / `getBrush`
+drive it from scripts; `getBrush().lastEdit` holds the last sphere's `onScreenMilliseconds`.
+
+Measured (Apple M5, real radius 8, stone, click to all rebuilt chunks on screen): radius 8 about 16 ms, 16 about
+25-45 ms, 32 about 85-110 ms (about 45 ms of it on the main thread: relight 20-25 ms, saved edits 13 ms), 64 (one
+million blocks) 0.5-0.6 s.
