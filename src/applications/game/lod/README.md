@@ -45,93 +45,30 @@ Design points worth knowing:
   8 km and 0.35 at 16 km; while the LOD is right at the camera (no real chunks yet) near drops to 0.5 and precision degrades to about 8 blocks at 8 km, which only shows as slight water/seabed flicker in shallow seas far away. A logarithmic depth buffer was not used: it needs `gl_FragDepth`, which disables early depth rejection for every LOD fragment (skirts and hidden terrain would all be shaded), and reversed-z needs `EXT_clip_control` and a renderer-wide change.
 - **Colours and light.** Vertex colour = the linear-light average of the face's texture (alpha-tested like the main shader); textures are pre-coloured, so there is no biome tint (same as the main shader). Shading is the main shader's `pow(0.8, 15 - light) * (0.55 + 0.15 * ao)` on the output-encoded colour: sky light 15 on land, lower under water, ambient occlusion 1 at wall feet.
 
-## Integration into `index.tsx`
+## Integration into the game (done)
 
-Everything goes through `createLodManager` from `./lod` (see `manager/lod-manager.ts` for the full interface).
+`index.tsx` drives the LOD through `game-lod-bridge.ts` (`GameLodBridge`), which owns the manager of the current world:
 
-1. **Create it with the world**, in `startWorldGeneration(currentSeed)` (so a new seed gets a new LOD), and keep it in a ref:
+- **Workers.** The bridge starts the `lod` worker pool once with the game and keeps it across worlds and settings
+  (`shareExecutor`); the workers decode the worldgen registries right away (`prepareWorldgen`), so the first horizon
+  of a world only waits for its seed's noise router and the root tiles (about 1.1 s after entering a world, against
+  4.5 to 6 s with a pool started per world).
+- **World and settings.** `startWorld(seed, distance)` replaces the manager when the chunk pipeline is created.
+  `renderSettings.lodRenderDistanceChunks` (`world/render-settings.ts`, 0 = off, 32..512, default 128) applies live:
+  a new distance calls `setRenderDistanceChunks` (cached tiles and real data stay), 0 disposes the manager, and
+  turning it back on replays every loaded and meshed chunk.
+- **Sky and fog.** The sky stays in the main scene while the LOD is off; the manager adopts it otherwise. On its first
+  frame the bridge calls `captureBackgroundHaze`, which renders the sky into a 32 px cube map, and the fog then fades
+  every fragment into the sky colour behind it (`setFogColor` remains the fallback).
+- **Render loop.** `renderer.autoClear` is false; each frame calls `renderer.clear()`, then the profiled render runs
+  the LOD pass (`renderPass`) before the main scene, so its draws and GPU time are part of the frame.
+- **Chunk events.** `onChunkGenerated`, `onMeshReady` (after the mesh is added or pruned) and `onChunkUnloaded` of the
+  `ChunkPipeline` forward to the manager; `applyBlockEditBatch` re-summarizes every chunk whose blocks changed.
+- **Underground.** While the camera is more than 12 blocks below the lowest surface of the finest cached tile over it,
+  the pass draws only the sky (`isCameraUnderground`), so far terrain never paints into caves through gaps.
+- **Teardown.** The bridge disposes the manager and terminates the workers on unmount.
 
-   ```ts
-   import { createLodManager, type LodManager } from "./lod";
-
-   const lodManagerRef = useRef<LodManager | null>(null);
-
-   // in startWorldGeneration(currentSeed), before chunks start loading:
-   lodManagerRef.current?.dispose();
-   lodManagerRef.current = createLodManager({
-     seed: currentSeed,
-     workerFactory: () =>
-       new Worker(new URL("./lod/worker/lod-worker.ts", import.meta.url), { name: "lod" }),
-     workerCount: 2,
-     renderDistanceChunks: 256,
-   });
-   lodManagerRef.current.adoptBackground(skyRef.current); // the Sky object, see step 2
-   ```
-
-   The `new Worker(new URL(...literal...), ...)` form must stay literal so Next bundles the worker, like the
-   `unified-worker.ts` pools. The pool registers itself with the profiler as `lod`.
-
-2. **Move the sky into the LOD pass.** Create the `Sky` as today but do not `scene.add(sky)`; call
-   `lod.adoptBackground(sky)` instead (keep it in a ref so step 1 can re-adopt it). After the LOD pass clears depth,
-   a sky left in the main scene would paint over the LOD. Optionally `lod.setFogColor(0x...)` to match the sky's
-   horizon colour (default `0xbcd0e6`).
-
-3. **Render loop.** Set `renderer.autoClear = false` once at start-up, then replace the render call at the end of the
-   frame with:
-
-   ```ts
-   const lod = lodManagerRef.current;
-   renderer.clear();
-   if (lod) {
-     lod.update(camera, renderer.domElement.clientHeight);
-     lod.render(renderer, camera);
-   }
-   if (profiledRenderRef.current) profiledRenderRef.current.render();
-   else renderer.render(scene, camera);
-   ```
-
-   `lod.render` draws the sky and the tiles with its own camera planes and clears depth; the main render must not
-   clear again (hence `autoClear = false`). Pass CSS pixels (`clientHeight`) so detail does not double on high-DPI
-   screens.
-
-4. **Chunk data.** In the `ChunkPipeline` events created in `startWorldGeneration` (blocks are final, saved edits
-   applied):
-
-   ```ts
-   onChunkGenerated: (record) =>
-     lodManagerRef.current?.onRealChunkLoaded(record.chunkX, record.chunkY, record.chunkZ, record.blocks!),
-   ```
-
-5. **Chunk meshes.** In the `onMeshReady` event (it fires with `mesh === null` when the chunk draws nothing), after
-   `addChunkMesh` / `pruneChunkMesh`:
-
-   ```ts
-   lodManagerRef.current?.onRealChunkMeshed(record.chunkX, record.chunkY, record.chunkZ);
-   ```
-
-   and in `onChunkUnloaded`:
-
-   ```ts
-   lodManagerRef.current?.onRealChunkUnloaded(record.chunkX, record.chunkY, record.chunkZ);
-   ```
-
-   A rebuilt mesh replaces the old one inside the same event, so the coverage never flickers.
-
-6. **Edits.** In `applyBlockEditBatch`, after `pipeline.applyBlockEdits` returns, for each chunk in
-   `result.changedChunks` whose blocks changed:
-
-   ```ts
-   lodManagerRef.current?.onBlocksEdited(chunk.x, chunk.y, chunk.z, pipeline.store.get(chunk.x, chunk.y, chunk.z)!.blocks!);
-   ```
-
-   Summaries are cheap (one top-down scan per column), re-assembly is batched (8 columns per frame) and tiles refresh
-   at most every 4 s.
-
-7. **Teardown.** `lodManagerRef.current?.dispose()` on unmount (terminates the workers, releases geometry, hands the
-   sky back to its previous parent).
-
-Optional: `lod.getStats()` for an overlay (drawn, missing, queued tiles, cache MB, first horizon and full detail
-times, per-level build costs).
+`window.__voxelWorld.lodStats()` returns `getStats()` plus the distance and the underground flag.
 
 ## Tuning (`LodManagerOptions`)
 
@@ -225,3 +162,6 @@ Regenerate the colour table after changing block textures:
 - Coverage assumes the loaded chunks form one region around the player; a meshed hole inside that region is drawn by
   the LOD but may be overdrawn by real chunks behind it until it loads.
 - Draw calls: one or two per tile (about 300-600 at 256 chunks).
+- The heightfield keeps a column's highest real surface, so an arch or overhang seen from beside it (or from above,
+  when the real chunks below the player's vertical range are not loaded) reads as a solid wall down to the ground.
+- Thin real features (a 4 block tower) vanish once a cell is wider than they are.

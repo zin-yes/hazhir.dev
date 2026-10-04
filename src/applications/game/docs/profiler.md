@@ -19,7 +19,7 @@ Everything is a cheap early return while the profiler is disabled, so instrument
 | Main-thread CPU | `main.*` scopes, inclusive and self time | `main.frame.render`, `main.chunk.buildGeometry`, `main.interval.randomTick`, `main.react.commit.game` |
 | Worker CPU | `worker.<pool>.<method>.exec` and per section | `worker.mesh.generateMesh.faceGeneration` |
 | Work done | `work.<pool>.<method>.<counter>` | `facesEmitted`, `bfsNodesVisited`, `blocksGenerated`; the report divides time by units (ns per face, etc.) |
-| GPU | `gpu.frame`, `gpu.pass.<sky,opaque,transparent,overlay>` | disjoint timer query, results arrive a few frames late |
+| GPU | `gpu.frame`, `gpu.pass.<lod,sky,opaque,transparent,overlay>` | disjoint timer query, results arrive a few frames late; `gpu.frame` includes the far terrain (LOD) pass, which the pass breakdown reports as `lod` |
 | WebGL driver CPU | `gl.cpu.upload`, `.draw`, `.programCompile`, `.sync` | time inside `bufferData`, `texSubImage3D`, `drawElements` |
 | Sending to GPU | `gl.upload.buffer`, `gl.upload.texture` bytes, `gpu.memory.*` | per-upload sizes, live buffer and texture memory |
 | Sending to workers | `main.workerPost.*`, `transfer.*`, `bytes.*` | postMessage serialization, transit latency, payload bytes, estimated receive-side clone cost |
@@ -33,6 +33,10 @@ Frames are tracked as intervals between render callbacks. Every main-thread scop
 ## Overlay tabs
 
 Targets (ranked list per group plus hints), Frames (interval, busy and GPU graphs, percentiles, worst frames), Main (scope tree), Workers (pool utilization, queue depth, per-method sections and efficiency), GPU (frame and pass time, draw calls, triangles, driver CPU, uploads), Transfers (bytes, serialization, latencies), Memory, Meshes (heaviest chunks, vertex distribution), Events.
+
+### Far terrain (LOD) metrics
+
+The LOD pass draws before the main scene inside `main.frame.render` (`main.lod.update`, `main.lod.render`); its draws count in `gpu.drawCalls` and `gpu.triangles`. The `lod` worker pool (method `buildLodTile`) shows in the Workers tab. `window.__voxelWorld.lodStats()` returns drawn, missing and cached tiles, cache and real data bytes, and the first horizon and full detail times. The rest of the LOD metrics are listed in `lod/README.md`.
 
 ### Chunk pipeline metrics
 
