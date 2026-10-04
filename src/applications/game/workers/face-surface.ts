@@ -1,14 +1,19 @@
-import { LIGHT_STEPS_PER_LEVEL, packPositionWord, packSurfaceWord } from "../vertex-format";
+import {
+  LIGHT_STEPS_PER_LEVEL,
+  SURFACE_LIGHT_SHIFT,
+  SURFACE_OCCLUSION_SHIFT,
+  SURFACE_TEXTURE_SHIFT,
+  SURFACE_V_SHIFT,
+} from "../vertex-format";
 import {
   CELL_AXIS_CORNER_PAIRS,
   CORNER_RING_INDICES,
-  FACE_CORNER_FLAGS,
+  CORNER_SIZE_MASKS,
+  CORNER_U_AT_FAR_END,
+  CORNER_V_AT_FAR_END,
   FACE_NEIGHBOR_DELTAS,
   FACE_RING_DELTAS,
   FULLY_LIT_AMBIENT_OCCLUSION,
-  FACE_U_AXIS,
-  FACE_U_FORWARD,
-  FACE_V_AXIS,
   LIGHT_LEVEL_OF_PACKED_LIGHT,
   MERGE_ALONG_CELLS,
   MERGE_ALONG_ROWS,
@@ -167,48 +172,36 @@ function isConstantAcrossPairs(pairs: Uint8Array, face: number): boolean {
 
 /**
  * Appends one axis aligned face as a quad, using the corner values left in
- * cornerAmbientOcclusion and cornerLightSteps. The box spans minimum to
- * minimum + size per axis in 1/16 blocks (size along the face's own axis is the
- * block height for top faces and a single cell otherwise). Texture coordinates
- * are in half blocks: u runs 0 to uExtent, v from vAtFlagZero to vAtFlagOne along
- * the face's v axis, mirrored per face as FACE_U_FORWARD says.
+ * cornerAmbientOcclusion and cornerLightSteps. The box spans minimumWord to
+ * minimumWord + sizeWord, both packed like a position word (1/16 blocks; the size
+ * along the face's own axis is the block height for top faces and a single cell
+ * otherwise). Texture coordinates are in half blocks: u runs 0 to uExtent, v from
+ * vAtFlagZero to vAtFlagOne along the face's v axis, mirrored per face as
+ * FACE_U_FORWARD says.
  */
 export function emitFaceQuad(
   target: VertexStream,
   face: number,
-  minX16: number,
-  minY16: number,
-  minZ16: number,
-  sizeX16: number,
-  sizeY16: number,
-  sizeZ16: number,
+  minimumWord: number,
+  sizeWord: number,
   uExtent: number,
   vAtFlagZero: number,
   vAtFlagOne: number,
   textureIndex: number
 ) {
-  const uAxis = FACE_U_AXIS[face];
-  const vAxis = FACE_V_AXIS[face];
-  const isUForward = FACE_U_FORWARD[face] === 1;
-  const faceBase = face * 12;
-
   const positionWords = quadPositionWords;
   const surfaceWords = quadSurfaceWords;
+  const textureBits = textureIndex << SURFACE_TEXTURE_SHIFT;
+  const faceBase = face * 4;
   for (let corner = 0; corner < 4; corner++) {
-    const base = faceBase + corner * 3;
-    positionWords[corner] = packPositionWord(
-      minX16 + FACE_CORNER_FLAGS[base] * sizeX16,
-      minY16 + FACE_CORNER_FLAGS[base + 1] * sizeY16,
-      minZ16 + FACE_CORNER_FLAGS[base + 2] * sizeZ16
-    );
-    const isUFlagSet = FACE_CORNER_FLAGS[base + uAxis] === 1;
-    surfaceWords[corner] = packSurfaceWord(
-      isUFlagSet === isUForward ? uExtent : 0,
-      FACE_CORNER_FLAGS[base + vAxis] === 1 ? vAtFlagOne : vAtFlagZero,
-      textureIndex,
-      cornerAmbientOcclusion[corner],
-      cornerLightSteps[corner]
-    );
+    const cornerIndex = faceBase + corner;
+    positionWords[corner] = minimumWord + (sizeWord & CORNER_SIZE_MASKS[cornerIndex]);
+    surfaceWords[corner] =
+      (CORNER_U_AT_FAR_END[cornerIndex] === 1 ? uExtent : 0) |
+      ((CORNER_V_AT_FAR_END[cornerIndex] === 1 ? vAtFlagOne : vAtFlagZero) << SURFACE_V_SHIFT) |
+      textureBits |
+      (cornerAmbientOcclusion[corner] << SURFACE_OCCLUSION_SHIFT) |
+      (cornerLightSteps[corner] << SURFACE_LIGHT_SHIFT);
   }
   // Split along the brighter diagonal so a dark corner does not streak.
   target.pushQuadFromCorners(

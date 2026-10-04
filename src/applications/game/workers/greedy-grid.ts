@@ -1,4 +1,4 @@
-import { CHUNK_UV_UNITS_PER_BLOCK, POSITION_UNITS_PER_BLOCK } from "../vertex-format";
+import { CHUNK_UV_UNITS_PER_BLOCK, POSITION_UNITS_PER_BLOCK, packPositionWord } from "../vertex-format";
 import {
   cornerAmbientOcclusion,
   cornerLightSteps,
@@ -134,12 +134,12 @@ function emitMergedQuad(
   emitFaceQuad(
     target,
     face,
-    quadOrigin[0] * blockUnits,
-    quadOrigin[1] * blockUnits,
-    quadOrigin[2] * blockUnits,
-    quadExtent[0] * blockUnits,
-    face === FACE_UP ? topHeight16 : quadExtent[1] * blockUnits,
-    quadExtent[2] * blockUnits,
+    packPositionWord(quadOrigin[0] * blockUnits, quadOrigin[1] * blockUnits, quadOrigin[2] * blockUnits),
+    packPositionWord(
+      quadExtent[0] * blockUnits,
+      face === FACE_UP ? topHeight16 : quadExtent[1] * blockUnits,
+      quadExtent[2] * blockUnits
+    ),
     uExtent,
     isVForward ? 0 : vExtent,
     isVForward ? vExtent : 0,

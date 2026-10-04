@@ -9,7 +9,12 @@ import {
   isWater,
 } from "@/applications/game/blocks";
 import { CHUNK_HEIGHT, CHUNK_LENGTH, CHUNK_WIDTH } from "../config";
-import { LIGHT_STEPS_PER_LEVEL } from "../vertex-format";
+import {
+  LIGHT_STEPS_PER_LEVEL,
+  POSITION_AXIS_BITS,
+  POSITION_Y_SHIFT,
+  POSITION_Z_SHIFT,
+} from "../vertex-format";
 import { PADDED_COLUMNS, PADDED_ROWS, STRIDE_X, STRIDE_Y, Z_PADDING, paddedDelta } from "./padded-layout";
 import { isPlantVoxelBlock } from "./plant-voxels";
 
@@ -146,10 +151,32 @@ export const FACE_CORNER_FLAGS = Uint8Array.from(FACE_CORNERS.flat(2));
  * spans; "forward" means the coordinate grows with the corner flag along that
  * axis. Side faces run v downward from the top of the block.
  */
+/**
+ * Per face and corner (at face * 4 + corner): the corner's flags as a mask over a
+ * packed (x, y, z) size word, and whether its u and v take the far end of their range.
+ */
+export const CORNER_SIZE_MASKS = new Int32Array(FACE_COUNT * 4);
+export const CORNER_U_AT_FAR_END = new Uint8Array(FACE_COUNT * 4);
+export const CORNER_V_AT_FAR_END = new Uint8Array(FACE_COUNT * 4);
+
 export const FACE_U_AXIS = Uint8Array.from([0, 0, 0, 0, 2, 2]);
 export const FACE_U_FORWARD = Uint8Array.from([0, 1, 0, 1, 1, 0]);
 export const FACE_V_AXIS = Uint8Array.from([2, 2, 1, 1, 1, 1]);
 export const FACE_V_FORWARD = Uint8Array.from([1, 0, 0, 0, 0, 0]);
+
+const POSITION_AXIS_MASK = (1 << POSITION_AXIS_BITS) - 1;
+for (let face = 0; face < FACE_COUNT; face++) {
+  for (let corner = 0; corner < 4; corner++) {
+    const base = (face * 4 + corner) * 3;
+    CORNER_SIZE_MASKS[face * 4 + corner] =
+      (FACE_CORNER_FLAGS[base] ? POSITION_AXIS_MASK : 0) |
+      (FACE_CORNER_FLAGS[base + 1] ? POSITION_AXIS_MASK << POSITION_Y_SHIFT : 0) |
+      (FACE_CORNER_FLAGS[base + 2] ? POSITION_AXIS_MASK << POSITION_Z_SHIFT : 0);
+    const isUFlagSet = FACE_CORNER_FLAGS[base + FACE_U_AXIS[face]] === 1;
+    CORNER_U_AT_FAR_END[face * 4 + corner] = isUFlagSet === (FACE_U_FORWARD[face] === 1) ? 1 : 0;
+    CORNER_V_AT_FAR_END[face * 4 + corner] = FACE_CORNER_FLAGS[base + FACE_V_AXIS[face]];
+  }
+}
 
 // Greedy merging walks each face direction as slices of rows of cells. Slice, row
 // and cell axes (0 = x, 1 = y, 2 = z) of each face's grid.

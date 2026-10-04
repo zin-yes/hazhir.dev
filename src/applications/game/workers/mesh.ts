@@ -16,6 +16,7 @@ import {
   POSITION_UNITS_PER_BLOCK,
   VERTICES_PER_QUAD,
   packPlantInstance,
+  packPositionWord,
 } from "../vertex-format";
 import {
   emitFaceQuad,
@@ -263,12 +264,12 @@ function emitCubeFaces(
     emitFaceQuad(
       target,
       face,
-      x * POSITION_UNITS_PER_BLOCK,
-      y * POSITION_UNITS_PER_BLOCK + bottomOffset16,
-      z * POSITION_UNITS_PER_BLOCK,
-      POSITION_UNITS_PER_BLOCK,
-      blockHeight16,
-      POSITION_UNITS_PER_BLOCK,
+      packPositionWord(
+        x * POSITION_UNITS_PER_BLOCK,
+        y * POSITION_UNITS_PER_BLOCK + bottomOffset16,
+        z * POSITION_UNITS_PER_BLOCK
+      ),
+      packPositionWord(POSITION_UNITS_PER_BLOCK, blockHeight16, POSITION_UNITS_PER_BLOCK),
       CHUNK_UV_UNITS_PER_BLOCK,
       isHorizontalFace ? (isVForward ? 0 : fullTextureV) : rowBottomV,
       isHorizontalFace ? (isVForward ? fullTextureV : 0) : rowTopV,
