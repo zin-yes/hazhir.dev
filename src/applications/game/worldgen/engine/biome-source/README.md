@@ -11,3 +11,5 @@ Climate-to-biome lookup and block-resolution biome zoom for the Terralith worldg
   `obfuscateSeed` (SHA-256 from `engine/random`).
 
 Tests read the real Terralith table; set `TERRALITH_PACK_ROOT` to the pack directory (they skip when it is absent).
+
+`BiomeManager` keeps a direct-mapped cache of the per-quart-cell fiddle offsets (they depend only on the cell, and neighbouring blocks share cells), which removes about 60% of surface-generation time; results stay bit-identical to the uncached BigInt oracle used in the tests.

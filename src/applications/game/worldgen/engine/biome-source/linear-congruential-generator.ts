@@ -51,6 +51,26 @@ function currentFiddle(): number {
   return (bits / 1024 - 0.5) * 0.9;
 }
 
+/** The fiddle offsets of one quart cell (independent of the sampled position), written by computeCellFiddles. */
+export const cellFiddles = { x: 0, y: 0, z: 0 };
+
+/** The three getFiddle offsets BiomeManager.getFiddledDistance derives for a cell; read them from `cellFiddles`. */
+export function computeCellFiddles(seedHigh: number, seedLow: number, cellX: number, cellY: number, cellZ: number): void {
+  stateHigh = seedHigh;
+  stateLow = seedLow;
+  advanceState(cellX >> 31, cellX);
+  advanceState(cellY >> 31, cellY);
+  advanceState(cellZ >> 31, cellZ);
+  advanceState(cellX >> 31, cellX);
+  advanceState(cellY >> 31, cellY);
+  advanceState(cellZ >> 31, cellZ);
+  cellFiddles.x = currentFiddle();
+  advanceState(seedHigh, seedLow);
+  cellFiddles.y = currentFiddle();
+  advanceState(seedHigh, seedLow);
+  cellFiddles.z = currentFiddle();
+}
+
 /**
  * BiomeManager.getFiddledDistance. The zoom seed is passed as int32 halves; cell coordinates are Java ints
  * (sign-extended to long when used as increments).
@@ -65,22 +85,10 @@ export function getFiddledDistance(
   yNoise: number,
   zNoise: number,
 ): number {
-  stateHigh = seedHigh;
-  stateLow = seedLow;
-  advanceState(cellX >> 31, cellX);
-  advanceState(cellY >> 31, cellY);
-  advanceState(cellZ >> 31, cellZ);
-  advanceState(cellX >> 31, cellX);
-  advanceState(cellY >> 31, cellY);
-  advanceState(cellZ >> 31, cellZ);
-  const xFiddle = currentFiddle();
-  advanceState(seedHigh, seedLow);
-  const yFiddle = currentFiddle();
-  advanceState(seedHigh, seedLow);
-  const zFiddle = currentFiddle();
-  const zTerm = zNoise + zFiddle;
-  const yTerm = yNoise + yFiddle;
-  const xTerm = xNoise + xFiddle;
+  computeCellFiddles(seedHigh, seedLow, cellX, cellY, cellZ);
+  const zTerm = zNoise + cellFiddles.z;
+  const yTerm = yNoise + cellFiddles.y;
+  const xTerm = xNoise + cellFiddles.x;
   return zTerm * zTerm + yTerm * yTerm + xTerm * xTerm;
 }
 

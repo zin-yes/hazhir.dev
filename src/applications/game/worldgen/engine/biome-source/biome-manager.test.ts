@@ -115,6 +115,20 @@ describe("BiomeManager", () => {
     }
   });
 
+  test("a manager whose fiddle cache has been overwritten many times still matches the BigInt oracle", () => {
+    const random = createSeededRandom(23);
+    const manager = new BiomeManager(cellName, worldSeed);
+    for (let warmupIndex = 0; warmupIndex < 150000; warmupIndex++) {
+      manager.getBiome(Math.floor((random() - 0.5) * 60000), Math.floor(random() * 384) - 64, Math.floor((random() - 0.5) * 60000));
+    }
+    for (let sampleIndex = 0; sampleIndex < 1500; sampleIndex++) {
+      const blockX = Math.floor((random() - 0.5) * 60000);
+      const blockY = Math.floor(random() * 384) - 64;
+      const blockZ = Math.floor((random() - 0.5) * 60000);
+      expect(manager.getBiome(blockX, blockY, blockZ)).toBe(cellName(...bigIntBiomeCell(worldSeed, blockX, blockY, blockZ)));
+    }
+  });
+
   test("is deterministic and only ever picks one of the 8 surrounding quart cells", () => {
     const manager = new BiomeManager(cellName, worldSeed);
     const random = createSeededRandom(3);
