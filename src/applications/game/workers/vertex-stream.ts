@@ -16,6 +16,11 @@ export class VertexStream {
     return this.wordCount / WORDS_PER_VERTEX;
   }
 
+  /** Empties the stream but keeps its capacity, so a long-lived stream stops growing after warmup. */
+  reset() {
+    this.wordCount = 0;
+  }
+
   private reserveWords(extraWords: number) {
     const requiredWords = this.wordCount + extraWords;
     if (requiredWords <= this.words.length) return;

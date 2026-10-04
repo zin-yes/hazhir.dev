@@ -6,8 +6,14 @@ import {
   CHUNK_WIDTH,
 } from "@/applications/game/config";
 import { calculateOffset } from "../utils";
-import { PLANT_NEIGHBOR_DIRECTIONS, VERTICES_PER_QUAD, WORDS_PER_VERTEX, unpackVertex } from "../vertex-format";
+import { PLANT_NEIGHBOR_DIRECTIONS, WORDS_PER_VERTEX, unpackVertex } from "../vertex-format";
 import { generateMesh } from "./mesh";
+import {
+  decodeSurfaceQuads,
+  findCovering,
+  indexByPlane,
+  sampleRectangle,
+} from "./mesh-reference.test-helper";
 
 const FULL_LIGHT = 0xff;
 
@@ -29,20 +35,20 @@ function meshVertices(vertexBuffer: ArrayBuffer) {
   return vertices;
 }
 
-// Occlusion of the vertices of upward faces lying in plane y, at the given corner.
-function topFaceOcclusionAt(vertexBuffer: ArrayBuffer, position: [number, number, number]) {
-  const vertices = meshVertices(vertexBuffer);
-  const values: number[] = [];
-  for (let quadStart = 0; quadStart < vertices.length; quadStart += VERTICES_PER_QUAD) {
-    const quad = vertices.slice(quadStart, quadStart + VERTICES_PER_QUAD);
-    const isFlatInPlane = quad.every((vertex) => vertex.y === position[1]);
-    if (!isFlatInPlane) continue;
-    for (const vertex of quad) {
-      const isAtPosition = vertex.x === position[0] && vertex.z === position[2];
-      if (isAtPosition) values.push(vertex.ambientOcclusion);
-    }
-  }
-  return values;
+const JUST_INSIDE = 0.001;
+
+// Shading of the upward facing surface in plane y at the block position (x, z).
+function topSurfaceAt(vertexBuffer: ArrayBuffer, y: number, x: number, z: number) {
+  const planes = indexByPlane(decodeSurfaceQuads(vertexBuffer));
+  const rectangle = findCovering(planes, `1:${y}:1`, x, z);
+  if (!rectangle) throw new Error(`no top surface at ${x}, ${y}, ${z}`);
+  return sampleRectangle(rectangle, x, z)!;
+}
+
+function topQuadsInPlane(vertexBuffer: ArrayBuffer, y: number) {
+  return decodeSurfaceQuads(vertexBuffer).filter(
+    (quad) => quad.corners.every((corner) => corner.y === y) && quad.corners[0].y === y
+  );
 }
 
 describe("generateMesh ambient occlusion", () => {
@@ -53,24 +59,30 @@ describe("generateMesh ambient occlusion", () => {
   const mesh = meshFloorWithPillar([...floor, [5, 5, 5, BlockType.STONE]]);
 
   test("floor corners touching a pillar are darkened", () => {
-    const values = topFaceOcclusionAt(mesh.opaque, [5, 5, 5]);
-    expect(values.length).toBeGreaterThanOrEqual(3);
-    for (const value of values) expect(value).toBe(2);
+    const touchingPoints: Array<[number, number]> = [
+      [5 - JUST_INSIDE, 5 - JUST_INSIDE],
+      [5 - JUST_INSIDE, 5 + JUST_INSIDE],
+      [5 + JUST_INSIDE, 5 - JUST_INSIDE],
+    ];
+    for (const [x, z] of touchingPoints) {
+      expect(topSurfaceAt(mesh.opaque, 5, x, z).ambientOcclusion).toBeCloseTo(2, 1);
+    }
   });
 
   test("open floor stays fully bright", () => {
-    const values = topFaceOcclusionAt(mesh.opaque, [3, 5, 3]);
-    expect(values.length).toBeGreaterThanOrEqual(1);
-    for (const value of values) expect(value).toBe(3);
+    expect(topSurfaceAt(mesh.opaque, 5, 3 + JUST_INSIDE, 3 + JUST_INSIDE).ambientOcclusion).toBe(3);
   });
 
   test("a concave floor to wall seam is darker than a lone corner", () => {
     const wall: Array<[number, number, number, BlockType]> = [];
     for (let z = 3; z <= 7; z++) wall.push([5, 5, z, BlockType.STONE]);
     const seamMesh = meshFloorWithPillar([...floor, ...wall]);
-    const seamValues = topFaceOcclusionAt(seamMesh.opaque, [5, 5, 5]);
+    const seamValues = [
+      topSurfaceAt(seamMesh.opaque, 5, 5 - JUST_INSIDE, 5 - JUST_INSIDE).ambientOcclusion,
+      topSurfaceAt(seamMesh.opaque, 5, 5 - JUST_INSIDE, 5 + JUST_INSIDE).ambientOcclusion,
+    ];
     expect(Math.max(...seamValues)).toBeLessThan(3);
-    expect(Math.min(...seamValues)).toBeLessThanOrEqual(2);
+    expect(Math.min(...seamValues)).toBeLessThanOrEqual(1.1);
   });
 
   test("every quad vertex carries an occlusion value within range, even with plants nearby", () => {
@@ -97,16 +109,54 @@ describe("generateMesh smooth light", () => {
     }
     const mesh = generateMesh(chunk.buffer, lightMap.buffer);
 
-    const topFaceOfBlock = meshVertices(mesh.opaque).filter(
-      (vertex) => vertex.y === 5 && vertex.x >= 4 && vertex.x <= 5 && vertex.z >= 5 && vertex.z <= 6
-    );
-    const lightByX = new Map<number, number>();
-    for (const vertex of topFaceOfBlock) lightByX.set(vertex.x, vertex.light);
+    expect(topSurfaceAt(mesh.opaque, 5, 4 + JUST_INSIDE, 5.5).light).toBeCloseTo(4, 1);
+    const blended = topSurfaceAt(mesh.opaque, 5, 5 - JUST_INSIDE, 5.5).light;
+    expect(blended).toBeGreaterThan(4);
+    expect(blended).toBeLessThan(15);
+  });
+});
 
-    expect(lightByX.get(4)).toBe(4);
-    expect(lightByX.get(5)).toBeGreaterThan(4);
-    expect(lightByX.get(5)).toBeLessThan(15);
-    expect(Number.isInteger(lightByX.get(5)! * 4)).toBe(true);
+describe("generateMesh greedy merging", () => {
+  function meshFloor(blockAt: (x: number, z: number) => BlockType, lightAt: (x: number, z: number) => number) {
+    const chunk = new Uint8Array(CHUNK_WIDTH * CHUNK_HEIGHT * CHUNK_LENGTH);
+    const lightMap = new Uint8Array(chunk.length).fill(FULL_LIGHT);
+    for (let x = 0; x < CHUNK_WIDTH; x++) {
+      for (let z = 0; z < CHUNK_LENGTH; z++) {
+        chunk[calculateOffset(x, 4, z)] = blockAt(x, z);
+        lightMap[calculateOffset(x, 5, z)] = lightAt(x, z);
+      }
+    }
+    return generateMesh(chunk.buffer, lightMap.buffer);
+  }
+
+  test("an open floor of one block type is a single quad tiling its texture across 32 blocks", () => {
+    const mesh = meshFloor(() => BlockType.STONE, () => FULL_LIGHT);
+    const topQuads = topQuadsInPlane(mesh.opaque, 5);
+    expect(topQuads.length).toBe(1);
+    const unwrapped = topQuads[0].corners.flatMap((corner) => [corner.u, corner.v]);
+    expect(Math.max(...unwrapped)).toBe(CHUNK_WIDTH);
+    expect(Math.min(...unwrapped)).toBe(0);
+  });
+
+  test("blocks with different textures do not merge", () => {
+    const mesh = meshFloor((x) => (x < 16 ? BlockType.STONE : BlockType.DIRT), () => FULL_LIGHT);
+    expect(topQuadsInPlane(mesh.opaque, 5).length).toBe(2);
+  });
+
+  test("faces with different light do not merge", () => {
+    const mesh = meshFloor(
+      () => BlockType.STONE,
+      (x) => (x < 16 ? 0xf0 : 0x80)
+    );
+    expect(topQuadsInPlane(mesh.opaque, 5).length).toBeGreaterThan(1);
+  });
+
+  test("a still water surface merges into one quad at its partial height", () => {
+    const mesh = meshFloor(() => BlockType.WATER, () => FULL_LIGHT);
+    const surface = decodeSurfaceQuads(mesh.transparent).filter((quad) =>
+      quad.corners.every((corner) => corner.y === 4 + 14 / 16)
+    );
+    expect(surface.length).toBe(1);
   });
 });
 
