@@ -678,6 +678,14 @@ export default function Game() {
           camera.quaternion.setFromEuler(new THREE.Euler(pitch, yaw, 0, "YXZ"));
           playerControlsRef.current?.resetMotion();
         },
+        getCamera: () => {
+          const orientation = new THREE.Euler().setFromQuaternion(camera.quaternion, "YXZ");
+          return {
+            position: { x: camera.position.x, y: camera.position.y, z: camera.position.z },
+            yaw: orientation.y,
+            pitch: orientation.x,
+          };
+        },
         setPlaying: (playing, flying = true) => {
           playerControlsRef.current?.resetMotion();
           playerControlsRef.current?.setFlying(flying);

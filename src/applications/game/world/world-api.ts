@@ -24,6 +24,7 @@ export interface VoxelWorldApi {
   getBlock(x: number, y: number, z: number): number | null;
   /** Moves the camera (and player); yaw and pitch in radians. */
   setCamera(position: BlockPosition, yaw: number, pitch: number): void;
+  getCamera(): { position: BlockPosition; yaw: number; pitch: number };
   /** Runs the simulation without pointer lock (true) or pauses it, flying or walking. */
   setPlaying(playing: boolean, flying?: boolean): void;
 }
