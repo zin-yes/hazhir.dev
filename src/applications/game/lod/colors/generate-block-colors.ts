@@ -2,13 +2,15 @@
 //   bun src/applications/game/lod/colors/generate-block-colors.ts
 
 import { readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { Texture } from "../../blocks";
 import { averageVisibleColor, decodeRgbaPng } from "./png-average-color";
 
-const REPOSITORY_ROOT = join(import.meta.dir, "../../../../..");
+const MODULE_DIRECTORY = dirname(fileURLToPath(import.meta.url));
+const REPOSITORY_ROOT = join(MODULE_DIRECTORY, "../../../../..");
 export const BLOCK_TEXTURE_DIRECTORY = join(REPOSITORY_ROOT, "public/game");
-const GENERATED_FILE_PATH = join(import.meta.dir, "texture-average-colors.generated.ts");
+const GENERATED_FILE_PATH = join(MODULE_DIRECTORY, "texture-average-colors.generated.ts");
 
 export function computeTextureAverageColors(textureDirectory: string = BLOCK_TEXTURE_DIRECTORY): Record<string, number> {
   const colorsByFileName: Record<string, number> = {};
