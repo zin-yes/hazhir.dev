@@ -1,5 +1,10 @@
 import { generateChunk } from "./generation";
 import { initializeChunkLight, propagateChunkLight } from "./lighting";
+import {
+  createSurroundingsSource,
+  lightChunkRegion,
+  listRegionTransferables,
+} from "./region-lighting";
 import { generateMesh, listTransferables } from "./mesh";
 import { loadTextureArray } from "./texture-array";
 import {
@@ -50,7 +55,13 @@ addEventListener("message", async (event: MessageEvent) => {
         params[5] ? new Uint8Array(params[5]) : undefined,
         params[6] ? new Uint8Array(params[6]) : undefined
       );
-      transfer = [result.light.buffer];
+      transfer = [result.light.buffer, result.queue.buffer];
+    } else if (method === "lightChunkRegion") {
+      result = lightChunkRegion(
+        params[0],
+        params[1] ? createSurroundingsSource(params[1]) : undefined
+      );
+      transfer = listRegionTransferables(result);
     } else if (method === "propagateChunkLight") {
       // neighbors and neighborLights are objects with ArrayBuffers
       const neighbors: { [key: string]: Uint8Array } = {};
