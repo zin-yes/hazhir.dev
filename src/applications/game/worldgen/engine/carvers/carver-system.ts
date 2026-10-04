@@ -14,6 +14,7 @@ import {
 } from "@/applications/game/profiler/worker-recorder";
 import type { ChunkBlocks } from "../chunk";
 import { LegacyRandomSource } from "../random";
+import { bigIntToHalves, type Int64Halves, multiply64Into } from "../random/int64";
 import type { JsonObject, TagRegistry, WorldgenRegistries } from "../registry/datapack-loader";
 import { type CarverConfig, parseConfiguredCarver, readBiomeAirCarverIds } from "./carver-config";
 import { carveCanyon } from "./canyon-world-carver";
@@ -48,13 +49,22 @@ const SEED_MASK_BITS = 64;
 const SOURCE_BIOME_SAMPLE_EVERY = 8;
 const START_ROLL_SAMPLE_EVERY = 8;
 
-/** WorldgenRandom.setLargeFeatureSeed on a Legacy source. */
-function setLargeFeatureSeed(random: LegacyRandomSource, seed: bigint, chunkX: number, chunkZ: number): void {
-  random.setSeed(seed);
-  const first = random.nextLong();
-  const second = random.nextLong();
-  const mixed = BigInt.asIntN(SEED_MASK_BITS, BigInt(chunkX) * first) ^ BigInt.asIntN(SEED_MASK_BITS, BigInt(chunkZ) * second) ^ seed;
-  random.setSeed(mixed);
+const firstLong: Int64Halves = { high: 0, low: 0 };
+const secondLong: Int64Halves = { high: 0, low: 0 };
+const firstProduct: Int64Halves = { high: 0, low: 0 };
+const secondProduct: Int64Halves = { high: 0, low: 0 };
+
+/**
+ * WorldgenRandom.setLargeFeatureSeed on a Legacy source, in int32 halves:
+ * setSeed(seed); setSeed((long)chunkX * nextLong() ^ (long)chunkZ * nextLong() ^ seed).
+ */
+function setLargeFeatureSeed(random: LegacyRandomSource, seed: Int64Halves, chunkX: number, chunkZ: number): void {
+  random.setSeedFromLongHalves(seed.high, seed.low);
+  random.nextLongInto(firstLong);
+  random.nextLongInto(secondLong);
+  multiply64Into(chunkX < 0 ? -1 : 0, chunkX | 0, firstLong.high, firstLong.low, firstProduct);
+  multiply64Into(chunkZ < 0 ? -1 : 0, chunkZ | 0, secondLong.high, secondLong.low, secondProduct);
+  random.setSeedFromLongHalves(firstProduct.high ^ secondProduct.high ^ seed.high, firstProduct.low ^ secondProduct.low ^ seed.low);
 }
 
 export class CarverSystem {
@@ -62,8 +72,20 @@ export class CarverSystem {
   private readonly carversByConfiguredId = new Map<string, CarverConfig>();
   private readonly carversBySourceChunk = new Map<number, CarverConfig[]>();
   private readonly random = new LegacyRandomSource(BigInt(0));
+  /** seed + carverIndex as a Java long, per carver index. */
+  private readonly carverSeeds: Int64Halves[] = [];
 
   constructor(private readonly config: CarverSystemConfig) {}
+
+  private carverSeed(carverIndex: number): Int64Halves {
+    let seed = this.carverSeeds[carverIndex];
+    if (seed === undefined) {
+      seed = { high: 0, low: 0 };
+      bigIntToHalves(BigInt.asIntN(SEED_MASK_BITS, this.config.seed + BigInt(carverIndex)), seed);
+      this.carverSeeds[carverIndex] = seed;
+    }
+    return seed;
+  }
 
   private carverById(carverId: string): CarverConfig {
     let carver = this.carversByConfiguredId.get(carverId);
@@ -119,7 +141,7 @@ export class CarverSystem {
         for (let carverIndex = 0; carverIndex < carvers.length; carverIndex++) {
           const carver = carvers[carverIndex]!;
           if (isProfiling) startWorkerSampledSection("carver.rollStart", START_ROLL_SAMPLE_EVERY);
-          setLargeFeatureSeed(random, BigInt.asIntN(SEED_MASK_BITS, this.config.seed + BigInt(carverIndex)), sourceChunkX, sourceChunkZ);
+          setLargeFeatureSeed(random, this.carverSeed(carverIndex), sourceChunkX, sourceChunkZ);
           const startsHere = random.nextFloat() <= carver.probability;
           if (isProfiling) endWorkerSection();
           carverRolls++;

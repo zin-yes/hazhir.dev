@@ -139,7 +139,12 @@ export class LegacyRandomSource implements RandomSource {
 
   setSeed(seed: bigint): void {
     bigIntToHalves(seed, scratchHalves);
-    this.setSeedFromHalves(scratchHalves.high, scratchHalves.low);
+    this.setSeedFromLongHalves(scratchHalves.high, scratchHalves.low);
+  }
+
+  /** setSeed for a Java long given as int32 halves (no BigInt). */
+  setSeedFromLongHalves(seedHigh: number, seedLow: number): void {
+    this.setSeedFromHalves(seedHigh, seedLow);
     this.gaussianSource?.reset();
   }
 }
