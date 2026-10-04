@@ -99,6 +99,15 @@ async function benchmarkHorizon(parsed: BenchmarkArguments) {
     if (stats.fullDetailMilliseconds !== undefined && stats.buildsInFlight === 0) break;
     await new Promise((resolve) => setTimeout(resolve, 16));
   }
+  const steadyUpdates = 120;
+  const steadyStartedAt = performance.now();
+  for (let updateIndex = 0; updateIndex < steadyUpdates; updateIndex++) {
+    camera.position.x += 0.2;
+    camera.rotation.y += 0.002;
+    camera.updateMatrixWorld();
+    manager.update(camera, 1080);
+  }
+  const steadyUpdateMilliseconds = (performance.now() - steadyStartedAt) / steadyUpdates;
   const stats = manager.getStats();
   console.log(`\n## Loading a ${parsed.radiusChunks}-chunk radius (${parsed.radiusChunks * 32} blocks) with ${parsed.workers} Bun workers\n`);
   console.log(`- first horizon (whole radius drawn, coarse): ${formatMilliseconds(stats.firstHorizonMilliseconds ?? Number.NaN)} ms (includes worker start-up)`);
@@ -106,6 +115,7 @@ async function benchmarkHorizon(parsed: BenchmarkArguments) {
   console.log(`- tiles: ${stats.selectedTiles} selected, ${stats.drawnTiles} drawn, ${stats.builtTiles} built, ${stats.cachedTiles} cached`);
   console.log(`- cache: ${(stats.cacheBytes / 1024 / 1024).toFixed(1)} MB (${formatKilobytes(stats.cacheBytes / Math.max(1, stats.cachedTiles))} KB per tile), budget ${(stats.cacheBudgetBytes / 1024 / 1024).toFixed(0)} MB`);
   console.log(`- near plane ${stats.nearPlane.toFixed(2)}, far plane ${stats.farPlane.toFixed(0)}`);
+  console.log(`- main-thread update while walking (steady state): ${steadyUpdateMilliseconds.toFixed(3)} ms per frame`);
   console.log("\n| level | tiles built | mean sample ms | mean mesh ms | mean vertices | mean geometry KB |");
   console.log("| --- | --- | --- | --- | --- | --- |");
   for (const [level, levelStats] of Object.entries(stats.buildsByLevel)) {

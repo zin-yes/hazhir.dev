@@ -78,6 +78,13 @@ export interface LodManager {
   dispose(): void;
 }
 
+interface FramePlan {
+  drawn: TileAddress[];
+  missingLeafCount: number;
+  selectedLeafCount: number;
+  hasUncoveredArea: boolean;
+}
+
 interface CachedTilePayload {
   tileMesh: LodTileMesh;
   builtAtMilliseconds: number;
@@ -99,6 +106,10 @@ const MAXIMUM_NEAR_PLANE = 64;
 const NEAR_PLANE_DEPTH_FACTOR = 0.45;
 const NEAR_TILE_SEARCH_DISTANCE = 512;
 const FOG_START_FRACTION = 0.2;
+/** View direction quantization for re-planning (build priorities favour the frustum). */
+const PLAN_DIRECTION_STEPS = 8;
+/** Re-plan at least this often so time-based refreshes are picked up while standing still. */
+const PLAN_MAXIMUM_AGE_MILLISECONDS = 1000;
 const MINIMUM_FOG_START_BLOCKS = 512;
 const DISSOLVE_START_FRACTION = 0.85;
 
@@ -134,6 +145,10 @@ class LodManagerImplementation implements LodManager {
   private farPlane: number;
   private isDisposed = false;
   private readonly stats: LodStats;
+  /** Bumped when the cache or the real data changes, which invalidates the current plan. */
+  private stateVersion = 0;
+  private lastPlanKey = "";
+  private lastPlan: FramePlan | undefined;
 
   constructor(private readonly options: LodManagerOptions) {
     this.now = options.now ?? (() => performance.now());
@@ -158,6 +173,7 @@ class LodManagerImplementation implements LodManager {
     sceneUniforms.dissolveEnd.value = this.radiusBlocks;
     this.display = new TileDisplay(this.pass.scene, options.fadeMilliseconds ?? DEFAULT_FADE_MILLISECONDS);
     this.cache = new LodTileCache<CachedTilePayload>(options.memoryBudgetBytes ?? DEFAULT_MEMORY_BUDGET_BYTES, (tile) => {
+      this.stateVersion++;
       this.display.remove(tile.address, tile.payload.tileMesh);
       tile.payload.tileMesh.dispose();
     });
@@ -252,76 +268,112 @@ class LodManagerImplementation implements LodManager {
       const elapsedMilliseconds = this.lastUpdateMilliseconds === undefined ? 0 : nowMilliseconds - this.lastUpdateMilliseconds;
       this.lastUpdateMilliseconds = nowMilliseconds;
 
-      this.realData.applyPendingColumns(this.options.realColumnsPerUpdate ?? DEFAULT_REAL_COLUMNS_PER_UPDATE);
+      const changedRealAddresses = this.realData.applyPendingColumns(this.options.realColumnsPerUpdate ?? DEFAULT_REAL_COLUMNS_PER_UPDATE);
+      if (changedRealAddresses.length > 0) this.stateVersion++;
 
       camera.updateMatrixWorld();
       const cameraBlockPosition = new THREE.Vector3().setFromMatrixPosition(camera.matrixWorld).addScalar(BLOCK_RENDER_OFFSET);
-      this.projectionView.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
-      this.frustum.setFromProjectionMatrix(this.projectionView);
-
-      const selectionToken = profiler.begin("main.lod.select");
-      const parameters: SelectionParameters = {
-        cameraX: cameraBlockPosition.x,
-        cameraY: cameraBlockPosition.y,
-        cameraZ: cameraBlockPosition.z,
-        projectionScale: projectionScaleOf(camera.fov, viewportHeightPixels) * camera.zoom,
-        maximumCellPixels: this.options.maximumCellPixels ?? DEFAULT_MAXIMUM_CELL_PIXELS,
-        thresholdGrowthPerLevel: this.options.thresholdGrowthPerLevel ?? DEFAULT_THRESHOLD_GROWTH_PER_LEVEL,
-        radiusBlocks: this.radiusBlocks,
-        minimumLevel: this.options.minimumLevel ?? 0,
-        maximumLevel: this.maximumLevel,
-        heightRangeOf: (address) => this.heightRangeFor(address),
-        previouslySplit: this.previouslySplit,
-      };
-      const selection = selectTiles(parameters);
-      this.previouslySplit = selection.split;
-      const coverage = this.realData.coverage;
-      const visibleLeaves = selection.leaves.filter((leaf) => !coverage.isTileFullyCovered(leaf));
-      const renderSet = computeRenderSet({ leaves: visibleLeaves, split: selection.split }, parameters, (address) => this.cache.has(address));
-      profiler.end(selectionToken);
-
-      const candidates: BuildCandidate[] = [];
-      let hasUncoveredArea = false;
-      for (const leaf of renderSet.missingLeaves) {
-        const root = ancestorAddressAt(leaf, this.maximumLevel);
-        if (this.hasStandIn(leaf) || this.queue.isInFlight(root)) {
-          candidates.push({ address: leaf, urgency: BuildUrgency.Refine, inFrustum: this.isInFrustum(leaf), distance: distanceToTile(leaf, parameters) });
-        } else {
-          hasUncoveredArea = true;
-          candidates.push({ address: root, urgency: BuildUrgency.Uncovered, inFrustum: this.isInFrustum(root), distance: distanceToTile(root, parameters) });
-        }
+      const viewDirection = camera.getWorldDirection(new THREE.Vector3());
+      const planKey = [
+        Math.round(cameraBlockPosition.x),
+        Math.round(cameraBlockPosition.y),
+        Math.round(cameraBlockPosition.z),
+        Math.round(viewDirection.x * PLAN_DIRECTION_STEPS),
+        Math.round(viewDirection.y * PLAN_DIRECTION_STEPS),
+        Math.round(viewDirection.z * PLAN_DIRECTION_STEPS),
+        viewportHeightPixels,
+        camera.fov,
+        camera.zoom,
+        this.stateVersion,
+        this.realData.coverage.version,
+        Math.floor(nowMilliseconds / PLAN_MAXIMUM_AGE_MILLISECONDS),
+      ].join(",");
+      if (planKey !== this.lastPlanKey || this.lastPlan === undefined) {
+        this.lastPlanKey = planKey;
+        this.lastPlan = this.plan(camera, cameraBlockPosition, viewportHeightPixels, nowMilliseconds);
+      } else {
+        this.dispatchBuilds();
       }
-      const refreshInterval = this.options.refreshIntervalMilliseconds ?? DEFAULT_REFRESH_INTERVAL_MILLISECONDS;
-      for (const address of renderSet.drawn) {
-        const tile = this.cache.get(address)!;
-        this.cache.touch(address);
-        if (tile.realDataVersion === this.realData.realDataVersionOf(address)) continue;
-        if (nowMilliseconds - tile.payload.builtAtMilliseconds < refreshInterval) continue;
-        candidates.push({ address, urgency: BuildUrgency.Refresh, inFrustum: this.isInFrustum(address), distance: distanceToTile(address, parameters) });
-      }
-      this.queue.replaceCandidates(candidates);
-      this.dispatchBuilds();
+      const plan = this.lastPlan;
 
       this.display.advance(elapsedMilliseconds);
-      this.display.reconcile(renderSet.drawn, (address) => this.cache.get(address)!.payload.tileMesh, (this.options.fadeMilliseconds ?? DEFAULT_FADE_MILLISECONDS) <= 0);
-      const pinned = new Set<number>(this.display.keys);
-      for (const address of renderSet.drawn) pinned.add(tileKeyOf(address.level, address.tileX, address.tileZ));
-      this.cache.enforceBudget(pinned);
-
+      this.display.reconcile(plan.drawn, (address) => this.cache.get(address)!.payload.tileMesh, (this.options.fadeMilliseconds ?? DEFAULT_FADE_MILLISECONDS) <= 0);
       this.updateCoverageTexture(cameraBlockPosition);
-      this.updateClipPlanes(cameraBlockPosition, renderSet.drawn);
 
       const sinceCreation = nowMilliseconds - this.createdAtMilliseconds;
-      if (this.stats.firstHorizonMilliseconds === undefined && !hasUncoveredArea && renderSet.drawn.length > 0) {
+      if (this.stats.firstHorizonMilliseconds === undefined && !plan.hasUncoveredArea && plan.drawn.length > 0) {
         this.stats.firstHorizonMilliseconds = sinceCreation;
       }
-      if (this.stats.fullDetailMilliseconds === undefined && renderSet.missingLeaves.length === 0 && renderSet.drawn.length > 0) {
+      if (this.stats.fullDetailMilliseconds === undefined && plan.missingLeafCount === 0 && plan.drawn.length > 0) {
         this.stats.fullDetailMilliseconds = sinceCreation;
       }
-      this.refreshStats(selection.leaves.length, renderSet.drawn.length, renderSet.missingLeaves.length);
+      this.refreshStats(plan.selectedLeafCount, plan.drawn.length, plan.missingLeafCount);
     } finally {
       profiler.end(updateToken);
     }
+  }
+
+  /**
+   * Selection, render set, build candidates, eviction and clip planes for one camera state. Re-run only when the camera
+   * moved a block, turned, or the cache or the real data changed.
+   */
+  private plan(camera: THREE.PerspectiveCamera, cameraBlockPosition: THREE.Vector3, viewportHeightPixels: number, nowMilliseconds: number): FramePlan {
+    this.projectionView.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+    this.frustum.setFromProjectionMatrix(this.projectionView);
+
+    const selectionToken = profiler.begin("main.lod.select");
+    const parameters: SelectionParameters = {
+      cameraX: cameraBlockPosition.x,
+      cameraY: cameraBlockPosition.y,
+      cameraZ: cameraBlockPosition.z,
+      projectionScale: projectionScaleOf(camera.fov, viewportHeightPixels) * camera.zoom,
+      maximumCellPixels: this.options.maximumCellPixels ?? DEFAULT_MAXIMUM_CELL_PIXELS,
+      thresholdGrowthPerLevel: this.options.thresholdGrowthPerLevel ?? DEFAULT_THRESHOLD_GROWTH_PER_LEVEL,
+      radiusBlocks: this.radiusBlocks,
+      minimumLevel: this.options.minimumLevel ?? 0,
+      maximumLevel: this.maximumLevel,
+      heightRangeOf: (address) => this.heightRangeFor(address),
+      previouslySplit: this.previouslySplit,
+    };
+    const selection = selectTiles(parameters);
+    this.previouslySplit = selection.split;
+    const coverage = this.realData.coverage;
+    const visibleLeaves = selection.leaves.filter((leaf) => !coverage.isTileFullyCovered(leaf));
+    const renderSet = computeRenderSet({ leaves: visibleLeaves, split: selection.split }, parameters, (address) => this.cache.has(address));
+    profiler.end(selectionToken);
+
+    const candidates: BuildCandidate[] = [];
+    let hasUncoveredArea = false;
+    for (const leaf of renderSet.missingLeaves) {
+      const root = ancestorAddressAt(leaf, this.maximumLevel);
+      if (this.hasStandIn(leaf) || this.queue.isInFlight(root)) {
+        candidates.push({ address: leaf, urgency: BuildUrgency.Refine, inFrustum: this.isInFrustum(leaf), distance: distanceToTile(leaf, parameters) });
+      } else {
+        hasUncoveredArea = true;
+        candidates.push({ address: root, urgency: BuildUrgency.Uncovered, inFrustum: this.isInFrustum(root), distance: distanceToTile(root, parameters) });
+      }
+    }
+    const refreshInterval = this.options.refreshIntervalMilliseconds ?? DEFAULT_REFRESH_INTERVAL_MILLISECONDS;
+    for (const address of renderSet.drawn) {
+      const tile = this.cache.get(address)!;
+      this.cache.touch(address);
+      if (tile.realDataVersion === this.realData.realDataVersionOf(address)) continue;
+      if (nowMilliseconds - tile.payload.builtAtMilliseconds < refreshInterval) continue;
+      candidates.push({ address, urgency: BuildUrgency.Refresh, inFrustum: this.isInFrustum(address), distance: distanceToTile(address, parameters) });
+    }
+    this.queue.replaceCandidates(candidates);
+    this.dispatchBuilds();
+
+    const pinned = new Set<number>(this.display.keys);
+    for (const address of renderSet.drawn) pinned.add(tileKeyOf(address.level, address.tileX, address.tileZ));
+    if (this.cache.enforceBudget(pinned) > 0) this.stateVersion++;
+    this.updateClipPlanes(cameraBlockPosition, renderSet.drawn);
+    return {
+      drawn: renderSet.drawn,
+      missingLeafCount: renderSet.missingLeaves.length,
+      selectedLeafCount: selection.leaves.length,
+      hasUncoveredArea,
+    };
   }
 
   private dispatchBuilds(): void {
@@ -356,6 +408,7 @@ class LodManagerImplementation implements LodManager {
         .then((result) => this.onTileBuilt(result, realDataVersion))
         .catch((error) => {
           this.queue.markFinished(address);
+          this.stateVersion++;
           this.stats.failedBuilds++;
           if (!this.isDisposed) console.error("LOD tile build failed", address, error);
         });
@@ -365,6 +418,7 @@ class LodManagerImplementation implements LodManager {
   private onTileBuilt(result: LodTileBuildResult, realDataVersion: number): void {
     this.queue.markFinished(result.address);
     if (this.isDisposed) return;
+    this.stateVersion++;
     const token = profiler.begin("main.lod.createTileMesh");
     try {
       const tileMesh = createLodTileMesh(result.address, result, this.materials);
