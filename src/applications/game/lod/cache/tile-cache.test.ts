@@ -14,7 +14,7 @@ function builtEntry(address: TileAddress) {
     address,
     packedSurface: packTileSurface(surface),
     heightRange: heightRangeOf(surface),
-    geometryBytes: mesh.vertices.byteLength + mesh.indices.byteLength,
+    geometryBytes: mesh.vertices.byteLength,
     payload: `mesh ${address.level}/${address.tileX}/${address.tileZ}`,
     realDataVersion: 0,
   };

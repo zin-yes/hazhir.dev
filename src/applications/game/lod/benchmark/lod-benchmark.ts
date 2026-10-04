@@ -71,7 +71,7 @@ function benchmarkTilesPerLevel(seed: number) {
       sampleMilliseconds += result.sampleMilliseconds;
       meshMilliseconds += result.meshMilliseconds;
       vertices += result.vertices.length / 2;
-      geometryBytes += result.vertices.byteLength + result.indices.byteLength;
+      geometryBytes += result.vertices.byteLength;
       packedBytes += result.packedSurface.byteLength;
     }
     console.log(

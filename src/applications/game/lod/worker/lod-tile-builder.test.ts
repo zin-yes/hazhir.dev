@@ -12,8 +12,8 @@ function bytesOf(view: ArrayBufferView | ArrayBuffer): Buffer {
 function expectIdentical(first: LodTileBuildResult, second: LodTileBuildResult) {
   expect(bytesOf(second.packedSurface).equals(bytesOf(first.packedSurface))).toBe(true);
   expect(bytesOf(second.vertices).equals(bytesOf(first.vertices))).toBe(true);
-  expect(bytesOf(second.indices).equals(bytesOf(first.indices))).toBe(true);
-  expect(second.terrainIndexCount).toBe(first.terrainIndexCount);
+  expect(second.terrainQuadCount).toBe(first.terrainQuadCount);
+  expect(second.waterQuadCount).toBe(first.waterQuadCount);
 }
 
 describe("LOD tile builder", () => {
@@ -25,7 +25,7 @@ describe("LOD tile builder", () => {
     console.log(`level-4 tile: sample ${first.sampleMilliseconds.toFixed(1)} ms, mesh ${first.meshMilliseconds.toFixed(1)} ms, ${first.vertices.length / 2} vertices`);
     expect(first.source).toBe("worldgen");
     expect(first.vertices.length).toBeGreaterThan(0);
-    expect(first.indices.length).toBe(first.terrainIndexCount + first.waterIndexCount);
+    expect(first.vertices.length).toBe((first.terrainQuadCount + first.waterQuadCount) * 8);
   });
 
   test("a parent built from its four children is their exact downsample and needs no worldgen sampling", () => {

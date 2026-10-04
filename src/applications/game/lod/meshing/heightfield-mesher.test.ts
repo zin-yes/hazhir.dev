@@ -133,8 +133,8 @@ describe("heightfield mesher", () => {
     const { surface, mesh, quads } = meshAndDecode(address);
     const waterQuads = quads.filter((quad) => quad.material === LodMaterial.Water);
     expect(waterQuads.length).toBeGreaterThan(0);
-    expect(mesh.waterIndexCount).toBe(waterQuads.length * 6);
-    expect(quads.slice(0, mesh.terrainIndexCount / 6).every((quad) => quad.material === LodMaterial.Terrain)).toBe(true);
+    expect(mesh.waterQuadCount).toBe(waterQuads.length);
+    expect(quads.slice(0, mesh.terrainQuadCount).every((quad) => quad.material === LodMaterial.Terrain)).toBe(true);
     const cellSize = cellSizeOfLevel(address.level);
     const originX = address.tileX * tileSizeOfLevel(address.level);
     const originZ = address.tileZ * tileSizeOfLevel(address.level);

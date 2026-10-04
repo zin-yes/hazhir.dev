@@ -22,8 +22,8 @@ export function decodeWorldQuads(mesh: TileMesh, address: TileAddress): WorldQua
   const originX = address.tileX * tileSizeOfLevel(address.level);
   const originZ = address.tileZ * tileSizeOfLevel(address.level);
   const quads: WorldQuad[] = [];
-  for (let firstIndex = 0; firstIndex < mesh.indices.length; firstIndex += 6) {
-    const cornerVertices = [mesh.indices[firstIndex]!, mesh.indices[firstIndex + 1]!, mesh.indices[firstIndex + 2]!, mesh.indices[firstIndex + 5]!];
+  for (let firstVertex = 0; firstVertex < mesh.vertices.length / LOD_VERTEX_WORDS; firstVertex += 4) {
+    const cornerVertices = [firstVertex, firstVertex + 1, firstVertex + 2, firstVertex + 3];
     const corners = cornerVertices.map((vertex) =>
       decodeLodVertex(mesh.vertices[vertex * LOD_VERTEX_WORDS]!, mesh.vertices[vertex * LOD_VERTEX_WORDS + 1]!),
     );

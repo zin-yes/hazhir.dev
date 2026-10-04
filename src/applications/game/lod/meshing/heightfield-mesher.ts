@@ -21,17 +21,18 @@ import {
 export const SKIRT_BOTTOM_Y = WORLD_MIN_Y - 1;
 const WALL_FOOT_OCCLUSION = 1;
 const EMPTY_CELL_KEY = -1e12;
-const VERTICES_PER_QUAD = 4;
-const INDICES_PER_QUAD = 6;
-const MAXIMUM_QUADS = TILE_CELLS * TILE_CELLS * 2 + 2 * TILE_CELLS * (TILE_CELLS + 1) + 4 * TILE_CELLS;
+export const VERTICES_PER_QUAD = 4;
+/** Upper bound of quads in one tile: tops and water per cell, one wall per inner edge, one skirt per border cell. */
+export const MAXIMUM_TILE_QUADS = TILE_CELLS * TILE_CELLS * 2 + 2 * TILE_CELLS * (TILE_CELLS + 1) + 4 * TILE_CELLS;
 
 export interface TileMesh {
-  /** LOD_VERTEX_WORDS uint32 words per vertex. */
+  /**
+   * LOD_VERTEX_WORDS uint32 words per vertex, four vertices per quad in counter-clockwise order, so every tile shares
+   * one quad index buffer. Terrain quads come first, water quads after them.
+   */
   vertices: Uint32Array;
-  indices: Uint16Array;
-  /** Terrain triangles come first, water triangles after them. */
-  terrainIndexCount: number;
-  waterIndexCount: number;
+  terrainQuadCount: number;
+  waterQuadCount: number;
   minY: number;
   maxY: number;
 }
@@ -44,16 +45,17 @@ function underwaterLight(waterDepth: number): number {
 }
 
 class QuadWriter {
-  private readonly vertexWords = new Uint32Array(MAXIMUM_QUADS * VERTICES_PER_QUAD * LOD_VERTEX_WORDS);
-  private readonly indexValues = new Uint16Array(MAXIMUM_QUADS * INDICES_PER_QUAD);
+  private readonly vertexWords = new Uint32Array(MAXIMUM_TILE_QUADS * VERTICES_PER_QUAD * LOD_VERTEX_WORDS);
   vertexCount = 0;
-  indexCount = 0;
   minY = Infinity;
   maxY = -Infinity;
 
   /** Four corners in counter-clockwise order seen from the front; each corner is [cellX, blockY, cellZ, occlusion]. */
+  get quadCount(): number {
+    return this.vertexCount / VERTICES_PER_QUAD;
+  }
+
   emit(corners: readonly (readonly [number, number, number, number])[], face: LodFace, light: number, color: number, material: LodMaterial): void {
-    const firstVertex = this.vertexCount;
     const colorWord = encodeVertexWord1(color, material);
     for (const [cellX, blockY, cellZ, occlusion] of corners) {
       const offset = this.vertexCount * LOD_VERTEX_WORDS;
@@ -63,12 +65,6 @@ class QuadWriter {
       if (blockY < this.minY) this.minY = blockY;
       if (blockY > this.maxY) this.maxY = blockY;
     }
-    this.indexValues[this.indexCount++] = firstVertex;
-    this.indexValues[this.indexCount++] = firstVertex + 1;
-    this.indexValues[this.indexCount++] = firstVertex + 2;
-    this.indexValues[this.indexCount++] = firstVertex;
-    this.indexValues[this.indexCount++] = firstVertex + 2;
-    this.indexValues[this.indexCount++] = firstVertex + 3;
   }
 
   topQuad(minCellX: number, minCellZ: number, maxCellX: number, maxCellZ: number, blockY: number, light: number, color: number, material: LodMaterial) {
@@ -104,12 +100,11 @@ class QuadWriter {
     this.emit(corners, facesPositiveZ ? LodFace.PositiveZ : LodFace.NegativeZ, light, color, LodMaterial.Terrain);
   }
 
-  finish(terrainIndexCount: number): TileMesh {
+  finish(terrainQuadCount: number): TileMesh {
     return {
       vertices: this.vertexWords.slice(0, this.vertexCount * LOD_VERTEX_WORDS),
-      indices: this.indexValues.slice(0, this.indexCount),
-      terrainIndexCount,
-      waterIndexCount: this.indexCount - terrainIndexCount,
+      terrainQuadCount,
+      waterQuadCount: this.quadCount - terrainQuadCount,
       minY: this.vertexCount === 0 ? 0 : this.minY,
       maxY: this.vertexCount === 0 ? 0 : this.maxY,
     };
@@ -255,7 +250,7 @@ export function meshTileSurface(surface: TileSurface): TileMesh {
     (wall) => writer.wallAlongX(TILE_CELLS, wall.start, wall.end, wall.bottomY, wall.topY, true, wall.light, wall.color),
   );
 
-  const terrainIndexCount = writer.indexCount;
+  const terrainQuadCount = writer.quadCount;
   const waterKeys = new Float64Array(TILE_CELLS * TILE_CELLS);
   for (let index = 0; index < waterKeys.length; index++) {
     const water = surface.waterLevels[index]!;
@@ -264,5 +259,5 @@ export function meshTileSurface(surface: TileSurface): TileMesh {
   greedyRectangles(waterKeys, (minX, minZ, maxX, maxZ, firstIndex) => {
     writer.topQuad(minX, minZ, maxX, maxZ, surface.waterLevels[firstIndex]!, MAXIMUM_SKY_LIGHT, WATER_SURFACE_COLOR, LodMaterial.Water);
   });
-  return writer.finish(terrainIndexCount);
+  return writer.finish(terrainQuadCount);
 }

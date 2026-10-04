@@ -37,9 +37,8 @@ export interface LodTileBuildResult {
   source: LodTileSource;
   packedSurface: PackedTileSurface;
   vertices: Uint32Array;
-  indices: Uint16Array;
-  terrainIndexCount: number;
-  waterIndexCount: number;
+  terrainQuadCount: number;
+  waterQuadCount: number;
   minY: number;
   maxY: number;
   sampleMilliseconds: number;
@@ -117,9 +116,8 @@ export function buildLodTile(request: LodTileBuildRequest): LodTileBuildResult {
     source: hasAllChildren ? "children" : "worldgen",
     packedSurface,
     vertices: mesh.vertices,
-    indices: mesh.indices,
-    terrainIndexCount: mesh.terrainIndexCount,
-    waterIndexCount: mesh.waterIndexCount,
+    terrainQuadCount: mesh.terrainQuadCount,
+    waterQuadCount: mesh.waterQuadCount,
     minY: mesh.minY,
     maxY: mesh.maxY,
     sampleMilliseconds,
@@ -129,5 +127,5 @@ export function buildLodTile(request: LodTileBuildRequest): LodTileBuildResult {
 }
 
 export function listLodTileTransferables(result: LodTileBuildResult): Transferable[] {
-  return [result.packedSurface, result.vertices.buffer, result.indices.buffer];
+  return [result.packedSurface, result.vertices.buffer];
 }
