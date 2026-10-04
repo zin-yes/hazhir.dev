@@ -134,6 +134,8 @@ const GENERATION_WORKER_COUNT = Math.min(
   ),
 );
 const RANDOM_TICKS_PER_CHUNK = 100;
+/** Random ticks (grass, saplings) only run this many chunks around the player, like a simulation distance. */
+const RANDOM_TICK_RADIUS_CHUNKS = 4;
 // Chunks whose centers are farther than this from the camera draw plants as flat sheets.
 const PLANT_VOXEL_DETAIL_DISTANCE = 72;
 const PLANT_DETAIL_UPDATE_INTERVAL_MS = 250;
@@ -1740,11 +1742,16 @@ export default function Game() {
     return block === BlockType.SAPLING || block === BlockType.GRASS;
   }
 
-  /** Drawn chunks with mixed blocks: uniform chunks hold no grass or saplings, far ones are not simulated. */
+  /** Drawn chunks with mixed blocks near the player: uniform chunks hold no grass or saplings. */
   function collectRandomTickedChunks() {
     const tickedChunks: ChunkRecord[] = [];
+    const playerChunkX = Math.floor(camera.position.x / CHUNK_WIDTH);
+    const playerChunkZ = Math.floor(camera.position.z / CHUNK_LENGTH);
     pipelineRef.current?.forEachChunk((record) => {
-      if (record.blocks && record.uniformBlock < 0 && record.appliedMeshVersion >= 0) {
+      const isNearPlayer =
+        Math.abs(record.chunkX - playerChunkX) <= RANDOM_TICK_RADIUS_CHUNKS &&
+        Math.abs(record.chunkZ - playerChunkZ) <= RANDOM_TICK_RADIUS_CHUNKS;
+      if (isNearPlayer && record.blocks && record.uniformBlock < 0 && record.appliedMeshVersion >= 0) {
         tickedChunks.push(record);
       }
     });
