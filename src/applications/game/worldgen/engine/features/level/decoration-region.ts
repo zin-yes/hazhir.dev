@@ -8,6 +8,7 @@ import { type BlockStateCatalog, type BlockStateInfo, type BlockTagIndex, Palett
 import type { BlockPalette, ChunkBlocks } from "../../chunk";
 import { CarvingMask, type CarvingStep } from "../core/carving-mask";
 import { ChunkHeightmap, HEIGHTMAP_TYPES, type HeightmapColumnReader, type HeightmapType, isWorldgenHeightmap } from "../core/heightmap";
+import { addFeatureCounter, endDecorationSection, startDecorationSection } from "../profiling/feature-profiling";
 import type { BaseColumnSource } from "./base-column-source";
 import { VOID_AIR_STATE, type WorldGenLevel } from "./world-gen-level";
 
@@ -39,6 +40,7 @@ class RegionColumn {
   heightmap(type: HeightmapType): ChunkHeightmap {
     let heightmap = this.heightmaps.get(type);
     if (!heightmap) {
+      startDecorationSection("region.heightmap.prime");
       const useBaseBlocks = isWorldgenHeightmap(type);
       const minY = this.base.minY;
       const reader: HeightmapColumnReader = {
@@ -51,6 +53,7 @@ class RegionColumn {
       };
       heightmap = new ChunkHeightmap(type, reader);
       this.heightmaps.set(type, heightmap);
+      endDecorationSection();
     }
     return heightmap;
   }
@@ -98,6 +101,11 @@ export class DecorationRegion implements WorldGenLevel {
   private palette: BlockPalette | undefined;
   private paletteInfo: PaletteBlockInfo | undefined;
   private readonly normalizedStateById: string[] = [];
+  private blockReads = 0;
+  private heightLookups = 0;
+  private columnLoads = 0;
+  private columnLookups = 0;
+  private blocksWritten = 0;
 
   constructor(params: DecorationRegionParams) {
     this.source = params.source;
@@ -119,9 +127,13 @@ export class DecorationRegion implements WorldGenLevel {
 
   private column(chunkX: number, chunkZ: number): RegionColumn {
     const key = DecorationRegion.columnKey(chunkX, chunkZ);
+    this.columnLookups++;
     let column = this.columns.get(key);
     if (!column) {
+      this.columnLoads++;
+      startDecorationSection("region.column.load");
       const base = this.source.generateBaseColumn(chunkX, chunkZ);
+      endDecorationSection();
       if (!this.palette) {
         this.palette = base.palette;
         this.paletteInfo = this.blockStates.forPalette(base.palette);
@@ -151,13 +163,34 @@ export class DecorationRegion implements WorldGenLevel {
     return y < this.minY || y >= this.minY + this.height;
   }
 
+  /** Setblock calls that changed a block so far (the profiler reads the delta per feature). */
+  get blockWriteCount(): number {
+    return this.blocksWritten;
+  }
+
+  /** Reports this region's traffic to the profiler; counts are cumulative, so it is called once per region. */
+  flushProfileCounters(): void {
+    addFeatureCounter("region.blockReads", this.blockReads);
+    addFeatureCounter("region.blockWrites", this.blocksWritten);
+    addFeatureCounter("region.heightLookups", this.heightLookups);
+    addFeatureCounter("region.columnLookups", this.columnLookups);
+    addFeatureCounter("region.columnLoads", this.columnLoads);
+    addFeatureCounter("region.columnCacheHits", this.columnLookups - this.columnLoads);
+    this.blockReads = 0;
+    this.heightLookups = 0;
+    this.columnLoads = 0;
+    this.columnLookups = 0;
+  }
+
   getBlockState(x: number, y: number, z: number): string {
+    this.blockReads++;
     if (this.isOutsideBuildHeight(y)) return VOID_AIR_STATE;
     const column = this.column(x >> 4, z >> 4);
     return this.normalizedState(column.blocks[this.indexOf(x, y, z)]!);
   }
 
   getBlockInfo(x: number, y: number, z: number): BlockStateInfo {
+    this.blockReads++;
     if (this.isOutsideBuildHeight(y)) return this.blockStates.info(VOID_AIR_STATE);
     const column = this.column(x >> 4, z >> 4);
     return this.paletteInfo!.info(column.blocks[this.indexOf(x, y, z)]!);
@@ -175,6 +208,7 @@ export class DecorationRegion implements WorldGenLevel {
     if (!this.ensureCanWrite(x, y, z)) return false;
     if (this.isOutsideBuildHeight(y)) return true;
     const column = this.column(x >> 4, z >> 4);
+    this.blocksWritten++;
     const normalized = this.blockStates.normalize(state);
     const paletteId = this.palette!.idOf(normalized);
     column.write(this.indexOf(x, y, z), paletteId);
@@ -183,6 +217,7 @@ export class DecorationRegion implements WorldGenLevel {
   }
 
   getHeight(type: HeightmapType, x: number, z: number): number {
+    this.heightLookups++;
     return this.column(x >> 4, z >> 4).heightmap(type).getFirstAvailable(x & 15, z & 15);
   }
 

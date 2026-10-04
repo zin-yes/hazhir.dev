@@ -5,6 +5,7 @@ import { Direction } from "../../core/direction";
 import { defineFeatureType } from "../../feature/feature-type";
 import type { WorldGenLevel } from "../../level/world-gen-level";
 import { asObject, requireNumber } from "../../providers/json-fields";
+import { addFeatureCounter, endFeatureStep, startFeatureStep } from "../../profiling/feature-profiling";
 import type { IntProvider } from "../../providers/value-providers";
 import { SculkSpreader } from "./sculk-spreader";
 import { isCollisionShapeFullBlock, isFaceSturdy } from "./support/block-faces";
@@ -48,12 +49,15 @@ export const sculkPatchFeature = defineFeatureType<SculkPatchConfig>({
     if (!canSpreadFrom(level, origin.x, origin.y, origin.z)) return false;
     const spreader = new SculkSpreader();
     const rounds = config.spreadRounds + config.growthRounds;
+    const spreadMark = startFeatureStep("feature.sculk_patch.spread", level);
     for (let round = 0; round < rounds; round++) {
       for (let charge = 0; charge < config.chargeCount; charge++) spreader.addCursors(origin, config.amountPerCharge);
       const spread = round < config.spreadRounds;
       for (let attempt = 0; attempt < config.spreadAttempts; attempt++) spreader.updateCursors(level, origin, random, spread);
       spreader.clear();
     }
+    endFeatureStep("feature.sculk_patch.spread", level, spreadMark);
+    addFeatureCounter("feature.sculk_patch.cursorUpdates", spreader.cursorUpdateCount);
     if (random.nextFloat() <= config.catalystChance && isCollisionShapeFullBlock(level, origin.x, origin.y - 1, origin.z)) {
       level.setBlock(origin.x, origin.y, origin.z, level.blockStates.defaultState("minecraft:sculk_catalyst"), 3);
     }

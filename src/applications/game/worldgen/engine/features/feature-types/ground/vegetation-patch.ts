@@ -9,6 +9,7 @@ import { defineFeatureType, type FeatureChunkGenerator, type FeatureType } from 
 import type { FeatureParser } from "../../feature/feature-parser";
 import type { PlacedFeature } from "../../feature/placed-feature";
 import type { WorldGenLevel } from "../../level/world-gen-level";
+import { endFeatureStep, startFeatureStep } from "../../profiling/feature-profiling";
 import { BlockPos } from "../../core/block-pos";
 import type { BlockStateProvider } from "../../providers/block-state-providers";
 import { asObject, type JsonValue, requireNumber, requireString } from "../../providers/json-fields";
@@ -110,13 +111,21 @@ function defineVegetationPatchType(
     place({ config, level, generator, random, origin }) {
       const radiusX = config.xzRadius.sample(random) + 1;
       const radiusZ = config.xzRadius.sample(random) + 1;
+      const groundMark = startFeatureStep("feature.vegetation_patch.ground", level);
       let patchPositions = placeGroundPatch(level, config, random, origin, radiusX, radiusZ);
-      if (waterlogged) patchPositions = waterlogPatch(level, patchPositions);
+      endFeatureStep("feature.vegetation_patch.ground", level, groundMark);
+      if (waterlogged) {
+        const waterlogMark = startFeatureStep("feature.vegetation_patch.waterlog", level);
+        patchPositions = waterlogPatch(level, patchPositions);
+        endFeatureStep("feature.vegetation_patch.waterlog", level, waterlogMark);
+      }
+      const vegetationMark = startFeatureStep("feature.vegetation_patch.vegetation", level);
       for (const { x, y, z } of patchPositions.entries()) {
         if (!(config.vegetationChance > 0) || !(random.nextFloat() < config.vegetationChance)) continue;
         if (waterlogged) placeWaterloggedVegetation(level, config, generator, random, x, y, z);
         else placeVegetation(level, config, generator, random, x, y, z);
       }
+      endFeatureStep("feature.vegetation_patch.vegetation", level, vegetationMark);
       return patchPositions.size > 0;
     },
   });

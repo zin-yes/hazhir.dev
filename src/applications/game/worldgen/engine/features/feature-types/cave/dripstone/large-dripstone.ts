@@ -6,6 +6,7 @@ import { Direction } from "../../../core/direction";
 import { defineFeatureType } from "../../../feature/feature-type";
 import type { WorldGenLevel } from "../../../level/world-gen-level";
 import { asObject, requireNumber } from "../../../providers/json-fields";
+import { endFeatureStep, startFeatureStep } from "../../../profiling/feature-profiling";
 import { type FloatProvider, type IntProvider, randomBetweenInclusive } from "../../../providers/value-providers";
 import { Column } from "../column";
 import { optionalInt, requireInt } from "../config-fields";
@@ -160,6 +161,7 @@ export const largeDripstoneFeature = defineFeatureType<LargeDripstoneConfig>({
   },
   place({ level, random, origin, config }) {
     if (!isEmptyOrWater(level, origin.x, origin.y, origin.z)) return false;
+    startFeatureStep("feature.large_dripstone.search");
     const column = Column.scan(
       (x, y, z) => level.getBlockState(x, y, z),
       origin,
@@ -167,6 +169,7 @@ export const largeDripstoneFeature = defineFeatureType<LargeDripstoneConfig>({
       (state) => isEmptyOrWaterState(level, state),
       (state) => isDripstoneBaseOrLavaState(level, state),
     );
+    endFeatureStep("feature.large_dripstone.search");
     if (column === undefined || !column.isRange()) return false;
     const floor = column.floor!;
     const ceiling = column.ceiling!;
@@ -179,10 +182,14 @@ export const largeDripstoneFeature = defineFeatureType<LargeDripstoneConfig>({
     const stalagmite = makeDripstone({ x: origin.x, y: floor + 1, z: origin.z }, true, random, radius, config.stalagmiteBluntness, config.heightScale);
     const wind =
       stalactite.isSuitableForWind(config) && stalagmite.isSuitableForWind(config) ? WindOffsetter.withWind(origin.y, random, config.windSpeed) : WindOffsetter.noWind();
+    startFeatureStep("feature.large_dripstone.fit");
     const stalactiteFits = stalactite.moveBackUntilBaseIsInsideStoneAndShrinkRadiusIfNecessary(level, wind);
     const stalagmiteFits = stalagmite.moveBackUntilBaseIsInsideStoneAndShrinkRadiusIfNecessary(level, wind);
+    endFeatureStep("feature.large_dripstone.fit");
+    const blocksMark = startFeatureStep("feature.large_dripstone.blocks", level);
     if (stalactiteFits) stalactite.placeBlocks(level, random, wind);
     if (stalagmiteFits) stalagmite.placeBlocks(level, random, wind);
+    endFeatureStep("feature.large_dripstone.blocks", level, blocksMark);
     return true;
   },
 });

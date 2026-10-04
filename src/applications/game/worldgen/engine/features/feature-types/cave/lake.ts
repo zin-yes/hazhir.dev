@@ -4,6 +4,8 @@
 // Fluid scheduled ticks and post-processing marks have no effect on generated blocks and are omitted.
 
 import { defineFeatureType } from "../../feature/feature-type";
+import type { WorldGenLevel } from "../../level/world-gen-level";
+import { addFeatureCounter, endFeatureStep, startFeatureStep } from "../../profiling/feature-profiling";
 import { asObject } from "../../providers/json-fields";
 import type { BlockStateProvider } from "../../providers/block-state-providers";
 
@@ -37,6 +39,22 @@ function isLakeEdge(shape: Uint8Array, x: number, z: number, y: number): boolean
   );
 }
 
+/** False when an edge cell would put liquid above the surface or leave the lake without a solid or matching wall. */
+function isLakeSiteValid(level: WorldGenLevel, shape: Uint8Array, baseX: number, baseY: number, baseZ: number, fluidState: string): boolean {
+  for (let x = 0; x < LAKE_SIZE_X; x++) {
+    for (let z = 0; z < LAKE_SIZE_Z; z++) {
+      for (let y = 0; y < LAKE_SIZE_Y; y++) {
+        if (!isLakeEdge(shape, x, z, y)) continue;
+        const existing = level.getBlockInfo(baseX + x, baseY + y, baseZ + z);
+        if (y >= 4 && existing.isLiquid) return false;
+        if (y >= 4 || existing.isSolid || level.blockStates.normalize(existing.state) === fluidState) continue;
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
 export const lakeFeature = defineFeatureType<LakeConfig>({
   id: "minecraft:lake",
   parseConfig(json, parser) {
@@ -51,6 +69,7 @@ export const lakeFeature = defineFeatureType<LakeConfig>({
     const baseX = origin.x;
     const baseY = origin.y - 4;
     const baseZ = origin.z;
+    startFeatureStep("feature.lake.shape");
     const shape = new Uint8Array(LAKE_SIZE_X * LAKE_SIZE_Z * LAKE_SIZE_Y);
     const blobCount = random.nextIntBounded(4) + 4;
     for (let blob = 0; blob < blobCount; blob++) {
@@ -72,18 +91,13 @@ export const lakeFeature = defineFeatureType<LakeConfig>({
         }
       }
     }
+    endFeatureStep("feature.lake.shape");
     const fluidState = config.fluid.getState(random, baseX, baseY, baseZ);
-    for (let x = 0; x < LAKE_SIZE_X; x++) {
-      for (let z = 0; z < LAKE_SIZE_Z; z++) {
-        for (let y = 0; y < LAKE_SIZE_Y; y++) {
-          if (!isLakeEdge(shape, x, z, y)) continue;
-          const existing = level.getBlockInfo(baseX + x, baseY + y, baseZ + z);
-          if (y >= 4 && existing.isLiquid) return false;
-          if (y >= 4 || existing.isSolid || level.blockStates.normalize(existing.state) === fluidState) continue;
-          return false;
-        }
-      }
-    }
+    startFeatureStep("feature.lake.check");
+    const siteValid = isLakeSiteValid(level, shape, baseX, baseY, baseZ, fluidState);
+    endFeatureStep("feature.lake.check");
+    if (!siteValid) return false;
+    const fillMark = startFeatureStep("feature.lake.fill", level);
     for (let x = 0; x < LAKE_SIZE_X; x++) {
       for (let z = 0; z < LAKE_SIZE_Z; z++) {
         for (let y = 0; y < LAKE_SIZE_Y; y++) {
@@ -94,8 +108,10 @@ export const lakeFeature = defineFeatureType<LakeConfig>({
         }
       }
     }
+    endFeatureStep("feature.lake.fill", level, fillMark);
     const barrierState = config.barrier.getState(random, baseX, baseY, baseZ);
     if (!level.blockStates.info(barrierState).isAir) {
+      const barrierMark = startFeatureStep("feature.lake.barrier", level);
       for (let x = 0; x < LAKE_SIZE_X; x++) {
         for (let z = 0; z < LAKE_SIZE_Z; z++) {
           for (let y = 0; y < LAKE_SIZE_Y; y++) {
@@ -107,7 +123,9 @@ export const lakeFeature = defineFeatureType<LakeConfig>({
           }
         }
       }
+      endFeatureStep("feature.lake.barrier", level, barrierMark);
     }
+    addFeatureCounter("feature.lake.placed", 1);
     return true;
   },
 });

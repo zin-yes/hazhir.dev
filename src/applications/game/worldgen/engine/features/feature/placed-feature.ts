@@ -6,6 +6,8 @@ import type { RandomSource } from "../../random";
 import { BlockPos } from "../core/block-pos";
 import type { WorldGenLevel } from "../level/world-gen-level";
 import { PlacementContext, type PlacementModifier } from "../placement/placement-modifier";
+import { isFeatureProfilingActive } from "../profiling/feature-profiling";
+import { placeConfiguredFeatureProfiled, placePlacedFeatureProfiled } from "../profiling/placed-feature-profiling";
 import type { FeatureChunkGenerator, FeatureType } from "./feature-type";
 
 export class ConfiguredFeature<Config = unknown> {
@@ -19,6 +21,7 @@ export class ConfiguredFeature<Config = unknown> {
   /** ConfiguredFeature.place -> Feature.place(config, level, generator, random, origin). */
   place(level: WorldGenLevel, generator: FeatureChunkGenerator, random: RandomSource, origin: BlockPos): boolean {
     if (!level.ensureCanWrite(origin.x, origin.y, origin.z)) return false;
+    if (isFeatureProfilingActive()) return placeConfiguredFeatureProfiled(this, level, generator, random, origin);
     return this.type.place({ level, generator, random, origin, config: this.config });
   }
 }
@@ -52,6 +55,7 @@ export class PlacedFeature {
   }
 
   private placeWithContext(context: PlacementContext, random: RandomSource, origin: BlockPos): boolean {
+    if (isFeatureProfilingActive()) return placePlacedFeatureProfiled(this, context, random, origin);
     let placedAny = false;
     this.walkPositions(context, random, origin, (position) => {
       if (this.feature.place(context.level, context.generator, random, position)) placedAny = true;

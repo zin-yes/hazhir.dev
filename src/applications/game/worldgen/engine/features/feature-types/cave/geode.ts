@@ -11,6 +11,7 @@ import type { WorldGenLevel } from "../../level/world-gen-level";
 import { asArray, asObject, type JsonObject, type JsonValue, optionalBoolean, optionalNumber, requireString } from "../../providers/json-fields";
 import { type IntProvider, parseIntProvider } from "../../providers/value-providers";
 import { Direction } from "../../core/direction";
+import { addFeatureCounter, endFeatureStep, startFeatureStep } from "../../profiling/feature-profiling";
 import { betweenClosed } from "./block-iteration";
 import { optionalInt, parseBlockStateIgnoringUnknownProperties, requireInt } from "./config-fields";
 import { mthInvSqrt } from "./java-math";
@@ -155,8 +156,11 @@ export const geodeFeature = defineFeatureType<GeodeConfig>({
     const safeSetBlock = (x: number, y: number, z: number, state: string): void => {
       if (!level.blockTags.is(level.getBlockInfo(x, y, z).name, cannotReplaceTag)) level.setBlock(x, y, z, state, 2);
     };
+    const layersMark = startFeatureStep("feature.geode.layers", level);
+    let scannedCellCount = 0;
     for (const position of betweenClosed(origin.x + minOffset, origin.y + minOffset, origin.z + minOffset, origin.x + maxOffset, origin.y + maxOffset, origin.z + maxOffset)) {
       const { x, y, z } = position;
+      scannedCellCount++;
       const noiseValue = noise.getValue(x, y, z) * config.noiseMultiplier;
       let pointSum = 0;
       let crackSum = 0;
@@ -191,6 +195,10 @@ export const geodeFeature = defineFeatureType<GeodeConfig>({
       }
       safeSetBlock(x, y, z, blocks.outerLayerProvider.getState(random, x, y, z));
     }
+    endFeatureStep("feature.geode.layers", level, layersMark);
+    addFeatureCounter("feature.geode.scannedCells", scannedCellCount);
+    addFeatureCounter("feature.geode.potentialPlacements", potentialPlacements.length);
+    const buddingMark = startFeatureStep("feature.geode.budding", level);
     const catalog = level.blockStates;
     for (const placement of potentialPlacements) {
       let state = blocks.innerPlacements[random.nextIntBounded(blocks.innerPlacements.length)]!;
@@ -209,6 +217,7 @@ export const geodeFeature = defineFeatureType<GeodeConfig>({
         break;
       }
     }
+    endFeatureStep("feature.geode.budding", level, buddingMark);
     return true;
   },
 });

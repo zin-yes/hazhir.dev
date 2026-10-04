@@ -16,6 +16,8 @@ import type { WorldGenerationContext } from "../providers/value-providers";
 export class PlacementContext implements WorldGenerationContext {
   readonly minGenY: number;
   readonly genDepth: number;
+  /** The biome the biome filter last looked up; the profiler attributes a placement to it. */
+  lastCheckedBiome: string | undefined;
 
   constructor(
     readonly level: WorldGenLevel,

@@ -17,6 +17,19 @@ import type { FeatureChunkGenerator, FeatureTypeRegistry } from "../feature/feat
 import type { PlacedFeature } from "../feature/placed-feature";
 import { createDefaultFeatureTypeRegistry } from "../feature-types";
 import { type BaseColumnSource, collectChunkBiomes } from "../level/base-column-source";
+import {
+  addFeatureCounter,
+  endDecorationSection,
+  featureProfileState,
+  flushOriginCounters,
+  isFeatureProfilingActive,
+  openFeatureSection,
+  recoverOpenSections,
+  resetFeatureProfileState,
+  startDecorationSection,
+  startSampledDecorationSection,
+  stepSectionName,
+} from "../profiling/feature-profiling";
 import { type ColumnPatch, DecorationRegion } from "../level/decoration-region";
 import { BiomeFeatureIndex, DECORATION_STEPS } from "./biome-features";
 import { buildFeaturesPerStep, type StepFeatureData } from "./feature-sorter";
@@ -125,14 +138,21 @@ export class FeatureDecorator {
   }
 
   placedFeatureByKey(featureKey: string): PlacedFeature {
-    return this.resolver.placedFeature(this.biomeFeatures.inlineDefinition(featureKey) ?? featureKey, featureKey);
+    startSampledDecorationSection("feature.resolve", 16);
+    const placedFeature = this.resolver.placedFeature(this.biomeFeatures.inlineDefinition(featureKey) ?? featureKey, featureKey);
+    endDecorationSection();
+    return placedFeature;
   }
 
   /** Decorates one origin chunk against base terrain and returns its clipped writes (cached). */
   decorateOrigin(chunkX: number, chunkZ: number, trace?: OriginDecorationTrace[]): OriginDecoration {
     const cacheKey = `${chunkX},${chunkZ}`;
     const cached = trace ? undefined : this.originCache.get(cacheKey);
-    if (cached) return cached;
+    if (cached) {
+      addFeatureCounter("decoration.originCacheHits", 1);
+      return cached;
+    }
+    addFeatureCounter("decoration.originCacheMisses", 1);
     const region = this.createRegion(chunkX, chunkZ);
     const decoration = this.decorateInRegion(region, trace);
     this.originCache.set(cacheKey, decoration);
@@ -153,6 +173,20 @@ export class FeatureDecorator {
 
   /** The applyBiomeDecoration loop over an existing region (exposed so tests can inspect the region afterwards). */
   decorateInRegion(region: DecorationRegion, trace?: OriginDecorationTrace[]): OriginDecoration {
+    if (!isFeatureProfilingActive()) return this.runDecorationSteps(region, trace);
+    const savedSectionDepth = featureProfileState.openSectionDepth;
+    resetFeatureProfileState();
+    openFeatureSection("feature.origin");
+    try {
+      const decoration = this.runDecorationSteps(region, trace);
+      flushOriginCounters(region);
+      return decoration;
+    } finally {
+      recoverOpenSections(savedSectionDepth);
+    }
+  }
+
+  private runDecorationSteps(region: DecorationRegion, trace?: OriginDecorationTrace[]): OriginDecoration {
     const chunkX = region.centerChunkX;
     const chunkZ = region.centerChunkZ;
     const minBlockX = chunkX * 16;
@@ -161,17 +195,20 @@ export class FeatureDecorator {
     const random = createDecorationRandom();
     const decorationSeed = random.setDecorationSeed(this.seed, minBlockX, minBlockZ);
 
+    startDecorationSection("feature.origin.biomeScan");
     const presentBiomes = new Set<string>();
     for (let offsetZ = -1; offsetZ <= 1; offsetZ++) {
       for (let offsetX = -1; offsetX <= 1; offsetX++) collectChunkBiomes(this.source, chunkX + offsetX, chunkZ + offsetZ, presentBiomes);
     }
     const biomes = [...presentBiomes].filter((biome) => this.possibleBiomes.has(biome));
+    endDecorationSection();
 
     const stepData = this.featuresPerStep;
     const stepCount = Math.max(DECORATION_STEPS.length, stepData.length);
     for (let step = 0; step < stepCount; step++) {
       if (step >= stepData.length) continue;
       const data = stepData[step]!;
+      startDecorationSection(stepSectionName(step, DECORATION_STEPS[step]));
       const indices = new Set<number>();
       for (const biome of biomes) {
         const steps = this.biomeFeatures.stepsOf(biome);
@@ -195,24 +232,35 @@ export class FeatureDecorator {
         }
         trace?.push({ step, featureIndex, featureKey, placed });
       }
+      endDecorationSection();
     }
-    return { chunkX, chunkZ, decorationSeed, biomes, patches: region.extractPatches() };
+    startDecorationSection("feature.origin.extractPatches");
+    const patches = region.extractPatches();
+    endDecorationSection();
+    return { chunkX, chunkZ, decorationSeed, biomes, patches };
   }
 
   /** Base column + the patches of the 9 origins around it, in raster order. */
   generateDecoratedColumn(chunkX: number, chunkZ: number): ChunkBlocks {
+    startDecorationSection("feature.column.base");
     const base = this.source.generateBaseColumn(chunkX, chunkZ);
     const decorated = new ChunkBlocks(chunkX, chunkZ, base.minY, base.height, base.palette);
     decorated.blocks.set(base.blocks);
+    endDecorationSection();
+    let mergedBlocks = 0;
     for (let originZ = chunkZ - 1; originZ <= chunkZ + 1; originZ++) {
       for (let originX = chunkX - 1; originX <= chunkX + 1; originX++) {
         const decoration = this.decorateOrigin(originX, originZ);
+        startDecorationSection("feature.column.merge");
         for (const patch of decoration.patches) {
           if (patch.chunkX !== chunkX || patch.chunkZ !== chunkZ) continue;
           for (let position = 0; position < patch.indices.length; position++) decorated.blocks[patch.indices[position]!] = patch.paletteIds[position]!;
+          mergedBlocks += patch.indices.length;
         }
+        endDecorationSection();
       }
     }
+    addFeatureCounter("decoration.patchBlocksMerged", mergedBlocks);
     return decorated;
   }
 }

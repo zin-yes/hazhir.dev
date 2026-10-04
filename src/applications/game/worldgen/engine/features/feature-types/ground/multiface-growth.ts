@@ -5,6 +5,7 @@ import type { RandomSource } from "../../../random";
 import { Direction } from "../../core/direction";
 import { defineFeatureType } from "../../feature/feature-type";
 import type { WorldGenLevel } from "../../level/world-gen-level";
+import { addFeatureCounter, endFeatureStep, startFeatureStep } from "../../profiling/feature-profiling";
 import type { BlockSet } from "../../providers/block-predicates";
 import { asObject, optionalBoolean, optionalNumber, type JsonValue } from "../../providers/json-fields";
 import {
@@ -96,20 +97,35 @@ export const multifaceGrowthFeature = defineFeatureType<MultifaceGrowthConfig>({
     if (!isAirOrWater(level, x, y, z)) return false;
     const directions = shuffledCopy(config.validDirections, random);
     if (placeGrowthIfPossible(level, x, y, z, level.getBlockState(x, y, z), config, random, directions)) return true;
-    for (const direction of directions) {
-      const remainingDirections = shuffledDirectionsExcept(config, random, direction.opposite);
-      for (let step = 0; step < config.searchRange; step++) {
-        // The search position is recomputed from the origin each step (Java: setWithOffset(origin, direction)),
-        // so every iteration inspects the same neighbor of the origin.
-        const searchX = x + direction.stepX;
-        const searchY = y + direction.stepY;
-        const searchZ = z + direction.stepZ;
-        const searchState = level.getBlockState(searchX, searchY, searchZ);
-        const searchInfo = level.blockStates.info(searchState);
-        if (!isAirOrWater(level, searchX, searchY, searchZ) && searchInfo.name !== config.placeBlock) break;
-        if (placeGrowthIfPossible(level, searchX, searchY, searchZ, searchState, config, random, remainingDirections)) return true;
-      }
-    }
-    return false;
+    const searchMark = startFeatureStep("feature.multiface_growth.search", level);
+    const found = searchForGrowth(level, config, random, directions, x, y, z);
+    endFeatureStep("feature.multiface_growth.search", level, searchMark);
+    return found;
   },
 });
+
+function searchForGrowth(level: WorldGenLevel, config: MultifaceGrowthConfig, random: RandomSource, directions: readonly Direction[], x: number, y: number, z: number): boolean {
+  let searchStepCount = 0;
+  let found = false;
+  for (const direction of directions) {
+    const remainingDirections = shuffledDirectionsExcept(config, random, direction.opposite);
+    for (let step = 0; step < config.searchRange; step++) {
+      searchStepCount++;
+      // The search position is recomputed from the origin each step (Java: setWithOffset(origin, direction)),
+      // so every iteration inspects the same neighbor of the origin.
+      const searchX = x + direction.stepX;
+      const searchY = y + direction.stepY;
+      const searchZ = z + direction.stepZ;
+      const searchState = level.getBlockState(searchX, searchY, searchZ);
+      const searchInfo = level.blockStates.info(searchState);
+      if (!isAirOrWater(level, searchX, searchY, searchZ) && searchInfo.name !== config.placeBlock) break;
+      if (placeGrowthIfPossible(level, searchX, searchY, searchZ, searchState, config, random, remainingDirections)) {
+        found = true;
+        break;
+      }
+    }
+    if (found) break;
+  }
+  addFeatureCounter("feature.multiface_growth.searchSteps", searchStepCount);
+  return found;
+}

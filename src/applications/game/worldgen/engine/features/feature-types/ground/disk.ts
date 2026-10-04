@@ -3,6 +3,7 @@
 
 import { defineFeatureType } from "../../feature/feature-type";
 import type { BlockPredicate } from "../../providers/block-predicates";
+import { addFeatureCounter } from "../../profiling/feature-profiling";
 import { asObject, requireNumber } from "../../providers/json-fields";
 import type { IntProvider } from "../../providers/value-providers";
 import { parseRuleBasedBlockStateProvider, type RuleBasedBlockStateProvider } from "./rule-based-block-state-provider";
@@ -27,6 +28,7 @@ export const diskFeature = defineFeatureType<DiskConfig>({
   },
   place({ config, level, random, origin }) {
     let placedAny = false;
+    let columnsScanned = 0;
     const topY = origin.y + config.halfHeight;
     const bottomExclusiveY = origin.y - config.halfHeight - 1;
     const radius = config.radius.sample(random);
@@ -36,6 +38,7 @@ export const diskFeature = defineFeatureType<DiskConfig>({
         const deltaX = x - origin.x;
         const deltaZ = z - origin.z;
         if (deltaX * deltaX + deltaZ * deltaZ > radius * radius) continue;
+        columnsScanned++;
         for (let y = topY; y > bottomExclusiveY; y--) {
           if (!config.target.test(level, x, y, z)) continue;
           level.setBlock(x, y, z, config.stateProvider.getState(level, random, x, y, z), 2);
@@ -43,6 +46,7 @@ export const diskFeature = defineFeatureType<DiskConfig>({
         }
       }
     }
+    addFeatureCounter("feature.disk.columnsScanned", columnsScanned);
     return placedAny;
   },
 });

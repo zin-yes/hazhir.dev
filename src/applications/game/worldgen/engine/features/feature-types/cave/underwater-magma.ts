@@ -4,6 +4,7 @@ import { Direction } from "../../core/direction";
 import { defineFeatureType } from "../../feature/feature-type";
 import type { WorldGenLevel } from "../../level/world-gen-level";
 import { asObject, requireNumber } from "../../providers/json-fields";
+import { addFeatureCounter, endFeatureStep, startFeatureStep } from "../../profiling/feature-profiling";
 import { betweenClosed } from "./block-iteration";
 import { Column } from "./column";
 import { requireInt } from "./config-fields";
@@ -54,12 +55,17 @@ export const underwaterMagmaFeature = defineFeatureType<UnderwaterMagmaConfig>({
     if (floorY === undefined) return false;
     const radius = config.placementRadiusAroundFloor;
     let placedCount = 0;
+    let candidateCellCount = 0;
+    const placeMark = startFeatureStep("feature.underwater_magma.place", level);
     for (const position of betweenClosed(origin.x - radius, floorY - radius, origin.z - radius, origin.x + radius, floorY + radius, origin.z + radius)) {
+      candidateCellCount++;
       if (!(random.nextFloat() < config.placementProbabilityPerValidPosition)) continue;
       if (!isValidPlacement(level, position.x, position.y, position.z)) continue;
       level.setBlock(position.x, position.y, position.z, "minecraft:magma_block", 2);
       placedCount++;
     }
+    endFeatureStep("feature.underwater_magma.place", level, placeMark);
+    addFeatureCounter("feature.underwater_magma.candidateCells", candidateCellCount);
     return placedCount > 0;
   },
 });

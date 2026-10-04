@@ -2,6 +2,7 @@
 
 import { defineFeatureType } from "../../feature/feature-type";
 import type { WorldGenLevel } from "../../level/world-gen-level";
+import { endFeatureStep, startFeatureStep } from "../../profiling/feature-profiling";
 import { ICE_BLOCK, isBlock, isDirt, PACKED_ICE_BLOCK, SNOW_BLOCK } from "./block-names";
 import { ceilFloat, divideInt, roundFloat } from "./java-float-math";
 
@@ -28,6 +29,7 @@ export const iceSpikeFeature = defineFeatureType<undefined>({
     const width = divideInt(height, 4) + random.nextIntBounded(2);
     if (width > 1 && random.nextIntBounded(60) === 0) y += 10 + random.nextIntBounded(30);
 
+    const bodyMark = startFeatureStep("feature.ice_spike.body", level);
     for (let layer = 0; layer < height; layer++) {
       const layerRadius = roundFloat(roundFloat(1 - roundFloat(layer / height)) * width);
       const reach = ceilFloat(layerRadius);
@@ -50,6 +52,9 @@ export const iceSpikeFeature = defineFeatureType<undefined>({
       }
     }
 
+    endFeatureStep("feature.ice_spike.body", level, bodyMark);
+
+    const rootsMark = startFeatureStep("feature.ice_spike.roots", level);
     const rootRadius = Math.min(Math.max(width - 1, 0), 1);
     for (let offsetX = -rootRadius; offsetX <= rootRadius; offsetX++) {
       for (let offsetZ = -rootRadius; offsetZ <= rootRadius; offsetZ++) {
@@ -68,6 +73,7 @@ export const iceSpikeFeature = defineFeatureType<undefined>({
         }
       }
     }
+    endFeatureStep("feature.ice_spike.roots", level, rootsMark);
     return true;
   },
 });

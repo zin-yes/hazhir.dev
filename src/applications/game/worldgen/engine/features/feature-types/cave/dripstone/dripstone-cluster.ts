@@ -6,6 +6,7 @@ import { Direction } from "../../../core/direction";
 import { defineFeatureType } from "../../../feature/feature-type";
 import type { WorldGenLevel } from "../../../level/world-gen-level";
 import { asObject, requireNumber } from "../../../providers/json-fields";
+import { addFeatureCounter, endDecorationSection, startSampledDecorationSection } from "../../../profiling/feature-profiling";
 import { type FloatProvider, type IntProvider, mthNormal, randomBetweenInclusive } from "../../../providers/value-providers";
 import { Column } from "../column";
 import { requireInt } from "../config-fields";
@@ -33,6 +34,8 @@ export interface DripstoneClusterConfig {
   readonly maxDistanceFromEdgeAffectingChanceOfDripstoneColumn: number;
   readonly maxDistanceFromCenterAffectingHeightBias: number;
 }
+
+const COLUMN_STEP_SAMPLE_EVERY = 8;
 
 function isLava(level: WorldGenLevel, x: number, y: number, z: number): boolean {
   return isBlockNamed(level, x, y, z, "minecraft:lava");
@@ -92,7 +95,8 @@ function placeColumn(
   height: number,
   density: number,
   config: DripstoneClusterConfig,
-): void {
+): boolean {
+  startSampledDecorationSection("feature.dripstone_cluster.scan", COLUMN_STEP_SAMPLE_EVERY);
   const scanned = Column.scan(
     (scanX, scanY, scanZ) => level.getBlockState(scanX, scanY, scanZ),
     { x, y, z },
@@ -100,10 +104,11 @@ function placeColumn(
     (state) => isEmptyOrWaterState(level, state),
     (state) => isNeitherEmptyNorWaterState(level, state),
   );
-  if (scanned === undefined) return;
+  endDecorationSection();
+  if (scanned === undefined) return false;
   const ceiling = scanned.ceiling;
   const floor = scanned.floor;
-  if (ceiling === undefined && floor === undefined) return;
+  if (ceiling === undefined && floor === undefined) return false;
   const placePool = random.nextFloat() < wetness;
   let column: Column;
   if (placePool && floor !== undefined && canPlacePool(level, x, floor, z)) {
@@ -153,8 +158,11 @@ function placeColumn(
   const columnHeight = column.height;
   const mergeTips =
     random.nextBoolean() && finalStalactiteHeight > 0 && finalStalagmiteHeight > 0 && columnHeight !== undefined && finalStalactiteHeight + finalStalagmiteHeight === columnHeight;
+  startSampledDecorationSection("feature.dripstone_cluster.grow", COLUMN_STEP_SAMPLE_EVERY);
   if (ceiling !== undefined) growPointedDripstone(level, x, ceiling - 1, z, Direction.DOWN, finalStalactiteHeight, mergeTips);
   if (columnFloor !== undefined) growPointedDripstone(level, x, columnFloor + 1, z, Direction.UP, finalStalagmiteHeight, mergeTips);
+  endDecorationSection();
+  return true;
 }
 
 export const dripstoneClusterFeature = defineFeatureType<DripstoneClusterConfig>({
@@ -182,12 +190,17 @@ export const dripstoneClusterFeature = defineFeatureType<DripstoneClusterConfig>
     const density = config.density.sample(random);
     const radiusX = config.radius.sample(random);
     const radiusZ = config.radius.sample(random);
+    let attemptedColumnCount = 0;
+    let openColumnCount = 0;
     for (let offsetX = -radiusX; offsetX <= radiusX; offsetX++) {
       for (let offsetZ = -radiusZ; offsetZ <= radiusZ; offsetZ++) {
         const chanceOfColumn = getChanceOfStalagmiteOrStalactite(radiusX, radiusZ, offsetX, offsetZ, config);
-        placeColumn(level, random, origin.x + offsetX, origin.y, origin.z + offsetZ, offsetX, offsetZ, wetness, chanceOfColumn, height, density, config);
+        attemptedColumnCount++;
+        if (placeColumn(level, random, origin.x + offsetX, origin.y, origin.z + offsetZ, offsetX, offsetZ, wetness, chanceOfColumn, height, density, config)) openColumnCount++;
       }
     }
+    addFeatureCounter("feature.dripstone_cluster.columnsAttempted", attemptedColumnCount);
+    addFeatureCounter("feature.dripstone_cluster.columnsOpen", openColumnCount);
     return true;
   },
 });

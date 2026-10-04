@@ -5,6 +5,7 @@
 import { isFluidWater } from "../../../block-state";
 import { defineFeatureType, type FeatureChunkGenerator } from "../../feature/feature-type";
 import type { WorldGenLevel } from "../../level/world-gen-level";
+import { addFeatureCounter, endFeatureStep, startFeatureStep } from "../../profiling/feature-profiling";
 import { ICE_BLOCK, isBlock, SNOW_LAYER_BLOCK, WATER_BLOCK } from "./block-names";
 
 const WARM_ENOUGH_TO_RAIN_TEMPERATURE = Math.fround(0.15);
@@ -49,6 +50,9 @@ export const freezeTopLayerFeature = defineFeatureType<undefined>({
     const temperatureAt = generator.biomeTemperature;
     if (!temperatureAt) throw new Error("freeze_top_layer needs generator.biomeTemperature (Biome.getTemperature)");
     const temperature: TemperatureLookup = (biomeId, x, y, z) => temperatureAt.call(generator, biomeId, x, y, z);
+    let frozenColumns = 0;
+    let snowedColumns = 0;
+    const scanMark = startFeatureStep("feature.freeze_top_layer.scan", level);
     for (let offsetX = 0; offsetX < 16; offsetX++) {
       for (let offsetZ = 0; offsetZ < 16; offsetZ++) {
         const x = origin.x + offsetX;
@@ -56,13 +60,20 @@ export const freezeTopLayerFeature = defineFeatureType<undefined>({
         const topY = level.getHeight("MOTION_BLOCKING", x, z);
         const belowY = topY - 1;
         const biomeId = level.getBiome(x, topY, z);
-        if (shouldFreeze(level, temperature, biomeId, x, belowY, z)) level.setBlock(x, belowY, z, ICE_BLOCK, 2);
+        if (shouldFreeze(level, temperature, biomeId, x, belowY, z)) {
+          level.setBlock(x, belowY, z, ICE_BLOCK, 2);
+          frozenColumns++;
+        }
         if (!shouldSnow(level, temperature, biomeId, x, topY, z)) continue;
+        snowedColumns++;
         level.setBlock(x, topY, z, level.blockStates.defaultState(SNOW_LAYER_BLOCK), 2);
         const below = level.getBlockState(x, belowY, z);
         if (level.blockStates.hasProperty(below, SNOWY_PROPERTY)) level.setBlock(x, belowY, z, level.blockStates.withProperty(below, SNOWY_PROPERTY, "true"), 2);
       }
     }
+    endFeatureStep("feature.freeze_top_layer.scan", level, scanMark);
+    addFeatureCounter("feature.freeze_top_layer.frozenColumns", frozenColumns);
+    addFeatureCounter("feature.freeze_top_layer.snowedColumns", snowedColumns);
     return true;
   },
 });

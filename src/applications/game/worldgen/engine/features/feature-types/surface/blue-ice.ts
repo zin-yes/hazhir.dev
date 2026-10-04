@@ -3,6 +3,7 @@
 
 import { Direction } from "../../core/direction";
 import { defineFeatureType } from "../../feature/feature-type";
+import { endFeatureStep, startFeatureStep } from "../../profiling/feature-profiling";
 import { divideInt } from "./java-float-math";
 import { BLUE_ICE_BLOCK, ICE_BLOCK, isBlock, PACKED_ICE_BLOCK, WATER_BLOCK } from "./block-names";
 
@@ -23,6 +24,7 @@ export const blueIceFeature = defineFeatureType<undefined>({
     }
     if (!touchesPackedIce) return false;
     level.setBlock(x, y, z, BLUE_ICE_BLOCK, 2);
+    const spreadMark = startFeatureStep("feature.blue_ice.spread", level);
     for (let attempt = 0; attempt < 200; attempt++) {
       const offsetY = random.nextIntBounded(5) - random.nextIntBounded(6);
       let spread = 3;
@@ -44,6 +46,7 @@ export const blueIceFeature = defineFeatureType<undefined>({
         }
       }
     }
+    endFeatureStep("feature.blue_ice.spread", level, spreadMark);
     return true;
   },
 });

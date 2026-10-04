@@ -6,6 +6,7 @@ import { defineFeatureType } from "../../feature/feature-type";
 import type { WorldGenLevel } from "../../level/world-gen-level";
 import { asObject } from "../../providers/json-fields";
 import type { IntProvider } from "../../providers/value-providers";
+import { addFeatureCounter, endFeatureStep, startFeatureStep } from "../../profiling/feature-profiling";
 import { withinManhattan } from "./block-iteration";
 import { parseBlockStateIgnoringUnknownProperties } from "./config-fields";
 
@@ -38,7 +39,9 @@ export const replaceBlobsFeature = defineFeatureType<ReplaceBlobsConfig>({
   },
   place({ level, random, origin, config }) {
     const clampedY = Math.min(Math.max(origin.y, level.minY + 1), level.minY + level.height - 1);
+    startFeatureStep("feature.replace_blobs.find");
     const targetY = findTarget(level, origin.x, clampedY, origin.z, config.targetBlockName);
+    endFeatureStep("feature.replace_blobs.find");
     if (targetY === undefined) return false;
     const target = { x: origin.x, y: targetY, z: origin.z };
     const radiusX = config.radius.sample(random);
@@ -46,13 +49,18 @@ export const replaceBlobsFeature = defineFeatureType<ReplaceBlobsConfig>({
     const radiusZ = config.radius.sample(random);
     const maxRadius = Math.max(radiusX, Math.max(radiusY, radiusZ));
     let replacedAny = false;
+    let scannedCellCount = 0;
+    const replaceMark = startFeatureStep("feature.replace_blobs.replace", level);
     for (const position of withinManhattan(target, radiusX, radiusY, radiusZ)) {
       const manhattanDistance = Math.abs(position.x - target.x) + Math.abs(position.y - target.y) + Math.abs(position.z - target.z);
       if (manhattanDistance > maxRadius) break;
+      scannedCellCount++;
       if (level.getBlockInfo(position.x, position.y, position.z).name !== config.targetBlockName) continue;
       level.setBlock(position.x, position.y, position.z, config.replaceState, 3);
       replacedAny = true;
     }
+    endFeatureStep("feature.replace_blobs.replace", level, replaceMark);
+    addFeatureCounter("feature.replace_blobs.scannedCells", scannedCellCount);
     return replacedAny;
   },
 });

@@ -5,6 +5,7 @@
 import type { RandomSource } from "../../../random";
 import { defineFeatureType } from "../../feature/feature-type";
 import type { WorldGenLevel } from "../../level/world-gen-level";
+import { endFeatureStep, startFeatureStep } from "../../profiling/feature-profiling";
 import { asObject } from "../../providers/json-fields";
 import { AIR_STATE, BLUE_ICE_BLOCK, ICE_BLOCK, isBlock, PACKED_ICE_BLOCK, SNOW_BLOCK, SNOW_LAYER_BLOCK, WATER_BLOCK } from "./block-names";
 import { ceilFloat, clampFloat, divideInt, roundFloat } from "./java-float-math";
@@ -230,6 +231,7 @@ export const icebergFeature = defineFeatureType<IcebergConfig>({
       ellipseRadius,
     };
 
+    const shapeMark = startFeatureStep("feature.iceberg.shape", level);
     for (let deltaX = -extent; deltaX < extent; deltaX++) {
       for (let deltaZ = -extent; deltaZ < extent; deltaZ++) {
         for (let layer = 0; layer < height; layer++) {
@@ -239,7 +241,11 @@ export const icebergFeature = defineFeatureType<IcebergConfig>({
         }
       }
     }
+    endFeatureStep("feature.iceberg.shape", level, shapeMark);
+    const smoothMark = startFeatureStep("feature.iceberg.smooth", level);
     smooth(level, shape, width, height);
+    endFeatureStep("feature.iceberg.smooth", level, smoothMark);
+    const underwaterMark = startFeatureStep("feature.iceberg.underwater", level);
     for (let deltaX = -extent; deltaX < extent; deltaX++) {
       for (let deltaZ = -extent; deltaZ < extent; deltaZ++) {
         for (let layer = -1; layer > -depth; layer--) {
@@ -250,8 +256,13 @@ export const icebergFeature = defineFeatureType<IcebergConfig>({
         }
       }
     }
+    endFeatureStep("feature.iceberg.underwater", level, underwaterMark);
     const shouldCutOut = isEllipse ? random.nextDouble() > 0.1 : random.nextDouble() > 0.7;
-    if (shouldCutOut) generateCutOut(level, random, shape, width, height);
+    if (shouldCutOut) {
+      const cutOutMark = startFeatureStep("feature.iceberg.cutout", level);
+      generateCutOut(level, random, shape, width, height);
+      endFeatureStep("feature.iceberg.cutout", level, cutOutMark);
+    }
     return true;
   },
 });

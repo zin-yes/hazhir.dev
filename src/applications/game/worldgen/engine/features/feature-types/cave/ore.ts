@@ -8,6 +8,7 @@ import { defineFeatureType } from "../../feature/feature-type";
 import type { WorldGenLevel } from "../../level/world-gen-level";
 import { asArray, asObject, requireNumber } from "../../providers/json-fields";
 import { Direction } from "../../core/direction";
+import { addFeatureCounter, endFeatureStep, startFeatureStep } from "../../profiling/feature-profiling";
 import { fround, FLOAT_PI, javaRoundFloat, mthCeil, mthFloor, mthLerp, mthSin } from "./java-math";
 import { parseBlockStateIgnoringUnknownProperties, requireInt } from "./config-fields";
 import { parseRuleTest, type RuleTest } from "./rule-test";
@@ -77,6 +78,7 @@ function placeOreBlobs(
   widthX: number,
   heightY: number,
 ): boolean {
+  startFeatureStep("feature.ore.shape");
   let placedCount = 0;
   const placedBits = new Uint8Array(widthX * heightY * widthX);
   const size = config.size;
@@ -108,6 +110,9 @@ function placeOreBlobs(
       }
     }
   }
+  endFeatureStep("feature.ore.shape");
+  const scanMark = startFeatureStep("feature.ore.scan", level);
+  let candidateCellCount = 0;
   for (let pointIndex = 0; pointIndex < size; pointIndex++) {
     const radius = points[pointIndex * 4 + 3]!;
     if (radius < 0) continue;
@@ -132,6 +137,7 @@ function placeOreBlobs(
           const bitIndex = blockX - minBlockX + (blockY - minBlockY) * widthX + (blockZ - minBlockZ) * widthX * heightY;
           if (placedBits[bitIndex]) continue;
           placedBits[bitIndex] = 1;
+          candidateCellCount++;
           if (!level.ensureCanWrite(blockX, blockY, blockZ)) continue;
           for (const target of config.targets) {
             if (!canPlaceOre(level, random, config, target, blockX, blockY, blockZ)) continue;
@@ -143,6 +149,9 @@ function placeOreBlobs(
       }
     }
   }
+  endFeatureStep("feature.ore.scan", level, scanMark);
+  addFeatureCounter("feature.ore.veins", 1);
+  addFeatureCounter("feature.ore.candidateCells", candidateCellCount);
   return placedCount > 0;
 }
 

@@ -16,6 +16,11 @@ export interface WorldGenLevel extends SurvivalLevel {
   readonly blockTags: BlockTagIndex;
   readonly survival: SurvivalRules;
 
+  /** Profiling: setBlock calls that wrote a block so far (absent on levels that do not count). */
+  readonly blockWriteCount?: number;
+  /** Profiling: reports and resets the level's own traffic counters. */
+  flushProfileCounters?(): void;
+
   /** Normalized state string; void air outside the build height. */
   getBlockState(x: number, y: number, z: number): string;
   getBlockInfo(x: number, y: number, z: number): BlockStateInfo;

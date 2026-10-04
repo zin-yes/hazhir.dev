@@ -4,6 +4,8 @@
 
 import { Direction } from "../../core/direction";
 import { defineFeatureType } from "../../feature/feature-type";
+import type { WorldGenLevel } from "../../level/world-gen-level";
+import { endFeatureStep, startFeatureStep } from "../../profiling/feature-profiling";
 import { isBlock } from "./block-names";
 
 const SAND = "minecraft:sand";
@@ -12,6 +14,15 @@ const SANDSTONE_SLAB = "minecraft:sandstone_slab";
 const WATER = "minecraft:water";
 const SUSPICIOUS_SAND = "minecraft:suspicious_sand";
 
+function hasSolidFooting(level: WorldGenLevel, x: number, y: number, z: number): boolean {
+  for (let offsetX = -2; offsetX <= 2; offsetX++) {
+    for (let offsetZ = -2; offsetZ <= 2; offsetZ++) {
+      if (level.isEmptyBlock(x + offsetX, y - 1, z + offsetZ) && level.isEmptyBlock(x + offsetX, y - 2, z + offsetZ)) return false;
+    }
+  }
+  return true;
+}
+
 export const desertWellFeature = defineFeatureType<undefined>({
   id: "minecraft:desert_well",
   parseConfig: () => undefined,
@@ -19,13 +30,12 @@ export const desertWellFeature = defineFeatureType<undefined>({
     const x = origin.x;
     const z = origin.z;
     let y = origin.y + 1;
+    const groundCheckMark = startFeatureStep("feature.desert_well.ground_check", level);
     while (level.isEmptyBlock(x, y, z) && y > level.minY + 2) y--;
-    if (!isBlock(level.getBlockState(x, y, z), SAND)) return false;
-    for (let offsetX = -2; offsetX <= 2; offsetX++) {
-      for (let offsetZ = -2; offsetZ <= 2; offsetZ++) {
-        if (level.isEmptyBlock(x + offsetX, y - 1, z + offsetZ) && level.isEmptyBlock(x + offsetX, y - 2, z + offsetZ)) return false;
-      }
-    }
+    const canBuild = isBlock(level.getBlockState(x, y, z), SAND) && hasSolidFooting(level, x, y, z);
+    endFeatureStep("feature.desert_well.ground_check", level, groundCheckMark);
+    if (!canBuild) return false;
+    const buildMark = startFeatureStep("feature.desert_well.build", level);
     for (let offsetY = -2; offsetY <= 0; offsetY++) {
       for (let offsetX = -2; offsetX <= 2; offsetX++) {
         for (let offsetZ = -2; offsetZ <= 2; offsetZ++) level.setBlock(x + offsetX, y + offsetY, z + offsetZ, SANDSTONE, 2);
@@ -68,6 +78,7 @@ export const desertWellFeature = defineFeatureType<undefined>({
     level.setBlock(firstColumn[0], y - 1, firstColumn[1], SUSPICIOUS_SAND, 3);
     const secondColumn = waterColumns[random.nextIntBounded(waterColumns.length)]!;
     level.setBlock(secondColumn[0], y - 2, secondColumn[1], SUSPICIOUS_SAND, 3);
+    endFeatureStep("feature.desert_well.build", level, buildMark);
     return true;
   },
 });

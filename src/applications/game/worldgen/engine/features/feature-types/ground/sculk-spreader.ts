@@ -100,6 +100,7 @@ function dischargeVein(level: WorldGenLevel, state: string, position: Position):
 
 export class SculkSpreader {
   private cursors: ChargeCursor[] = [];
+  cursorUpdateCount = 0;
 
   /** SculkSpreader.addCursors: cursors of at most 1000 charge each, 32 cursors in total. */
   addCursors(position: Position, charge: number): void {
@@ -118,6 +119,7 @@ export class SculkSpreader {
   /** SculkSpreader.updateCursors for a world generation spreader (no merging, every cursor with charge stays). */
   updateCursors(level: WorldGenLevel, origin: Position, random: RandomSource, spread: boolean): void {
     if (this.cursors.length === 0) return;
+    this.cursorUpdateCount += this.cursors.length;
     const survivors: ChargeCursor[] = [];
     for (const cursor of this.cursors) {
       cursor.update(level, origin, random, spread);

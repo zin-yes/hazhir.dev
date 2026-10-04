@@ -8,7 +8,8 @@ import { Direction } from "../../core/direction";
 import type { FeatureParser } from "../../feature/feature-parser";
 import type { WorldGenLevel } from "../../level/world-gen-level";
 import type { BlockStateProvider } from "../../providers/block-state-providers";
-import { asArray, asObject, type JsonValue, requireNumber, typeOf } from "../../providers/json-fields";
+import { endFeatureStep, startFeatureStep } from "../../profiling/feature-profiling";
+import { asArray, asObject, type JsonObject, type JsonValue, requireNumber, typeOf } from "../../providers/json-fields";
 import type { JavaHashPositionSet, PositionEntry } from "./java-hash-position-set";
 import type { TreeBlockSetter } from "./tree-placement";
 import { isDirtBlock, parseTreeStateProvider } from "./tree-world";
@@ -265,9 +266,23 @@ class AttachedToLeavesDecorator implements TreeDecorator {
   }
 }
 
+function withProfiling(stepName: string, decorator: TreeDecorator): TreeDecorator {
+  return {
+    place(context) {
+      const mark = startFeatureStep(stepName, context.level);
+      decorator.place(context);
+      endFeatureStep(stepName, context.level, mark);
+    },
+  };
+}
+
 export function parseTreeDecorator(json: JsonValue | undefined, parser: FeatureParser): TreeDecorator {
   const object = asObject(json, "tree decorator");
   const type = typeOf(object, "tree decorator");
+  return withProfiling(`feature.tree.decorator.${type.slice(type.indexOf(":") + 1)}`, createTreeDecorator(object, type, parser));
+}
+
+function createTreeDecorator(object: JsonObject, type: string, parser: FeatureParser): TreeDecorator {
   switch (type) {
     case "minecraft:beehive":
       return new BeehiveDecorator(fround(requireNumber(object, "probability", type)));

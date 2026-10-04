@@ -211,7 +211,9 @@ export const biomeFilter = definePlacementModifierType({
     return filterModifier(this.id, (context, _random, origin) => {
       const topFeature = context.topFeature;
       if (!topFeature) throw new Error("Tried to biome check an unregistered feature, or a feature that should not restrict the biome");
-      return context.generator.biomeHasFeature(context.level.getBiome(origin.x, origin.y, origin.z), topFeature);
+      const biome = context.level.getBiome(origin.x, origin.y, origin.z);
+      context.lastCheckedBiome = biome;
+      return context.generator.biomeHasFeature(biome, topFeature);
     });
   },
 });
