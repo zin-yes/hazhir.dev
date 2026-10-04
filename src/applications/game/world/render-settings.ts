@@ -1,4 +1,4 @@
-// How far the game draws real chunks, as runtime settings. The streaming volume is derived from them: one more
+// How far the game draws real chunks and the far terrain (LOD), as runtime settings. The streaming volume is derived from them: one more
 // chunk in every direction is generated and lit but never meshed, so every drawn chunk has its neighbors' border
 // blocks and light before it is meshed.
 
@@ -14,13 +14,19 @@ export interface RenderSettings {
   verticalDown: number;
   /** "cylinder" keeps the full vertical range out to the horizon; "ellipsoid" tapers it with distance. */
   shape: LoadVolumeShape;
+  /** Far terrain (LOD) radius in chunks; 0 turns it off. */
+  lodRenderDistanceChunks: number;
 }
+
+export const LOD_RENDER_DISTANCE_MINIMUM_CHUNKS = 32;
+export const LOD_RENDER_DISTANCE_MAXIMUM_CHUNKS = 512;
 
 export const DEFAULT_RENDER_SETTINGS: Readonly<RenderSettings> = {
   horizontalRadius: 8,
   verticalUp: 3,
   verticalDown: 3,
   shape: "cylinder",
+  lodRenderDistanceChunks: 128,
 };
 
 /** Generated and lit, never meshed: supplies border data to the outermost drawn chunks. */
@@ -41,7 +47,15 @@ export function normalizeRenderSettings(settings: Partial<RenderSettings>): Rend
     verticalUp: wholeNonNegative(settings.verticalUp, DEFAULT_RENDER_SETTINGS.verticalUp),
     verticalDown: wholeNonNegative(settings.verticalDown, DEFAULT_RENDER_SETTINGS.verticalDown),
     shape: settings.shape ?? DEFAULT_RENDER_SETTINGS.shape,
+    lodRenderDistanceChunks: normalizeLodRenderDistance(
+      wholeNonNegative(settings.lodRenderDistanceChunks, DEFAULT_RENDER_SETTINGS.lodRenderDistanceChunks),
+    ),
   };
+}
+
+function normalizeLodRenderDistance(chunks: number): number {
+  if (chunks === 0) return 0;
+  return Math.min(LOD_RENDER_DISTANCE_MAXIMUM_CHUNKS, Math.max(LOD_RENDER_DISTANCE_MINIMUM_CHUNKS, chunks));
 }
 
 export function streamConfigFor(
