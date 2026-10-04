@@ -23,6 +23,8 @@ export interface OverworldGeneratorParams {
   seed: bigint;
   /** Replaces the default stage list (noise fill, surface); use `generator.stages` to splice instead. */
   stages?: ColumnStage[];
+  /** Bounded LRU size for generated columns (default 64). */
+  maxCachedColumns?: number;
 }
 
 export interface OverworldGenerator {
@@ -63,7 +65,7 @@ export function createOverworldGenerator(params: OverworldGeneratorParams): Over
   const palette = new BlockPalette();
   const surfaceSystem = createSeedSurfaceSystem({ registries, settings, seed });
   const stages = params.stages ?? [createNoiseFillStage(), createSurfaceStage(surfaceSystem)];
-  const columnCache = new BoundedLruCache<string, ChunkBlocks>(MAX_CACHED_COLUMNS);
+  const columnCache = new BoundedLruCache<string, ChunkBlocks>(params.maxCachedColumns ?? MAX_CACHED_COLUMNS);
   const motionBlockingByPaletteId: boolean[] = [];
 
   const generateBaseColumn = (chunkX: number, chunkZ: number): ChunkBlocks => {

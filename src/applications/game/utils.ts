@@ -1,5 +1,5 @@
 import { CHUNK_HEIGHT, CHUNK_WIDTH } from "./config";
-import { getTerrainModel } from "./worldgen/column-grid";
+import { createSurfaceHeightSampler } from "./worldgen/surface-height";
 import { findSpawnPoint, type SpawnPoint } from "./worldgen/spawn-point";
 
 export function getSurfaceHeightFromSeed(
@@ -7,7 +7,7 @@ export function getSurfaceHeightFromSeed(
   x: number,
   z: number
 ): number {
-  return getTerrainModel(seed).sample(x, z).height;
+  return createSurfaceHeightSampler(seed)(x, z);
 }
 
 const spawnPointBySeed = new Map<number, SpawnPoint>();

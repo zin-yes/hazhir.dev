@@ -21,8 +21,23 @@ interface QueuedTask {
   resolve: (value: any) => void;
   reject: (reason: any) => void;
   onProgress?: (fraction: number) => void;
+  /** Tasks sharing a key prefer the same worker, so it can reuse state cached from earlier tasks. */
+  affinityKey?: number;
   enqueuedAtMs: number;
   queueDepthAtEnqueue: number;
+}
+
+export interface ExecOptions {
+  affinityKey?: number;
+}
+
+/** Spreads the chunk columns of a rectangular area evenly over a small pool; vertical neighbours share a key. */
+export function chunkColumnAffinityKey(chunkX: number, chunkZ: number): number {
+  return chunkX + chunkZ * 2;
+}
+
+function mod(value: number, divisor: number): number {
+  return ((value % divisor) + divisor) % divisor;
 }
 
 function currentEpochMs() {
@@ -67,8 +82,9 @@ export class WorkerPool {
     method: string,
     params: any[],
     onProgress?: (fraction: number) => void,
+    options?: ExecOptions,
   ): Promise<any> {
-    return this.enqueue(method, () => ({ params }), onProgress);
+    return this.enqueue(method, () => ({ params }), onProgress, options?.affinityKey);
   }
 
   /**
@@ -87,6 +103,7 @@ export class WorkerPool {
     method: string,
     buildRequest: () => WorkerRequest | null,
     onProgress?: (fraction: number) => void,
+    affinityKey?: number,
   ): Promise<any> {
     return new Promise((resolve, reject) => {
       const isProfiling = profiler.enabled;
@@ -96,6 +113,7 @@ export class WorkerPool {
         resolve,
         reject,
         onProgress,
+        affinityKey,
         enqueuedAtMs: isProfiling ? performance.now() : 0,
         queueDepthAtEnqueue: this.countTasksWaitingForWorker(),
       });
@@ -142,13 +160,17 @@ export class WorkerPool {
       if (this.workers.length < this.maxWorkers) {
         this.spawnWorker();
       }
+      // A task's preferred worker must exist before it can be matched, so affinity tasks spawn the whole pool.
+      if (this.queue.some((queued) => queued.affinityKey !== undefined)) {
+        while (this.workers.length < this.maxWorkers) this.spawnWorker();
+      }
 
       const availableWorker = this.workers.find(
         (w) => !this.activeWorkers.has(w)
       );
       if (!availableWorker) return;
 
-      const task = this.queue.shift()!;
+      const task = this.queue.splice(this.indexOfNextTaskFor(availableWorker), 1)[0]!;
       const request = task.buildRequest();
       if (!request) {
         task.resolve(null);
@@ -156,6 +178,20 @@ export class WorkerPool {
       }
       this.dispatch(availableWorker, task, request);
     }
+  }
+
+  /**
+   * The oldest task that prefers this worker or has no preference. A worker with nothing of its own takes the
+   * oldest task of another worker instead of idling.
+   */
+  private indexOfNextTaskFor(worker: Worker): number {
+    const workerIndex = this.workers.indexOf(worker);
+    const ownTaskIndex = this.queue.findIndex(
+      (queued) =>
+        queued.affinityKey === undefined ||
+        mod(queued.affinityKey, this.maxWorkers) === workerIndex,
+    );
+    return ownTaskIndex === -1 ? 0 : ownTaskIndex;
   }
 
   private dispatch(worker: Worker, task: QueuedTask, request: WorkerRequest) {

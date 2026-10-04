@@ -25,7 +25,7 @@ import {
   POSITIVE_Z_RENDER_DISTANCE,
   TEXTURE_SIZE,
 } from "./config";
-import { WorkerPool } from "./worker-pool";
+import { WorkerPool, chunkColumnAffinityKey } from "./worker-pool";
 
 import * as THREE from "three";
 
@@ -527,12 +527,12 @@ export default function Game() {
     // 1. Generate Blocks
     Promise.all(
       chunksToGenerate.map(async ({ x, y, z }) => {
-        const result = await generationWorkerPool.exec("generateChunk", [
-          currentSeed,
-          x,
-          y,
-          z,
-        ]);
+        const result = await generationWorkerPool.exec(
+          "generateChunk",
+          [currentSeed, x, y, z],
+          undefined,
+          { affinityKey: chunkColumnAffinityKey(x, z) },
+        );
         const chunk = new Uint8Array(result);
         const chunkName = generateChunkName(x, y, z);
         chunks.current[chunkName] = chunk;
@@ -1293,7 +1293,12 @@ export default function Game() {
     const requestedAtMs = profiler.now();
 
     generationWorkerPool
-      .exec("generateChunk", [seedRef.current, chunkX, chunkY, chunkZ])
+      .exec(
+        "generateChunk",
+        [seedRef.current, chunkX, chunkY, chunkZ],
+        undefined,
+        { affinityKey: chunkColumnAffinityKey(chunkX, chunkZ) },
+      )
       .then(async (result: ArrayBuffer) => {
         const generatedAtMs = profiler.now();
         profiler.recordTimer(
