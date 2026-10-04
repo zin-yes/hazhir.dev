@@ -19,10 +19,14 @@ export class ChunkWorldSurfaceHeightmap implements WorldSurfaceHeightmap {
   }
 
   private scanDownFrom(localX: number, localZ: number, startY: number): number {
-    for (let y = startY; y >= this.chunk.minY; y--) {
-      if (!this.isAirId(this.chunk.getId(localX, y, localZ))) return y;
+    const blocks = this.chunk.blocks;
+    const minY = this.chunk.minY;
+    for (let y = startY, index = (startY - minY) * 256 + localZ * 16 + localX; y >= minY; y--, index -= 256) {
+      const blockId = blocks[index]!;
+      // Palette id 0 is always minecraft:air.
+      if (blockId !== 0 && !this.isAirId(blockId)) return y;
     }
-    return this.chunk.minY - 1;
+    return minY - 1;
   }
 
   getHeight(localX: number, localZ: number): number {
