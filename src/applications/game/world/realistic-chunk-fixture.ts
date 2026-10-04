@@ -41,7 +41,7 @@ function listChunkCoordinates(columnsPerSide: number): [number, number, number][
 
 function generateColumn(chunkX: number, chunkZ: number): RealisticChunk[] {
   const column: RealisticChunk[] = [];
-  let lightOfChunkAbove = new Uint8Array(CHUNK_CELL_COUNT).fill(FULL_SKY_LIGHT);
+  let lightOfChunkAbove: Uint8Array = new Uint8Array(CHUNK_CELL_COUNT).fill(FULL_SKY_LIGHT);
   for (let chunkY = REALISTIC_HIGHEST_CHUNK_Y; chunkY >= REALISTIC_LOWEST_CHUNK_Y; chunkY--) {
     const blocks = generateChunkBlocks(REALISTIC_FIXTURE_SEED, chunkX, chunkY, chunkZ);
     const { light } = initializeChunkLight(blocks, REALISTIC_FIXTURE_SEED, chunkX, chunkY, chunkZ, undefined, lightOfChunkAbove);
