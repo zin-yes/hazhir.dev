@@ -21,7 +21,6 @@ import {
 } from "@/applications/game/profiler/worker-recorder";
 import type { WorldGenLevel } from "../level/world-gen-level";
 
-export const TOP_LEVEL_MODIFIER_SAMPLE_EVERY = 8;
 export const NESTED_SAMPLE_EVERY = 32;
 
 export const featureProfileState = {

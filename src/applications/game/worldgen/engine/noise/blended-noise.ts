@@ -5,6 +5,7 @@
 import type { RandomSource } from "../random/random-source";
 import type { ImprovedNoise } from "./improved-noise";
 import { buildGeneratedFunction } from "../generated-function";
+import { InlineNoiseSource, NOISE_IO, NOISE_IO_RESULT, NOISE_IO_X, NOISE_IO_Y, NOISE_IO_Z, noiseNumberLiteral } from "./inline-noise-source";
 import { PerlinNoise, wrapNoiseCoordinate } from "./perlin-noise";
 
 const BASE_SCALE = 684.412;
@@ -52,86 +53,125 @@ export class BlendedNoise {
     this.minValue = -this.maxValue;
   }
 
-  private compiled: ((blockX: number, blockY: number, blockZ: number) => number) | undefined;
+  private compiled: (() => void) | null | undefined;
 
   /** Java `compute(FunctionContext)` at integer block coordinates. */
   compute(blockX: number, blockY: number, blockZ: number): number {
-    this.compiled ??= this.compileCompute();
-    return this.compiled(blockX, blockY, blockZ);
+    const sampler = this.compiledSampler();
+    if (sampler === undefined) return this.computeInterpreted(blockX, blockY, blockZ);
+    NOISE_IO[NOISE_IO_X] = blockX;
+    NOISE_IO[NOISE_IO_Y] = blockY;
+    NOISE_IO[NOISE_IO_Z] = blockZ;
+    sampler();
+    return NOISE_IO[NOISE_IO_RESULT]!;
   }
 
   /**
-   * computeInterpreted with the octave loops unrolled: the frequencies (powers of two) and the null checks become
-   * literals, the operations and their order stay the same.
+   * computeInterpreted as generated code with every octave sampled inline: reads the block position from NOISE_IO
+   * and writes the value to NOISE_IO[NOISE_IO_RESULT]. The frequencies (powers of two) and null checks become
+   * literals; operations and their order stay the same. The 40 octaves are split over a few functions (each stays
+   * small enough for the optimizing compiler) that hand their running totals over in a Float64Array.
    */
-  private compileCompute(): (blockX: number, blockY: number, blockZ: number) => number {
-    const octaves: ImprovedNoise[] = [];
-    const octaveReference = (noise: ImprovedNoise): string => {
-      octaves.push(noise);
-      return `octaves[${octaves.length - 1}]`;
-    };
-    const lines: string[] = [
-      `const limitX = blockX * ${numberLiteral(this.xzMultiplier)};`,
-      `const limitY = blockY * ${numberLiteral(this.yMultiplier)};`,
-      `const limitZ = blockZ * ${numberLiteral(this.xzMultiplier)};`,
-      `const mainX = limitX / ${numberLiteral(this.xzFactor)};`,
-      `const mainY = limitY / ${numberLiteral(this.yFactor)};`,
-      `const mainZ = limitZ / ${numberLiteral(this.xzFactor)};`,
-      `const limitSmear = ${numberLiteral(this.yMultiplier)} * ${numberLiteral(this.smearScaleMultiplier)};`,
-      `const mainSmear = limitSmear / ${numberLiteral(this.yFactor)};`,
-      "let minLimitTotal = 0.0;",
-      "let maxLimitTotal = 0.0;",
+  compiledSampler(): (() => void) | undefined {
+    if (this.compiled === undefined) this.compiled = this.compileSampler() ?? null;
+    return this.compiled ?? undefined;
+  }
+
+  private compileSampler(): (() => void) | undefined {
+    const source = new InlineNoiseSource();
+    const state = "blendedState";
+    // State slots: 0..2 limit x/y/z, 3..5 main x/y/z, 6 limit smear, 7 main smear, 8..10 min/max/main totals, 11 blend.
+    const loadState = [
+      `const limitX = ${state}[0];`,
+      `const limitY = ${state}[1];`,
+      `const limitZ = ${state}[2];`,
+      `const mainX = ${state}[3];`,
+      `const mainY = ${state}[4];`,
+      `const mainZ = ${state}[5];`,
+      `const limitSmear = ${state}[6];`,
+      `const mainSmear = ${state}[7];`,
+    ];
+    const setup = [
+      "const blockX = noiseIo[0];",
+      "const blockY = noiseIo[1];",
+      "const blockZ = noiseIo[2];",
+      `const limitX = blockX * ${noiseNumberLiteral(this.xzMultiplier)};`,
+      `const limitY = blockY * ${noiseNumberLiteral(this.yMultiplier)};`,
+      `const limitZ = blockZ * ${noiseNumberLiteral(this.xzMultiplier)};`,
+      `const mainX = limitX / ${noiseNumberLiteral(this.xzFactor)};`,
+      `const mainY = limitY / ${noiseNumberLiteral(this.yFactor)};`,
+      `const mainZ = limitZ / ${noiseNumberLiteral(this.xzFactor)};`,
+      `const limitSmear = ${noiseNumberLiteral(this.yMultiplier)} * ${noiseNumberLiteral(this.smearScaleMultiplier)};`,
+      `const mainSmear = limitSmear / ${noiseNumberLiteral(this.yFactor)};`,
+      `${state}[0] = limitX; ${state}[1] = limitY; ${state}[2] = limitZ;`,
+      `${state}[3] = mainX; ${state}[4] = mainY; ${state}[5] = mainZ;`,
+      `${state}[6] = limitSmear; ${state}[7] = mainSmear;`,
       "let mainTotal = 0.0;",
     ];
     let frequency = 1.0;
     for (let octave = 0; octave < 8; octave++) {
       const noise = this.mainOctaves[octave];
       if (noise !== null && noise !== undefined) {
-        const factor = numberLiteral(frequency);
-        lines.push(
-          `mainTotal += ${octaveReference(noise)}.noiseWithYScale(wrap(mainX * ${factor}), wrap(mainY * ${factor}), wrap(mainZ * ${factor}), mainSmear * ${factor}, mainY * ${factor}) / ${factor};`,
-        );
+        const factor = noiseNumberLiteral(frequency);
+        const value = source.temporary("main");
+        const wrappedX = source.wrapped(`mainX * ${factor}`, setup);
+        const wrappedY = source.wrapped(`mainY * ${factor}`, setup);
+        const wrappedZ = source.wrapped(`mainZ * ${factor}`, setup);
+        source.octave(noise, value, wrappedX, wrappedY, wrappedZ, setup, `mainSmear * ${factor}`, `mainY * ${factor}`);
+        setup.push(`mainTotal += ${value} / ${factor};`);
       }
       frequency /= 2.0;
     }
-    lines.push("const blendFactor = (mainTotal / 10.0 + 1.0) / 2.0;");
-    lines.push("const onlyMaxLimit = blendFactor >= 1.0;");
-    lines.push("const onlyMinLimit = blendFactor <= 0.0;");
+    setup.push("const blendFactor = (mainTotal / 10.0 + 1.0) / 2.0;");
+    setup.push(`${state}[8] = 0.0; ${state}[9] = 0.0; ${state}[11] = blendFactor;`);
+
+    const limitStages: string[][] = [];
     frequency = 1.0;
-    for (let octave = 0; octave < 16; octave++) {
-      const factor = numberLiteral(frequency);
-      lines.push("{");
-      lines.push(`const wrappedX = wrap(limitX * ${factor});`);
-      lines.push(`const wrappedY = wrap(limitY * ${factor});`);
-      lines.push(`const wrappedZ = wrap(limitZ * ${factor});`);
-      lines.push(`const smear = limitSmear * ${factor};`);
-      const minLimitNoise = this.minLimitOctaves[octave];
-      if (minLimitNoise !== null && minLimitNoise !== undefined) {
-        lines.push(
-          `if (!onlyMaxLimit) minLimitTotal += ${octaveReference(minLimitNoise)}.noiseWithYScale(wrappedX, wrappedY, wrappedZ, smear, limitY * ${factor}) / ${factor};`,
-        );
+    for (let stage = 0; stage < 2; stage++) {
+      const lines = [...loadState, `const blendFactor = ${state}[11];`, "const onlyMaxLimit = blendFactor >= 1.0;", "const onlyMinLimit = blendFactor <= 0.0;"];
+      lines.push(`let minLimitTotal = ${state}[8];`, `let maxLimitTotal = ${state}[9];`);
+      for (let octave = stage * 8; octave < stage * 8 + 8; octave++) {
+        const factor = noiseNumberLiteral(frequency);
+        lines.push("{");
+        const wrappedX = source.wrapped(`limitX * ${factor}`, lines);
+        const wrappedY = source.wrapped(`limitY * ${factor}`, lines);
+        const wrappedZ = source.wrapped(`limitZ * ${factor}`, lines);
+        const minLimitNoise = this.minLimitOctaves[octave];
+        if (minLimitNoise !== null && minLimitNoise !== undefined) {
+          const value = source.temporary("minimum");
+          lines.push("if (!onlyMaxLimit) {");
+          source.octave(minLimitNoise, value, wrappedX, wrappedY, wrappedZ, lines, `limitSmear * ${factor}`, `limitY * ${factor}`);
+          lines.push(`minLimitTotal += ${value} / ${factor};`, "}");
+        }
+        const maxLimitNoise = this.maxLimitOctaves[octave];
+        if (maxLimitNoise !== null && maxLimitNoise !== undefined) {
+          const value = source.temporary("maximum");
+          lines.push("if (!onlyMinLimit) {");
+          source.octave(maxLimitNoise, value, wrappedX, wrappedY, wrappedZ, lines, `limitSmear * ${factor}`, `limitY * ${factor}`);
+          lines.push(`maxLimitTotal += ${value} / ${factor};`, "}");
+        }
+        lines.push("}");
+        frequency /= 2.0;
       }
-      const maxLimitNoise = this.maxLimitOctaves[octave];
-      if (maxLimitNoise !== null && maxLimitNoise !== undefined) {
-        lines.push(
-          `if (!onlyMinLimit) maxLimitTotal += ${octaveReference(maxLimitNoise)}.noiseWithYScale(wrappedX, wrappedY, wrappedZ, smear, limitY * ${factor}) / ${factor};`,
-        );
-      }
-      lines.push("}");
-      frequency /= 2.0;
+      lines.push(`${state}[8] = minLimitTotal;`, `${state}[9] = maxLimitTotal;`);
+      limitStages.push(lines);
     }
-    lines.push("return clampedLerp(minLimitTotal / 512.0, maxLimitTotal / 512.0, blendFactor) / 128.0;");
-    const source = `return function blendedNoise(blockX, blockY, blockZ) {\n${lines.join("\n")}\n};`;
-    return (
-      buildGeneratedFunction<(blockX: number, blockY: number, blockZ: number) => number>(
-        ["octaves", "wrap", "clampedLerp"],
-        source,
-        [octaves, wrapNoiseCoordinate, clampedLerp],
-      ) ?? ((blockX, blockY, blockZ) => this.computeInterpreted(blockX, blockY, blockZ))
-    );
+    const helperDeclarations = source.helperNames.map((helperName, index) => `const ${helperName} = helpers[${index}];`).join("\n");
+    const body = `${helperDeclarations}
+const ${state} = new Float64Array(12);
+function blendedSetup() {\n${setup.join("\n")}\n}
+function blendedLowLimits() {\n${limitStages[0]!.join("\n")}\n}
+function blendedHighLimits() {\n${limitStages[1]!.join("\n")}\n}
+return function blendedNoise() {
+  blendedSetup();
+  blendedLowLimits();
+  blendedHighLimits();
+  noiseIo[3] = clampedLerp(${state}[8] / 512.0, ${state}[9] / 512.0, ${state}[11]) / 128.0;
+};`;
+    return buildGeneratedFunction<() => void>(["helpers", "clampedLerp"], body, [source.helperValues, clampedLerp]);
   }
 
-  /** The loop form of compute (reference for compileCompute). */
+  /** The loop form of compute (reference for the generated sampler). */
   computeInterpreted(blockX: number, blockY: number, blockZ: number): number {
     const limitX = blockX * this.xzMultiplier;
     const limitY = blockY * this.yMultiplier;

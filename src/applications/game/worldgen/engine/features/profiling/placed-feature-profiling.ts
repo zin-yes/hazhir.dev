@@ -13,7 +13,6 @@ import type { WorldGenLevel } from "../level/world-gen-level";
 import type { PlacementContext } from "../placement/placement-modifier";
 import {
   NESTED_SAMPLE_EVERY,
-  TOP_LEVEL_MODIFIER_SAMPLE_EVERY,
   addBiomePlacementUnit,
   addTypeBlockUnits,
   biomeFeatureKey,
@@ -95,8 +94,6 @@ export function placePlacedFeatureProfiled(
 
 function walkPositionsProfiled(placedFeature: PlacedFeature, context: PlacementContext, random: RandomSource, origin: BlockPos, isTopLevel: boolean): boolean {
   const modifiers = placedFeature.placement;
-  const sampleEvery = isTopLevel ? TOP_LEVEL_MODIFIER_SAMPLE_EVERY : NESTED_SAMPLE_EVERY;
-  const featureKey = featureProfileState.activeFeatureKey;
   let placedAny = false;
 
   const visit = (modifierIndex: number, position: BlockPos): void => {
@@ -106,9 +103,7 @@ function walkPositionsProfiled(placedFeature: PlacedFeature, context: PlacementC
     }
     const modifier = modifiers[modifierIndex]!;
     const tally = modifierTallyOf(modifier.type);
-    openSampledFeatureSection(tally.sectionName, sampleEvery, DIMENSIONS.worldgenFeature, featureKey);
     const nextPositions = modifier.getPositions(context, random, position);
-    closeFeatureSection();
     tally.calls++;
     tally.positionsOut += nextPositions.length;
     for (const next of nextPositions) visit(modifierIndex + 1, next);

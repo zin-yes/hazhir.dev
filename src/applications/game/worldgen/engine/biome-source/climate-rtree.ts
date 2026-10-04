@@ -3,6 +3,8 @@
 import { CLIMATE_DIMENSION_COUNT, type ParameterPoint } from "./climate-parameter-list";
 
 const CHILDREN_PER_NODE = 6;
+/** Far above the depth of any climate tree (log6 of the parameter point count). */
+const MAX_TREE_DEPTH = 64;
 if (CLIMATE_DIMENSION_COUNT !== 7) throw new Error("ClimateRTree's distance is unrolled for 7 climate dimensions");
 
 /** One dimension of the squared distance from a target to a box ([minimum, maximum]), added in dimension order. */
@@ -135,6 +137,8 @@ export class ClimateRTree {
   private readonly nodeChildCount: Int32Array;
   private readonly childNodeIds: Int32Array;
   private readonly rootNodeId: number;
+  private readonly searchStackNodes = new Int32Array(MAX_TREE_DEPTH);
+  private readonly searchStackOffsets = new Int32Array(MAX_TREE_DEPTH);
   private searchTarget0 = 0;
   private searchTarget1 = 0;
   private searchTarget2 = 0;
@@ -229,7 +233,7 @@ export class ClimateRTree {
       this.bestDistance = this.nodeDistance(this.lastLeafNodeId);
       this.bestNodeId = this.lastLeafNodeId;
     }
-    this.searchNode(this.rootNodeId);
+    this.searchFromRoot();
     this.lastLeafNodeId = this.bestNodeId;
     return this.bestNodeId < 0 ? -1 : this.nodeLeafIndex[this.bestNodeId];
   }
@@ -259,22 +263,67 @@ export class ClimateRTree {
 
   /**
    * Mirrors Climate.RTree.SubTree.search: visit children in order, descend only when the child's box distance is
-   * strictly below the best so far, so earlier children win exact ties.
+   * strictly below the best so far, so earlier children win exact ties. Written as a loop with an explicit stack and
+   * the distance inline (the same order of visits and comparisons as the recursion), so no double crosses a call.
    */
-  private searchNode(nodeId: number): void {
-    const childCount = this.nodeChildCount[nodeId];
-    const childStart = this.nodeChildStart[nodeId];
-    for (let childOffset = 0; childOffset < childCount; childOffset++) {
-      const childId = this.childNodeIds[childStart + childOffset];
-      const childDistance = this.nodeDistance(childId);
-      if (this.bestDistance > childDistance) {
-        if (this.nodeLeafIndex[childId] >= 0) {
-          this.bestDistance = childDistance;
-          this.bestNodeId = childId;
-        } else {
-          this.searchNode(childId);
+  private searchFromRoot(): void {
+    const bounds = this.nodeBounds;
+    const childNodeIds = this.childNodeIds;
+    const nodeChildStart = this.nodeChildStart;
+    const nodeChildCount = this.nodeChildCount;
+    const nodeLeafIndex = this.nodeLeafIndex;
+    const stackNodes = this.searchStackNodes;
+    const stackOffsets = this.searchStackOffsets;
+    const target0 = this.searchTarget0;
+    const target1 = this.searchTarget1;
+    const target2 = this.searchTarget2;
+    const target3 = this.searchTarget3;
+    const target4 = this.searchTarget4;
+    const target5 = this.searchTarget5;
+    const target6 = this.searchTarget6;
+    let bestDistance = this.bestDistance;
+    let bestNodeId = this.bestNodeId;
+    let distanceEvaluations = 0;
+    stackNodes[0] = this.rootNodeId;
+    stackOffsets[0] = 0;
+    let depth = 1;
+    while (depth > 0) {
+      const nodeId = stackNodes[depth - 1]!;
+      const childCount = nodeChildCount[nodeId]!;
+      const childStart = nodeChildStart[nodeId]!;
+      let childOffset = stackOffsets[depth - 1]!;
+      let descended = false;
+      while (childOffset < childCount) {
+        const childId = childNodeIds[childStart + childOffset]!;
+        childOffset++;
+        const base = childId * CLIMATE_DIMENSION_COUNT * 2;
+        distanceEvaluations++;
+        let distance = 0;
+        distance += boxDistanceTerm(target0, bounds[base]!, bounds[base + 1]!);
+        distance += boxDistanceTerm(target1, bounds[base + 2]!, bounds[base + 3]!);
+        distance += boxDistanceTerm(target2, bounds[base + 4]!, bounds[base + 5]!);
+        distance += boxDistanceTerm(target3, bounds[base + 6]!, bounds[base + 7]!);
+        distance += boxDistanceTerm(target4, bounds[base + 8]!, bounds[base + 9]!);
+        distance += boxDistanceTerm(target5, bounds[base + 10]!, bounds[base + 11]!);
+        distance += boxDistanceTerm(target6, bounds[base + 12]!, bounds[base + 13]!);
+        if (bestDistance > distance) {
+          if (nodeLeafIndex[childId]! >= 0) {
+            bestDistance = distance;
+            bestNodeId = childId;
+          } else {
+            stackOffsets[depth - 1] = childOffset;
+            stackNodes[depth] = childId;
+            stackOffsets[depth] = 0;
+            depth++;
+            descended = true;
+            break;
+          }
         }
       }
+      if (!descended) depth--;
     }
+    this.nodeDistanceCount += distanceEvaluations;
+    this.bestDistance = bestDistance;
+    this.bestNodeId = bestNodeId;
   }
 }

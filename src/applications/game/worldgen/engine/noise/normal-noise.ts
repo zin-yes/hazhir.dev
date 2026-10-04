@@ -3,7 +3,8 @@
 
 import type { RandomSource } from "../random/random-source";
 import { buildGeneratedFunction } from "../generated-function";
-import { PerlinNoise, wrapNoiseCoordinate } from "./perlin-noise";
+import { InlineNoiseSource, NOISE_IO, NOISE_IO_RESULT, NOISE_IO_X, NOISE_IO_Y, NOISE_IO_Z } from "./inline-noise-source";
+import { PerlinNoise } from "./perlin-noise";
 
 /** The `minecraft:noise` registry entry shape. */
 export interface NoiseParameters {
@@ -26,7 +27,7 @@ export class NormalNoise {
   private readonly valueFactor: number;
   private readonly first: PerlinNoise;
   private readonly second: PerlinNoise;
-  private compiled: ((x: number, y: number, z: number) => number) | undefined;
+  private compiled: (() => void) | null | undefined;
 
   static create(random: RandomSource, parameters: NoiseParameters): NormalNoise {
     return new NormalNoise(random, parameters, true);
@@ -56,28 +57,40 @@ export class NormalNoise {
   }
 
   /**
-   * getValue as one generated function with both octave stacks unrolled (the same operations in the same order), for
-   * callers that sample this noise in hot loops. Built on first use.
+   * getValue as one generated function with every octave of both stacks sampled inline (the same operations in the
+   * same order), for hot loops. It reads x, y, z from NOISE_IO and writes the value to NOISE_IO[NOISE_IO_RESULT].
+   * Built on first use; undefined when code generation is blocked.
    */
-  compiledGetValue(): (x: number, y: number, z: number) => number {
+  compiledSampler(): (() => void) | undefined {
     if (this.compiled === undefined) {
-      const first = this.first.unrolledSource("firstTotal", "x", "y", "z", "octaves", 0);
-      const second = this.second.unrolledSource("secondTotal", "scaledX", "scaledY", "scaledZ", "octaves", first.octaves.length);
-      const source = `return function normalNoise(x, y, z) {
-const scaledX = x * ${INPUT_FACTOR};
-const scaledY = y * ${INPUT_FACTOR};
-const scaledZ = z * ${INPUT_FACTOR};
-${first.source}
-${second.source}
-return (firstTotal + secondTotal) * ${String(this.valueFactor)};
-};`;
-      this.compiled =
-        buildGeneratedFunction<(x: number, y: number, z: number) => number>(["octaves", "wrap"], source, [
-          [...first.octaves, ...second.octaves],
-          wrapNoiseCoordinate,
-        ]) ?? ((x, y, z) => this.getValue(x, y, z));
+      const source = new InlineNoiseSource();
+      const lines = [
+        "const x = noiseIo[0];",
+        "const y = noiseIo[1];",
+        "const z = noiseIo[2];",
+        `const scaledX = x * ${INPUT_FACTOR};`,
+        `const scaledY = y * ${INPUT_FACTOR};`,
+        `const scaledZ = z * ${INPUT_FACTOR};`,
+      ];
+      this.first.appendInlineSource(source, "firstTotal", "x", "y", "z", lines);
+      this.second.appendInlineSource(source, "secondTotal", "scaledX", "scaledY", "scaledZ", lines);
+      lines.push(`noiseIo[3] = (firstTotal + secondTotal) * ${String(this.valueFactor)};`);
+      this.compiled = buildGeneratedFunction<() => void>(["helpers"], source.factorySource("normalNoise", lines), [source.helperValues]) ?? null;
     }
-    return this.compiled;
+    return this.compiled ?? undefined;
+  }
+
+  /** getValue through the generated sampler when there is one (same value). */
+  compiledGetValue(): (x: number, y: number, z: number) => number {
+    const sampler = this.compiledSampler();
+    if (sampler === undefined) return (x, y, z) => this.getValue(x, y, z);
+    return (x, y, z) => {
+      NOISE_IO[NOISE_IO_X] = x;
+      NOISE_IO[NOISE_IO_Y] = y;
+      NOISE_IO[NOISE_IO_Z] = z;
+      sampler();
+      return NOISE_IO[NOISE_IO_RESULT]!;
+    };
   }
 
   getValue(x: number, y: number, z: number): number {

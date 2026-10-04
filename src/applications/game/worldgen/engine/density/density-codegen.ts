@@ -5,6 +5,8 @@
 // computed closure variables: column values are kept until the evaluated (x, z) changes, point values for one call.
 
 import { buildGeneratedFunction } from "../generated-function";
+import { BlendedNoise } from "../noise/blended-noise";
+import { NOISE_IO } from "../noise/inline-noise-source";
 import { NormalNoise } from "../noise/normal-noise";
 import {
   DensityNode,
@@ -50,7 +52,9 @@ class DensityCodeWriter {
   readonly cachedFunctionSources: string[] = [];
   readonly columnCacheNames: string[] = [];
   readonly pointCacheNames: string[] = [];
-  private readonly cacheFunctionByNode = new Map<DensityNode, string>();
+  readonly columnCacheIndices: number[] = [];
+  readonly pointCacheIndices: number[] = [];
+  private readonly cacheFunctionByNode = new Map<DensityNode, { name: string; index: number }>();
   private temporaryCount = 0;
 
   helper(value: unknown): string {
@@ -63,10 +67,22 @@ class DensityCodeWriter {
     return `helper${index}`;
   }
 
-  /** A call expression sampling `noise` (unrolled NormalNoise code when available). */
-  private noiseCall(noise: NormalNoiseSampler, x: string, y: string, z: string): string {
-    if (noise instanceof NormalNoise) return `${this.helper(noise.compiledGetValue())}(${x}, ${y}, ${z})`;
-    return `${this.helper(noise)}.getValue(${x}, ${y}, ${z})`;
+  /**
+   * An expression holding `noise` sampled at (x, y, z). Generated NormalNoise samplers take their coordinates and
+   * return their value through NOISE_IO, so no double crosses a call boundary (V8 would box it).
+   */
+  private noiseCall(noise: NormalNoiseSampler, x: string, y: string, z: string, statements: string[]): string {
+    const sampler = noise instanceof NormalNoise ? noise.compiledSampler() : undefined;
+    if (sampler === undefined) return `${this.helper(noise)}.getValue(${x}, ${y}, ${z})`;
+    return this.ioCall(sampler, x, y, z, statements);
+  }
+
+  private ioCall(sampler: () => void, x: string, y: string, z: string, statements: string[]): string {
+    const io = this.helper(NOISE_IO);
+    const result = this.temporary();
+    statements.push(`${io}[0] = ${x};`, `${io}[1] = ${y};`, `${io}[2] = ${z};`, `${this.helper(sampler)}();`);
+    statements.push(`const ${result} = ${io}[3];`);
+    return result;
   }
 
   private temporary(): string {
@@ -81,8 +97,8 @@ class DensityCodeWriter {
     if (node instanceof HolderNode) return this.emit(node.target, statements);
     if (node instanceof MarkerNode) return this.emit(node.wrapped, statements);
     if (node instanceof BlendDensityNode) return this.emit(node.input, statements);
-    if (node instanceof LastColumnCacheNode) return `${this.cachedFunction(node, node.wrapped, "column")}()`;
-    if (node instanceof LastPointCacheNode) return `${this.cachedFunction(node, node.wrapped, "point")}()`;
+    if (node instanceof LastColumnCacheNode) return this.cachedValue(node, node.wrapped, "column", statements);
+    if (node instanceof LastPointCacheNode) return this.cachedValue(node, node.wrapped, "point", statements);
     if (node instanceof YClampedGradientNode) {
       const result = this.temporary();
       statements.push(
@@ -95,7 +111,7 @@ class DensityCodeWriter {
       if (node.noise.noise === null) return "0";
       const result = this.temporary();
       statements.push(
-        `const ${result} = ${this.noiseCall(node.noise.noise, `blockX * ${literal(node.xzScale)}`, `blockY * ${literal(node.yScale)}`, `blockZ * ${literal(node.xzScale)}`)};`,
+        `const ${result} = ${this.noiseCall(node.noise.noise, `blockX * ${literal(node.xzScale)}`, `blockY * ${literal(node.yScale)}`, `blockZ * ${literal(node.xzScale)}`, statements)};`,
       );
       return result;
     }
@@ -111,7 +127,7 @@ class DensityCodeWriter {
       statements.push(`const ${sampleZ} = blockZ * ${literal(node.xzScale)} + ${shiftZ};`);
       if (node.noise.noise === null) return "0";
       const result = this.temporary();
-      statements.push(`const ${result} = ${this.noiseCall(node.noise.noise, sampleX, sampleY, sampleZ)};`);
+      statements.push(`const ${result} = ${this.noiseCall(node.noise.noise, sampleX, sampleY, sampleZ, statements)};`);
       return result;
     }
     if (node instanceof ShiftNode) {
@@ -119,7 +135,7 @@ class DensityCodeWriter {
       const result = this.temporary();
       const [first, second, third] =
         node.type === "shift_a" ? ["blockX", "0", "blockZ"] : node.type === "shift_b" ? ["blockZ", "blockX", "0"] : ["blockX", "blockY", "blockZ"];
-      statements.push(`const ${result} = ${this.noiseCall(node.offsetNoise.noise, `${first} * 0.25`, `${second} * 0.25`, `${third} * 0.25`)} * 4;`);
+      statements.push(`const ${result} = ${this.noiseCall(node.offsetNoise.noise, `${first} * 0.25`, `${second} * 0.25`, `${third} * 0.25`, statements)} * 4;`);
       return result;
     }
     if (node instanceof WeirdScaledSamplerNode) {
@@ -129,9 +145,13 @@ class DensityCodeWriter {
       statements.push(`const ${rarity} = ${mapper}(${input});`);
       const result = this.temporary();
       const noiseValue =
-        node.noise.noise === null ? "0" : this.noiseCall(node.noise.noise, `blockX / ${rarity}`, `blockY / ${rarity}`, `blockZ / ${rarity}`);
+        node.noise.noise === null ? "0" : this.noiseCall(node.noise.noise, `blockX / ${rarity}`, `blockY / ${rarity}`, `blockZ / ${rarity}`, statements);
       statements.push(`const ${result} = ${rarity} * Math.abs(${noiseValue});`);
       return result;
+    }
+    if (node instanceof OldBlendedNoiseNode && node.sampler instanceof BlendedNoise) {
+      const sampler = node.sampler.compiledSampler();
+      if (sampler !== undefined) return this.ioCall(sampler, "blockX", "blockY", "blockZ", statements);
     }
     if (node instanceof OldBlendedNoiseNode && node.sampler !== null) {
       const result = this.temporary();
@@ -216,20 +236,34 @@ class DensityCodeWriter {
   }
 
   /** A closure-level lazily computed value: per evaluated column, or per evaluated point. */
-  private cachedFunction(cacheNode: DensityNode, wrapped: DensityNode, scope: "column" | "point"): string {
+  /**
+   * Reads a cached value, filling it first when needed. The fill function stores into the typed array and returns
+   * nothing: V8 would box a returned double.
+   */
+  private cachedValue(cacheNode: DensityNode, wrapped: DensityNode, scope: "column" | "point", statements: string[]): string {
+    const { name, index } = this.cachedFunction(cacheNode, wrapped, scope);
+    const result = this.temporary();
+    statements.push(`if (cacheIsValid[${index}] !== 1) ${name}(blockX, blockY, blockZ);`);
+    statements.push(`const ${result} = cachedValues[${index}];`);
+    return result;
+  }
+
+  private cachedFunction(cacheNode: DensityNode, wrapped: DensityNode, scope: "column" | "point"): { name: string; index: number } {
     const existing = this.cacheFunctionByNode.get(cacheNode);
     if (existing !== undefined) return existing;
     const index = this.cachedFunctionSources.length;
     const name = `${scope}Cache${index}`;
-    this.cacheFunctionByNode.set(cacheNode, name);
+    this.cacheFunctionByNode.set(cacheNode, { name, index });
     this.cachedFunctionSources.push("");
     (scope === "column" ? this.columnCacheNames : this.pointCacheNames).push(name);
     const statements: string[] = [];
     const value = this.emit(wrapped, statements);
+    // Cached values live in typed arrays: V8 boxes doubles held in closure variables, typed arrays store them raw.
     this.cachedFunctionSources[index] =
-      `let ${name}Valid = false;\nlet ${name}Value = 0;\nfunction ${name}() {\n` +
-      `if (${name}Valid) return ${name}Value;\n${statements.join("\n")}\n${name}Value = ${value};\n${name}Valid = true;\nreturn ${name}Value;\n}`;
-    return name;
+      `function ${name}(blockX, blockY, blockZ) {\n${statements.join("\n")}\n` +
+      `cachedValues[${index}] = ${value};\ncacheIsValid[${index}] = 1;\n}`;
+    (scope === "column" ? this.columnCacheIndices : this.pointCacheIndices).push(index);
+    return { name, index };
   }
 }
 
@@ -239,24 +273,20 @@ export function compileDensityFunction(root: DensityNode): CompiledDensityFuncti
   const bodyStatements: string[] = [];
   const result = writer.emit(root, bodyStatements);
   const helperDeclarations = writer.helpers.map((_, index) => `const helper${index} = helpers[${index}];`).join("\n");
-  const columnResets = writer.columnCacheNames.map((name) => `${name}Valid = false;`).join(" ");
-  const pointResets = writer.pointCacheNames.map((name) => `${name}Valid = false;`).join(" ");
+  const columnResets = writer.columnCacheIndices.map((index) => `cacheIsValid[${index}] = 0;`).join(" ");
+  const pointResets = writer.pointCacheIndices.map((index) => `cacheIsValid[${index}] = 0;`).join(" ");
+  const cacheCount = Math.max(1, writer.cachedFunctionSources.length);
   const source = `${helperDeclarations}
-let blockX = 0;
-let blockY = 0;
-let blockZ = 0;
-let columnX = NaN;
-let columnZ = NaN;
+const cachedValues = new Float64Array(${cacheCount});
+const cacheIsValid = new Uint8Array(${cacheCount});
+const columnPosition = new Float64Array([NaN, NaN]);
 const context = { blockX: 0, blockY: 0, blockZ: 0 };
 ${writer.cachedFunctionSources.join("\n")}
-return function evaluate(x, y, z) {
-  blockX = x;
-  blockY = y;
-  blockZ = z;
-  context.blockX = x;
-  context.blockY = y;
-  context.blockZ = z;
-  if (x !== columnX || z !== columnZ) { columnX = x; columnZ = z; ${columnResets} }
+return function evaluate(blockX, blockY, blockZ) {
+  context.blockX = blockX;
+  context.blockY = blockY;
+  context.blockZ = blockZ;
+  if (blockX !== columnPosition[0] || blockZ !== columnPosition[1]) { columnPosition[0] = blockX; columnPosition[1] = blockZ; ${columnResets} }
   ${pointResets}
   ${bodyStatements.join("\n  ")}
   return ${result};

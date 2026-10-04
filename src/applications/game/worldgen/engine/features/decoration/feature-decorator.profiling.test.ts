@@ -78,8 +78,9 @@ describe("decoration profiling", () => {
     const originNode = profile.callTree.find((node) => node.path === "feature.origin")!;
     expect(originNode.calls).toBe(9);
     expect(paths.has("feature.origin>feature.step.vegetal_decoration>feature.placed")).toBe(true);
-    const modifierPath = [...paths].find((path) => path.endsWith("placement.modifier.in_square"));
-    expect(modifierPath).toBeDefined();
+    // Placement modifiers are too hot for sections: they are counted, not timed.
+    expect([...paths].some((path) => path.includes("placement.modifier."))).toBe(false);
+    expect(profile.counters["placement.in_square.calls"]).toBeGreaterThan(0);
     expect(profile.callTree.some((node) => node.path.includes("feature.place.tree>feature.body"))).toBe(true);
     expect(profile.callTree.some((node) => node.path.endsWith("feature.tree.trunk") && node.calls > 0)).toBe(true);
   });

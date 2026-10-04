@@ -3,14 +3,10 @@
 // vein_gap leaves holes. Veins are raw ore blocks (2%), ore, or the granite / tuff filler. Returns a terrain symbol,
 // or NO_VEIN where the block is not part of a vein.
 
-import {
-  endWorkerSection,
-  isWorkerProfiling,
-  startWorkerSampledSection,
-} from "@/applications/game/profiler/worker-recorder";
 import type { FunctionContext } from "../density/density-function";
 import type { DensityNode } from "../density/density-function";
 import type { PositionalRandomFactory } from "../random";
+import { NoiseInterpolator } from "./noise-chunk-caches";
 import { transientRandomAt } from "../random/xoroshiro-random-source";
 import {
   BLOCK_COPPER_ORE,
@@ -24,6 +20,7 @@ import {
 export const NO_VEIN = -1;
 
 const VEININESS_THRESHOLD = Math.fround(0.4);
+const TOGGLE_ROUNDING_MARGIN = 1e-6;
 const EDGE_ROUNDOFF_BEGIN = 20;
 const MAX_EDGE_ROUNDOFF = 0.2;
 const VEIN_SOLIDNESS = Math.fround(0.7);
@@ -51,10 +48,8 @@ function clampedMap(value: number, fromStart: number, fromEnd: number, toStart: 
   return toStart + delta * (toEnd - toStart);
 }
 
-const VEIN_SAMPLE_EVERY = 128;
 
 export class OreVeinifier {
-  private readonly isProfiling = isWorkerProfiling();
 
   constructor(
     private readonly veinToggle: DensityNode,
@@ -68,15 +63,18 @@ export class OreVeinifier {
     return blockY <= COPPER_VEIN.maxY && blockY >= IRON_VEIN.minY;
   }
 
+  /**
+   * True when no block of the chunk's selected cell can be part of a vein: an interpolated toggle never leaves its
+   * corners' range (the margin covers rounding), and a magnitude below the veininess threshold is NO_VEIN.
+   */
+  selectedCellCannotHoldVeins(): boolean {
+    const toggle = this.veinToggle;
+    return toggle instanceof NoiseInterpolator && toggle.maxAbsoluteCorner() < VEININESS_THRESHOLD - TOGGLE_ROUNDING_MARGIN;
+  }
+
   /** The BlockStateFiller of OreVeinifier.create: the vein block at the context's position, or NO_VEIN. */
   compute(context: FunctionContext): number {
-    if (!this.isProfiling) return this.computeVein(context);
-    startWorkerSampledSection("noise.oreVein", VEIN_SAMPLE_EVERY);
-    try {
-      return this.computeVein(context);
-    } finally {
-      endWorkerSection();
-    }
+    return this.computeVein(context);
   }
 
   private computeVein(context: FunctionContext): number {

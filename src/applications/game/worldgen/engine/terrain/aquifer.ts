@@ -8,7 +8,6 @@ import {
   addWorkerCounter,
   endWorkerSection,
   isWorkerProfiling,
-  startWorkerSampledSection,
   startWorkerSection,
 } from "@/applications/game/profiler/worker-recorder";
 import { type FunctionContext, SinglePointContext } from "../density/density-function";
@@ -33,8 +32,6 @@ const X_SPACING = 16;
 const Y_SPACING = 12;
 const Z_SPACING = 16;
 
-/** (-2, -1) style chunk offsets sampled when looking for the surface above an aquifer centre. */
-const NEAREST_CENTERS_SAMPLE_EVERY = 64;
 const GRID_CELLS_PER_LOOKUP = 12;
 const ORIGIN_UNIFORM = 1;
 const ORIGIN_MIXED = 2;
@@ -174,6 +171,43 @@ export class NoiseBasedAquifer {
     return this.fluidAtStatus(originIndex, blockY);
   }
 
+  /**
+   * For a box of blocks: the index of a fluid status shared by every origin cell the box's blocks use, when all of
+   * them are uniform (so every open block above the lava level answers fluidOfStatusAt(index, y)), or -1.
+   */
+  sharedUniformStatusOfBox(minBlockX: number, maxBlockX: number, minBlockY: number, maxBlockY: number, minBlockZ: number, maxBlockZ: number): number {
+    let sharedIndex = -1;
+    for (let originGridY = Math.floor((minBlockY + 1) / Y_SPACING); originGridY <= Math.floor((maxBlockY + 1) / Y_SPACING); originGridY++) {
+      for (let originGridZ = (minBlockZ - 5) >> 4; originGridZ <= (maxBlockZ - 5) >> 4; originGridZ++) {
+        for (let originGridX = (minBlockX - 5) >> 4; originGridX <= (maxBlockX - 5) >> 4; originGridX++) {
+          const originIndex = this.cellIndex(originGridX, originGridY, originGridZ);
+          let uniformity = this.originUniformity[originIndex]!;
+          if (uniformity === 0) {
+            uniformity = this.classifyOrigin(originGridX, originGridY, originGridZ);
+            this.originUniformity[originIndex] = uniformity;
+          }
+          if (uniformity !== ORIGIN_UNIFORM) return -1;
+          if (sharedIndex === -1) {
+            sharedIndex = originIndex;
+          } else if (this.statusLevel[originIndex] !== this.statusLevel[sharedIndex] || this.statusFluid[originIndex] !== this.statusFluid[sharedIndex]) {
+            return -1;
+          }
+        }
+      }
+    }
+    return sharedIndex;
+  }
+
+  /** The fluid a status gives at y (air at and above its level). */
+  fluidOfStatusAt(statusIndex: number, blockY: number): number {
+    return this.fluidAtStatus(statusIndex, blockY);
+  }
+
+  /** True where every open block is lava (the global fluid picker's lava level). */
+  isBelowLavaLevel(blockY: number): boolean {
+    return blockY < this.lavaBelowY;
+  }
+
   /** computeSubstance for a context known to sit at (blockX, blockY, blockZ), skipping its coordinate getters. */
   computeSubstanceAt(context: FunctionContext, density: number, blockX: number, blockY: number, blockZ: number): number {
     if (density > 0) return NULL_SUBSTANCE;
@@ -232,7 +266,6 @@ export class NoiseBasedAquifer {
     let secondIndex = 0;
     let thirdIndex = 0;
     // Only the center search is timed: the fluid status work below can trigger rare heavy children, which would skew a sampled estimate.
-    if (this.isProfiling) startWorkerSampledSection("aquifer.findNearestCenters", NEAREST_CENTERS_SAMPLE_EVERY);
     for (let offsetX = 0; offsetX <= 1; offsetX++) {
       for (let offsetY = -1; offsetY <= 1; offsetY++) {
         for (let offsetZ = 0; offsetZ <= 1; offsetZ++) {
@@ -265,7 +298,6 @@ export class NoiseBasedAquifer {
       }
     }
 
-    if (this.isProfiling) endWorkerSection();
 
     this.ensureStatus(nearestIndex);
     const nearestFluid = this.fluidAtStatus(nearestIndex, blockY);
@@ -370,9 +402,7 @@ export class NoiseBasedAquifer {
     this.statusLookups++;
     if (this.statusKnown[index] !== 0) return;
     this.statusMisses++;
-    if (this.isProfiling) startWorkerSection("aquifer.computeFluid");
     this.computeFluid(this.locationX[index]!, this.locationY[index]!, this.locationZ[index]!);
-    if (this.isProfiling) endWorkerSection();
     this.statusLevel[index] = this.computedLevel;
     this.statusFluid[index] = this.computedFluid;
     this.statusKnown[index] = 1;
