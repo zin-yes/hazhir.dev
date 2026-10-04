@@ -6,6 +6,7 @@ import { DIMENSIONS } from "@/applications/game/profiler/dimensions";
 import { endWorkerSection, startWorkerSection } from "@/applications/game/profiler/worker-recorder";
 import type { JsonObject, JsonValue } from "../registry/datapack-loader";
 import { formatBlockState } from "../chunk";
+import { generateSurfaceRule } from "./surface-rule-codegen";
 import { NO_WATER_HEIGHT, type SurfaceRuleContext } from "./surface-rule-context";
 import {
   withDefaultNamespace,
@@ -129,6 +130,12 @@ function profileCondition(condition: SurfaceCondition, typeKey: string): Surface
 }
 
 export function compileSurfaceRules(ruleJson: JsonObject, inputs: SurfaceRuleCompilerInputs): SurfaceRule {
+  if (!inputs.profileRuleTypes) return generateSurfaceRule(ruleJson, inputs);
+  return compileSurfaceRuleClosures(ruleJson, inputs);
+}
+
+/** The closure form of the rules (one closure per node); the profiler wraps each one with its type. */
+export function compileSurfaceRuleClosures(ruleJson: JsonObject, inputs: SurfaceRuleCompilerInputs): SurfaceRule {
   function compileCondition(json: JsonValue | undefined): SurfaceCondition {
     const condition = compileConditionBody(json);
     return inputs.profileRuleTypes ? profileCondition(condition, `condition.${shortTypeOf(json, "condition")}`) : condition;
