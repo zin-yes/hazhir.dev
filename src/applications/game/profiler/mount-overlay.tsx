@@ -48,6 +48,9 @@ export function mountProfilerOverlay(options: { runBenchmark?: RunBenchmark }): 
   if (shouldStartOpen) {
     setOverlayVisible(true);
     profiler.setEnabled(true);
+    const queryParameters = new URLSearchParams(window.location.search);
+    if (queryParameters.get("trace") === "1") window.__gameProfiler?.trace(true);
+    if (queryParameters.get("sample") === "1") void window.__gameProfiler?.startSampling();
   }
 
   const onKeyDown = (event: KeyboardEvent) => {

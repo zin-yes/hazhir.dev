@@ -4,6 +4,7 @@ import {
   estimateReceiveCloneMillisecondsPerSecond,
   estimateSelfMillisecondsPerSecond,
 } from "./cost-model";
+import { PATH_SEPARATOR, isOverflowKey, isOverflowNode, percentOf, rankedBreakdownEntries, rootTotalMsForNode, treeTotalMs } from "./detail-analysis";
 import { buildOptimizationHints } from "./hints";
 import {
   buildEfficiencyLines,
@@ -26,6 +27,8 @@ export {
 };
 
 const TARGETS_PER_GROUP = 15;
+const WORKER_DETAIL_TREE_PATHS = 10;
+const WORKER_DETAIL_BREAKDOWN_KEYS = 10;
 const MEMORY_GAUGE_UNIT = "bytes";
 /** Wrapper aggregate that would double count every scope nested inside it. */
 const EXCLUDED_MAIN_THREAD_SCOPES = new Set(["main.frame.callback"]);
@@ -38,6 +41,7 @@ const GROUP_ORDER: OptimizationTarget["group"][] = [
   "gl-driver",
   "transfer",
   "worker",
+  "worker-detail",
   "memory",
   "light",
   "latency",
@@ -50,6 +54,7 @@ export function buildProfileReport(snapshot: ProfileSnapshot): ProfileReport {
     ...buildDomainTimerTargets(snapshot, "gl", "gl-driver", true),
     ...buildTransferTargets(snapshot),
     ...buildWorkerTargets(snapshot),
+    ...buildWorkerDetailTargets(snapshot),
     ...buildMemoryTargets(snapshot),
     ...buildLightTargets(snapshot),
     ...buildLatencyTargets(snapshot),
@@ -222,6 +227,54 @@ function buildWorkerTargets(snapshot: ProfileSnapshot): TargetDraft[] {
     })
     .filter((draft) => (draft.millisecondsPerSecond ?? 0) > 0)
     .sort(descendingByCost);
+}
+
+function buildWorkerDetailTargets(snapshot: ProfileSnapshot): TargetDraft[] {
+  const profiledSeconds = Math.max(snapshot.profiledForMs / 1000, 1);
+
+  const treePathDrafts: TargetDraft[] = snapshot.callTrees
+    .filter((tree) => tree.thread === "worker")
+    .flatMap((tree) => {
+      const treeTotal = treeTotalMs(tree);
+      return tree.nodes
+        .filter((node) => node.selfMs > 0 && !isOverflowNode(node))
+        .map((node): TargetDraft => ({
+          group: "worker-detail",
+          name: `${tree.root}: ${node.path.split(PATH_SEPARATOR).join(" > ")}`,
+          millisecondsPerSecond: node.selfMs / profiledSeconds,
+          frameBudgetSharePercent: null,
+          bytesPerSecond: null,
+          count: node.calls,
+          meanMs: node.calls > 0 ? node.selfMs / node.calls : null,
+          p95Ms: null,
+          maxMs: node.maxMs,
+          note: `self time, ${percentOf(node.selfMs, treeTotal).toFixed(0)}% of ${tree.root} tree, ${percentOf(node.selfMs, rootTotalMsForNode(tree, node)).toFixed(0)}% of its root${node.estimated ? ", estimated from sampled calls" : ""}`,
+        }));
+    })
+    .sort(descendingByCost)
+    .slice(0, WORKER_DETAIL_TREE_PATHS);
+
+  const breakdownDrafts: TargetDraft[] = snapshot.breakdowns
+    .flatMap((summary) =>
+      rankedBreakdownEntries(summary)
+        .filter((entry) => entry.selfMs > 0 && !isOverflowKey(entry))
+        .map((entry): TargetDraft => ({
+          group: "worker-detail",
+          name: `${summary.dimension} = ${entry.key}`,
+          millisecondsPerSecond: entry.selfMs / profiledSeconds,
+          frameBudgetSharePercent: null,
+          bytesPerSecond: null,
+          count: entry.calls,
+          meanMs: entry.calls > 0 ? entry.selfMs / entry.calls : null,
+          p95Ms: null,
+          maxMs: null,
+          note: `${percentOf(entry.selfMs, summary.totalSelfMs).toFixed(0)}% of ${summary.dimension} (${summary.thread})${entry.units > 0 ? `, ${((entry.selfMs / entry.units) * 1_000_000).toFixed(0)}ns per unit over ${entry.units} units` : ""}`,
+        })),
+    )
+    .sort(descendingByCost)
+    .slice(0, WORKER_DETAIL_BREAKDOWN_KEYS);
+
+  return [...treePathDrafts, ...breakdownDrafts].sort(descendingByCost);
 }
 
 function buildMemoryTargets(snapshot: ProfileSnapshot): TargetDraft[] {

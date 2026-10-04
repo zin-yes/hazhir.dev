@@ -1,4 +1,6 @@
+import { renderBreakdownSection, renderCallTreeSection, renderSamplingSection } from "./detail-markdown";
 import { buildLightEditRows } from "./light-report";
+import { markdownHeading as heading, markdownTable } from "./markdown-table";
 import { buildEfficiencyLines, buildWorkerMethodRows } from "./metric-names";
 import { estimateSelfMillisecondsPerSecond } from "./cost-model";
 import type {
@@ -28,6 +30,7 @@ const GROUP_TITLES: Record<OptimizationTarget["group"], string> = {
   "gl-driver": "GL driver (main-thread CPU inside WebGL calls)",
   transfer: "Transfers (worker messages and GPU uploads)",
   worker: "Workers (background CPU)",
+  "worker-detail": "Hot paths and breakdown keys (from call trees and breakdowns)",
   memory: "Memory",
   light: "Light edits (wall clock per edit)",
   latency: "Latency (wall clock, not CPU)",
@@ -72,13 +75,12 @@ function renderReportSections(
     ...renderHintSection(report, headingLevel),
     ...renderLightEditSection(report, headingLevel),
     ...renderTargetSections(report.targets, headingLevel, targetRows),
+    ...renderCallTreeSection(report.snapshot, headingLevel),
+    ...renderBreakdownSection(report.snapshot, headingLevel),
+    ...renderSamplingSection(report.snapshot, headingLevel),
   ];
   if (includeAppendix) lines.push(...renderAppendix(report, headingLevel));
   return lines;
-}
-
-function heading(level: number, text: string): string {
-  return `${"#".repeat(level)} ${text}`;
 }
 
 function renderSessionSection(report: ProfileReport, level: number): string[] {
@@ -374,16 +376,4 @@ function timerRow(timer: TimerSummary): string[] {
 
 function formatGaugeValue(value: number, unit: string): string {
   return unit === "bytes" ? formatBytes(value) : `${Number.isInteger(value) ? value : value.toFixed(2)} ${unit}`;
-}
-
-/** GitHub-style table; returns a placeholder line when there are no rows. */
-function markdownTable(headers: string[], rows: string[][]): string {
-  if (rows.length === 0) return "_no data_";
-  const escape = (cell: string) => cell.replace(/\|/g, "\\|").replace(/\n/g, " ");
-  const lines = [
-    `| ${headers.map(escape).join(" | ")} |`,
-    `| ${headers.map(() => "---").join(" | ")} |`,
-    ...rows.map((row) => `| ${row.map(escape).join(" | ")} |`),
-  ];
-  return lines.join("\n");
 }

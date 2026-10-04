@@ -1,3 +1,17 @@
+import {
+  CROSS_KEY_SEPARATOR,
+  leafName,
+  isOverflowKey,
+  isOverflowNode,
+  isCrossDimension,
+  isUnitsOnly,
+  percentOf,
+  PATH_SEPARATOR,
+  rankedBreakdownEntries,
+  rootTotalMsForNode,
+  workerUnattributedGap,
+  pathDepth,
+} from "./detail-analysis";
 import { lightEditLatencyHint } from "./light-hints";
 import { buildWorkerMethodRows } from "./metric-names";
 import {
@@ -69,6 +83,24 @@ export const POOL_IDLE_MIN_TASKS = 20;
 export const DOMINANT_SCOPE_BUDGET_SHARE_MEDIUM = 10;
 export const DOMINANT_SCOPE_BUDGET_SHARE_HIGH = 25;
 
+export const BREAKDOWN_KEY_DOMINANT_SHARE = 0.4;
+export const BREAKDOWN_KEY_HIGH_SHARE = 0.6;
+export const BREAKDOWN_KEY_MIN_SELF_MS = 5;
+export const BREAKDOWN_KEY_HIGH_SELF_MS = 100;
+export const BREAKDOWN_KEY_MIN_KEYS = 2;
+
+export const CALL_NODE_SELF_SHARE = 0.25;
+export const CALL_NODE_MIN_SELF_MS = 5;
+export const CALL_NODE_HIGH_SHARE = 0.5;
+export const CALL_NODE_HIGH_SELF_MS = 500;
+export const CALL_TREE_MIN_NODES = 2;
+
+export const UNATTRIBUTED_EXEC_SHARE = 0.3;
+export const UNATTRIBUTED_EXEC_HIGH_SHARE = 0.6;
+export const UNATTRIBUTED_EXEC_MIN_GAP_MS = 5;
+
+export const DETAIL_HINTS_PER_RULE = 3;
+
 const SEVERITY_ORDER: Record<OptimizationHint["severity"], number> = {
   high: 0,
   medium: 1,
@@ -94,6 +126,10 @@ export function buildOptimizationHints(
     heapAllocationHint(snapshot),
     lightEditLatencyHint(snapshot),
     ...workerPoolHints(snapshot),
+    ...breakdownDominanceHints(snapshot),
+    ...callTreeSelfTimeHints(snapshot, false),
+    ...callTreeSelfTimeHints(snapshot, true),
+    ...unattributedWorkerTimeHints(snapshot),
   ];
   return rules
     .filter((hint): hint is OptimizationHint => hint !== null)
@@ -395,4 +431,98 @@ function workerPoolHints(snapshot: ProfileSnapshot): (OptimizationHint | null)[]
     }
     return null;
   });
+}
+
+function breakdownDominanceHints(snapshot: ProfileSnapshot): OptimizationHint[] {
+  const hints: { selfMs: number; hint: OptimizationHint }[] = [];
+  for (const summary of snapshot.breakdowns) {
+    if (isUnitsOnly(summary) || summary.entries.length < BREAKDOWN_KEY_MIN_KEYS) continue;
+    const top = rankedBreakdownEntries(summary).find((entry) => !isOverflowKey(entry));
+    if (!top) continue;
+    const share = top.selfMs / summary.totalSelfMs;
+    if (share <= BREAKDOWN_KEY_DOMINANT_SHARE || top.selfMs <= BREAKDOWN_KEY_MIN_SELF_MS) continue;
+    const displayKey = isCrossDimension(summary) ? top.key.split(CROSS_KEY_SEPARATOR).join(" x ") : top.key;
+    const unitsText =
+      top.units > 0 ? `, ${top.units} units at ${((top.selfMs / top.units) * 1000).toFixed(2)}us each` : "";
+    hints.push({
+      selfMs: top.selfMs,
+      hint: {
+        severity:
+          share >= BREAKDOWN_KEY_HIGH_SHARE && top.selfMs >= BREAKDOWN_KEY_HIGH_SELF_MS ? "high" : "medium",
+        title: `${summary.dimension}: "${displayKey}" dominates`,
+        evidence: `"${displayKey}" takes ${formatMilliseconds(top.selfMs)} of ${formatMilliseconds(summary.totalSelfMs)} (${(share * 100).toFixed(0)}%) across ${summary.entries.length} keys in ${summary.dimension}, ${top.calls} calls${unitsText}.`,
+        suggestion: `Optimize "${displayKey}" first: it outweighs every other key in ${summary.dimension}. Check its per-unit cost against the other keys to see whether it does more work or the same work slower.`,
+      },
+    });
+  }
+  return topHints(hints);
+}
+
+function callTreeSelfTimeHints(snapshot: ProfileSnapshot, estimatedNodes: boolean): OptimizationHint[] {
+  const hints: { selfMs: number; hint: OptimizationHint }[] = [];
+  for (const tree of snapshot.callTrees) {
+    if (tree.thread === "worker" && tree.nodes.length < CALL_TREE_MIN_NODES) continue;
+    const isFlatTree = tree.nodes.every((node) => pathDepth(node.path) === 0);
+    let best: { path: string; selfMs: number; calls: number; share: number; rootMs: number } | null = null;
+    for (const node of tree.nodes) {
+      if (node.estimated !== estimatedNodes || isOverflowNode(node)) continue;
+      if (tree.thread === "main" && pathDepth(node.path) === 0) continue;
+      const rootMs = rootTotalMsForNode(tree, node);
+      if (rootMs <= 0 || node.selfMs <= CALL_NODE_MIN_SELF_MS) continue;
+      const share = node.selfMs / rootMs;
+      if (share <= CALL_NODE_SELF_SHARE) continue;
+      if (!best || node.selfMs > best.selfMs) {
+        best = { path: node.path, selfMs: node.selfMs, calls: node.calls, share, rootMs };
+      }
+    }
+    if (!best) continue;
+    const readablePath = best.path.split(PATH_SEPARATOR).join(" > ");
+    const evidence = `${tree.root}: "${readablePath}" has ${formatMilliseconds(best.selfMs)} of its own time, ${(best.share * 100).toFixed(0)}% of ${formatMilliseconds(best.rootMs)} in its root, over ${best.calls} calls (${formatMilliseconds(best.selfMs / Math.max(best.calls, 1))} each).`;
+    hints.push({
+      selfMs: best.selfMs,
+      hint: estimatedNodes
+        ? {
+            severity: "medium",
+            title: `Sampled estimate dominates ${tree.root}`,
+            evidence: `${evidence} The time is extrapolated from sampled calls, so it can be off by a wide margin.`,
+            suggestion: `Verify "${readablePath}" with exact timing (lower its sample interval, or time one representative call) before optimizing; then split it into nested sections to see what inside it is slow.`,
+          }
+        : {
+            severity: isFlatTree
+              ? "low"
+              : best.share >= CALL_NODE_HIGH_SHARE && best.selfMs >= CALL_NODE_HIGH_SELF_MS
+                ? "high"
+                : "medium",
+            title: `${tree.root}: "${leafName(best.path)}" is the hot node`,
+            evidence,
+            suggestion: `Its time is not inside any nested section, so the cost is in the node's own code. Add finer sections or counters inside "${readablePath}", or reduce how often it runs.`,
+          },
+    });
+  }
+  return topHints(hints);
+}
+
+function unattributedWorkerTimeHints(snapshot: ProfileSnapshot): OptimizationHint[] {
+  const hints: { selfMs: number; hint: OptimizationHint }[] = [];
+  for (const tree of snapshot.callTrees) {
+    const gap = workerUnattributedGap(snapshot, tree);
+    if (!gap || gap.gapShare <= UNATTRIBUTED_EXEC_SHARE || gap.gapMs <= UNATTRIBUTED_EXEC_MIN_GAP_MS) continue;
+    hints.push({
+      selfMs: gap.gapMs,
+      hint: {
+        severity: gap.gapShare >= UNATTRIBUTED_EXEC_HIGH_SHARE ? "high" : "medium",
+        title: `${tree.root}: ${(gap.gapShare * 100).toFixed(0)}% of task time is uninstrumented`,
+        evidence: `${gap.taskCount} tasks executed for ${formatMilliseconds(gap.execTotalMs)}, but its sections only cover ${formatMilliseconds(gap.instrumentedMs)}; ${formatMilliseconds(gap.gapMs)} (${(percentOf(gap.gapMs, gap.execTotalMs)).toFixed(0)}%) is not inside any section.`,
+        suggestion: `Wrap the remaining work of ${tree.root} (setup, decoding the message, building the result) in workerSection calls so the call tree shows where that time goes.`,
+      },
+    });
+  }
+  return topHints(hints);
+}
+
+function topHints(candidates: { selfMs: number; hint: OptimizationHint }[]): OptimizationHint[] {
+  return candidates
+    .sort((first, second) => second.selfMs - first.selfMs)
+    .slice(0, DETAIL_HINTS_PER_RULE)
+    .map((candidate) => candidate.hint);
 }

@@ -1,5 +1,11 @@
 import { describe, expect, test } from "bun:test";
-import { busyGameScenario, simulateSnapshot, type SimulatedScenario } from "./profile-fixtures";
+import {
+  busyGameScenario,
+  simulateSnapshot,
+  worldgenScenario,
+  worldgenTask,
+  type SimulatedScenario,
+} from "./profile-fixtures";
 import { buildProfileReport } from "./report";
 
 function hintTitles(scenario: SimulatedScenario) {
@@ -135,5 +141,90 @@ describe("buildOptimizationHints on other sessions", () => {
     const longTasks = report.hints.find((hint) => hint.title === "Long main-thread tasks");
     expect(longTasks?.severity).toBe("medium");
     expect(longTasks?.evidence).toContain("mesh-upload.js (2x)");
+  });
+});
+
+describe("buildOptimizationHints from call trees and breakdowns", () => {
+  const hintsFor = (scenario: SimulatedScenario) => buildProfileReport(simulateSnapshot(scenario)).hints;
+  const withTask = (task: Parameters<typeof worldgenTask>[0]) =>
+    worldgenScenario({ workerTasks: [worldgenTask(task)] });
+
+  test("flags a breakdown key that takes most of its dimension, with the per unit cost", () => {
+    const hint = hintsFor(worldgenScenario()).find((candidate) => candidate.title === 'worldgen.biome: "forest" dominates');
+    expect(hint?.severity).toBe("high");
+    expect(hint?.evidence).toContain('"forest" takes 1200ms of 1680ms (71%) across 3 keys');
+    expect(hint?.evidence).toContain("4.88us each");
+  });
+
+  test("names cross dimension pairs with a readable separator", () => {
+    const titles = hintsFor(worldgenScenario()).map((hint) => hint.title);
+    expect(titles).toContain('worldgen.biomeStage: "forest x features" dominates');
+  });
+
+  test("ignores dominant keys below the minimum total time or in single key dimensions", () => {
+    const hints = hintsFor(
+      withTask({
+        breakdowns: {
+          "worldgen.biome": [
+            { key: "forest", selfMs: 0.05, calls: 1 },
+            { key: "desert", selfMs: 0.01, calls: 1 },
+          ],
+          "worldgen.carver": [{ key: "cave", selfMs: 30, calls: 1 }],
+        },
+      }),
+    );
+    expect(hints.filter((hint) => hint.title.startsWith("worldgen.biome:") || hint.title.startsWith("worldgen.carver:"))).toEqual([]);
+  });
+
+  test("flags the call tree node whose own time is a large share of its root", () => {
+    const hint = hintsFor(worldgenScenario()).find((candidate) => candidate.title.includes('"placeTree" is the hot node'));
+    expect(hint?.severity).toBe("medium");
+    expect(hint?.evidence).toContain("840ms of its own time, 42% of 1980ms");
+    expect(hint?.evidence).toContain("360 calls");
+  });
+
+  test("a hot section in a flat tree is only a low priority prompt to add nested sections", () => {
+    const flat = hintsFor(
+      worldgenScenario({
+        workerTasks: [worldgenTask({ nestedSections: [{ name: "faceLoop", selfMs: 40 }, { name: "pack", selfMs: 4 }], executionMs: 44, breakdowns: {} })],
+      }),
+    );
+    expect(flat.find((hint) => hint.title.includes('"faceLoop" is the hot node'))?.severity).toBe("low");
+  });
+
+  test("a balanced tree produces no hot node hint", () => {
+    const balanced = ["a", "b", "c", "d", "e"].map((name) => ({ name, selfMs: 6 }));
+    const hints = hintsFor(withTask({ nestedSections: balanced, executionMs: 30, breakdowns: {} }));
+    expect(hints.filter((hint) => hint.title.includes("hot node") || hint.title.includes("uninstrumented"))).toEqual([]);
+  });
+
+  test("a dominating sampled node says the number is an extrapolation", () => {
+    const hints = hintsFor(
+      withTask({
+        nestedSections: [
+          { name: "noise", selfMs: 2, children: [{ name: "densityNode", selfMs: 20, calls: 100000, estimated: true }] },
+          { name: "carve", selfMs: 3 },
+        ],
+        executionMs: 25,
+        breakdowns: {},
+      }),
+    );
+    const estimated = hints.find((hint) => hint.title === "Sampled estimate dominates worldgen.generateChunk");
+    expect(estimated?.evidence).toContain("noise > densityNode");
+    expect(estimated?.evidence).toContain("extrapolated from sampled calls");
+    expect(hints.some((hint) => hint.title.includes("hot node"))).toBe(false);
+  });
+
+  test("flags worker tasks whose time is mostly outside any instrumented section", () => {
+    const hint = hintsFor(withTask({ executionMs: 80 })).find((candidate) => candidate.title.includes("uninstrumented"));
+    expect(hint?.title).toBe("worldgen.generateChunk: 59% of task time is uninstrumented");
+    expect(hint?.severity).toBe("medium");
+    expect(hint?.evidence).toContain("60 tasks executed for 4800ms");
+    expect(hint?.evidence).toContain("sections only cover 1980ms");
+  });
+
+  test("a task with a small uninstrumented remainder is not flagged", () => {
+    const titles = hintsFor(worldgenScenario()).map((hint) => hint.title);
+    expect(titles.some((title) => title.includes("uninstrumented"))).toBe(false);
   });
 });

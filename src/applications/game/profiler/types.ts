@@ -287,6 +287,7 @@ export interface OptimizationTarget {
     | "gpu"
     | "gl-driver"
     | "worker"
+    | "worker-detail"
     | "transfer"
     | "memory"
     | "light"

@@ -1,6 +1,13 @@
 import { Profiler } from "./profiler";
 import { ingestWorkerTask } from "./worker-task-ingest";
-import type { MeshGeometryStats, ProfileSnapshot } from "./types";
+import type {
+  BreakdownEntry,
+  CallTreeNode,
+  MeshGeometryStats,
+  ProfileSnapshot,
+  SamplingSummary,
+  TraceSpan,
+} from "./types";
 
 /**
  * Test helper: drives the real Profiler with a fake clock through a simulated
@@ -11,8 +18,26 @@ import type { MeshGeometryStats, ProfileSnapshot } from "./types";
 export interface SimulatedScope {
   name: string;
   milliseconds: number;
-  /** Scopes nested inside this one; their time is part of `milliseconds`. */
-  children?: { name: string; milliseconds: number }[];
+  /** Scopes nested inside this one, to any depth; their time is part of `milliseconds`. */
+  children?: SimulatedScope[];
+}
+
+/** A worker section with its own time excluding children, nested to any depth. */
+export interface SimulatedSection {
+  name: string;
+  selfMs: number;
+  /** Defaults to 1. */
+  calls?: number;
+  /** Marks the time as extrapolated from sampled calls. */
+  estimated?: boolean;
+  children?: SimulatedSection[];
+}
+
+export interface SimulatedBreakdownEntry {
+  key: string;
+  selfMs: number;
+  units?: number;
+  calls?: number;
 }
 
 export interface SimulatedWorkerTask {
@@ -21,7 +46,12 @@ export interface SimulatedWorkerTask {
   workerCount: number;
   everyFrames: number;
   executionMs: number;
-  sectionSelfMs: { [sectionName: string]: number };
+  /** Flat sections; ignored when `nestedSections` is given. */
+  sectionSelfMs?: { [sectionName: string]: number };
+  /** Nested sections per task; also drives the call tree and trace spans. */
+  nestedSections?: SimulatedSection[];
+  /** Cost per key per dimension recorded by each task. */
+  breakdowns?: { [dimension: string]: SimulatedBreakdownEntry[] };
   counters: { [counterName: string]: number };
   paramBytes: number;
   resultBytes: number;
@@ -44,6 +74,11 @@ export interface SimulatedScenario {
   meshes?: { chunkName: string; stats: MeshGeometryStats }[];
   events?: { kind: "long-task" | "long-animation-frame" | "gc-estimate"; durationMs: number; detail: string }[];
   structuredCloneMegabytesPerSecond?: number;
+  /** Main-thread breakdown amounts recorded every frame (cost per key per dimension). */
+  frameBreakdowns?: { dimension: string; key: string; selfMs?: number; units?: number; calls?: number }[];
+  /** Captures timeline spans for main-thread scopes and worker sections. */
+  trace?: boolean;
+  sampling?: SamplingSummary;
 }
 
 export function simulateSession(scenario: SimulatedScenario): Profiler {
@@ -56,6 +91,8 @@ export function simulateSession(scenario: SimulatedScenario): Profiler {
     gpuTimerMode: "disjoint-timer-query",
     structuredCloneMegabytesPerSecond: scenario.structuredCloneMegabytesPerSecond ?? 800,
   });
+  if (scenario.trace) profiler.setTracing(true);
+  if (scenario.sampling) profiler.setSamplingSummaryProvider(() => scenario.sampling ?? null);
   for (const task of scenario.workerTasks ?? []) {
     profiler.registerWorkerPool(task.poolName, task.workerCount);
   }
@@ -70,17 +107,20 @@ export function simulateSession(scenario: SimulatedScenario): Profiler {
     const frameId = profiler.currentFrameId;
     let spentMs = 0;
 
-    for (const scope of scenario.scopes) {
+    const runScope = (scope: SimulatedScope) => {
       profiler.measure(scope.name, () => {
-        const childMs = (scope.children ?? []).reduce((sum, child) => sum + child.milliseconds, 0);
+        const children = scope.children ?? [];
+        const childMs = children.reduce((sum, child) => sum + child.milliseconds, 0);
         nowMs += scope.milliseconds - childMs;
-        for (const child of scope.children ?? []) {
-          profiler.measure(child.name, () => {
-            nowMs += child.milliseconds;
-          });
-        }
+        children.forEach(runScope);
       });
+    };
+    for (const scope of scenario.scopes) {
+      runScope(scope);
       spentMs += scope.milliseconds;
+    }
+    for (const breakdown of scenario.frameBreakdowns ?? []) {
+      profiler.recordBreakdown(breakdown.dimension, breakdown.key, breakdown);
     }
 
     const spike = scenario.spike;
@@ -97,7 +137,7 @@ export function simulateSession(scenario: SimulatedScenario): Profiler {
         nowMs += task.mainPostMs;
       });
       spentMs += task.mainPostMs;
-      ingestSimulatedTask(profiler, task, nowMs);
+      ingestSimulatedTask(profiler, task, nowMs, scenario.trace === true);
     }
 
     if (scenario.gpuFrameMs !== undefined) {
@@ -128,10 +168,68 @@ export function simulateSnapshot(scenario: SimulatedScenario): ProfileSnapshot {
   return simulateSession(scenario).snapshot("simulated");
 }
 
-function ingestSimulatedTask(profiler: Profiler, task: SimulatedWorkerTask, completedAtMs: number) {
+interface FlattenedSections {
+  callTree: CallTreeNode[];
+  sectionSelfMs: { [sectionName: string]: number };
+  spans: TraceSpan[];
+}
+
+function flattenSections(sections: SimulatedSection[]): FlattenedSections {
+  const flattened: FlattenedSections = { callTree: [], sectionSelfMs: {}, spans: [] };
+  let cursorMs = 0;
+  const visit = (section: SimulatedSection, parentPath: string, startMs: number, depth: number): number => {
+    const path = parentPath === "" ? section.name : `${parentPath}>${section.name}`;
+    const calls = section.calls ?? 1;
+    const node: CallTreeNode = {
+      path,
+      calls,
+      totalMs: section.selfMs,
+      selfMs: section.selfMs,
+      maxMs: section.selfMs / calls,
+      estimated: section.estimated === true,
+    };
+    flattened.callTree.push(node);
+    flattened.sectionSelfMs[section.name] = (flattened.sectionSelfMs[section.name] ?? 0) + section.selfMs;
+    const spanIndex = flattened.spans.length;
+    flattened.spans.push({ name: section.name, startMs, durationMs: section.selfMs, depth });
+    let childStartMs = startMs + section.selfMs;
+    for (const child of section.children ?? []) {
+      const childTotalMs = visit(child, path, childStartMs, depth + 1);
+      node.totalMs += childTotalMs;
+      childStartMs += childTotalMs;
+    }
+    flattened.spans[spanIndex].durationMs = node.totalMs;
+    return node.totalMs;
+  };
+  for (const section of sections) cursorMs += visit(section, "", cursorMs, 0);
+  return flattened;
+}
+
+function ingestSimulatedTask(
+  profiler: Profiler,
+  task: SimulatedWorkerTask,
+  completedAtMs: number,
+  captureSpans: boolean,
+) {
+  const flattened = flattenSections(
+    task.nestedSections ??
+      Object.entries(task.sectionSelfMs ?? {}).map(([name, selfMs]) => ({ name, selfMs })),
+  );
+  const breakdowns: { [dimension: string]: BreakdownEntry[] } = {};
+  for (const [dimension, entries] of Object.entries(task.breakdowns ?? {})) {
+    breakdowns[dimension] = entries.map((entry) => ({
+      key: entry.key,
+      calls: entry.calls ?? 1,
+      selfMs: entry.selfMs,
+      totalMs: entry.selfMs,
+      units: entry.units ?? 0,
+    }));
+  }
+
+  const epochBaseMs = performance.timeOrigin;
   const enqueuedAtMs = completedAtMs - 20;
   const dispatchedAtMs = enqueuedAtMs + task.queueWaitMs;
-  const receivedAtEpochMs = dispatchedAtMs + 1;
+  const receivedAtEpochMs = epochBaseMs + dispatchedAtMs + 1;
   const finishedAtEpochMs = receivedAtEpochMs + task.executionMs;
   ingestWorkerTask(profiler, {
     poolName: task.poolName,
@@ -139,29 +237,25 @@ function ingestSimulatedTask(profiler: Profiler, task: SimulatedWorkerTask, comp
     enqueuedAtMs,
     dispatchedAtMs,
     completedAtMs,
-    postedToWorkerAtEpochMs: dispatchedAtMs,
+    postedToWorkerAtEpochMs: epochBaseMs + dispatchedAtMs,
     receivedFromWorkerAtEpochMs: finishedAtEpochMs + task.resultPostMs + 1,
     paramBytes: task.paramBytes,
     resultBytes: task.resultBytes,
     failed: false,
     queueDepthAtEnqueue: task.queueDepth,
     workerResultPostMs: task.resultPostMs,
+    workerTrackName: `${task.poolName} worker`,
     workerProfile: {
       receivedAtEpochMs,
       executionStartedAtEpochMs: receivedAtEpochMs,
       executionFinishedAtEpochMs: finishedAtEpochMs,
       executionMs: task.executionMs,
-      sectionSelfMs: task.sectionSelfMs,
+      sectionSelfMs: flattened.sectionSelfMs,
       counters: task.counters,
-      callTree: Object.entries(task.sectionSelfMs).map(([path, selfMs]) => ({
-        path,
-        calls: 1,
-        totalMs: selfMs,
-        selfMs,
-        maxMs: selfMs,
-        estimated: false,
-      })),
-      breakdowns: {},
+      callTree: flattened.callTree,
+      breakdowns,
+      spans: captureSpans ? flattened.spans : undefined,
+      droppedSpans: 0,
     },
   });
 }
@@ -229,6 +323,104 @@ export function busyGameScenario(overrides: Partial<SimulatedScenario> = {}): Si
       chunkName: `${chunkIndex},0,0`,
       stats: meshStats(chunkIndex),
     })),
+    ...overrides,
+  };
+}
+
+/**
+ * A chunk generation worker task with nested, partly sampled sections and
+ * tagged breakdowns (per biome, biome x stage, per block). Section times add
+ * up to 33 ms of the 44 ms execution, leaving 25% uninstrumented.
+ */
+export function worldgenTask(overrides: Partial<SimulatedWorkerTask> = {}): SimulatedWorkerTask {
+  return {
+    poolName: "worldgen",
+    method: "generateChunk",
+    workerCount: 2,
+    everyFrames: 5,
+    executionMs: 44,
+    nestedSections: [
+      {
+        name: "noise",
+        selfMs: 6,
+        children: [{ name: "density", selfMs: 4, calls: 4096, estimated: true }],
+      },
+      { name: "carve", selfMs: 3 },
+      {
+        name: "features",
+        selfMs: 4,
+        children: [
+          { name: "placeTree", selfMs: 14, calls: 6 },
+          { name: "placeOre", selfMs: 2, calls: 10 },
+        ],
+      },
+    ],
+    breakdowns: {
+      "worldgen.biome": [
+        { key: "forest", selfMs: 20, units: 4096, calls: 1 },
+        { key: "desert", selfMs: 5, units: 4096, calls: 1 },
+        { key: "plains", selfMs: 3, units: 4096, calls: 1 },
+      ],
+      "worldgen.biomeStage": [
+        { key: "forest|features", selfMs: 15, calls: 1 },
+        { key: "forest|noise", selfMs: 4, calls: 1 },
+        { key: "desert|noise", selfMs: 2, calls: 1 },
+        { key: "desert|features", selfMs: 3, calls: 1 },
+        { key: "desert|carve", selfMs: 1, calls: 1 },
+      ],
+      "worldgen.block": [
+        { key: "stone", selfMs: 0, units: 20000, calls: 1 },
+        { key: "dirt", selfMs: 0, units: 5000, calls: 1 },
+      ],
+    },
+    counters: { blocksGenerated: 32768 },
+    paramBytes: 256,
+    resultBytes: 65536,
+    mainPostMs: 0.1,
+    resultPostMs: 0.4,
+    queueWaitMs: 2,
+    queueDepth: 1,
+    ...overrides,
+  };
+}
+
+/** Six seconds of play with nested main-thread scopes, one worldgen worker and a captured trace. */
+export function worldgenScenario(overrides: Partial<SimulatedScenario> = {}): SimulatedScenario {
+  return {
+    seconds: 6,
+    frameIntervalMs: 20,
+    scopes: [
+      {
+        name: "main.frame.render",
+        milliseconds: 4,
+        children: [
+          {
+            name: "main.gl.upload",
+            milliseconds: 1,
+            children: [{ name: "main.gl.bufferData", milliseconds: 0.6 }],
+          },
+        ],
+      },
+      { name: "main.player.update", milliseconds: 0.4 },
+    ],
+    spike: { everyFrames: 90, scopeName: "main.chunks.addChunkMesh", milliseconds: 45 },
+    gpuFrameMs: 4,
+    workerTasks: [worldgenTask()],
+    frameBreakdowns: [
+      { dimension: "ui.surface", key: "hud", selfMs: 0.3, calls: 1 },
+      { dimension: "ui.surface", key: "minimap", selfMs: 0.1, calls: 1 },
+    ],
+    trace: true,
+    sampling: {
+      sampleIntervalMs: 1,
+      totalSamples: 2000,
+      durationMs: 2000,
+      topSelf: [
+        { functionName: "packVertices", resource: "mesh-worker.js", line: 212, samples: 640, selfMs: 640 },
+        { functionName: "", resource: "game.js", line: 31, samples: 120, selfMs: 120 },
+      ],
+      topStacks: [{ frames: ["tick", "updateChunks", "packVertices"], samples: 640 }],
+    },
     ...overrides,
   };
 }

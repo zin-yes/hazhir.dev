@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { buildEfficiencyLines, buildWorkerMethodRows } from "./metric-names";
-import { busyGameScenario, simulateSnapshot } from "./profile-fixtures";
+import { busyGameScenario, simulateSnapshot, worldgenScenario } from "./profile-fixtures";
 import { buildProfileReport } from "./report";
 
 describe("buildProfileReport", () => {
@@ -95,5 +95,40 @@ describe("buildProfileReport", () => {
     const gpu = targetsIn("gpu").find((target) => target.name === "gpu.frame");
     expect(gpu?.millisecondsPerSecond).toBeGreaterThan(240);
     expect(gpu?.millisecondsPerSecond).toBeLessThan(260);
+  });
+});
+
+describe("buildProfileReport worker-detail targets", () => {
+  const report = buildProfileReport(simulateSnapshot(worldgenScenario()));
+  const detail = report.targets.filter((target) => target.group === "worker-detail");
+
+  test("ranks the hottest worker call path and breakdown key by cost per second", () => {
+    const names = detail.map((target) => target.name);
+    expect(names).toContain("worldgen.generateChunk: features > placeTree");
+    expect(names).toContain("worldgen.biome = forest");
+    const rates = detail.map((target) => target.millisecondsPerSecond ?? 0);
+    expect(rates).toEqual([...rates].sort((first, second) => second - first));
+    expect(detail[0].name).toBe("worldgen.biome = forest");
+    // forest: 20ms per task, 60 tasks over ~6.1 profiled seconds
+    expect(detail[0].millisecondsPerSecond!).toBeGreaterThan(190);
+    expect(detail[0].millisecondsPerSecond!).toBeLessThan(205);
+  });
+
+  test("carries call counts, mean per call and the share of its tree in the note", () => {
+    const placeTree = detail.find((target) => target.name.endsWith("features > placeTree"));
+    expect(placeTree?.count).toBe(360);
+    expect(placeTree?.meanMs).toBeCloseTo(14 / 6, 5);
+    expect(placeTree?.note).toContain("42% of worldgen.generateChunk tree");
+  });
+
+  test("does not list main-thread tree nodes or units-only keys", () => {
+    expect(detail.some((target) => target.name.includes("main.frame.render"))).toBe(false);
+    expect(detail.some((target) => target.name.includes("worldgen.block"))).toBe(false);
+  });
+
+  test("sits after the worker group and keeps ranks contiguous", () => {
+    const groups = report.targets.map((target) => target.group);
+    expect(groups.indexOf("worker-detail")).toBeGreaterThan(groups.lastIndexOf("worker"));
+    expect(report.targets.map((target) => target.rank)).toEqual(report.targets.map((_, index) => index + 1));
   });
 });
