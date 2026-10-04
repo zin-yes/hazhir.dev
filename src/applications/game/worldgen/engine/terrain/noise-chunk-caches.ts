@@ -1,0 +1,255 @@
+// The per-chunk implementations NoiseChunk substitutes for each density function Marker. Mirrors the inner classes
+// NoiseChunk.NoiseInterpolator, FlatCache, Cache2D, CacheOnce and CacheAllInCell, including their quirks: they only
+// cache when the context is the NoiseChunk itself, flat_cache samples quart corners at y = 0, and cache_once is
+// keyed on the chunk's interpolation counters rather than on the position.
+
+import {
+  allocateIdentitySignature,
+  type ContextProvider,
+  DensityNode,
+  type DensityVisitor,
+  type FunctionContext,
+  SinglePointContext,
+} from "../density/density-function";
+import { MarkerNode, type MarkerType } from "../density/nodes/structural-nodes";
+import type { NoiseChunk } from "./noise-chunk";
+
+function lerp(delta: number, start: number, end: number): number {
+  return start + delta * (end - start);
+}
+
+abstract class NoiseChunkCache extends DensityNode {
+  private readonly identitySignature: string;
+
+  constructor(
+    protected readonly chunk: NoiseChunk,
+    readonly markerType: MarkerType,
+    readonly wrapped: DensityNode,
+  ) {
+    super();
+    this.identitySignature = allocateIdentitySignature(markerType);
+  }
+
+  get minValue(): number {
+    return this.wrapped.minValue;
+  }
+
+  get maxValue(): number {
+    return this.wrapped.maxValue;
+  }
+
+  /** MarkerOrMarked.mapAll: rebuild as a plain Marker around the mapped wrapped function. */
+  mapAll(visitor: DensityVisitor): DensityNode {
+    return visitor.apply(new MarkerNode(this.markerType, visitor.map(this.wrapped)));
+  }
+
+  children(): readonly DensityNode[] {
+    return [this.wrapped];
+  }
+
+  structuralSignature(): string {
+    return this.identitySignature;
+  }
+}
+
+/** NoiseChunk.NoiseInterpolator: trilinear interpolation of cell-corner samples. */
+export class NoiseInterpolator extends NoiseChunkCache {
+  slice0: Float64Array[];
+  slice1: Float64Array[];
+  private noise000 = 0;
+  private noise001 = 0;
+  private noise100 = 0;
+  private noise101 = 0;
+  private noise010 = 0;
+  private noise011 = 0;
+  private noise110 = 0;
+  private noise111 = 0;
+  private valueXZ00 = 0;
+  private valueXZ10 = 0;
+  private valueXZ01 = 0;
+  private valueXZ11 = 0;
+  private valueZ0 = 0;
+  private valueZ1 = 0;
+  private value = 0;
+
+  constructor(chunk: NoiseChunk, wrapped: DensityNode) {
+    super(chunk, "interpolated", wrapped);
+    this.slice0 = NoiseInterpolator.allocateSlice(chunk.cellCountY, chunk.cellCountXZ);
+    this.slice1 = NoiseInterpolator.allocateSlice(chunk.cellCountY, chunk.cellCountXZ);
+  }
+
+  private static allocateSlice(cellCountY: number, cellCountXZ: number): Float64Array[] {
+    const slice: Float64Array[] = [];
+    for (let index = 0; index <= cellCountXZ; index++) slice.push(new Float64Array(cellCountY + 1));
+    return slice;
+  }
+
+  selectCellYZ(cellY: number, cellZ: number): void {
+    this.noise000 = this.slice0[cellZ][cellY];
+    this.noise001 = this.slice0[cellZ + 1][cellY];
+    this.noise100 = this.slice1[cellZ][cellY];
+    this.noise101 = this.slice1[cellZ + 1][cellY];
+    this.noise010 = this.slice0[cellZ][cellY + 1];
+    this.noise011 = this.slice0[cellZ + 1][cellY + 1];
+    this.noise110 = this.slice1[cellZ][cellY + 1];
+    this.noise111 = this.slice1[cellZ + 1][cellY + 1];
+  }
+
+  updateForY(deltaY: number): void {
+    this.valueXZ00 = lerp(deltaY, this.noise000, this.noise010);
+    this.valueXZ10 = lerp(deltaY, this.noise100, this.noise110);
+    this.valueXZ01 = lerp(deltaY, this.noise001, this.noise011);
+    this.valueXZ11 = lerp(deltaY, this.noise101, this.noise111);
+  }
+
+  updateForX(deltaX: number): void {
+    this.valueZ0 = lerp(deltaX, this.valueXZ00, this.valueXZ10);
+    this.valueZ1 = lerp(deltaX, this.valueXZ01, this.valueXZ11);
+  }
+
+  updateForZ(deltaZ: number): void {
+    this.value = lerp(deltaZ, this.valueZ0, this.valueZ1);
+  }
+
+  swapSlices(): void {
+    const previous = this.slice0;
+    this.slice0 = this.slice1;
+    this.slice1 = previous;
+  }
+
+  compute(context: FunctionContext): number {
+    const chunk = this.chunk;
+    if (context !== chunk) return this.wrapped.compute(context);
+    if (!chunk.interpolating) throw new Error("Trying to sample interpolator outside the interpolation loop");
+    if (!chunk.fillingCell) return this.value;
+    // Mth.lerp3(dx, dy, dz, ...) = lerp(dz, lerp2(dx, dy, c000, c100, c010, c110), lerp2(dx, dy, c001, c101, c011, c111)).
+    const deltaX = chunk.inCellX / chunk.cellWidth;
+    const deltaY = chunk.inCellY / chunk.cellHeight;
+    const deltaZ = chunk.inCellZ / chunk.cellWidth;
+    const nearZ = lerp(deltaY, lerp(deltaX, this.noise000, this.noise100), lerp(deltaX, this.noise010, this.noise110));
+    const farZ = lerp(deltaY, lerp(deltaX, this.noise001, this.noise101), lerp(deltaX, this.noise011, this.noise111));
+    return lerp(deltaZ, nearZ, farZ);
+  }
+
+  fillArray(values: Float64Array, provider: ContextProvider): void {
+    if (this.chunk.fillingCell) provider.fillAllDirectly(values, this);
+    else this.wrapped.fillArray(values, provider);
+  }
+}
+
+/** NoiseChunk.FlatCache: the wrapped function sampled once per quart column at (quartX * 4, 0, quartZ * 4). */
+export class FlatCache extends NoiseChunkCache {
+  readonly values: Float64Array;
+  private readonly sideLength: number;
+
+  constructor(chunk: NoiseChunk, wrapped: DensityNode, fill: boolean) {
+    super(chunk, "flat_cache", wrapped);
+    this.sideLength = chunk.noiseSizeXZ + 1;
+    this.values = new Float64Array(this.sideLength * this.sideLength);
+    if (fill) {
+      for (let quartOffsetX = 0; quartOffsetX < this.sideLength; quartOffsetX++) {
+        const blockX = (chunk.firstNoiseX + quartOffsetX) << 2;
+        for (let quartOffsetZ = 0; quartOffsetZ < this.sideLength; quartOffsetZ++) {
+          const blockZ = (chunk.firstNoiseZ + quartOffsetZ) << 2;
+          this.values[quartOffsetX * this.sideLength + quartOffsetZ] = wrapped.compute(new SinglePointContext(blockX, 0, blockZ));
+        }
+      }
+    }
+  }
+
+  compute(context: FunctionContext): number {
+    const quartOffsetX = (context.blockX >> 2) - this.chunk.firstNoiseX;
+    const quartOffsetZ = (context.blockZ >> 2) - this.chunk.firstNoiseZ;
+    const sideLength = this.sideLength;
+    return quartOffsetX >= 0 && quartOffsetZ >= 0 && quartOffsetX < sideLength && quartOffsetZ < sideLength
+      ? this.values[quartOffsetX * sideLength + quartOffsetZ]
+      : this.wrapped.compute(context);
+  }
+}
+
+/** NoiseChunk.Cache2D: remembers the last (x, z) column's value, whatever y it was first computed at. */
+export class Cache2D extends NoiseChunkCache {
+  private lastBlockX = Number.NaN;
+  private lastBlockZ = Number.NaN;
+  private lastValue = 0;
+
+  constructor(chunk: NoiseChunk, wrapped: DensityNode) {
+    super(chunk, "cache_2d", wrapped);
+  }
+
+  compute(context: FunctionContext): number {
+    const blockX = context.blockX;
+    const blockZ = context.blockZ;
+    if (blockX === this.lastBlockX && blockZ === this.lastBlockZ) return this.lastValue;
+    this.lastBlockX = blockX;
+    this.lastBlockZ = blockZ;
+    const value = this.wrapped.compute(context);
+    this.lastValue = value;
+    return value;
+  }
+
+  fillArray(values: Float64Array, provider: ContextProvider): void {
+    this.wrapped.fillArray(values, provider);
+  }
+}
+
+/** NoiseChunk.CacheOnce: one value per interpolation step, one array per array-fill step. */
+export class CacheOnce extends NoiseChunkCache {
+  private lastCounter = 0;
+  private lastArrayCounter = 0;
+  private lastValue = 0;
+  private lastArray: Float64Array | null = null;
+
+  constructor(chunk: NoiseChunk, wrapped: DensityNode) {
+    super(chunk, "cache_once", wrapped);
+  }
+
+  compute(context: FunctionContext): number {
+    const chunk = this.chunk;
+    if (context !== chunk) return this.wrapped.compute(context);
+    if (this.lastArray !== null && this.lastArrayCounter === chunk.arrayInterpolationCounter) {
+      return this.lastArray[chunk.arrayIndex];
+    }
+    if (this.lastCounter === chunk.interpolationCounter) return this.lastValue;
+    this.lastCounter = chunk.interpolationCounter;
+    const value = this.wrapped.compute(context);
+    this.lastValue = value;
+    return value;
+  }
+
+  fillArray(values: Float64Array, provider: ContextProvider): void {
+    const chunk = this.chunk;
+    if (this.lastArray !== null && this.lastArrayCounter === chunk.arrayInterpolationCounter) {
+      values.set(this.lastArray.subarray(0, values.length));
+      return;
+    }
+    this.wrapped.fillArray(values, provider);
+    if (this.lastArray !== null && this.lastArray.length === values.length) this.lastArray.set(values);
+    else this.lastArray = values.slice();
+    this.lastArrayCounter = chunk.arrayInterpolationCounter;
+  }
+}
+
+/** NoiseChunk.CacheAllInCell: every block of the current cell, filled in bulk when the cell is selected. */
+export class CacheAllInCell extends NoiseChunkCache {
+  readonly values: Float64Array;
+
+  constructor(chunk: NoiseChunk, wrapped: DensityNode) {
+    super(chunk, "cache_all_in_cell", wrapped);
+    this.values = new Float64Array(chunk.cellWidth * chunk.cellWidth * chunk.cellHeight);
+  }
+
+  compute(context: FunctionContext): number {
+    const chunk = this.chunk;
+    if (context !== chunk) return this.wrapped.compute(context);
+    if (!chunk.interpolating) throw new Error("Trying to sample interpolator outside the interpolation loop");
+    const inCellX = chunk.inCellX;
+    const inCellY = chunk.inCellY;
+    const inCellZ = chunk.inCellZ;
+    const cellWidth = chunk.cellWidth;
+    const cellHeight = chunk.cellHeight;
+    return inCellX >= 0 && inCellY >= 0 && inCellZ >= 0 && inCellX < cellWidth && inCellY < cellHeight && inCellZ < cellWidth
+      ? this.values[((cellHeight - 1 - inCellY) * cellWidth + inCellX) * cellWidth + inCellZ]
+      : this.wrapped.compute(context);
+  }
+}
