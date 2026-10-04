@@ -1,10 +1,15 @@
-import { generateChunk } from "./generation";
+import {
+  generateChunk,
+  generateChunkColumn,
+  listColumnTransferables,
+} from "./generation";
 import { initializeChunkLight, propagateChunkLight } from "./lighting";
 import {
   createSurroundingsSource,
   lightChunkRegion,
   listRegionTransferables,
 } from "./region-lighting";
+import { lightRegionFromSlabs } from "./region-surroundings";
 import { generateMesh, listTransferables } from "./mesh";
 import { loadTextureArray } from "./texture-array";
 import {
@@ -29,6 +34,12 @@ addEventListener("message", async (event: MessageEvent) => {
       const chunkBuffer = generateChunk(params[0], params[1], params[2], params[3]);
       result = chunkBuffer;
       transfer = [chunkBuffer];
+    } else if (method === "generateChunkColumn") {
+      result = generateChunkColumn(params[0], params[1], params[2], params[3]);
+      transfer = listColumnTransferables(result);
+    } else if (method === "lightRegionFromSlabs") {
+      result = lightRegionFromSlabs(params[0], params[1]);
+      transfer = listRegionTransferables(result);
     } else if (method === "generateMesh") {
       result = generateMesh(
         params[0],
