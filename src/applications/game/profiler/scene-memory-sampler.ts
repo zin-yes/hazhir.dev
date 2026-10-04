@@ -62,8 +62,9 @@ export function collectMeshAttributeByteLengths(scene: THREE.Scene): number[][] 
 
 export interface SceneMemorySources {
   getScene: () => THREE.Scene;
-  getChunks: () => { [chunkName: string]: Uint8Array };
-  getLightChunks: () => { [chunkName: string]: Uint8Array };
+  /** Byte length of each chunk's own block array (shared uniform arrays are not counted). */
+  getChunkDataByteLengths: () => number[];
+  getLightDataByteLengths: () => number[];
   getModifiedChunks: () => Map<string, Map<number, number>>;
   getTextureArrayBytes: () => number;
 }
@@ -72,8 +73,8 @@ export interface SceneMemorySources {
 export function sampleSceneMemory(sources: SceneMemorySources) {
   if (!profiler.enabled) return;
   const gauges = computeSceneMemoryGauges({
-    chunkByteLengths: Object.values(sources.getChunks()).map((chunk) => chunk.byteLength),
-    lightByteLengths: Object.values(sources.getLightChunks()).map((light) => light.byteLength),
+    chunkByteLengths: sources.getChunkDataByteLengths(),
+    lightByteLengths: sources.getLightDataByteLengths(),
     meshAttributeByteLengths: collectMeshAttributeByteLengths(sources.getScene()),
     modifiedBlockCounts: Array.from(sources.getModifiedChunks().values()).map(
       (edits) => edits.size,

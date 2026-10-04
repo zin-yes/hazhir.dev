@@ -53,7 +53,8 @@ const PROFILER_PHASE_NAMES: { [phase in BulkEditPhase]?: string } = {
 
 let openProfilerToken = 0;
 
-function trackPhaseInProfiler(phase: BulkEditPhase, hasStarted: boolean) {
+/** onPhase for applyBlockEdits on the main thread: each light phase becomes a profiler scope. */
+export function trackLightPhaseInProfiler(phase: BulkEditPhase, hasStarted: boolean) {
   const name = PROFILER_PHASE_NAMES[phase];
   if (!name) return;
   if (hasStarted) {
@@ -80,7 +81,7 @@ export function relightAfterBlockChange(
   oldBlock: number,
 ): RelightResult {
   const result = relightAfterSingleBlockWritten(source, x, y, z, oldBlock, {
-    onPhase: profiler.enabled ? trackPhaseInProfiler : undefined,
+    onPhase: profiler.enabled ? trackLightPhaseInProfiler : undefined,
   });
   const { cellsRemoved, cellsLit, cellsVisited } = result.stats;
   if (profiler.enabled) {
