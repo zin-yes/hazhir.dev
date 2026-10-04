@@ -10,4 +10,4 @@ Terralith-inspired, fully deterministic generation: every block is a pure functi
 - `trees/`: pure tree, bush and cactus shape builders. `vegetation/`: where they grow (jittered grid, groves, slope, cold limits, water proximity) and per-column ground cover.
 - `chunk-generator.ts`: assembles a chunk. `spawn-point.ts`: dry start position.
 
-Block art comes from `scripts/block-textures` (`bun run generate:block-textures`).
+Block textures for biome blocks are Minecraft placeholders in `public/game`, to be replaced with original art.
