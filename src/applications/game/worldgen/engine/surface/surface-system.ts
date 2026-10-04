@@ -10,6 +10,8 @@ import {
   startWorkerSection,
 } from "@/applications/game/profiler/worker-recorder";
 import type { ChunkBlocks } from "../chunk";
+import { createColumnMemoizedDensity } from "../density/column-memoization";
+import { DensityNode } from "../density/density-function";
 import type { JsonObject } from "../registry/datapack-loader";
 import { generateClayBands, CLAY_BAND_COUNT } from "./clay-bands";
 import { BiomeTemperatureSampler } from "./biome-temperature";
@@ -18,6 +20,7 @@ import { compileSurfaceRules, NO_RULE_MATCH, SurfaceResultTable, type SurfaceRul
 import type {
   BiomeAtBlock,
   BiomeClimateLookup,
+  DensityPoint,
   SurfaceNoiseRegistry,
   SurfaceNoiseRouter,
   SurfaceNoiseSource,
@@ -82,6 +85,8 @@ export class SurfaceSystem {
   private readonly temperatureSampler: BiomeTemperatureSampler;
   private readonly preliminarySurfaceLevels = new Map<number, number>();
   private preliminaryRouter: SurfaceNoiseRouter | undefined;
+  private preliminaryDensity: SurfaceNoiseRouter["initialDensityWithoutJaggedness"] | undefined;
+  private readonly preliminaryProbe: DensityPoint = { blockX: 0, blockY: 0, blockZ: 0 };
 
   constructor(private readonly config: SurfaceSystemConfig) {
     this.minY = config.minY ?? -64;
@@ -156,6 +161,8 @@ export class SurfaceSystem {
     if (this.preliminaryRouter !== router) {
       this.preliminaryRouter = router;
       this.preliminarySurfaceLevels.clear();
+      const density = router.initialDensityWithoutJaggedness;
+      this.preliminaryDensity = density instanceof DensityNode ? createColumnMemoizedDensity(density) : density;
     }
     const quartAlignedX = (blockX >> 2) << 2;
     const quartAlignedZ = (blockZ >> 2) << 2;
@@ -171,8 +178,13 @@ export class SurfaceSystem {
       startWorkerSection("surface.preliminaryLevel");
     }
     let level = 2147483647;
+    const density = this.preliminaryDensity!;
+    const probe = this.preliminaryProbe;
+    probe.blockX = quartAlignedX;
+    probe.blockZ = quartAlignedZ;
     for (let blockY = this.minY + this.height; blockY >= this.minY; blockY -= PRELIMINARY_SURFACE_CELL_HEIGHT) {
-      if (router.initialDensityWithoutJaggedness.compute({ blockX: quartAlignedX, blockY, blockZ: quartAlignedZ }) > INITIAL_DENSITY_SURFACE_THRESHOLD) {
+      probe.blockY = blockY;
+      if (density.compute(probe) > INITIAL_DENSITY_SURFACE_THRESHOLD) {
         level = blockY;
         break;
       }
