@@ -4,7 +4,14 @@
 // know are called through their own `compute`. The column and point caches of column-memoization.ts become lazily
 // computed closure variables: column values are kept until the evaluated (x, z) changes, point values for one call.
 
-import { DensityNode, type FunctionContext, type StructuralIdLookup, type DensityVisitor } from "./density-function";
+import { NormalNoise } from "../noise/normal-noise";
+import {
+  DensityNode,
+  type DensityVisitor,
+  type FunctionContext,
+  type NormalNoiseSampler,
+  type StructuralIdLookup,
+} from "./density-function";
 import { LastColumnCacheNode, LastPointCacheNode } from "./column-memoization";
 import {
   ClampNode,
@@ -55,6 +62,12 @@ class DensityCodeWriter {
     return `helper${index}`;
   }
 
+  /** A call expression sampling `noise` (unrolled NormalNoise code when available). */
+  private noiseCall(noise: NormalNoiseSampler, x: string, y: string, z: string): string {
+    if (noise instanceof NormalNoise) return `${this.helper(noise.compiledGetValue())}(${x}, ${y}, ${z})`;
+    return `${this.helper(noise)}.getValue(${x}, ${y}, ${z})`;
+  }
+
   private temporary(): string {
     return `value${this.temporaryCount++}`;
   }
@@ -81,7 +94,7 @@ class DensityCodeWriter {
       if (node.noise.noise === null) return "0";
       const result = this.temporary();
       statements.push(
-        `const ${result} = ${this.helper(node.noise.noise)}.getValue(blockX * ${literal(node.xzScale)}, blockY * ${literal(node.yScale)}, blockZ * ${literal(node.xzScale)});`,
+        `const ${result} = ${this.noiseCall(node.noise.noise, `blockX * ${literal(node.xzScale)}`, `blockY * ${literal(node.yScale)}`, `blockZ * ${literal(node.xzScale)}`)};`,
       );
       return result;
     }
@@ -97,16 +110,15 @@ class DensityCodeWriter {
       statements.push(`const ${sampleZ} = blockZ * ${literal(node.xzScale)} + ${shiftZ};`);
       if (node.noise.noise === null) return "0";
       const result = this.temporary();
-      statements.push(`const ${result} = ${this.helper(node.noise.noise)}.getValue(${sampleX}, ${sampleY}, ${sampleZ});`);
+      statements.push(`const ${result} = ${this.noiseCall(node.noise.noise, sampleX, sampleY, sampleZ)};`);
       return result;
     }
     if (node instanceof ShiftNode) {
       if (node.offsetNoise.noise === null) return "0";
-      const noise = this.helper(node.offsetNoise.noise);
       const result = this.temporary();
       const [first, second, third] =
         node.type === "shift_a" ? ["blockX", "0", "blockZ"] : node.type === "shift_b" ? ["blockZ", "blockX", "0"] : ["blockX", "blockY", "blockZ"];
-      statements.push(`const ${result} = ${noise}.getValue(${first} * 0.25, ${second} * 0.25, ${third} * 0.25) * 4;`);
+      statements.push(`const ${result} = ${this.noiseCall(node.offsetNoise.noise, `${first} * 0.25`, `${second} * 0.25`, `${third} * 0.25`)} * 4;`);
       return result;
     }
     if (node instanceof WeirdScaledSamplerNode) {
@@ -116,7 +128,7 @@ class DensityCodeWriter {
       statements.push(`const ${rarity} = ${mapper}(${input});`);
       const result = this.temporary();
       const noiseValue =
-        node.noise.noise === null ? "0" : `${this.helper(node.noise.noise)}.getValue(blockX / ${rarity}, blockY / ${rarity}, blockZ / ${rarity})`;
+        node.noise.noise === null ? "0" : this.noiseCall(node.noise.noise, `blockX / ${rarity}`, `blockY / ${rarity}`, `blockZ / ${rarity}`);
       statements.push(`const ${result} = ${rarity} * Math.abs(${noiseValue});`);
       return result;
     }

@@ -6,6 +6,11 @@ import { ImprovedNoise } from "./improved-noise";
 /** PerlinNoise.ROUND_OFF = 2^25: inputs are wrapped into [-2^24, 2^24] to keep precision far from the origin. */
 const ROUND_OFF = 33554432.0;
 
+function numberLiteral(value: number): string {
+  if (!Number.isFinite(value)) throw new Error(`Noise factor ${value} is not finite`);
+  return Object.is(value, -0) ? "(-0)" : `(${String(value)})`;
+}
+
 /** Below this magnitude `value / ROUND_OFF + 0.5` stays inside (0.25, 0.75), so wrap returns the value unchanged. */
 const WRAP_IDENTITY_LIMIT = 8388608.0;
 
@@ -147,6 +152,23 @@ export class PerlinNoise {
       total += amplitudes[index] * octaveValue * valueFactors[index];
     }
     return total;
+  }
+
+  /**
+   * Source of a statement block adding this noise's getValue at (`xName`, `yName`, `zName`) into `totalName`, with the
+   * octaves unrolled and their factors as literals (same operations and order as getValue). Octave i is read from
+   * `octaveArrayName[octaveOffset + i]`; returns the octaves to put there.
+   */
+  unrolledSource(totalName: string, xName: string, yName: string, zName: string, octaveArrayName: string, octaveOffset: number): { source: string; octaves: ImprovedNoise[] } {
+    const lines: string[] = [`let ${totalName} = 0;`];
+    for (let index = 0; index < this.activeNoises.length; index++) {
+      const inputFactor = numberLiteral(this.activeInputFactors[index]!);
+      const octave = `${octaveArrayName}[${octaveOffset + index}]`;
+      lines.push(
+        `${totalName} += ${numberLiteral(this.activeAmplitudes[index]!)} * ${octave}.noise(wrap(${xName} * ${inputFactor}), wrap(${yName} * ${inputFactor}), wrap(${zName} * ${inputFactor})) * ${numberLiteral(this.activeValueFactors[index]!)};`,
+      );
+    }
+    return { source: lines.join("\n"), octaves: [...this.activeNoises] };
   }
 
   /** Java's deprecated `getValue(x, y, z, yScale, yMax, useFixedY)`. */
