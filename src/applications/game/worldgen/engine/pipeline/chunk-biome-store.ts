@@ -174,6 +174,14 @@ export class ChunkBiomeStore {
     }
   }
 
+  /** Whether the chunk holding this quart column already has its biome grid (no climate sampling needed). */
+  hasQuartColumn(quartX: number, quartZ: number): boolean {
+    const chunkX = quartX >> 2;
+    const chunkZ = quartZ >> 2;
+    if (chunkX === this.lastGridChunkX && chunkZ === this.lastGridChunkZ) return true;
+    return this.grids.has(packChunkColumnKey(chunkX, chunkZ));
+  }
+
   /** ChunkAccess.getNoiseBiome: y is clamped into the chunk's section range, x and z select the chunk. */
   rawBiomeAtQuart(quartX: number, quartY: number, quartZ: number): string {
     const chunkX = quartX >> 2;

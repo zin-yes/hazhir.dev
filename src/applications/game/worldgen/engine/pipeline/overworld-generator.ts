@@ -72,7 +72,7 @@ export function createOverworldGenerator(params: OverworldGeneratorParams): Over
     maxCachedChunks: MAX_CACHED_BIOME_CHUNKS,
   });
   const rawBiomeAtQuart = (quartX: number, quartY: number, quartZ: number) => biomeStore.rawBiomeAtQuart(quartX, quartY, quartZ);
-  const biomeManager = new BiomeManager(rawBiomeAtQuart, seed);
+  const biomeManager = new BiomeManager(rawBiomeAtQuart, seed, (quartX, quartZ) => biomeStore.hasQuartColumn(quartX, quartZ));
   const biomeAt = (blockX: number, blockY: number, blockZ: number) => biomeManager.getBiome(blockX, blockY, blockZ);
 
   const palette = new BlockPalette();

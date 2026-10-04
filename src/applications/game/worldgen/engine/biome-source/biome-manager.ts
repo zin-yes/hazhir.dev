@@ -4,6 +4,8 @@ import { sha256 } from "../random";
 import { cellFiddles, computeCellFiddles } from "./linear-congruential-generator";
 
 export type RawBiomeAtQuart = (quartX: number, quartY: number, quartZ: number) => string;
+/** Whether raw biomes of the chunk holding a quart column are already at hand (reading them costs no generation). */
+export type IsQuartColumnCached = (quartX: number, quartZ: number) => boolean;
 
 /** BiomeManager.obfuscateSeed: first 8 bytes (little-endian) of SHA-256 over the seed's 8 little-endian bytes, as a signed long. */
 export function obfuscateSeed(seed: bigint): bigint {
@@ -47,9 +49,14 @@ export class BiomeManager {
   private readonly cubeBiome: string[] = new Array<string>(1 << CUBE_CACHE_BITS).fill("");
 
   /** @param seed the WORLD seed; it is obfuscated here exactly as vanilla callers do before constructing BiomeManager. */
+  /**
+   * @param isQuartColumnCached lets the uniform-cube shortcut skip cubes whose candidates span chunks with no biomes
+   * yet, so scattered lookups never generate more chunks than the plain zoom would.
+   */
   constructor(
     private readonly rawBiomeAtQuart: RawBiomeAtQuart,
     seed: bigint,
+    private readonly isQuartColumnCached?: IsQuartColumnCached,
   ) {
     const zoomSeed = BigInt.asUintN(64, obfuscateSeed(seed));
     this.zoomSeedHigh = Number(zoomSeed >> BigInt(32)) | 0;
@@ -85,6 +92,8 @@ export class BiomeManager {
       this.cubeY[slot] !== baseQuartY ||
       this.cubeZ[slot] !== baseQuartZ
     ) {
+      const spansSeveralChunks = (baseQuartX & 3) === 3 || (baseQuartZ & 3) === 3;
+      if (spansSeveralChunks && !this.areCandidateChunksCached(baseQuartX, baseQuartZ)) return undefined;
       const firstBiome = this.rawBiomeAtQuart(baseQuartX, baseQuartY, baseQuartZ);
       let isUniform = true;
       for (let candidate = 1; candidate < 8 && isUniform; candidate++) {
@@ -102,6 +111,17 @@ export class BiomeManager {
       this.cubeBiome[slot] = firstBiome;
     }
     return this.cubeState[slot] === CUBE_UNIFORM ? this.cubeBiome[slot] : undefined;
+  }
+
+  private areCandidateChunksCached(baseQuartX: number, baseQuartZ: number): boolean {
+    const isCached = this.isQuartColumnCached;
+    if (isCached === undefined) return true;
+    return (
+      isCached(baseQuartX, baseQuartZ) &&
+      isCached(baseQuartX + 1, baseQuartZ) &&
+      isCached(baseQuartX, baseQuartZ + 1) &&
+      isCached(baseQuartX + 1, baseQuartZ + 1)
+    );
   }
 
   getBiome(blockX: number, blockY: number, blockZ: number): string {

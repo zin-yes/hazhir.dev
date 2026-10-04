@@ -43,6 +43,11 @@ export class BoundedLruCache<Key, Value> {
     }
   }
 
+  /** Presence check that does not count as a read. */
+  has(key: Key): boolean {
+    return this.entries.has(key);
+  }
+
   get size(): number {
     return this.entries.size;
   }
