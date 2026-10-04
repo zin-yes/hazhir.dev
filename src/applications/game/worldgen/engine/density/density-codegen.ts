@@ -54,7 +54,7 @@ class DensityCodeWriter {
   readonly pointCacheNames: string[] = [];
   readonly columnCacheIndices: number[] = [];
   readonly pointCacheIndices: number[] = [];
-  private readonly cacheFunctionByNode = new Map<DensityNode, string>();
+  private readonly cacheFunctionByNode = new Map<DensityNode, { name: string; index: number }>();
   private temporaryCount = 0;
 
   helper(value: unknown): string {
@@ -97,8 +97,8 @@ class DensityCodeWriter {
     if (node instanceof HolderNode) return this.emit(node.target, statements);
     if (node instanceof MarkerNode) return this.emit(node.wrapped, statements);
     if (node instanceof BlendDensityNode) return this.emit(node.input, statements);
-    if (node instanceof LastColumnCacheNode) return `${this.cachedFunction(node, node.wrapped, "column")}(blockX, blockY, blockZ)`;
-    if (node instanceof LastPointCacheNode) return `${this.cachedFunction(node, node.wrapped, "point")}(blockX, blockY, blockZ)`;
+    if (node instanceof LastColumnCacheNode) return this.cachedValue(node, node.wrapped, "column", statements);
+    if (node instanceof LastPointCacheNode) return this.cachedValue(node, node.wrapped, "point", statements);
     if (node instanceof YClampedGradientNode) {
       const result = this.temporary();
       statements.push(
@@ -236,23 +236,34 @@ class DensityCodeWriter {
   }
 
   /** A closure-level lazily computed value: per evaluated column, or per evaluated point. */
-  private cachedFunction(cacheNode: DensityNode, wrapped: DensityNode, scope: "column" | "point"): string {
+  /**
+   * Reads a cached value, filling it first when needed. The fill function stores into the typed array and returns
+   * nothing: V8 would box a returned double.
+   */
+  private cachedValue(cacheNode: DensityNode, wrapped: DensityNode, scope: "column" | "point", statements: string[]): string {
+    const { name, index } = this.cachedFunction(cacheNode, wrapped, scope);
+    const result = this.temporary();
+    statements.push(`if (cacheIsValid[${index}] !== 1) ${name}(blockX, blockY, blockZ);`);
+    statements.push(`const ${result} = cachedValues[${index}];`);
+    return result;
+  }
+
+  private cachedFunction(cacheNode: DensityNode, wrapped: DensityNode, scope: "column" | "point"): { name: string; index: number } {
     const existing = this.cacheFunctionByNode.get(cacheNode);
     if (existing !== undefined) return existing;
     const index = this.cachedFunctionSources.length;
     const name = `${scope}Cache${index}`;
-    this.cacheFunctionByNode.set(cacheNode, name);
+    this.cacheFunctionByNode.set(cacheNode, { name, index });
     this.cachedFunctionSources.push("");
     (scope === "column" ? this.columnCacheNames : this.pointCacheNames).push(name);
     const statements: string[] = [];
     const value = this.emit(wrapped, statements);
     // Cached values live in typed arrays: V8 boxes doubles held in closure variables, typed arrays store them raw.
     this.cachedFunctionSources[index] =
-      `function ${name}(blockX, blockY, blockZ) {\n` +
-      `if (cacheIsValid[${index}] === 1) return cachedValues[${index}];\n${statements.join("\n")}\n` +
-      `cachedValues[${index}] = ${value};\ncacheIsValid[${index}] = 1;\nreturn cachedValues[${index}];\n}`;
+      `function ${name}(blockX, blockY, blockZ) {\n${statements.join("\n")}\n` +
+      `cachedValues[${index}] = ${value};\ncacheIsValid[${index}] = 1;\n}`;
     (scope === "column" ? this.columnCacheIndices : this.pointCacheIndices).push(index);
-    return name;
+    return { name, index };
   }
 }
 
