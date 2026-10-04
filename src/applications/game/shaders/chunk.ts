@@ -138,6 +138,7 @@ void main() {
 
   if (textureColor.a < 0.5) discard;
 
-  gl_FragColor = vec4((vec4(lighting, 1.0) * textureColor).rgb, textureColor.a);
+  vec3 displayColor = linearToOutputTexel(textureColor).rgb;
+  gl_FragColor = vec4(lighting * displayColor, textureColor.a);
 }
 `;
