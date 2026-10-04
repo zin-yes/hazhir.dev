@@ -12,6 +12,7 @@ import {
 import { MarkerNode } from "../density/nodes/structural-nodes";
 import type { NoiseRouter } from "../density/router-wiring";
 import { CacheAllInCell, Cache2D, CacheOnce, FlatCache, NoiseInterpolator } from "./noise-chunk-caches";
+import { cellFillProgramFor } from "./cell-fill-compiler";
 import { cornerColumnSamplerFor } from "./corner-column-sampler";
 import { getNoiseChunkTemplate, type NoiseChunkTemplate } from "./noise-chunk-template";
 
@@ -132,6 +133,25 @@ export class NoiseChunk implements FunctionContext, ContextProvider {
       if (interpolator.templateWrapped === undefined) continue;
       interpolator.cornerSampler = cornerColumnSamplerFor(interpolator.templateWrapped, this.cellNoiseMinY, this.cellHeight, this.cellCountY + 1);
     }
+    if (this.finalDensityForFill instanceof CacheAllInCell) this.attachCompiledFill(this.finalDensityForFill, template.finalDensityForFill, wiredFields);
+  }
+
+  private attachCompiledFill(cellCache: CacheAllInCell, templateRoot: DensityNode, wiredFields: ReadonlySet<string>): void {
+    const program = cellFillProgramFor(templateRoot, cellCache.wrapped, this.cellWidth, this.cellHeight, [...wiredFields].join(","));
+    if (program === null) return;
+    const interpolatorByTemplate = new Map<DensityNode, NoiseInterpolator>();
+    for (const interpolator of this.interpolators) {
+      if (interpolator.templateWrapped !== undefined) interpolatorByTemplate.set(interpolator.templateWrapped, interpolator);
+    }
+    const interpolators: NoiseInterpolator[] = [];
+    for (const interpolatorTemplate of program.interpolatorTemplates) {
+      const interpolator = interpolatorByTemplate.get(interpolatorTemplate);
+      if (interpolator === undefined) return;
+      interpolators.push(interpolator);
+    }
+    cellCache.compiledFill = program.fill;
+    cellCache.compiledFillInterpolators = interpolators;
+    cellCache.compiledFillCorners = new Float64Array(interpolators.length * 8);
   }
 
   get blockX(): number {
@@ -228,7 +248,17 @@ export class NoiseChunk implements FunctionContext, ContextProvider {
     this.cellStartBlockY = (cellY + this.cellNoiseMinY) * this.cellHeight;
     this.cellStartBlockZ = (this.firstCellZ + cellOffsetZ) * this.cellWidth;
     this.arrayInterpolationCounter++;
-    for (const cellCache of this.cellCaches) cellCache.wrapped.fillArray(cellCache.values, this);
+    for (const cellCache of this.cellCaches) {
+      const compiledFill = cellCache.compiledFill;
+      if (compiledFill === undefined) {
+        cellCache.wrapped.fillArray(cellCache.values, this);
+        continue;
+      }
+      const corners = cellCache.compiledFillCorners!;
+      const interpolators = cellCache.compiledFillInterpolators;
+      for (let index = 0; index < interpolators.length; index++) interpolators[index]!.writeCorners(corners, index * 8);
+      compiledFill(cellCache.values, corners, this.cellStartBlockY);
+    }
     this.arrayInterpolationCounter++;
     this.fillingCell = false;
   }

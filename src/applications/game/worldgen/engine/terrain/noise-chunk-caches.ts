@@ -13,6 +13,7 @@ import {
 } from "../density/density-function";
 import { MarkerNode, type MarkerType } from "../density/nodes/structural-nodes";
 import { densityCacheTypeIndex, noteDensityCacheHit, noteDensityEvaluation } from "../density/density-evaluation-counter";
+import type { CompiledCellFill } from "./cell-fill-compiler";
 import type { CornerColumnSampler } from "./corner-column-sampler";
 import type { NoiseChunk } from "./noise-chunk";
 
@@ -87,6 +88,18 @@ export class NoiseInterpolator extends NoiseChunkCache {
     const slice: Float64Array[] = [];
     for (let index = 0; index <= cellCountXZ; index++) slice.push(new Float64Array(cellCountY + 1));
     return slice;
+  }
+
+  /** The selected cell's corners in lerp3 order: 000, 100, 010, 110, 001, 101, 011, 111. */
+  writeCorners(target: Float64Array, offset: number): void {
+    target[offset] = this.noise000;
+    target[offset + 1] = this.noise100;
+    target[offset + 2] = this.noise010;
+    target[offset + 3] = this.noise110;
+    target[offset + 4] = this.noise001;
+    target[offset + 5] = this.noise101;
+    target[offset + 6] = this.noise011;
+    target[offset + 7] = this.noise111;
   }
 
   selectCellYZ(cellY: number, cellZ: number): void {
@@ -261,6 +274,10 @@ export class CacheOnce extends NoiseChunkCache {
 /** NoiseChunk.CacheAllInCell: every block of the current cell, filled in bulk when the cell is selected. */
 export class CacheAllInCell extends NoiseChunkCache {
   readonly values: Float64Array;
+  /** Compiled whole-cell fill and the interpolators whose corners it reads (see cell-fill-compiler.ts). */
+  compiledFill: CompiledCellFill | undefined;
+  compiledFillInterpolators: NoiseInterpolator[] = [];
+  compiledFillCorners: Float64Array | undefined;
 
   constructor(chunk: NoiseChunk, wrapped: DensityNode) {
     super(chunk, "cache_all_in_cell", wrapped);
