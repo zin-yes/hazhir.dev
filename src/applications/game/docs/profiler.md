@@ -34,6 +34,16 @@ Frames are tracked as intervals between render callbacks. Every main-thread scop
 
 Targets (ranked list per group plus hints), Frames (interval, busy and GPU graphs, percentiles, worst frames), Main (scope tree), Workers (pool utilization, queue depth, per-method sections and efficiency), GPU (frame and pass time, draw calls, triangles, driver CPU, uploads), Transfers (bytes, serialization, latencies), Memory, Meshes (heaviest chunks, vertex distribution), Events.
 
+### Chunk pipeline metrics
+
+Streaming, lighting and meshing run through `world/chunk-pipeline.ts` (see `world/README.md`).
+
+- Latency from the moment a chunk was requested: `chunk.pipeline.generate`, `chunk.pipeline.light`, `chunk.pipeline.total` (first mesh on screen); `chunk.load.total` is the start area; `chunk.pipeline.edit` is an edit until its last rebuilt mesh.
+- Worker methods: `generation.generateChunkColumn` (one call per column), `lighting.lightRegionFromSlabs` (one call per column), `mesh.generateMesh`.
+- Counters: `game.chunks.generated`, `game.chunks.lit`, `game.chunks.unloaded`, `game.chunks.skippedAboveSurface`, `game.mesh.builds`, `game.mesh.skippedUniform` (all air or buried, no worker call), `game.mesh.staleDropped`, `game.light.regionRetries` (light thrown away because an edit landed meanwhile), `game.streaming.plannerOperations`. Builds per chunk on screen is `game.mesh.builds / game.chunks.lit`.
+- Bytes and gauges: `bytes.light.surroundingSlabs`, `queue.chunks.columnGenerations`, `queue.chunks.lightings`, `queue.chunks.meshes`, `game.chunks.waitingForMesh`.
+- Main-thread scopes: `main.interval.chunkStreaming` (with `main.chunk.planStreaming`), `main.light.collectRegionInputs`, `main.light.mergeRegion`, `main.chunk.extractBorders`, `main.light.relight` (edits), `main.edit.sphere`.
+
 ### Light tab
 
 Follows every block edit from the click to the last re-meshed chunk on screen. Each edit is one of `lightPlace`, `lightBreak`, `blockPlace`, `blockBreak`. The tab and the markdown report show per kind: end to end time, first mesh on screen, relight (light data final) and remesh (relight to last mesh), then the pipeline stages with their share of the total, plus cells and chunks touched per edit. Stage timers are `light.stage.<kind>.<stage>`, end to end timers `light.edit.<kind>.<total|firstMesh|relight|remesh>`, and a hint fires when the p95 is over 40 ms. Code: `light-trace.ts`, `light-report.ts`, `light-hints.ts`.
@@ -44,7 +54,7 @@ Header buttons: Pause, Reset, Save to `.profiles`, Copy markdown, Download JSON,
 
 Creates a throwaway in-memory world (default seed `20240607`) and runs five phases, each profiled on its own. The world is never saved or listed, and the game returns to the title screen afterwards.
 
-1. `world-load`: cold start until every initial mesh is on screen, including the staged load timings.
+1. `world-load`: cold start until the start area (every drawn chunk within 3 chunks of the player) is on screen; the rest of the render distance keeps streaming in the later phases.
 2. `fly`: straight flight at 12 blocks per second so new chunks stream in (default 20 s).
 3. `hover`: stationary, camera turning, steady-state rendering after a 3 s warmup (default 8 s).
 4. `edit`: a burst of place and break edits, alternating stone and light sources (default 8 s).
