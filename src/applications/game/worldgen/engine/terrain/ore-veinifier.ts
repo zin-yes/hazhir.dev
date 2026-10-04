@@ -74,8 +74,10 @@ export class OreVeinifier {
   }
 
   private computeVein(context: FunctionContext): number {
-    const toggle = this.veinToggle.compute(context);
     const blockY = context.blockY;
+    // Outside both vein height ranges the answer is NO_VEIN whatever the toggle (an interpolated read, no side effects).
+    if (blockY > COPPER_VEIN.maxY || blockY < IRON_VEIN.minY) return NO_VEIN;
+    const toggle = this.veinToggle.compute(context);
     const vein = toggle > 0 ? COPPER_VEIN : IRON_VEIN;
     const magnitude = Math.abs(toggle);
     const distanceToTop = vein.maxY - blockY;

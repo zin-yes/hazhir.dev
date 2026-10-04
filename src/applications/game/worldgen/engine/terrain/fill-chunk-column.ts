@@ -13,6 +13,7 @@ import type { NoiseRouter } from "../density/router-wiring";
 import type { PositionalRandomFactory } from "../random";
 import { NoiseBasedAquifer, NULL_SUBSTANCE } from "./aquifer";
 import { NoiseChunk } from "./noise-chunk";
+import { CacheAllInCell } from "./noise-chunk-caches";
 import { NO_VEIN, OreVeinifier } from "./ore-veinifier";
 import { getPreliminarySurfaceLevelCache } from "./preliminary-surface-level";
 import { BLOCK_AIR, BLOCK_DEFAULT_BLOCK, BLOCK_DEFAULT_FLUID, BLOCK_LAVA } from "./terrain-blocks";
@@ -227,6 +228,8 @@ interface InterpolationSettings {
 function interpolateColumn(noiseChunk: NoiseChunk, settings: InterpolationSettings): Uint8Array {
   const { aquifer, oreVeinifier, minY, height, seaLevel, chunkMinBlockX, chunkMinBlockZ, isProfiling } = settings;
   const density = noiseChunk.finalDensityForFill;
+  // doFill reads the cache_all_in_cell wrapper of the final density; its values are filled when a cell is selected.
+  const cellValues = density instanceof CacheAllInCell ? density.values : undefined;
   const cellWidth = noiseChunk.cellWidth;
   const cellHeight = noiseChunk.cellHeight;
   const cellsPerChunkSide = 16 / cellWidth;
@@ -253,18 +256,21 @@ function interpolateColumn(noiseChunk: NoiseChunk, settings: InterpolationSettin
           const blockY = (minCellY + cellY) * cellHeight + yInCell;
           noiseChunk.updateForY(blockY, yInCell / cellHeight);
           const rowOffset = (blockY - minY) * 256;
+          const fluidWithoutAquifer = fluidAt(blockY, seaLevel);
+          const cellRowStart = (cellHeight - 1 - yInCell) * cellWidth;
           for (let xInCell = 0; xInCell < cellWidth; xInCell++) {
             const localX = cellX * cellWidth + xInCell;
             noiseChunk.updateForX(chunkMinBlockX + localX, xInCell / cellWidth);
+            const cellLineStart = (cellRowStart + xInCell) * cellWidth;
             for (let zInCell = 0; zInCell < cellWidth; zInCell++) {
               const localZ = cellZ * cellWidth + zInCell;
               noiseChunk.updateForZ(chunkMinBlockZ + localZ, zInCell / cellWidth);
-              const densityValue = density.compute(noiseChunk);
+              const densityValue = cellValues === undefined ? density.compute(noiseChunk) : cellValues[cellLineStart + zInCell]!;
               let symbol: number;
               if (aquifer === undefined) {
-                symbol = densityValue > 0 ? BLOCK_DEFAULT_BLOCK : fluidAt(blockY, seaLevel);
+                symbol = densityValue > 0 ? BLOCK_DEFAULT_BLOCK : fluidWithoutAquifer;
               } else {
-                symbol = aquifer.computeSubstance(noiseChunk, densityValue);
+                symbol = densityValue > 0 ? NULL_SUBSTANCE : aquifer.computeSubstance(noiseChunk, densityValue);
                 if (symbol === NULL_SUBSTANCE) {
                   symbol = oreVeinifier === undefined ? NO_VEIN : oreVeinifier.compute(noiseChunk);
                   if (symbol === NO_VEIN) symbol = BLOCK_DEFAULT_BLOCK;
