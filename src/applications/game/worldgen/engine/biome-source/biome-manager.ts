@@ -24,6 +24,13 @@ export function obfuscateSeed(seed: bigint): bigint {
 // neighbouring blocks (and the 8 candidates of one block) share them. A direct-mapped cache keeps the results.
 const FIDDLE_CACHE_BITS = 16;
 const FIDDLE_CACHE_MASK = (1 << FIDDLE_CACHE_BITS) - 1;
+// When the 8 candidate cells of a block hold one biome, that biome is the answer whatever the fiddled distances. A
+// direct-mapped cache remembers, per 2x2x2 candidate cube, whether it is uniform (shared by the 64 blocks it serves).
+const CUBE_CACHE_BITS = 14;
+const CUBE_CACHE_MASK = (1 << CUBE_CACHE_BITS) - 1;
+const CUBE_UNKNOWN = 0;
+const CUBE_UNIFORM = 1;
+const CUBE_MIXED = 2;
 
 export class BiomeManager {
   private readonly zoomSeedHigh: number;
@@ -33,6 +40,11 @@ export class BiomeManager {
   private readonly cachedCellZ = new Int32Array(1 << FIDDLE_CACHE_BITS);
   private readonly cachedCellIsFilled = new Uint8Array(1 << FIDDLE_CACHE_BITS);
   private readonly cachedFiddles = new Float64Array(3 << FIDDLE_CACHE_BITS);
+  private readonly cubeX = new Int32Array(1 << CUBE_CACHE_BITS);
+  private readonly cubeY = new Int32Array(1 << CUBE_CACHE_BITS);
+  private readonly cubeZ = new Int32Array(1 << CUBE_CACHE_BITS);
+  private readonly cubeState = new Uint8Array(1 << CUBE_CACHE_BITS);
+  private readonly cubeBiome: string[] = new Array<string>(1 << CUBE_CACHE_BITS).fill("");
 
   /** @param seed the WORLD seed; it is obfuscated here exactly as vanilla callers do before constructing BiomeManager. */
   constructor(
@@ -64,6 +76,34 @@ export class BiomeManager {
     return slot * 3;
   }
 
+  /** The biome every candidate cell of the cube holds, or undefined when they differ. */
+  private uniformCubeBiome(baseQuartX: number, baseQuartY: number, baseQuartZ: number): string | undefined {
+    const slot = (Math.imul(baseQuartX, 73856093) ^ Math.imul(baseQuartY, 19349663) ^ Math.imul(baseQuartZ, 83492791)) & CUBE_CACHE_MASK;
+    if (
+      this.cubeState[slot] === CUBE_UNKNOWN ||
+      this.cubeX[slot] !== baseQuartX ||
+      this.cubeY[slot] !== baseQuartY ||
+      this.cubeZ[slot] !== baseQuartZ
+    ) {
+      const firstBiome = this.rawBiomeAtQuart(baseQuartX, baseQuartY, baseQuartZ);
+      let isUniform = true;
+      for (let candidate = 1; candidate < 8 && isUniform; candidate++) {
+        const candidateBiome = this.rawBiomeAtQuart(
+          (candidate & 4) === 0 ? baseQuartX : baseQuartX + 1,
+          (candidate & 2) === 0 ? baseQuartY : baseQuartY + 1,
+          (candidate & 1) === 0 ? baseQuartZ : baseQuartZ + 1,
+        );
+        isUniform = candidateBiome === firstBiome;
+      }
+      this.cubeX[slot] = baseQuartX;
+      this.cubeY[slot] = baseQuartY;
+      this.cubeZ[slot] = baseQuartZ;
+      this.cubeState[slot] = isUniform ? CUBE_UNIFORM : CUBE_MIXED;
+      this.cubeBiome[slot] = firstBiome;
+    }
+    return this.cubeState[slot] === CUBE_UNIFORM ? this.cubeBiome[slot] : undefined;
+  }
+
   getBiome(blockX: number, blockY: number, blockZ: number): string {
     const shiftedX = blockX - 2;
     const shiftedY = blockY - 2;
@@ -71,6 +111,8 @@ export class BiomeManager {
     const baseQuartX = shiftedX >> 2;
     const baseQuartY = shiftedY >> 2;
     const baseQuartZ = shiftedZ >> 2;
+    const uniformBiome = this.uniformCubeBiome(baseQuartX, baseQuartY, baseQuartZ);
+    if (uniformBiome !== undefined) return uniformBiome;
     const fractionX = (shiftedX & 3) / 4;
     const fractionY = (shiftedY & 3) / 4;
     const fractionZ = (shiftedZ & 3) / 4;
