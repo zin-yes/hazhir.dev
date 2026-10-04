@@ -44,4 +44,17 @@ describe("AffinityQueues", () => {
     queues.schedule(230, 8);
     expect(queues.takeFor(1)).toBe(110);
   });
+
+  test("an idle worker takes over a whole tile, but splits off single keys of the tile its owner is working on", () => {
+    const tileOf = (key: number) => Math.floor(key / 10);
+    const queues = new AffinityQueues(2, () => 0, 2, tileOf);
+    for (const key of [10, 11, 12, 20, 21, 22]) queues.schedule(key, key / 10);
+    expect(queues.takeFor(0)).toBe(10);
+    expect(queues.takeFor(1)).toBe(11);
+    expect(queues.takeFor(1)).toBe(12);
+    expect(queues.takeFor(1)).toBe(20);
+    expect(queues.takeFor(0)).toBe(21);
+    expect(queues.takeFor(1)).toBe(22);
+    expect(queues.size).toBe(0);
+  });
 });
