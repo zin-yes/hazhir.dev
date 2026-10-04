@@ -11,7 +11,7 @@ export class AffinityQueues {
   constructor(
     readonly workerCount: number,
     private readonly preferredWorkerOf: (key: number) => number,
-    private readonly maxPriorityGapForAffinity = Number.POSITIVE_INFINITY,
+    public maxPriorityGapForAffinity = Number.POSITIVE_INFINITY,
   ) {
     this.queues = Array.from({ length: workerCount }, () => new PriorityScheduler<number>());
   }

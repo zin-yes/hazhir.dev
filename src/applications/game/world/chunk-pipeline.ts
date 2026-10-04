@@ -69,8 +69,12 @@ const REPRIORITIZE_TURN_COSINE = Math.cos((30 * Math.PI) / 180);
 /** Columns examined per lighting dispatch while skipping ones next to a column being lit. */
 const MAX_LIGHTING_CANDIDATES_PER_DISPATCH = 16;
 const MAX_GENERATION_ATTEMPTS = 3;
-/** A generation worker runs another worker's column instead of its own when that column is this much nearer. */
-const MAX_PRIORITY_GAP_FOR_GENERATION_AFFINITY = 2;
+/**
+ * A generation worker runs another worker's column instead of its own when that column is this much nearer.
+ * Tight while the start area loads (nearest first matters most), looser afterwards (worker caches matter more).
+ */
+const START_AREA_GENERATION_AFFINITY_GAP = 0.75;
+const STREAMING_GENERATION_AFFINITY_GAP = 2;
 const NO_FORWARD: PlannerForwardVector = { x: 0, y: 0, z: 0 };
 
 export interface ChunkPipelineOptions {
@@ -154,7 +158,7 @@ export class ChunkPipeline {
     this.generationQueues = new AffinityQueues(options.generation.workerCount, (columnKey) => {
       const column = unpackColumnKey(columnKey, this.columnScratch);
       return preferredWorker(column.chunkX, column.chunkZ);
-    }, MAX_PRIORITY_GAP_FOR_GENERATION_AFFINITY);
+    }, START_AREA_GENERATION_AFFINITY_GAP);
     this.generationWorkerBusy = new Array(options.generation.workerCount).fill(false);
     this.meshes = new MeshCoordinator(this.store, options.meshing, {
       priorityOf: (key) => this.planner.priorityOfKey(key),
@@ -351,6 +355,7 @@ export class ChunkPipeline {
       targetKeys,
       (fractions) => this.options.events.onStartAreaProgress?.(fractions),
       () => {
+        this.generationQueues.maxPriorityGapForAffinity = STREAMING_GENERATION_AFFINITY_GAP;
         profiler.recordTimer("chunk.load.total", profiler.now() - startedAtMs, "latency");
         this.options.events.onStartAreaReady?.();
       },
