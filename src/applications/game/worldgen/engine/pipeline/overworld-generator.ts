@@ -19,7 +19,8 @@ import { runStagesWithProfiling } from "./profiled-stage-runner";
 import { readOverworldSettings, type OverworldSettings } from "./noise-settings-reader";
 
 const MAX_CACHED_COLUMNS = 64;
-const MAX_CACHED_BIOME_CHUNKS = 64;
+// A biome grid is about 3 KB; decoration and surface rules read biomes a few chunks around every base column.
+const MAX_CACHED_BIOME_CHUNKS = 1024;
 
 export type HeightmapType = "WORLD_SURFACE_WG" | "OCEAN_FLOOR_WG";
 

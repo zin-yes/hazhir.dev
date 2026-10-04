@@ -19,6 +19,11 @@ import type { MultiNoiseBiomeSource } from "../biome-source";
 import { BoundedLruCache } from "./bounded-lru-cache";
 
 const QUARTS_PER_CHUNK_SIDE = 4;
+
+/** Packs chunk coordinates (well inside +-2^21 for a 30M block world) into one exact number. */
+function chunkColumnKey(chunkX: number, chunkZ: number): number {
+  return (chunkX + 0x200000) * 0x400000 + (chunkZ + 0x200000);
+}
 const CLIMATE_FIELDS = ["temperature", "vegetation", "continents", "erosion", "depth", "ridges"] as const;
 /**
  * Vanilla's last-leaf hint carries over from whatever chunk the worker thread sampled before, which is unknowable.
@@ -30,43 +35,34 @@ const PRIMING_TARGET: TargetPoint = { temperature: 90000, humidity: 90000, conti
 
 class ChunkBiomeGrid {
   private readonly biomeIndices: Uint16Array;
-  private readonly temperature: DensityNode;
-  private readonly humidity: DensityNode;
-  private readonly continentalness: DensityNode;
-  private readonly erosion: DensityNode;
-  private readonly depth: DensityNode;
-  private readonly weirdness: DensityNode;
 
   constructor(
     private readonly chunkX: number,
     private readonly chunkZ: number,
     private readonly quartYCount: number,
     private readonly minQuartY: number,
-    router: NoiseRouter,
-    minY: number,
-    height: number,
     private readonly biomeSource: MultiNoiseBiomeSource,
     private readonly internBiome: (biomeId: string) => number,
   ) {
     this.biomeIndices = new Uint16Array(QUARTS_PER_CHUNK_SIDE * QUARTS_PER_CHUNK_SIDE * quartYCount);
+  }
+
+  /** Mirrors ChunkAccess.fillBiomesFromNoise. Cell layout: (quartY * 4 + localQuartZ) * 4 + localQuartX. */
+  fill(router: NoiseRouter, minY: number, height: number): void {
     const noiseChunk = new NoiseChunk(router, {
       cellCountXZ: 4,
-      firstBlockX: chunkX * 16,
-      firstBlockZ: chunkZ * 16,
+      firstBlockX: this.chunkX * 16,
+      firstBlockZ: this.chunkZ * 16,
       minY,
       height,
       wiredRouterFields: CLIMATE_FIELDS,
     });
-    this.temperature = noiseChunk.router.temperature!;
-    this.humidity = noiseChunk.router.vegetation!;
-    this.continentalness = noiseChunk.router.continents!;
-    this.erosion = noiseChunk.router.erosion!;
-    this.depth = noiseChunk.router.depth!;
-    this.weirdness = noiseChunk.router.ridges!;
-  }
-
-  /** Mirrors ChunkAccess.fillBiomesFromNoise. Cell layout: (quartY * 4 + localQuartZ) * 4 + localQuartX. */
-  fill(): void {
+    const temperature = noiseChunk.router.temperature!;
+    const humidity = noiseChunk.router.vegetation!;
+    const continentalness = noiseChunk.router.continents!;
+    const erosion = noiseChunk.router.erosion!;
+    const depth = noiseChunk.router.depth!;
+    const weirdness = noiseChunk.router.ridges!;
     const firstQuartX = this.chunkX * QUARTS_PER_CHUNK_SIDE;
     const firstQuartZ = this.chunkZ * QUARTS_PER_CHUNK_SIDE;
     const isProfiling = isWorkerProfiling();
@@ -82,12 +78,12 @@ class ChunkBiomeGrid {
             const context = new SinglePointContext(quartX << 2, quartY << 2, quartZ << 2);
             if (isProfiling) startWorkerSampledSection("biome.sampleClimate", CLIMATE_SAMPLE_EVERY);
             const target: TargetPoint = {
-              temperature: quantizeClimateCoordinate(this.temperature.compute(context)),
-              humidity: quantizeClimateCoordinate(this.humidity.compute(context)),
-              continentalness: quantizeClimateCoordinate(this.continentalness.compute(context)),
-              erosion: quantizeClimateCoordinate(this.erosion.compute(context)),
-              depth: quantizeClimateCoordinate(this.depth.compute(context)),
-              weirdness: quantizeClimateCoordinate(this.weirdness.compute(context)),
+              temperature: quantizeClimateCoordinate(temperature.compute(context)),
+              humidity: quantizeClimateCoordinate(humidity.compute(context)),
+              continentalness: quantizeClimateCoordinate(continentalness.compute(context)),
+              erosion: quantizeClimateCoordinate(erosion.compute(context)),
+              depth: quantizeClimateCoordinate(depth.compute(context)),
+              weirdness: quantizeClimateCoordinate(weirdness.compute(context)),
             };
             if (isProfiling) {
               endWorkerSection();
@@ -124,12 +120,13 @@ export interface ChunkBiomeStoreParams {
 }
 
 export class ChunkBiomeStore {
-  private readonly grids: BoundedLruCache<string, ChunkBiomeGrid>;
+  private readonly grids: BoundedLruCache<number, ChunkBiomeGrid>;
   private readonly biomeIds: string[] = [];
   private readonly indicesByBiomeId = new Map<string, number>();
   private readonly minQuartY: number;
   private readonly quartYCount: number;
-  private lastGridKey = "";
+  private lastGridChunkX = Number.NaN;
+  private lastGridChunkZ = Number.NaN;
   private lastGrid: ChunkBiomeGrid | undefined;
   private gridLookups = 0;
   private gridMisses = 0;
@@ -164,18 +161,8 @@ export class ChunkBiomeStore {
     const isProfiling = isWorkerProfiling();
     if (isProfiling) startWorkerSection("biome.fillGrid");
     try {
-      const grid = new ChunkBiomeGrid(
-        chunkX,
-        chunkZ,
-        this.quartYCount,
-        this.minQuartY,
-        this.params.router,
-        this.params.minY,
-        this.params.height,
-        this.params.biomeSource,
-        this.internBiome,
-      );
-      grid.fill();
+      const grid = new ChunkBiomeGrid(chunkX, chunkZ, this.quartYCount, this.minQuartY, this.params.biomeSource, this.internBiome);
+      grid.fill(this.params.router, this.params.minY, this.params.height);
       return grid;
     } finally {
       if (isProfiling) endWorkerSection();
@@ -186,18 +173,22 @@ export class ChunkBiomeStore {
   rawBiomeAtQuart(quartX: number, quartY: number, quartZ: number): string {
     const chunkX = quartX >> 2;
     const chunkZ = quartZ >> 2;
-    const key = `${chunkX},${chunkZ}`;
-    let grid: ChunkBiomeGrid | undefined;
-    if (key === this.lastGridKey) grid = this.lastGrid;
-    grid ??= this.grids.get(key);
     this.gridLookups++;
-    if (grid === undefined) {
-      this.gridMisses++;
-      grid = this.createFilledGrid(chunkX, chunkZ);
-      this.grids.set(key, grid);
+    let grid: ChunkBiomeGrid | undefined;
+    if (chunkX === this.lastGridChunkX && chunkZ === this.lastGridChunkZ) {
+      grid = this.lastGrid!;
+    } else {
+      const key = chunkColumnKey(chunkX, chunkZ);
+      grid = this.grids.get(key);
+      if (grid === undefined) {
+        this.gridMisses++;
+        grid = this.createFilledGrid(chunkX, chunkZ);
+        this.grids.set(key, grid);
+      }
+      this.lastGridChunkX = chunkX;
+      this.lastGridChunkZ = chunkZ;
+      this.lastGrid = grid;
     }
-    this.lastGridKey = key;
-    this.lastGrid = grid;
     const clampedQuartY = Math.min(Math.max(quartY, this.minQuartY), this.minQuartY + this.quartYCount - 1);
     return this.biomeIds[grid.biomeIndexAt(quartX, clampedQuartY, quartZ)]!;
   }
