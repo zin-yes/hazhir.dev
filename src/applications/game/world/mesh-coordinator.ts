@@ -6,6 +6,7 @@
 // chunk (deduplicated by key) that reads the newest data when a worker takes it; a result built from an older
 // version is dropped. Edit rebuilds go ahead of streaming work.
 
+import { MAX_LIGHT } from "../edits/light-tables";
 import { profiler } from "../profiler";
 import { BlockType } from "../blocks";
 import { type BorderFace, extractBorderSlab } from "../chunk-borders";
@@ -54,7 +55,15 @@ export interface MeshCoordinatorHooks {
   priorityOf(key: number): number;
   isInDrawnVolume(record: ChunkRecord): boolean;
   onMeshReady(record: ChunkRecord, mesh: ChunkMeshResult | null, isFirstMesh: boolean): void;
+  /**
+   * True when the chunk above is not loaded because it is open sky (skipped above the surface). Its border is then
+   * air in full sky light, not unknown, so top faces against it are lit instead of black.
+   */
+  isOpenSkyAbove?(record: ChunkRecord): boolean;
 }
+
+const BORDER_CELLS = 32 * 32;
+const SKY_LIT_AIR_LIGHT = MAX_LIGHT << 4;
 
 export interface MeshCounters {
   builds: number;
@@ -268,8 +277,13 @@ export class MeshCoordinator {
     const neighbors = this.store.neighborsOfKey(record.key);
     for (let direction = 0; direction < neighbors.length; direction++) {
       const neighbor = neighbors[direction];
-      if (!neighbor?.blocks) continue;
       const face = BORDER_FACE_BY_DIRECTION[direction]!;
+      if (!neighbor && face === "top" && this.hooks.isOpenSkyAbove?.(record)) {
+        borders[face] = new Uint8Array(BORDER_CELLS).buffer;
+        borderLights[face] = new Uint8Array(BORDER_CELLS).fill(SKY_LIT_AIR_LIGHT).buffer;
+        continue;
+      }
+      if (!neighbor?.blocks) continue;
       borders[face] = extractBorderSlab(neighbor.blocks, face);
       if (neighbor.isLit && neighbor.light) borderLights[face] = extractBorderSlab(neighbor.light, face);
     }
