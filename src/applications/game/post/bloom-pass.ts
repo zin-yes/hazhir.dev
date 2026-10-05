@@ -1,4 +1,4 @@
-// Bloom: the world is drawn into a half float target instead of the canvas (emissive surfaces overshoot white there),
+// World target and bloom: the world is drawn into a half float target instead of the canvas (emissive surfaces overshoot white there),
 // the part above white is spread into a soft halo through a chain of shrinking targets, and the halo is added over the
 // picture on its way to the canvas. Anything that never goes above white (everything but light sources and the sun's
 // glints) leaves the bloom empty, so ordinary surfaces stay crisp.
@@ -125,7 +125,8 @@ function createTarget(width: number, height: number, withDepth: boolean): THREE.
 export class BloomPass {
   private sceneTarget: THREE.WebGLRenderTarget | null = null;
   private levelTargets: THREE.WebGLRenderTarget[] = [];
-  private isEnabled = false;
+  private isBloomEnabled = false;
+  private isOffscreenRequired = false;
   private readonly size = new THREE.Vector2();
   private readonly camera = new THREE.Camera();
   private readonly downsampleUniforms = {
@@ -152,62 +153,82 @@ export class BloomPass {
 
   constructor(private readonly renderer: THREE.WebGLRenderer) {}
 
-  get isActive(): boolean {
-    return this.isEnabled;
+  /** True while the world is drawn into the offscreen target (bloom, or another effect that reads the finished world). */
+  get isOffscreen(): boolean {
+    return this.isBloomEnabled || this.isOffscreenRequired;
   }
 
-  setEnabled(isEnabled: boolean): void {
-    if (isEnabled === this.isEnabled) return;
-    this.isEnabled = isEnabled;
+  get worldTarget(): THREE.WebGLRenderTarget | null {
+    return this.isOffscreen ? this.sceneTarget : null;
+  }
+
+  setBloomEnabled(isEnabled: boolean): void {
+    if (isEnabled === this.isBloomEnabled) return;
+    this.isBloomEnabled = isEnabled;
     skyLightingUniforms.skyEmissiveGain.value = isEnabled ? EMISSIVE_BLOOM_GAIN : 1;
-    if (!isEnabled) this.releaseTargets();
+    this.releaseTargets();
+  }
+
+  /** Effects that sample the finished opaque world (water reflections) need it in an offscreen target. */
+  setOffscreenRequired(isRequired: boolean): void {
+    if (isRequired === this.isOffscreenRequired) return;
+    this.isOffscreenRequired = isRequired;
+    this.releaseTargets();
   }
 
   /** Points the renderer at the offscreen scene target (sized to the canvas); call before drawing the world. */
   beginFrame(): void {
-    if (!this.isEnabled) return;
+    if (!this.isOffscreen) return;
     this.renderer.getDrawingBufferSize(this.size);
     const width = Math.max(1, Math.floor(this.size.x));
     const height = Math.max(1, Math.floor(this.size.y));
     if (!this.sceneTarget || this.sceneTarget.width !== width || this.sceneTarget.height !== height) {
       this.releaseTargets();
       this.sceneTarget = createTarget(width, height, true);
-      this.levelTargets = Array.from({ length: BLOOM_LEVELS }, (_, level) =>
-        createTarget(Math.max(1, width >> (level + 1)), Math.max(1, height >> (level + 1)), false),
-      );
+      if (this.isBloomEnabled) {
+        this.levelTargets = Array.from({ length: BLOOM_LEVELS }, (_, level) =>
+          createTarget(Math.max(1, width >> (level + 1)), Math.max(1, height >> (level + 1)), false),
+        );
+      }
     }
     this.renderer.setRenderTarget(this.sceneTarget);
   }
 
   /** Spreads the glow and writes the finished picture to the canvas; call after the whole world is drawn. */
   endFrame(): void {
-    if (!this.isEnabled || !this.sceneTarget) return;
+    if (!this.isOffscreen || !this.sceneTarget) return;
     const previousAutoClear = this.renderer.autoClear;
     this.renderer.autoClear = false;
     try {
-      let source: THREE.WebGLRenderTarget = this.sceneTarget;
-      this.levelTargets.forEach((levelTarget, level) => {
-        this.downsampleUniforms.source.value = source.texture;
-        this.downsampleUniforms.sourceTexelSize.value.set(0.5 / source.width, 0.5 / source.height);
-        this.downsampleUniforms.isFirstLevel.value = level === 0 ? 1 : 0;
-        this.renderer.setRenderTarget(levelTarget);
-        this.renderer.render(this.downsampleScene, this.camera);
-        source = levelTarget;
-      });
-      for (let level = BLOOM_LEVELS - 1; level > 0; level--) {
-        const smaller = this.levelTargets[level]!;
-        this.upsampleUniforms.source.value = smaller.texture;
-        this.upsampleUniforms.sourceTexelSize.value.set(0.5 / smaller.width, 0.5 / smaller.height);
-        this.renderer.setRenderTarget(this.levelTargets[level - 1]!);
-        this.renderer.render(this.upsampleScene, this.camera);
-      }
+      if (this.levelTargets.length > 0) this.spreadGlow();
       this.compositeUniforms.scene.value = this.sceneTarget.texture;
-      this.compositeUniforms.bloom.value = this.levelTargets[0]!.texture;
+      this.compositeUniforms.bloom.value = this.levelTargets[0]?.texture ?? this.sceneTarget.texture;
+      this.compositeUniforms.strength.value = this.levelTargets.length > 0 ? BLOOM_STRENGTH : 0;
       this.renderer.setRenderTarget(null);
       this.renderer.render(this.compositeScene, this.camera);
     } finally {
       this.renderer.setRenderTarget(null);
       this.renderer.autoClear = previousAutoClear;
+    }
+  }
+
+  private spreadGlow(): void {
+    if (!this.sceneTarget) return;
+    let source: THREE.WebGLRenderTarget = this.sceneTarget;
+    this.levelTargets.forEach((levelTarget, level) => {
+      this.downsampleUniforms.source.value = source.texture;
+      this.downsampleUniforms.sourceTexelSize.value.set(0.5 / source.width, 0.5 / source.height);
+      this.downsampleUniforms.isFirstLevel.value = level === 0 ? 1 : 0;
+      this.renderer.setRenderTarget(levelTarget);
+      this.renderer.render(this.downsampleScene, this.camera);
+      source = levelTarget;
+    });
+    for (let level = BLOOM_LEVELS - 1; level > 0; level--) {
+      const smaller = this.levelTargets[level]!;
+      this.upsampleUniforms.source.value = smaller.texture;
+      this.upsampleUniforms.sourceTexelSize.value.set(0.5 / smaller.width, 0.5 / smaller.height);
+      this.renderer.setRenderTarget(this.levelTargets[level - 1]!);
+      this.renderer.render(this.upsampleScene, this.camera);
     }
   }
 
