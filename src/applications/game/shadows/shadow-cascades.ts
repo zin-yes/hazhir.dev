@@ -1,6 +1,7 @@
 // Pure math for cascaded sun shadows: where each cascade ends along the view, and the light-space box that covers its
 // slice of the view frustum. Each box is a sphere fitted around the slice (so it does not change size as the camera
-// turns) and snapped to whole shadow texels (so edges do not shimmer as the camera moves).
+// turns), padded, and snapped to a coarse grid of whole shadow texels: edges do not shimmer as the camera moves, and
+// the map only has to be redrawn once the camera has travelled a whole grid step, the padding covering the slack.
 
 export type Vector3Tuple = [number, number, number];
 
@@ -78,14 +79,19 @@ export function frustumSliceSphere(slice: FrustumSlice): { center: Vector3Tuple;
   return { center, radius };
 }
 
+/** Share of the radius added around the slice so the box can lag a grid step behind the camera. */
+export const BOX_PADDING_FRACTION = 0.1;
+export const SNAP_TEXELS = 16;
+
 export function fitCascadeBox(slice: FrustumSlice, lightDirection: Vector3Tuple, shadowMapSize: number): CascadeBox {
   const sphere = frustumSliceSphere(slice);
-  const halfExtent = Math.ceil(sphere.radius);
+  const halfExtent = Math.ceil(sphere.radius * (1 + BOX_PADDING_FRACTION));
   const texelWorldSize = (2 * halfExtent) / shadowMapSize;
+  const snapStep = texelWorldSize * SNAP_TEXELS;
   const { right, up } = lightPlaneAxes(lightDirection);
-  const rightCoordinate = Math.floor(dot(sphere.center, right) / texelWorldSize) * texelWorldSize;
-  const upCoordinate = Math.floor(dot(sphere.center, up) / texelWorldSize) * texelWorldSize;
-  const alongLight = dot(sphere.center, lightDirection);
+  const rightCoordinate = Math.round(dot(sphere.center, right) / snapStep) * snapStep;
+  const upCoordinate = Math.round(dot(sphere.center, up) / snapStep) * snapStep;
+  const alongLight = Math.round(dot(sphere.center, lightDirection) / snapStep) * snapStep;
   const center: Vector3Tuple = [
     right[0] * rightCoordinate + up[0] * upCoordinate + lightDirection[0] * alongLight,
     right[1] * rightCoordinate + up[1] * upCoordinate + lightDirection[1] * alongLight,

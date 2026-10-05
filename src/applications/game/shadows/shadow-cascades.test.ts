@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { cascadeEndDistances, fitCascadeBox, frustumSliceSphere, lightPlaneAxes, type FrustumSlice, type Vector3Tuple } from "./shadow-cascades";
+import { SNAP_TEXELS, cascadeEndDistances, fitCascadeBox, frustumSliceSphere, lightPlaneAxes, type FrustumSlice, type Vector3Tuple } from "./shadow-cascades";
 
 const slice: FrustumSlice = {
   cameraPosition: [1234.3, 90.7, -560.1],
@@ -47,13 +47,28 @@ describe("fitCascadeBox", () => {
   const length = Math.hypot(...sunDirection);
   const lightDirection: Vector3Tuple = [sunDirection[0] / length, sunDirection[1] / length, sunDirection[2] / length];
 
-  test("the box origin sits on whole texels, so a sub-texel camera move does not change it", () => {
+  test("the box origin sits on a grid of whole texels, so creeping the camera rarely moves it", () => {
     const first = fitCascadeBox(slice, lightDirection, 2048);
-    const moved = fitCascadeBox({ ...slice, cameraPosition: [slice.cameraPosition[0] + first.texelWorldSize * 0.2, slice.cameraPosition[1], slice.cameraPosition[2]] }, lightDirection, 2048);
+    const moved = fitCascadeBox({ ...slice, cameraPosition: [slice.cameraPosition[0] + first.texelWorldSize, slice.cameraPosition[1], slice.cameraPosition[2]] }, lightDirection, 2048);
     const { right } = lightPlaneAxes(lightDirection);
-    const texelsAlongRight = (first.center[0] * right[0] + first.center[1] * right[1] + first.center[2] * right[2]) / first.texelWorldSize;
-    expect(Math.abs(texelsAlongRight - Math.round(texelsAlongRight))).toBeLessThan(1e-6);
+    const gridCellsAlongRight = (first.center[0] * right[0] + first.center[1] * right[1] + first.center[2] * right[2]) / (first.texelWorldSize * SNAP_TEXELS);
+    expect(Math.abs(gridCellsAlongRight - Math.round(gridCellsAlongRight))).toBeLessThan(1e-6);
+    expect(distance(moved.center, first.center)).toBeLessThanOrEqual(first.texelWorldSize * SNAP_TEXELS * 1.0001);
+    const redrawsWhileCreeping = Array.from({ length: 16 }, (_, step) =>
+      fitCascadeBox({ ...slice, cameraPosition: [slice.cameraPosition[0] + step * first.texelWorldSize, slice.cameraPosition[1], slice.cameraPosition[2]] }, lightDirection, 2048).center.join(),
+    );
+    expect(new Set(redrawsWhileCreeping).size).toBeLessThanOrEqual(2);
     expect(moved.halfExtent).toBe(first.halfExtent);
+  });
+
+  test("the padded box still covers the whole slice when the snapped centre lags the camera", () => {
+    const box = fitCascadeBox(slice, lightDirection, 2048);
+    const sphere = frustumSliceSphere(slice);
+    const { right, up } = lightPlaneAxes(lightDirection);
+    const offset: Vector3Tuple = [sphere.center[0] - box.center[0], sphere.center[1] - box.center[1], sphere.center[2] - box.center[2]];
+    const along = (axis: Vector3Tuple) => Math.abs(offset[0] * axis[0] + offset[1] * axis[1] + offset[2] * axis[2]);
+    expect(along(right) + sphere.radius).toBeLessThanOrEqual(box.halfExtent);
+    expect(along(up) + sphere.radius).toBeLessThanOrEqual(box.halfExtent);
   });
 
   test("the box size does not change when the camera turns", () => {
