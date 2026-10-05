@@ -4,22 +4,40 @@
 // SURFACE_LIGHTING_GLSL before it.
 
 export const REFLECTIVE_LIGHTING_GLSL = `
-const int WAVE_COUNT = 4;
+const int WAVE_COUNT = 6;
 
-/** Slope of the water surface: four travelling waves, the fine ones fading out with distance so they never shimmer. */
+/**
+ * Slope of the water surface. Six travelling waves at unrelated angles and frequencies, their positions bent by slow
+ * noise and their strength varied from place to place, so no pattern repeats; the fine ones fade out with distance
+ * so they never shimmer.
+ */
 vec3 waterSurfaceNormal(vec3 worldPosition, float distanceToCamera) {
-  const vec2 directions[WAVE_COUNT] = vec2[WAVE_COUNT](vec2(0.92, 0.39), vec2(-0.55, 0.83), vec2(0.31, -0.95), vec2(-0.88, -0.47));
-  const float frequencies[WAVE_COUNT] = float[WAVE_COUNT](0.55, 1.15, 2.3, 4.6);
-  const float amplitudes[WAVE_COUNT] = float[WAVE_COUNT](0.07, 0.05, 0.035, 0.022);
-  const float speeds[WAVE_COUNT] = float[WAVE_COUNT](0.9, 1.3, 1.9, 2.7);
+  const vec2 directions[WAVE_COUNT] = vec2[WAVE_COUNT](
+    vec2(0.92, 0.39), vec2(-0.55, 0.83), vec2(0.31, -0.95), vec2(-0.88, -0.47), vec2(0.12, 0.99), vec2(-0.97, 0.24)
+  );
+  const float frequencies[WAVE_COUNT] = float[WAVE_COUNT](0.43, 0.97, 1.71, 2.93, 4.37, 6.11);
+  const float amplitudes[WAVE_COUNT] = float[WAVE_COUNT](0.075, 0.055, 0.04, 0.03, 0.022, 0.016);
+  const float speeds[WAVE_COUNT] = float[WAVE_COUNT](0.7, 1.1, 1.6, 2.3, 3.1, 3.9);
+  vec2 position = worldPosition.xz;
+  vec2 bend = vec2(
+    fogNoise(position * 0.045 + skyFogTime * 0.015),
+    fogNoise(position * 0.045 + 41.0 - skyFogTime * 0.012)
+  ) - 0.5;
+  position += bend * 14.0;
   vec2 slope = vec2(0.0);
   for (int wave = 0; wave < WAVE_COUNT; wave++) {
-    float fade = 1.0 - smoothstep(40.0 * float(WAVE_COUNT - wave), 90.0 * float(WAVE_COUNT - wave) + 60.0, distanceToCamera);
-    float phase = dot(directions[wave], worldPosition.xz) * frequencies[wave] + skyFogTime * speeds[wave];
-    slope += directions[wave] * cos(phase) * amplitudes[wave] * frequencies[wave] * fade * 3.0;
+    float fade = 1.0 - smoothstep(35.0 * float(WAVE_COUNT - wave), 80.0 * float(WAVE_COUNT - wave) + 50.0, distanceToCamera);
+    float strength = 0.35 + 1.3 * fogNoise(position * 0.06 + float(wave) * 13.7);
+    float phase = dot(directions[wave], position) * frequencies[wave] + skyFogTime * speeds[wave] + float(wave) * 2.4;
+    slope += directions[wave] * cos(phase) * amplitudes[wave] * frequencies[wave] * fade * strength * 3.0;
   }
-  vec2 detail = vec2(fogNoise(worldPosition.xz * 7.0 + skyFogTime * 0.7), fogNoise(worldPosition.xz * 7.0 + 19.0 - skyFogTime * 0.6)) - 0.5;
-  slope += detail * 0.06 * (1.0 - smoothstep(20.0, 90.0, distanceToCamera));
+  vec2 turn = vec2(0.8, 0.6);
+  vec2 turned = vec2(dot(position, turn), dot(position, vec2(-turn.y, turn.x)));
+  vec2 detail = vec2(
+    fogNoise(turned * 5.3 + skyFogTime * 0.5) + 0.5 * fogNoise(turned * 11.9 - skyFogTime * 0.8),
+    fogNoise(turned * 5.3 + 19.0 - skyFogTime * 0.45) + 0.5 * fogNoise(turned * 11.9 + 7.0 + skyFogTime * 0.7)
+  ) - 0.75;
+  slope += detail * 0.07 * (1.0 - smoothstep(20.0, 90.0, distanceToCamera));
   return normalize(vec3(-slope.x, 1.0, -slope.y));
 }
 
@@ -52,7 +70,7 @@ vec4 shadeWater(vec3 albedoLinear, float bakedShade, vec3 surfaceNormal, vec3 wo
   vec3 toCamera = (cameraPosition - worldPosition) / max(distanceToCamera, 0.0001);
   float facingCamera = clamp(dot(normal, toCamera), 0.0, 1.0);
   float reflectivity = schlickFresnel(facingCamera, 0.06) * (isTopFace ? 1.0 : 0.5);
-  float sparkle = 0.55 + 0.9 * fogNoise(worldPosition.xz * 9.0 + skyFogTime * 1.3);
+  float sparkle = 0.45 + 0.8 * fogNoise(worldPosition.xz * 9.0 + skyFogTime * 1.3) + 0.5 * fogNoise(worldPosition.zx * 3.7 - skyFogTime * 0.9);
   vec3 reflected = mirroredSky(normal, toCamera, worldPosition, surfaceNormal, bakedShade, skyExposure, distanceToCamera, sparkle);
   vec3 lit = shadeSurface(albedoLinear, bakedShade, surfaceNormal, worldPosition, skyExposure, 0.0);
   float mirrorShare = clamp(reflectivity * 1.15, 0.0, 0.97);
