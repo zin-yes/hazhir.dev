@@ -16,6 +16,7 @@ export interface GameSettings {
   touchOpacity: number;
   touchJoystickMode: TouchJoystickMode;
   shadowQuality: ShadowQuality;
+  bloomEnabled: boolean;
 }
 
 export const FIELD_OF_VIEW_MINIMUM_DEGREES = 60;
@@ -38,6 +39,7 @@ export const DEFAULT_GAME_SETTINGS: Readonly<GameSettings> = {
   touchOpacity: 0.85,
   touchJoystickMode: "floating",
   shadowQuality: "high",
+  bloomEnabled: true,
 };
 
 type MatchMedia = (query: string) => Pick<MediaQueryList, "matches">;
@@ -47,19 +49,32 @@ export function defaultShadowQuality(matchMedia: MatchMedia | undefined = browse
   return matchMedia?.("(pointer: coarse)").matches ? "off" : "high";
 }
 
+/** Bloom starts off on touch devices (coarse primary pointer) and on elsewhere, including on the server. */
+export function defaultBloomEnabled(matchMedia: MatchMedia | undefined = browserMatchMedia()): boolean {
+  return !matchMedia?.("(pointer: coarse)").matches;
+}
+
 function browserMatchMedia(): MatchMedia | undefined {
   if (typeof window === "undefined" || typeof window.matchMedia !== "function") return undefined;
   return (query) => window.matchMedia(query);
 }
 
-/** The defaults for this device: the static defaults plus the device-dependent shadow quality. */
+/** The defaults for this device: the static defaults plus the device-dependent shadow quality and bloom. */
 export function defaultGameSettings(matchMedia?: MatchMedia): GameSettings {
-  return { ...DEFAULT_GAME_SETTINGS, shadowQuality: defaultShadowQuality(matchMedia) };
+  return {
+    ...DEFAULT_GAME_SETTINGS,
+    shadowQuality: defaultShadowQuality(matchMedia),
+    bloomEnabled: defaultBloomEnabled(matchMedia),
+  };
 }
 
 function clampedNumber(value: unknown, minimum: number, maximum: number, fallback: number): number {
   if (typeof value !== "number" || !Number.isFinite(value)) return fallback;
   return Math.min(maximum, Math.max(minimum, value));
+}
+
+function booleanOrFallback(value: unknown, fallback: boolean): boolean {
+  return typeof value === "boolean" ? value : fallback;
 }
 
 function allowedOption<Option extends string>(value: unknown, options: readonly Option[], fallback: Option): Option {
@@ -93,5 +108,6 @@ export function normalizeGameSettings(settings: Partial<Record<keyof GameSetting
     ),
     touchJoystickMode: allowedOption(settings.touchJoystickMode, TOUCH_JOYSTICK_MODES, DEFAULT_GAME_SETTINGS.touchJoystickMode),
     shadowQuality: allowedOption(settings.shadowQuality, SHADOW_QUALITIES, defaultShadowQuality()),
+    bloomEnabled: booleanOrFallback(settings.bloomEnabled, defaultBloomEnabled()),
   };
 }
