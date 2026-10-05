@@ -59,3 +59,38 @@ describe("computeSkyState", () => {
     expect(computeSkyState(0, 8, 0).moonPhaseAngle).toBe(0);
   });
 });
+
+describe("terrain lighting", () => {
+  test("the sun lights the terrain by day and the moon by night, always from above the horizon", () => {
+    const noon = computeSkyState(0.5, 0, 0);
+    const midnight = computeSkyState(0, 0, 0);
+    expect(noon.lightDirection).toEqual(noon.sunDirection);
+    expect(midnight.lightDirection).toEqual(midnight.moonDirection);
+    for (let timeOfDay = 0; timeOfDay < 1; timeOfDay += 0.005) {
+      expect(computeSkyState(timeOfDay, 0, 0).lightDirection[1]).toBeGreaterThan(-0.06);
+    }
+  });
+
+  test("direct light is far stronger at noon than at night, and the handover between sun and moon is dark", () => {
+    const noon = luminance(computeSkyState(0.5, 0, 0).directLightColor);
+    const midnight = luminance(computeSkyState(0, 0, 0).directLightColor);
+    expect(noon).toBeGreaterThan(midnight * 3);
+    let handoverLuminance = Number.POSITIVE_INFINITY;
+    let previousDirectionWasSun = true;
+    for (let timeOfDay = 0.5; timeOfDay < 1.25; timeOfDay += 0.0005) {
+      const state = computeSkyState(timeOfDay % 1, 0, 0);
+      const directionIsSun = state.lightDirection === state.sunDirection;
+      if (directionIsSun !== previousDirectionWasSun) handoverLuminance = luminance(state.directLightColor);
+      previousDirectionWasSun = directionIsSun;
+    }
+    expect(handoverLuminance).toBeLessThan(0.005);
+  });
+
+  test("overcast skies weaken direct light but keep the sky light", () => {
+    const clear = computeSkyState(0.5, 0, 0);
+    const overcast = computeSkyState(0.5, 0, 1);
+    expect(luminance(overcast.directLightColor)).toBeLessThan(luminance(clear.directLightColor) * 0.4);
+    expect(luminance(overcast.ambientSkyColor)).toBeCloseTo(luminance(clear.ambientSkyColor), 3);
+  });
+});
+

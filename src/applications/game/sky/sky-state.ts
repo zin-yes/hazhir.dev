@@ -26,6 +26,13 @@ export interface SkyState {
   mistColor: Rgb;
   /** 1 in full daylight, 0 at night; scales the lighting of the terrain. */
   daylight: number;
+  /** Unit direction towards the body that lights the terrain: the sun by day, the moon by night. */
+  lightDirection: Rgb;
+  /** Linear colour of that body's direct light, already scaled by how strong it is (0 around the horizon crossing). */
+  directLightColor: Rgb;
+  /** Linear colour of the sky light that reaches a face turned up; faces turned down get the ground colour. */
+  ambientSkyColor: Rgb;
+  ambientGroundColor: Rgb;
 }
 
 interface PaletteStop {
@@ -53,6 +60,16 @@ const DAYLIGHT_RISE_START_ELEVATION = -0.18;
 const DAYLIGHT_RISE_END_ELEVATION = 0.12;
 const STARS_FULL_ELEVATION = -0.2;
 const STARS_GONE_ELEVATION = 0.0;
+/** The sun stops lighting terrain once it is this far below the horizon, and the moon takes over. */
+const SUN_LIGHT_SET_ELEVATION = -0.05;
+const SUN_LIGHT_FULL_ELEVATION = 0.12;
+const MOON_LIGHT_FULL_ELEVATION = -0.2;
+const MOON_LIGHT_COLOR: Rgb = [0.5, 0.62, 1.0];
+const MOON_LIGHT_STRENGTH = 0.22;
+const MAX_OVERCAST_DIRECT_LIGHT_LOSS = 0.8;
+const AMBIENT_SKY_LUMINANCE = 0.62;
+const AMBIENT_GROUND_LUMINANCE = 0.3;
+const AMBIENT_TINT_SHARE = 0.45;
 
 function srgbHexToLinear(hex: number): Rgb {
   const toLinear = (channel: number) => {
@@ -137,6 +154,17 @@ function greyOf(color: Rgb): Rgb {
   return [luminance, luminance, luminance];
 }
 
+function luminanceOf(color: Rgb): number {
+  return 0.2126 * color[0] + 0.7152 * color[1] + 0.0722 * color[2];
+}
+
+/** A colour with the hue of `tint` (partly desaturated) and exactly the given luminance. */
+function tintedAtLuminance(tint: Rgb, luminance: number): Rgb {
+  const grey = luminanceOf(tint);
+  const softened = mixRgb([grey, grey, grey], tint, AMBIENT_TINT_SHARE);
+  return scaleRgb(softened, luminance / Math.max(luminanceOf(softened), 1e-4));
+}
+
 export function computeSkyState(timeOfDay: number, moonPhaseIndex: number, overcast: number): SkyState {
   const orbitAngle = (timeOfDay - 0.25) * Math.PI * 2;
   const sunDirection: Rgb = [
@@ -171,6 +199,16 @@ export function computeSkyState(timeOfDay: number, moonPhaseIndex: number, overc
     mistGrey[2] * 0.8 + sampled.sunLight[2] * 0.35 * daylight + 0.16 * night,
   ];
 
+  const sunLightsTerrain = sunElevation > SUN_LIGHT_SET_ELEVATION;
+  const sunStrength = smoothstep(SUN_LIGHT_SET_ELEVATION, SUN_LIGHT_FULL_ELEVATION, sunElevation);
+  const moonStrength = smoothstep(SUN_LIGHT_SET_ELEVATION, MOON_LIGHT_FULL_ELEVATION, sunElevation) * MOON_LIGHT_STRENGTH;
+  const directLightLoss = 1 - clampedOvercast * MAX_OVERCAST_DIRECT_LIGHT_LOSS;
+  const directLightColor = scaleRgb(
+    sunLightsTerrain ? sampled.sunLight : MOON_LIGHT_COLOR,
+    (sunLightsTerrain ? sunStrength : moonStrength) * directLightLoss,
+  );
+  const ambientTint = mixRgb(overcastHorizon, overcastZenith, 0.5);
+
   return {
     sunDirection,
     moonDirection,
@@ -186,5 +224,9 @@ export function computeSkyState(timeOfDay: number, moonPhaseIndex: number, overc
     fogColor,
     mistColor,
     daylight,
+    lightDirection: sunLightsTerrain ? sunDirection : moonDirection,
+    directLightColor,
+    ambientSkyColor: tintedAtLuminance(ambientTint, AMBIENT_SKY_LUMINANCE),
+    ambientGroundColor: tintedAtLuminance(mixRgb(ambientTint, sampled.sunLight, 0.3), AMBIENT_GROUND_LUMINANCE),
   };
 }
