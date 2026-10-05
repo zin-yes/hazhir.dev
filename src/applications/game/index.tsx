@@ -10,7 +10,9 @@ import {
 } from "react";
 import { toast } from "sonner";
 
-import { Sky } from "three/addons/objects/Sky.js";
+import { HumidityMap } from "./sky/climate/humidity-map";
+import { SkyController } from "./sky/sky-controller";
+import { skyLightingUniforms } from "./sky/sky-lighting";
 
 import {
   CHUNK_HEIGHT,
@@ -222,6 +224,7 @@ export default function Game() {
   // document.body.appendChild(stats.dom);
   const containerRef = useRef<HTMLDivElement>(null);
 
+  const skyControllerRef = useRef<SkyController | null>(null);
   const seedRef = useRef(Math.floor(Math.random() * 100000000));
   const networkManager = useRef(new NetworkManager());
   const remotePlayers = useRef<Map<string, RemotePlayer>>(new Map());
@@ -630,6 +633,7 @@ export default function Game() {
     pipelineRef.current?.dispose();
     loadTracker.resetWorldStages();
     lodBridgeRef.current?.startWorld(currentSeed, renderSettingsRef.current.lodRenderDistanceChunks);
+    skyControllerRef.current?.setWorldSeed(currentSeed);
 
     pipelineRef.current = new ChunkPipeline({
       renderSettings: renderSettingsRef.current,
@@ -742,20 +746,12 @@ export default function Game() {
       brushPreviewRef.current = new BrushPreview();
       scene.add(brushPreviewRef.current);
 
-      const sky = new Sky();
-      sky.name = "sky";
-      sky.scale.setScalar(450000);
-
-      const phi = THREE.MathUtils.degToRad(90);
-      const theta = THREE.MathUtils.degToRad(180);
-      const sunPosition = new THREE.Vector3().setFromSphericalCoords(
-        1,
-        phi,
-        theta,
+      const skyController = new SkyController(
+        new HumidityMap((method, params) => generationWorkerPool.exec(method, params), seedRef.current),
+        seedRef.current,
       );
-
-      sky.material.uniforms.sunPosition.value = sunPosition;
-
+      skyControllerRef.current = skyController;
+      const sky = skyController.dome;
       scene.add(sky);
       lodBridgeRef.current = new GameLodBridge({
         createWorker: () => new Worker(new URL("./lod/worker/lod-worker.ts", import.meta.url), { name: "lod" }),
@@ -803,6 +799,7 @@ export default function Game() {
             pitch: orientation.x,
           };
         },
+        setTimeOfDay: (timeOfDay) => skyController.setTimeOfDay(timeOfDay),
         setPlaying: (playing, flying = true) => {
           playerControlsRef.current?.resetMotion();
           playerControlsRef.current?.setFlying(flying);
@@ -942,6 +939,7 @@ export default function Game() {
                 edgeExpansion: {
                   value: EDGE_EXPANSION_PER_DEPTH,
                 },
+                ...skyLightingUniforms,
               },
               vertexShader: VERTEX_SHADER,
               fragmentShader: FRAGMENT_SHADER,
@@ -962,6 +960,7 @@ export default function Game() {
                 edgeExpansion: {
                   value: 0,
                 },
+                ...skyLightingUniforms,
               },
               vertexShader: VERTEX_SHADER,
               fragmentShader: FRAGMENT_SHADER,
@@ -979,6 +978,7 @@ export default function Game() {
                 waterTextureIndex: {
                   value: waterTextureIndex,
                 },
+                ...skyLightingUniforms,
               },
               vertexShader: PLANT_VERTEX_SHADER,
               fragmentShader: FRAGMENT_SHADER,
@@ -1187,6 +1187,8 @@ export default function Game() {
         pipelineRef.current = null;
         lodBridgeRef.current?.dispose();
         lodBridgeRef.current = null;
+        skyControllerRef.current?.dispose();
+        skyControllerRef.current = null;
 
         document.removeEventListener("keyup", onKeyUp);
         if (container) {
@@ -2534,6 +2536,9 @@ export default function Game() {
 
     profiler.addCounter("game.getBlock.calls", getBlockCallsRef.current);
     getBlockCallsRef.current = 0;
+
+    const sky = skyControllerRef.current;
+    if (sky && sky.update(Math.min(delta, 0.1), camera.position)) lodBridgeRef.current?.refreshBackgroundHaze();
 
     renderer.clear();
     const drawFarTerrain = () => lodBridgeRef.current?.renderPass(renderer, camera);

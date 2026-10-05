@@ -35,6 +35,8 @@ export interface VoxelWorldApi {
   getCamera(): { position: BlockPosition; yaw: number; pitch: number };
   /** Runs the simulation without pointer lock (true) or pauses it, flying or walking. */
   setPlaying(playing: boolean, flying?: boolean): void;
+  /** Jumps the sky clock: 0 midnight, 0.25 sunrise, 0.5 noon, 0.75 sunset. */
+  setTimeOfDay(timeOfDay: number): void;
 }
 
 declare global {
