@@ -23,7 +23,10 @@ import {
   EDGE_OUTWARD_SHIFT,
   PLANT_UV_UNITS_PER_TEXTURE,
 } from "../vertex-format";
+import { FOLIAGE_LOOKUP_GLSL } from "../sky/foliage-textures";
 import { DAYLIGHT_GLSL, FOG_GLSL } from "../sky/sky-lighting";
+import { WATER_LIGHTING_GLSL } from "../sky/water-lighting";
+import { SKY_EXPOSURE_BRIGHT_LEVEL, SKY_EXPOSURE_DARK_LEVEL, SURFACE_LIGHTING_GLSL } from "../sky/surface-lighting";
 
 /**
  * How far the opaque shader pushes a face corner outward, per block of view
@@ -40,12 +43,13 @@ const mask = (bits: number) => `${(1 << bits) - 1}u`;
 // across a face, so doing the math per vertex matches doing it per fragment.
 // Texture coordinates leave the vertex shader unwrapped (a merged quad runs from
 // 0 to its size in blocks); the fragment shader tiles them.
-const VERTEX_DECODING = `
+export const VERTEX_DECODING = `
 ${DAYLIGHT_GLSL}
 attribute uvec2 packedVertex;
 
 varying vec2 TextureCoordinates;
 varying float vShade;
+varying float vSkyExposure;
 varying vec3 vFogWorldPosition;
 flat out int TextureIndex;
 
@@ -61,6 +65,10 @@ float shadeFor(float lightLevel, float ambientOcclusion) {
   float lightIntensity = pow(0.8, 15.0 - lightLevel) * daylightScale();
   float ambientOcclusionFactor = 0.55 + 0.15 * ambientOcclusion;
   return lightIntensity * ambientOcclusionFactor;
+}
+
+float skyExposureForLightLevel(float lightLevel) {
+  return smoothstep(${SKY_EXPOSURE_DARK_LEVEL.toFixed(1)}, ${SKY_EXPOSURE_BRIGHT_LEVEL.toFixed(1)}, lightLevel);
 }
 
 float decodeLight(uint surfaceWord) {
@@ -88,7 +96,9 @@ uniform float edgeExpansion;
 void main() {
   uint surfaceWord = packedVertex.y;
   decodeSurface(surfaceWord, ${CHUNK_UV_UNITS_PER_BLOCK}.0);
-  vShade = shadeFor(decodeLight(surfaceWord), decodeAmbientOcclusion(surfaceWord));
+  float lightLevel = decodeLight(surfaceWord);
+  vShade = shadeFor(lightLevel, decodeAmbientOcclusion(surfaceWord));
+  vSkyExposure = skyExposureForLightLevel(lightLevel);
 
   vec3 localPosition = decodeVoxelPosition(packedVertex.x) * ${(1 / POSITION_UNITS_PER_BLOCK).toFixed(6)};
   vec4 viewPosition = modelViewMatrix * vec4(localPosition, 1.0);
@@ -143,6 +153,7 @@ void main() {
   float neighborAmbientOcclusion = 3.0 * (1.0 - min(1.0, shadowStrength));
   float ambientOcclusion = min(decodeAmbientOcclusion(surfaceWord), neighborAmbientOcclusion);
   vShade = shadeFor(lightLevel, ambientOcclusion);
+  vSkyExposure = skyExposureForLightLevel(lightLevel);
 
   vec3 localPosition = blockOrigin + voxelPosition * ${(1 / POSITION_UNITS_PER_BLOCK).toFixed(6)};
   vFogWorldPosition = (modelMatrix * vec4(localPosition, 1.0)).xyz;
@@ -157,10 +168,27 @@ void main() {
  * first. The gradients come from the unwrapped coordinates, which are
  * continuous across tile boundaries, so mip selection does not jump there.
  */
+export const SAMPLE_TILED_TEXTURE_GLSL = `
+vec4 sampleTiledTexture(sampler2DArray textureArray, vec2 unwrappedCoordinates, int textureIndex) {
+  vec2 tileIndex = max(ceil(unwrappedCoordinates - ${TILE_EDGE_BIAS}) - 1.0, 0.0);
+  return textureGrad(
+    textureArray,
+    vec3(unwrappedCoordinates - tileIndex, textureIndex),
+    dFdx(unwrappedCoordinates),
+    dFdy(unwrappedCoordinates)
+  );
+}
+`;
+
 export const FRAGMENT_SHADER = `
 ${FOG_GLSL}
+${SURFACE_LIGHTING_GLSL}
+${FOLIAGE_LOOKUP_GLSL}
+${SAMPLE_TILED_TEXTURE_GLSL}
+${WATER_LIGHTING_GLSL}
 varying vec2 TextureCoordinates;
 varying float vShade;
+varying float vSkyExposure;
 varying vec3 vFogWorldPosition;
 flat in int TextureIndex;
 
@@ -168,23 +196,26 @@ uniform sampler2DArray Texture;
 uniform int waterTextureIndex;
 
 void main() {
-  vec3 lighting = max(vec3(vShade), vec3(0.05));
+  vec4 textureColor = sampleTiledTexture(Texture, TextureCoordinates, TextureIndex);
+  bool isWater = TextureIndex == waterTextureIndex;
+  if (!isWater && textureColor.a < 0.5) discard;
 
-  vec2 tileIndex = max(ceil(TextureCoordinates - ${TILE_EDGE_BIAS}) - 1.0, 0.0);
-  vec4 textureColor = textureGrad(
-    Texture,
-    vec3(TextureCoordinates - tileIndex, TextureIndex),
-    dFdx(TextureCoordinates),
-    dFdy(TextureCoordinates)
-  );
-
-  if (TextureIndex == waterTextureIndex) {
-    textureColor.a = 0.7;
+  vec3 surfaceNormal = flatNormalAt(vFogWorldPosition);
+  vec3 finalColor;
+  float alpha = textureColor.a;
+  if (isWater) {
+    vec4 water = shadeWater(textureColor.rgb, vShade, surfaceNormal, vFogWorldPosition, vSkyExposure, 0.7);
+    finalColor = water.rgb;
+    alpha = water.a;
+  } else {
+#ifdef IS_PLANT_MATERIAL
+    float foliage = 1.0;
+#else
+    float foliage = isFoliageTexture(TextureIndex) ? 1.0 : 0.0;
+#endif
+    finalColor = shadeSurface(textureColor.rgb, vShade, surfaceNormal, vFogWorldPosition, vSkyExposure, foliage);
   }
 
-  if (textureColor.a < 0.5) discard;
-
-  vec3 displayColor = linearToOutputTexel(textureColor).rgb;
-  gl_FragColor = vec4(applyFog(lighting * displayColor, vFogWorldPosition), textureColor.a);
+  gl_FragColor = vec4(applyFog(finalColor, vFogWorldPosition), alpha);
 }
 `;

@@ -107,6 +107,12 @@ export class SkyController {
     skyLightingUniforms.skyFogDensity.value = this.fogDensity;
     skyLightingUniforms.skyFogTime.value = this.elapsedSeconds;
     skyLightingUniforms.skyMist.value = this.cloudMist;
+    skyLightingUniforms.skyLightDirection.value.set(...state.lightDirection);
+    skyLightingUniforms.skyDirectColor.value.set(...state.directLightColor);
+    skyLightingUniforms.skyAmbientColor.value.set(...state.ambientSkyColor);
+    skyLightingUniforms.skyGroundColor.value.set(...state.ambientGroundColor);
+    skyLightingUniforms.skyZenithColor.value.set(...state.zenithColor);
+    skyLightingUniforms.skyHorizonColor.value.set(...state.horizonColor);
     skyLightingUniforms.skyFogColor.value.set(
       linearToSrgbChannel(state.fogColor[0] + (state.mistColor[0] - state.fogColor[0]) * this.cloudMist),
       linearToSrgbChannel(state.fogColor[1] + (state.mistColor[1] - state.fogColor[1]) * this.cloudMist),

@@ -5,6 +5,8 @@
 // map of the adopted sky) or a fixed horizon colour.
 
 import { DAYLIGHT_GLSL, FOG_GLSL } from "../../sky/sky-lighting";
+import { SKY_EXPOSURE_BRIGHT_LEVEL, SKY_EXPOSURE_DARK_LEVEL, SURFACE_LIGHTING_GLSL } from "../../sky/surface-lighting";
+import { WATER_LIGHTING_GLSL } from "../../sky/water-lighting";
 import { COVERAGE_NORMAL_NUDGE_BLOCKS } from "../coverage/real-chunk-coverage";
 import { BLOCK_RENDER_OFFSET, CHUNK_SIZE_BLOCKS } from "../core/lod-constants";
 import {
@@ -30,7 +32,9 @@ attribute uvec2 packedVertex;
 out vec3 vWorldPosition;
 out vec3 vColor;
 out float vShade;
+out float vSkyExposure;
 flat out vec2 vNormalXZ;
+flat out vec3 vNormal;
 
 vec3 srgbToLinear(vec3 color) {
   return mix(color / 12.92, pow((color + 0.055) / 1.055, vec3(2.4)), step(vec3(0.04045), color));
@@ -48,11 +52,13 @@ void main() {
   float occlusion = float((positionWord >> ${OCCLUSION_SHIFT}u) & ${mask(OCCLUSION_BITS)});
   float light = float((positionWord >> ${LIGHT_SHIFT}u) & ${mask(LIGHT_BITS)});
   vShade = pow(0.8, 15.0 - light) * daylightScale() * (0.55 + 0.15 * occlusion);
+  vSkyExposure = smoothstep(${SKY_EXPOSURE_DARK_LEVEL.toFixed(1)}, ${SKY_EXPOSURE_BRIGHT_LEVEL.toFixed(1)}, light);
   vColor = srgbToLinear(vec3(
     float((colorWord >> 16u) & 255u),
     float((colorWord >> 8u) & 255u),
     float(colorWord & 255u)
   ) / 255.0);
+  vNormal = face == 1u ? vec3(1.0, 0.0, 0.0) : face == 2u ? vec3(-1.0, 0.0, 0.0) : face == 3u ? vec3(0.0, 0.0, 1.0) : face == 4u ? vec3(0.0, 0.0, -1.0) : vec3(0.0, 1.0, 0.0);
   vNormalXZ = face == 1u ? vec2(1.0, 0.0) : face == 2u ? vec2(-1.0, 0.0) : face == 3u ? vec2(0.0, 1.0) : face == 4u ? vec2(0.0, -1.0) : vec2(0.0);
   vec4 worldPosition = modelMatrix * vec4(localPosition, 1.0);
   vWorldPosition = worldPosition.xyz;
@@ -62,10 +68,14 @@ void main() {
 
 export const LOD_FRAGMENT_SHADER = `
 ${FOG_GLSL}
+${SURFACE_LIGHTING_GLSL}
+${WATER_LIGHTING_GLSL}
 in vec3 vWorldPosition;
 in vec3 vColor;
 in float vShade;
+in float vSkyExposure;
 flat in vec2 vNormalXZ;
+flat in vec3 vNormal;
 
 uniform sampler2D coverageTexture;
 uniform vec2 coverageCenterChunk;
@@ -105,12 +115,13 @@ void main() {
     if (dither < -tileFade - 1.0 || dither >= farVisibility) discard;
   }
 
-  vec3 lighting = max(vec3(vShade), vec3(0.05));
-  vec3 displayColor = linearToOutputTexel(vec4(vColor, 1.0)).rgb * lighting;
+  bool isWater = surfaceAlpha < 0.99;
+  vec4 water = isWater ? shadeWater(vColor, vShade, vNormal, vWorldPosition, vSkyExposure, surfaceAlpha) : vec4(0.0);
+  vec3 displayColor = isWater ? water.rgb : shadeSurface(vColor, vShade, vNormal, vWorldPosition, vSkyExposure, 0.0);
   float hazeAmount = smoothstep(hazeStart, hazeEnd, distanceToCamera);
   vec3 skyBehind = useHazeCube > 0.5
     ? linearToOutputTexel(vec4(texture(hazeCube, (vWorldPosition - cameraPosition) / distanceToCamera).rgb, 1.0)).rgb
     : hazeColor;
-  gl_FragColor = vec4(applyFog(mix(displayColor, skyBehind, hazeAmount), vWorldPosition), surfaceAlpha);
+  gl_FragColor = vec4(applyFog(mix(displayColor, skyBehind, hazeAmount), vWorldPosition), isWater ? water.a : surfaceAlpha);
 }
 `;

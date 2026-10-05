@@ -13,6 +13,9 @@ import { toast } from "sonner";
 import { HumidityMap } from "./sky/climate/humidity-map";
 import { SkyController } from "./sky/sky-controller";
 import { skyLightingUniforms } from "./sky/sky-lighting";
+import { buildFoliageTextureBits } from "./sky/foliage-textures";
+import { shadowUniforms } from "./shadows/shadow-glsl";
+import { ShadowPass } from "./shadows/shadow-pass";
 
 import {
   CHUNK_HEIGHT,
@@ -225,6 +228,7 @@ export default function Game() {
   const containerRef = useRef<HTMLDivElement>(null);
 
   const skyControllerRef = useRef<SkyController | null>(null);
+  const shadowPassRef = useRef<ShadowPass | null>(null);
   const seedRef = useRef(Math.floor(Math.random() * 100000000));
   const networkManager = useRef(new NetworkManager());
   const remotePlayers = useRef<Map<string, RemotePlayer>>(new Map());
@@ -752,6 +756,7 @@ export default function Game() {
         seedRef.current,
       );
       skyControllerRef.current = skyController;
+      shadowPassRef.current = new ShadowPass(renderer);
       const sky = skyController.dome;
       scene.add(sky);
       lodBridgeRef.current = new GameLodBridge({
@@ -930,6 +935,9 @@ export default function Game() {
               Texture.WATER,
             );
 
+            const foliageTextureBits = buildFoliageTextureBits(Object.keys(Texture));
+            shadowPassRef.current?.setBlockTextures(textureArray);
+
             materialsRef.current.opaque = new THREE.ShaderMaterial({
               uniforms: {
                 Texture: {
@@ -941,7 +949,9 @@ export default function Game() {
                 edgeExpansion: {
                   value: EDGE_EXPANSION_PER_DEPTH,
                 },
+                foliageTextureBits: { value: foliageTextureBits },
                 ...skyLightingUniforms,
+                ...shadowUniforms,
               },
               vertexShader: VERTEX_SHADER,
               fragmentShader: FRAGMENT_SHADER,
@@ -962,7 +972,9 @@ export default function Game() {
                 edgeExpansion: {
                   value: 0,
                 },
+                foliageTextureBits: { value: foliageTextureBits },
                 ...skyLightingUniforms,
+                ...shadowUniforms,
               },
               vertexShader: VERTEX_SHADER,
               fragmentShader: FRAGMENT_SHADER,
@@ -980,8 +992,11 @@ export default function Game() {
                 waterTextureIndex: {
                   value: waterTextureIndex,
                 },
+                foliageTextureBits: { value: foliageTextureBits },
                 ...skyLightingUniforms,
+                ...shadowUniforms,
               },
+              defines: { IS_PLANT_MATERIAL: "" },
               vertexShader: PLANT_VERTEX_SHADER,
               fragmentShader: FRAGMENT_SHADER,
               blending: THREE.NormalBlending,
@@ -1191,6 +1206,8 @@ export default function Game() {
         lodBridgeRef.current = null;
         skyControllerRef.current?.dispose();
         skyControllerRef.current = null;
+        shadowPassRef.current?.dispose();
+        shadowPassRef.current = null;
 
         document.removeEventListener("keyup", onKeyUp);
         if (container) {
@@ -1595,9 +1612,9 @@ export default function Game() {
         vertexCount: meshResult.opaque.byteLength / 8,
         bytesByAttribute: { packedVertices: meshResult.opaque.byteLength },
       });
-      meshes.push(
-        placeChunkMesh(opaqueGeometry, opaque, chunkName, 0, chunkX, chunkY, chunkZ),
-      );
+      const opaqueMesh = placeChunkMesh(opaqueGeometry, opaque, chunkName, 0, chunkX, chunkY, chunkZ);
+      shadowPassRef.current?.addChunkCaster(chunkName, opaqueGeometry, opaqueMesh);
+      meshes.push(opaqueMesh);
     }
 
     const transparentGeometry = createChunkSurfaceGeometry(meshResult.transparent);
@@ -1842,6 +1859,7 @@ export default function Game() {
     const disposeToken = profiler.begin("main.chunk.dispose");
     profiler.removeMesh(chunkName);
     plantDetailRef.current.delete(chunkName);
+    shadowPassRef.current?.removeChunkCaster(chunkName);
     const meshes = chunkMeshesRef.current.get(chunkName);
     if (meshes) {
       for (const mesh of meshes) {
@@ -2541,6 +2559,12 @@ export default function Game() {
 
     const sky = skyControllerRef.current;
     if (sky && sky.update(Math.min(delta, 0.1), camera.position)) lodBridgeRef.current?.refreshBackgroundHaze();
+
+    const shadowPass = shadowPassRef.current;
+    if (shadowPass) {
+      shadowPass.setQuality(gameSettingsRef.current.shadowQuality);
+      shadowPass.update(camera);
+    }
 
     renderer.clear();
     const drawFarTerrain = () => lodBridgeRef.current?.renderPass(renderer, camera);

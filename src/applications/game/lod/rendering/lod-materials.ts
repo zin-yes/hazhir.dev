@@ -2,6 +2,7 @@
 // coverage texture); only the per-tile cross-fade value is set per draw, from the tile mesh's onBeforeRender.
 
 import * as THREE from "three";
+import { shadowUniforms } from "../../shadows/shadow-glsl";
 import { skyLightingUniforms } from "../../sky/sky-lighting";
 import { LOD_FRAGMENT_SHADER, LOD_VERTEX_SHADER } from "./lod-shaders";
 
@@ -61,7 +62,7 @@ export function createLodMaterials(fogColorHex: number): LodMaterials {
   const createMaterial = (isWater: boolean) =>
     new THREE.ShaderMaterial({
       name: isWater ? "lod-water" : "lod-terrain",
-      uniforms: { ...sceneUniforms, ...skyLightingUniforms, tileFade: { value: 1 }, surfaceAlpha: { value: isWater ? WATER_ALPHA : 1 } },
+      uniforms: { ...sceneUniforms, ...skyLightingUniforms, ...shadowUniforms, tileFade: { value: 1 }, surfaceAlpha: { value: isWater ? WATER_ALPHA : 1 } },
       vertexShader: LOD_VERTEX_SHADER,
       fragmentShader: LOD_FRAGMENT_SHADER,
       transparent: isWater,
