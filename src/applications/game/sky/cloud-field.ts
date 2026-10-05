@@ -41,10 +41,12 @@ export interface CloudFieldInputs {
 }
 
 const SHAPE_SALT = 7919;
-const MIN_WIDTH_SCALE = 0.62;
-const MAX_WIDTH_SCALE = 0.98;
-const MIN_HEIGHT_SCALE = 0.5;
-const MAX_HEIGHT_SCALE = 0.95;
+const MIN_WIDTH_SCALE = 0.5;
+const MAX_WIDTH_SCALE = 0.8;
+const MIN_HEIGHT_SCALE = 0.45;
+const MAX_HEIGHT_SCALE = 0.72;
+/** Room kept around a body for the shader's edge warp, so a warped body never leaves its own cell. */
+const WARP_MARGIN: [number, number, number] = [4, 1.5, 4];
 const CORNER_ROUNDNESS = 0.9;
 
 function toUint32(value: number): number {
@@ -173,9 +175,9 @@ export function cloudBodyOf(cell: CloudCell): CloudBody {
   ];
   const [offsetXHash, offsetYHash, offsetZHash] = pcg3d(cell.x - SHAPE_SALT, cell.y - SHAPE_SALT, cell.z - SHAPE_SALT);
   const offset: [number, number, number] = [
-    (offsetXHash / UINT32_RANGE - 0.5) * (CLOUD_CELL_WIDTH - halfExtents[0] * 2),
-    (offsetYHash / UINT32_RANGE - 0.5) * (CLOUD_CELL_HEIGHT - halfExtents[1] * 2),
-    (offsetZHash / UINT32_RANGE - 0.5) * (CLOUD_CELL_WIDTH - halfExtents[2] * 2),
+    (offsetXHash / UINT32_RANGE - 0.5) * Math.max(CLOUD_CELL_WIDTH - (halfExtents[0] + WARP_MARGIN[0]) * 2, 0),
+    (offsetYHash / UINT32_RANGE - 0.5) * Math.max(CLOUD_CELL_HEIGHT - (halfExtents[1] + WARP_MARGIN[1]) * 2, 0),
+    (offsetZHash / UINT32_RANGE - 0.5) * Math.max(CLOUD_CELL_WIDTH - (halfExtents[2] + WARP_MARGIN[2]) * 2, 0),
   ];
   return { offset, halfExtents, cornerRadius: Math.min(...halfExtents) * CORNER_ROUNDNESS };
 }

@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { CloudPass } from "./cloud-pass";
 import { CloudCarves } from "./cloud-carves";
 import { cloudDepthAt } from "./cloud-field";
 import { cloudCoverageFor, weatherShiftAt } from "./cloud-weather";
@@ -32,6 +33,7 @@ function linearToSrgbChannel(channel: number): number {
 /** Drives the day/night clock, weather and humidity-fed clouds, and keeps the terrain daylight uniform in step. */
 export class SkyController {
   readonly dome: SkyDome;
+  readonly cloudPass: CloudPass;
   readonly clock = new SkyClock();
   private elapsedSeconds = 0;
   private fogDensity = 0;
@@ -42,10 +44,13 @@ export class SkyController {
   private secondsSinceHazeRefresh = Number.POSITIVE_INFINITY;
 
   constructor(
+    renderer: THREE.WebGLRenderer,
     private readonly humidityMap: HumidityMap,
     private weatherSeed: number = 0,
   ) {
     this.dome = new SkyDome(humidityMap.texture, humidityMap.uniforms);
+    this.cloudPass = new CloudPass(renderer, this.dome.material.uniforms);
+    this.cloudPass.onDisabled = () => this.dome.setCloudsInDome(true);
   }
 
   /** A new world gets its own biome humidity and its own run of weather. */
@@ -125,6 +130,7 @@ export class SkyController {
 
   dispose(): void {
     this.humidityMap.dispose();
+    this.cloudPass.dispose();
     this.dome.geometry.dispose();
     this.dome.material.dispose();
   }

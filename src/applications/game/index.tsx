@@ -747,6 +747,7 @@ export default function Game() {
       scene.add(brushPreviewRef.current);
 
       const skyController = new SkyController(
+        renderer,
         new HumidityMap((method, params) => generationWorkerPool.exec(method, params), seedRef.current),
         seedRef.current,
       );
@@ -757,6 +758,7 @@ export default function Game() {
         createWorker: () => new Worker(new URL("./lod/worker/lod-worker.ts", import.meta.url), { name: "lod" }),
         workerCount: LOD_WORKER_COUNT,
         background: sky,
+        onFarTerrainDrawn: (farTerrainCamera) => skyController.cloudPass.captureFarTerrainDepth(farTerrainCamera),
       });
       renderer.autoClear = false;
 
@@ -2548,6 +2550,7 @@ export default function Game() {
       drawFarTerrain();
       renderer.render(scene, camera);
     }
+    sky?.cloudPass.render(camera);
     // stats.end();
     profiler.endFrame();
   };

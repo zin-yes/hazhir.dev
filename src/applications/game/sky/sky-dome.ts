@@ -40,6 +40,7 @@ export class SkyDome extends THREE.Mesh<THREE.BoxGeometry, THREE.ShaderMaterial>
           fogStrength: { value: 0 },
           mistColor: { value: new THREE.Vector3() },
           cloudMist: { value: 0 },
+          cloudsInDome: { value: 0 },
           cloudCarves: { value: Array.from({ length: MAX_CLOUD_CARVES }, () => new THREE.Vector4()) },
           humidityTexture: { value: humidityTexture },
           ...humidityUniforms,
@@ -52,6 +53,11 @@ export class SkyDome extends THREE.Mesh<THREE.BoxGeometry, THREE.ShaderMaterial>
     );
     this.name = "sky";
     this.frustumCulled = false;
+  }
+
+  /** Turns the clouds in the dome on or off (they are normally drawn by the cloud pass instead). */
+  setCloudsInDome(isEnabled: boolean): void {
+    this.material.uniforms.cloudsInDome!.value = isEnabled ? 1 : 0;
   }
 
   get carveUniform(): THREE.Vector4[] {
