@@ -4,6 +4,7 @@
 export type TouchControlSize = "small" | "medium" | "large";
 export type TouchHandedness = "right" | "left";
 export type TouchJoystickMode = "floating" | "fixed";
+export type ShadowQuality = "off" | "low" | "high";
 
 export interface GameSettings {
   fieldOfViewDegrees: number;
@@ -14,6 +15,7 @@ export interface GameSettings {
   touchHandedness: TouchHandedness;
   touchOpacity: number;
   touchJoystickMode: TouchJoystickMode;
+  shadowQuality: ShadowQuality;
 }
 
 export const FIELD_OF_VIEW_MINIMUM_DEGREES = 60;
@@ -26,6 +28,7 @@ export const TOUCH_OPACITY_MAXIMUM = 1;
 export const TOUCH_CONTROL_SIZES: readonly TouchControlSize[] = ["small", "medium", "large"];
 export const TOUCH_HANDEDNESS_OPTIONS: readonly TouchHandedness[] = ["right", "left"];
 export const TOUCH_JOYSTICK_MODES: readonly TouchJoystickMode[] = ["floating", "fixed"];
+export const SHADOW_QUALITIES: readonly ShadowQuality[] = ["off", "low", "high"];
 
 export const DEFAULT_GAME_SETTINGS: Readonly<GameSettings> = {
   fieldOfViewDegrees: 85,
@@ -34,7 +37,25 @@ export const DEFAULT_GAME_SETTINGS: Readonly<GameSettings> = {
   touchHandedness: "right",
   touchOpacity: 0.85,
   touchJoystickMode: "floating",
+  shadowQuality: "high",
 };
+
+type MatchMedia = (query: string) => Pick<MediaQueryList, "matches">;
+
+/** Shadows start off on touch devices (coarse primary pointer) and high elsewhere, including on the server. */
+export function defaultShadowQuality(matchMedia: MatchMedia | undefined = browserMatchMedia()): ShadowQuality {
+  return matchMedia?.("(pointer: coarse)").matches ? "off" : "high";
+}
+
+function browserMatchMedia(): MatchMedia | undefined {
+  if (typeof window === "undefined" || typeof window.matchMedia !== "function") return undefined;
+  return (query) => window.matchMedia(query);
+}
+
+/** The defaults for this device: the static defaults plus the device-dependent shadow quality. */
+export function defaultGameSettings(matchMedia?: MatchMedia): GameSettings {
+  return { ...DEFAULT_GAME_SETTINGS, shadowQuality: defaultShadowQuality(matchMedia) };
+}
 
 function clampedNumber(value: unknown, minimum: number, maximum: number, fallback: number): number {
   if (typeof value !== "number" || !Number.isFinite(value)) return fallback;
@@ -71,5 +92,6 @@ export function normalizeGameSettings(settings: Partial<Record<keyof GameSetting
       DEFAULT_GAME_SETTINGS.touchOpacity,
     ),
     touchJoystickMode: allowedOption(settings.touchJoystickMode, TOUCH_JOYSTICK_MODES, DEFAULT_GAME_SETTINGS.touchJoystickMode),
+    shadowQuality: allowedOption(settings.shadowQuality, SHADOW_QUALITIES, defaultShadowQuality()),
   };
 }

@@ -1,17 +1,17 @@
 // Game settings kept in localStorage between sessions. Storage can be missing or throw (private windows, blocked site
 // data): the defaults apply then.
 
-import { DEFAULT_GAME_SETTINGS, normalizeGameSettings, type GameSettings } from "./game-settings";
+import { defaultGameSettings, normalizeGameSettings, type GameSettings } from "./game-settings";
 
 const STORAGE_KEY = "voxel-game.game-settings";
 
 export function loadStoredGameSettings(storage: Pick<Storage, "getItem"> | undefined): GameSettings {
   try {
     const text = storage?.getItem(STORAGE_KEY);
-    if (!text) return { ...DEFAULT_GAME_SETTINGS };
+    if (!text) return defaultGameSettings();
     return normalizeGameSettings(JSON.parse(text) as Partial<GameSettings>);
   } catch {
-    return { ...DEFAULT_GAME_SETTINGS };
+    return defaultGameSettings();
   }
 }
 

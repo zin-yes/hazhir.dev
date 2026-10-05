@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { DEFAULT_GAME_SETTINGS, normalizeGameSettings } from "./game-settings";
+import { DEFAULT_GAME_SETTINGS, SHADOW_QUALITIES, defaultShadowQuality, normalizeGameSettings } from "./game-settings";
 import { loadStoredGameSettings, storeGameSettings } from "./game-settings-storage";
 
 function memoryStorage() {
@@ -56,5 +56,29 @@ describe("game settings", () => {
         DEFAULT_GAME_SETTINGS,
       ),
     ).not.toThrow();
+  });
+
+  test("shadow quality defaults per device and keeps valid stored values", () => {
+    const startedAt = performance.now();
+    const touchDevice = (query: string) => ({ matches: query === "(pointer: coarse)" });
+    const desktopDevice = () => ({ matches: false });
+
+    expect(defaultShadowQuality(touchDevice)).toBe("off");
+    expect(defaultShadowQuality(desktopDevice)).toBe("high");
+    expect(defaultShadowQuality()).toBe("high");
+    expect(SHADOW_QUALITIES).toEqual(["off", "low", "high"]);
+
+    expect(normalizeGameSettings({ shadowQuality: "ultra" }).shadowQuality).toBe("high");
+    expect(normalizeGameSettings({ shadowQuality: 3 }).shadowQuality).toBe("high");
+    for (const shadowQuality of SHADOW_QUALITIES) {
+      expect(normalizeGameSettings({ shadowQuality }).shadowQuality).toBe(shadowQuality);
+    }
+
+    const storage = memoryStorage();
+    storage.setItem("voxel-game.game-settings", JSON.stringify({ shadowQuality: "low" }));
+    expect(loadStoredGameSettings(storage).shadowQuality).toBe("low");
+    storage.setItem("voxel-game.game-settings", JSON.stringify({ shadowQuality: "junk" }));
+    expect(loadStoredGameSettings(storage).shadowQuality).toBe("high");
+    console.log(`shadow quality defaults test: ${(performance.now() - startedAt).toFixed(2)} ms`);
   });
 });
