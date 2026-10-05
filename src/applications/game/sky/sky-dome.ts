@@ -17,7 +17,7 @@ export interface SkyDomeInputs {
 
 /** A unit cube drawn at the far plane around the camera; the shader turns each pixel's direction into sky. */
 export class SkyDome extends THREE.Mesh<THREE.BoxGeometry, THREE.ShaderMaterial> {
-  constructor(humidityTexture: THREE.Texture, humidityUniforms: HumidityUniforms) {
+  constructor(humidityTexture: THREE.Texture, humidityUniforms: HumidityUniforms, cloudNoiseTexture: THREE.Texture) {
     super(
       new THREE.BoxGeometry(2, 2, 2),
       new THREE.ShaderMaterial({
@@ -43,6 +43,7 @@ export class SkyDome extends THREE.Mesh<THREE.BoxGeometry, THREE.ShaderMaterial>
           cloudsInDome: { value: 0 },
           cloudCarves: { value: Array.from({ length: MAX_CLOUD_CARVES }, () => new THREE.Vector4()) },
           humidityTexture: { value: humidityTexture },
+          cloudNoise: { value: cloudNoiseTexture },
           ...humidityUniforms,
         },
         vertexShader: SKY_VERTEX_SHADER,

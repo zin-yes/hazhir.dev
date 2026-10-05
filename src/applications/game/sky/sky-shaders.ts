@@ -32,6 +32,17 @@ const float MOON_RADIUS = 0.05;
 const float STAR_GRID = 180.0;
 const float STAR_DENSITY = 0.004;
 
+float valueNoise(vec3 point) {
+  vec3 base = floor(point);
+  vec3 fraction = point - base;
+  vec3 eased = fraction * fraction * (3.0 - 2.0 * fraction);
+  return mix(
+    mix(mix(hash13(base), hash13(base + vec3(1.0, 0.0, 0.0)), eased.x), mix(hash13(base + vec3(0.0, 1.0, 0.0)), hash13(base + vec3(1.0, 1.0, 0.0)), eased.x), eased.y),
+    mix(mix(hash13(base + vec3(0.0, 0.0, 1.0)), hash13(base + vec3(1.0, 0.0, 1.0)), eased.x), mix(hash13(base + vec3(0.0, 1.0, 1.0)), hash13(base + vec3(1.0, 1.0, 1.0)), eased.x), eased.y),
+    eased.z
+  );
+}
+
 vec3 skyGradient(vec3 direction) {
   float elevation = clamp(direction.y, -1.0, 1.0);
   vec3 color = mix(horizonColor, zenithColor, pow(max(elevation, 0.0), 0.5));

@@ -1,10 +1,10 @@
 import * as THREE from "three";
 import { CloudPass } from "./cloud-pass";
 import { CloudCarves } from "./cloud-carves";
-import { cloudDepthAt } from "./cloud-field";
+import { cloudDensityAt } from "./cloud-field";
+import { CLOUD_NOISE_SIZE, generateCloudNoise } from "./cloud-noise";
 import { cloudCoverageFor, weatherShiftAt } from "./cloud-weather";
 import type { HumidityMap } from "./climate/humidity-map";
-import { CLOUD_CELL_HEIGHT } from "./sky-constants";
 import { SkyClock } from "./sky-clock";
 import { SkyDome } from "./sky-dome";
 import { targetFogDensity } from "./fog-weather";
@@ -18,11 +18,11 @@ const OVERCAST_COVERAGE_FULL = 1;
 const HAZE_REFRESH_INTERVAL_SECONDS = 2;
 /** Fog rolls in and burns off over about this long, so crossing a biome border never pops. */
 const FOG_RESPONSE_SECONDS = 25;
-/** Depth inside a cloud body (blocks) at which the mist is complete, and how fast it builds up or clears. */
-const FULL_MIST_DEPTH_BLOCKS = CLOUD_CELL_HEIGHT * 0.3;
+/** Cloud density the viewer sits in that gives complete mist, and how fast it builds up or clears. */
+const FULL_MIST_DENSITY = 0.6;
 const MIST_RESPONSE_SECONDS = 0.35;
 /** The hole opened behind a moving viewer sits this far back, so it never swallows the viewer's own cloud. */
-const CARVE_DISTANCE_BEHIND_BLOCKS = 15;
+const CARVE_DISTANCE_BEHIND_BLOCKS = 42;
 const MAX_TRAIL_STEP_BLOCKS = 20;
 
 function linearToSrgbChannel(channel: number): number {
@@ -34,6 +34,8 @@ function linearToSrgbChannel(channel: number): number {
 export class SkyController {
   readonly dome: SkyDome;
   readonly cloudPass: CloudPass;
+  private readonly cloudNoiseData: Uint8Array;
+  private readonly cloudNoiseTexture: THREE.Data3DTexture;
   readonly clock = new SkyClock();
   private elapsedSeconds = 0;
   private fogDensity = 0;
@@ -48,7 +50,20 @@ export class SkyController {
     private readonly humidityMap: HumidityMap,
     private weatherSeed: number = 0,
   ) {
-    this.dome = new SkyDome(humidityMap.texture, humidityMap.uniforms);
+    this.cloudNoiseData = generateCloudNoise();
+    const cloudNoiseTexture = new THREE.Data3DTexture(this.cloudNoiseData, CLOUD_NOISE_SIZE, CLOUD_NOISE_SIZE, CLOUD_NOISE_SIZE);
+    cloudNoiseTexture.format = THREE.RGFormat;
+    cloudNoiseTexture.type = THREE.UnsignedByteType;
+    cloudNoiseTexture.minFilter = THREE.LinearFilter;
+    cloudNoiseTexture.magFilter = THREE.LinearFilter;
+    cloudNoiseTexture.wrapS = THREE.RepeatWrapping;
+    cloudNoiseTexture.wrapT = THREE.RepeatWrapping;
+    cloudNoiseTexture.wrapR = THREE.RepeatWrapping;
+    cloudNoiseTexture.unpackAlignment = 1;
+    cloudNoiseTexture.generateMipmaps = false;
+    cloudNoiseTexture.needsUpdate = true;
+    this.cloudNoiseTexture = cloudNoiseTexture;
+    this.dome = new SkyDome(humidityMap.texture, humidityMap.uniforms, cloudNoiseTexture);
     this.cloudPass = new CloudPass(renderer, this.dome.material.uniforms);
     this.cloudPass.onDisabled = () => this.dome.setCloudsInDome(true);
   }
@@ -73,15 +88,16 @@ export class SkyController {
 
     this.carves.advance(deltaSeconds);
     const cloudInputs = {
+      noise: this.cloudNoiseData,
       elapsedSeconds: this.elapsedSeconds,
       weatherShift,
       humidityAt: (worldX: number, worldZ: number) => this.humidityMap.humidityAt(worldX, worldZ),
       carves: this.carves.list(),
     };
-    const depthInsideCloud = cloudDepthAt(viewerPosition.x, viewerPosition.y, viewerPosition.z, cloudInputs);
-    const mistTarget = Math.min(1, depthInsideCloud / FULL_MIST_DEPTH_BLOCKS);
+    const densityAtViewer = cloudDensityAt(viewerPosition.x, viewerPosition.y, viewerPosition.z, cloudInputs);
+    const mistTarget = Math.min(1, densityAtViewer / FULL_MIST_DENSITY);
     this.cloudMist += (mistTarget - this.cloudMist) * (1 - Math.exp(-deltaSeconds / MIST_RESPONSE_SECONDS));
-    this.carveTrailBehind(viewerPosition, depthInsideCloud > 0);
+    this.carveTrailBehind(viewerPosition, densityAtViewer > 0.05);
     this.carves.writeUniform(this.dome.carveUniform);
 
     const fogTarget = targetFogDensity({ humidity, weatherShift, sunElevation: state.sunDirection[1] });
@@ -131,6 +147,7 @@ export class SkyController {
   dispose(): void {
     this.humidityMap.dispose();
     this.cloudPass.dispose();
+    this.cloudNoiseTexture.dispose();
     this.dome.geometry.dispose();
     this.dome.material.dispose();
   }

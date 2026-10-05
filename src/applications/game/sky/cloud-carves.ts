@@ -3,10 +3,10 @@
 
 import type { CloudCarve } from "./cloud-field";
 
-export const MAX_CLOUD_CARVES = 16;
-const CARVE_RADIUS_BLOCKS = 13;
+export const MAX_CLOUD_CARVES = 12;
+const CARVE_RADIUS_BLOCKS = 34;
 const CARVE_LIFETIME_SECONDS = 30;
-const MINIMUM_SPACING_BLOCKS = 8;
+const MINIMUM_SPACING_BLOCKS = 16;
 
 interface LiveCarve {
   x: number;

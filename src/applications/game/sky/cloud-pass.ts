@@ -2,10 +2,12 @@
 // to the canvas, so its depth is copied out (framebuffer blit) into depth textures: once after the far terrain pass
 // (before that pass clears depth for the real chunks) and once after the real chunks. The cloud shader reads both,
 // turns them into distances along the view ray and marches the clouds only up to the nearer one.
+// The clouds are marched at CLOUD_RENDER_SCALE of the screen size into a target and then upsampled over the canvas.
 // If the blit is not supported the pass turns itself off and the sky dome traces the clouds instead (behind the world).
 
 import * as THREE from "three";
 import { CLOUD_GLSL } from "./cloud-glsl";
+import { CLOUD_RENDER_SCALE } from "./sky-constants";
 
 const FULLSCREEN_VERTEX_SHADER = `
 varying vec2 vUv;
@@ -15,7 +17,7 @@ void main() {
 }
 `;
 
-const CLOUD_PASS_FRAGMENT_SHADER = `
+const CLOUD_MARCH_FRAGMENT_SHADER = `
 varying vec2 vUv;
 
 ${CLOUD_GLSL}
@@ -45,17 +47,25 @@ void main() {
     if (farDepthValue < 1.0) terrainDistance = min(terrainDistance, distanceFromDepth(farDepthValue, farTerrainProjectionInverse));
   }
 
-  float jitter = fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453);
+  float jitter = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
   vec4 clouds = traceClouds(viewerPosition, direction, terrainDistance, jitter);
 
   vec3 gathered = mix(clouds.rgb, fogColor * (1.0 - clouds.w), fogStrength * 0.45);
   float transmittance = clouds.w * (1.0 - cloudMist);
   gathered = gathered * (1.0 - cloudMist) + mistColor * cloudMist;
-  float alpha = 1.0 - transmittance;
-  if (alpha < 0.002) discard;
+  gl_FragColor = vec4(gathered, 1.0 - transmittance);
+}
+`;
 
-  vec3 straight = gathered / alpha;
-  gl_FragColor = vec4(linearToOutputTexel(vec4(straight, 1.0)).rgb * alpha, alpha);
+const CLOUD_COMPOSITE_FRAGMENT_SHADER = `
+varying vec2 vUv;
+uniform sampler2D cloudColor;
+
+void main() {
+  vec4 clouds = texture2D(cloudColor, vUv);
+  if (clouds.a < 0.002) discard;
+  vec3 straight = clouds.rgb / clouds.a;
+  gl_FragColor = vec4(linearToOutputTexel(vec4(straight, 1.0)).rgb * clouds.a, clouds.a);
 }
 `;
 
@@ -146,13 +156,27 @@ class DepthCopy {
   }
 }
 
+function createFullscreenScene(material: THREE.ShaderMaterial): THREE.Scene {
+  const triangle = new THREE.BufferGeometry();
+  triangle.setAttribute("position", new THREE.Float32BufferAttribute([-1, -1, 0, 3, -1, 0, -1, 3, 0], 3));
+  triangle.setAttribute("uv", new THREE.Float32BufferAttribute([0, 0, 2, 0, 0, 2], 2));
+  const mesh = new THREE.Mesh(triangle, material);
+  mesh.frustumCulled = false;
+  const scene = new THREE.Scene();
+  scene.add(mesh);
+  return scene;
+}
+
 export class CloudPass {
   private readonly gl: WebGL2RenderingContext;
   private readonly worldDepthCopy: DepthCopy;
   private readonly farTerrainDepthCopy: DepthCopy;
-  private readonly scene = new THREE.Scene();
   private readonly camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
-  private readonly material: THREE.ShaderMaterial;
+  private readonly marchMaterial: THREE.ShaderMaterial;
+  private readonly compositeMaterial: THREE.ShaderMaterial;
+  private readonly marchScene: THREE.Scene;
+  private readonly compositeScene: THREE.Scene;
+  private readonly cloudTarget: THREE.WebGLRenderTarget;
   private readonly size = new THREE.Vector2();
   private farTerrainCapturedThisFrame = false;
   private isUsable = true;
@@ -165,8 +189,16 @@ export class CloudPass {
     this.gl = renderer.getContext() as WebGL2RenderingContext;
     this.worldDepthCopy = new DepthCopy(renderer, this.gl);
     this.farTerrainDepthCopy = new DepthCopy(renderer, this.gl);
-    this.material = new THREE.ShaderMaterial({
-      name: "cloud-pass",
+    this.cloudTarget = new THREE.WebGLRenderTarget(1, 1, {
+      type: THREE.HalfFloatType,
+      format: THREE.RGBAFormat,
+      minFilter: THREE.LinearFilter,
+      magFilter: THREE.LinearFilter,
+      depthBuffer: false,
+      generateMipmaps: false,
+    });
+    this.marchMaterial = new THREE.ShaderMaterial({
+      name: "cloud-march",
       uniforms: {
         ...skyUniforms,
         worldDepth: { value: null },
@@ -177,7 +209,16 @@ export class CloudPass {
         cameraWorldMatrix: { value: new THREE.Matrix4() },
       },
       vertexShader: FULLSCREEN_VERTEX_SHADER,
-      fragmentShader: CLOUD_PASS_FRAGMENT_SHADER,
+      fragmentShader: CLOUD_MARCH_FRAGMENT_SHADER,
+      depthTest: false,
+      depthWrite: false,
+      blending: THREE.NoBlending,
+    });
+    this.compositeMaterial = new THREE.ShaderMaterial({
+      name: "cloud-composite",
+      uniforms: { cloudColor: { value: this.cloudTarget.texture } },
+      vertexShader: FULLSCREEN_VERTEX_SHADER,
+      fragmentShader: CLOUD_COMPOSITE_FRAGMENT_SHADER,
       depthTest: false,
       depthWrite: false,
       transparent: true,
@@ -188,12 +229,8 @@ export class CloudPass {
       blendSrcAlpha: THREE.OneFactor,
       blendDstAlpha: THREE.OneMinusSrcAlphaFactor,
     });
-    const triangle = new THREE.BufferGeometry();
-    triangle.setAttribute("position", new THREE.Float32BufferAttribute([-1, -1, 0, 3, -1, 0, -1, 3, 0], 3));
-    triangle.setAttribute("uv", new THREE.Float32BufferAttribute([0, 0, 2, 0, 0, 2], 2));
-    const mesh = new THREE.Mesh(triangle, this.material);
-    mesh.frustumCulled = false;
-    this.scene.add(mesh);
+    this.marchScene = createFullscreenScene(this.marchMaterial);
+    this.compositeScene = createFullscreenScene(this.compositeMaterial);
   }
 
   /** True while the pass draws the clouds; false means the sky dome must trace them. */
@@ -209,11 +246,11 @@ export class CloudPass {
       this.disable();
       return;
     }
-    this.material.uniforms.farTerrainProjectionInverse!.value.copy(farTerrainCamera.projectionMatrixInverse);
+    this.marchMaterial.uniforms.farTerrainProjectionInverse!.value.copy(farTerrainCamera.projectionMatrixInverse);
     this.farTerrainCapturedThisFrame = true;
   }
 
-  /** Call after the whole world is drawn: copies the real chunks' depth and draws the clouds over the canvas. */
+  /** Call after the whole world is drawn: copies the real chunks' depth, marches the clouds and draws them over the canvas. */
   render(camera: THREE.PerspectiveCamera): void {
     if (!this.isUsable) return;
     this.renderer.getDrawingBufferSize(this.size);
@@ -222,7 +259,7 @@ export class CloudPass {
       return;
     }
     camera.updateMatrixWorld();
-    const uniforms = this.material.uniforms;
+    const uniforms = this.marchMaterial.uniforms;
     uniforms.worldDepth!.value = this.worldDepthCopy.texture;
     uniforms.farTerrainDepth!.value = this.farTerrainDepthCopy.texture;
     uniforms.farTerrainDepthValid!.value = this.farTerrainCapturedThisFrame ? 1 : 0;
@@ -230,11 +267,22 @@ export class CloudPass {
     uniforms.cameraWorldMatrix!.value.copy(camera.matrixWorld);
     this.farTerrainCapturedThisFrame = false;
 
+    const targetWidth = Math.max(1, Math.round(this.size.x * CLOUD_RENDER_SCALE));
+    const targetHeight = Math.max(1, Math.round(this.size.y * CLOUD_RENDER_SCALE));
+    if (this.cloudTarget.width !== targetWidth || this.cloudTarget.height !== targetHeight) {
+      this.cloudTarget.setSize(targetWidth, targetHeight);
+    }
+
     const previousAutoClear = this.renderer.autoClear;
+    const previousTarget = this.renderer.getRenderTarget();
     this.renderer.autoClear = false;
     try {
-      this.renderer.render(this.scene, this.camera);
+      this.renderer.setRenderTarget(this.cloudTarget);
+      this.renderer.render(this.marchScene, this.camera);
+      this.renderer.setRenderTarget(previousTarget);
+      this.renderer.render(this.compositeScene, this.camera);
     } finally {
+      this.renderer.setRenderTarget(previousTarget);
       this.renderer.autoClear = previousAutoClear;
     }
   }
@@ -244,10 +292,14 @@ export class CloudPass {
   dispose(): void {
     this.worldDepthCopy.dispose();
     this.farTerrainDepthCopy.dispose();
-    this.material.dispose();
-    this.scene.traverse((object) => {
-      if (object instanceof THREE.Mesh) object.geometry.dispose();
-    });
+    this.cloudTarget.dispose();
+    this.marchMaterial.dispose();
+    this.compositeMaterial.dispose();
+    for (const scene of [this.marchScene, this.compositeScene]) {
+      scene.traverse((object) => {
+        if (object instanceof THREE.Mesh) object.geometry.dispose();
+      });
+    }
   }
 
   private disable(): void {
