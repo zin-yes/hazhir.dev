@@ -45,6 +45,11 @@ export class GameLodBridge {
     this.executor.prepare?.();
   }
 
+  /** The sky changed: the far terrain's haze cube is re-rendered on the next frame. */
+  refreshBackgroundHaze(): void {
+    this.hasCapturedHaze = false;
+  }
+
   get isActive(): boolean {
     return this.manager !== null;
   }

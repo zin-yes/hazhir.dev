@@ -4,6 +4,7 @@
 // for dissolving into the sky at the far edge, and atmospheric fog towards the sky colour behind each fragment (a cube
 // map of the adopted sky) or a fixed horizon colour.
 
+import { DAYLIGHT_GLSL, FOG_GLSL } from "../../sky/sky-lighting";
 import { COVERAGE_NORMAL_NUDGE_BLOCKS } from "../coverage/real-chunk-coverage";
 import { BLOCK_RENDER_OFFSET, CHUNK_SIZE_BLOCKS } from "../core/lod-constants";
 import {
@@ -23,6 +24,7 @@ import {
 const mask = (bits: number) => `${(1 << bits) - 1}u`;
 
 export const LOD_VERTEX_SHADER = `
+${DAYLIGHT_GLSL}
 attribute uvec2 packedVertex;
 
 out vec3 vWorldPosition;
@@ -45,7 +47,7 @@ void main() {
   uint face = (positionWord >> ${FACE_SHIFT}u) & ${mask(FACE_BITS)};
   float occlusion = float((positionWord >> ${OCCLUSION_SHIFT}u) & ${mask(OCCLUSION_BITS)});
   float light = float((positionWord >> ${LIGHT_SHIFT}u) & ${mask(LIGHT_BITS)});
-  vShade = pow(0.8, 15.0 - light) * (0.55 + 0.15 * occlusion);
+  vShade = pow(0.8, 15.0 - light) * daylightScale() * (0.55 + 0.15 * occlusion);
   vColor = srgbToLinear(vec3(
     float((colorWord >> 16u) & 255u),
     float((colorWord >> 8u) & 255u),
@@ -59,6 +61,7 @@ void main() {
 `;
 
 export const LOD_FRAGMENT_SHADER = `
+${FOG_GLSL}
 in vec3 vWorldPosition;
 in vec3 vColor;
 in float vShade;
@@ -108,6 +111,6 @@ void main() {
   vec3 skyBehind = useHazeCube > 0.5
     ? linearToOutputTexel(vec4(texture(hazeCube, (vWorldPosition - cameraPosition) / distanceToCamera).rgb, 1.0)).rgb
     : hazeColor;
-  gl_FragColor = vec4(mix(displayColor, skyBehind, hazeAmount), surfaceAlpha);
+  gl_FragColor = vec4(applyFog(mix(displayColor, skyBehind, hazeAmount), vWorldPosition), surfaceAlpha);
 }
 `;

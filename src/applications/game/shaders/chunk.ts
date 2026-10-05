@@ -23,6 +23,7 @@ import {
   EDGE_OUTWARD_SHIFT,
   PLANT_UV_UNITS_PER_TEXTURE,
 } from "../vertex-format";
+import { DAYLIGHT_GLSL, FOG_GLSL } from "../sky/sky-lighting";
 
 /**
  * How far the opaque shader pushes a face corner outward, per block of view
@@ -40,10 +41,12 @@ const mask = (bits: number) => `${(1 << bits) - 1}u`;
 // Texture coordinates leave the vertex shader unwrapped (a merged quad runs from
 // 0 to its size in blocks); the fragment shader tiles them.
 const VERTEX_DECODING = `
+${DAYLIGHT_GLSL}
 attribute uvec2 packedVertex;
 
 varying vec2 TextureCoordinates;
 varying float vShade;
+varying vec3 vFogWorldPosition;
 flat out int TextureIndex;
 
 vec3 decodeVoxelPosition(uint positionWord) {
@@ -55,7 +58,7 @@ vec3 decodeVoxelPosition(uint positionWord) {
 }
 
 float shadeFor(float lightLevel, float ambientOcclusion) {
-  float lightIntensity = pow(0.8, 15.0 - lightLevel);
+  float lightIntensity = pow(0.8, 15.0 - lightLevel) * daylightScale();
   float ambientOcclusionFactor = 0.55 + 0.15 * ambientOcclusion;
   return lightIntensity * ambientOcclusionFactor;
 }
@@ -99,6 +102,7 @@ void main() {
     localPosition += outward * (max(-viewPosition.z, 0.0) * edgeExpansion);
     viewPosition = modelViewMatrix * vec4(localPosition, 1.0);
   }
+  vFogWorldPosition = (modelMatrix * vec4(localPosition, 1.0)).xyz;
   gl_Position = projectionMatrix * viewPosition;
 }
 `;
@@ -141,6 +145,7 @@ void main() {
   vShade = shadeFor(lightLevel, ambientOcclusion);
 
   vec3 localPosition = blockOrigin + voxelPosition * ${(1 / POSITION_UNITS_PER_BLOCK).toFixed(6)};
+  vFogWorldPosition = (modelMatrix * vec4(localPosition, 1.0)).xyz;
   gl_Position = projectionMatrix * modelViewMatrix * vec4(localPosition, 1.0);
 }
 `;
@@ -153,8 +158,10 @@ void main() {
  * continuous across tile boundaries, so mip selection does not jump there.
  */
 export const FRAGMENT_SHADER = `
+${FOG_GLSL}
 varying vec2 TextureCoordinates;
 varying float vShade;
+varying vec3 vFogWorldPosition;
 flat in int TextureIndex;
 
 uniform sampler2DArray Texture;
@@ -178,6 +185,6 @@ void main() {
   if (textureColor.a < 0.5) discard;
 
   vec3 displayColor = linearToOutputTexel(textureColor).rgb;
-  gl_FragColor = vec4(lighting * displayColor, textureColor.a);
+  gl_FragColor = vec4(applyFog(lighting * displayColor, vFogWorldPosition), textureColor.a);
 }
 `;
