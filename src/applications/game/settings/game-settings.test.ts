@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { DEFAULT_GAME_SETTINGS, SHADOW_QUALITIES, defaultBloomEnabled, defaultGameSettings, defaultShadowQuality, normalizeGameSettings } from "./game-settings";
+import { DEFAULT_GAME_SETTINGS, SHADOW_QUALITIES, defaultBloomEnabled, defaultGameSettings, defaultShadowQuality, defaultWaterReflections, normalizeGameSettings } from "./game-settings";
 import { loadStoredGameSettings, storeGameSettings } from "./game-settings-storage";
 
 function memoryStorage() {
@@ -107,5 +107,32 @@ describe("game settings", () => {
     storage.setItem("voxel-game.game-settings", JSON.stringify({ bloomEnabled: "junk" }));
     expect(loadStoredGameSettings(storage).bloomEnabled).toBe(true);
     console.log(`bloom defaults test: ${(performance.now() - startedAt).toFixed(2)} ms`);
+  });
+
+  test("water reflections default per device and keep valid stored values", () => {
+    const startedAt = performance.now();
+    const touchDevice = (query: string) => ({ matches: query === "(pointer: coarse)" });
+    const desktopDevice = () => ({ matches: false });
+
+    expect(defaultWaterReflections(touchDevice)).toBe(false);
+    expect(defaultWaterReflections(desktopDevice)).toBe(true);
+    expect(defaultWaterReflections()).toBe(true);
+    expect(defaultGameSettings(touchDevice).waterReflections).toBe(false);
+    expect(defaultGameSettings(desktopDevice).waterReflections).toBe(true);
+
+    expect(normalizeGameSettings({ waterReflections: "yes" }).waterReflections).toBe(true);
+    expect(normalizeGameSettings({ waterReflections: 0 }).waterReflections).toBe(true);
+    expect(normalizeGameSettings({ waterReflections: null }).waterReflections).toBe(true);
+    expect(normalizeGameSettings({ waterReflections: false }).waterReflections).toBe(false);
+    expect(normalizeGameSettings({ waterReflections: true }).waterReflections).toBe(true);
+
+    const storage = memoryStorage();
+    storage.setItem("voxel-game.game-settings", JSON.stringify({ waterReflections: false }));
+    expect(loadStoredGameSettings(storage).waterReflections).toBe(false);
+    storage.setItem("voxel-game.game-settings", JSON.stringify({ shadowQuality: "low" }));
+    expect(loadStoredGameSettings(storage).waterReflections).toBe(true);
+    storage.setItem("voxel-game.game-settings", JSON.stringify({ waterReflections: "junk" }));
+    expect(loadStoredGameSettings(storage).waterReflections).toBe(true);
+    console.log(`water reflections defaults test: ${(performance.now() - startedAt).toFixed(2)} ms`);
   });
 });

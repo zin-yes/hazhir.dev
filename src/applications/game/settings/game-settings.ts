@@ -17,6 +17,7 @@ export interface GameSettings {
   touchJoystickMode: TouchJoystickMode;
   shadowQuality: ShadowQuality;
   bloomEnabled: boolean;
+  waterReflections: boolean;
 }
 
 export const FIELD_OF_VIEW_MINIMUM_DEGREES = 60;
@@ -40,6 +41,7 @@ export const DEFAULT_GAME_SETTINGS: Readonly<GameSettings> = {
   touchJoystickMode: "floating",
   shadowQuality: "high",
   bloomEnabled: true,
+  waterReflections: true,
 };
 
 type MatchMedia = (query: string) => Pick<MediaQueryList, "matches">;
@@ -54,17 +56,23 @@ export function defaultBloomEnabled(matchMedia: MatchMedia | undefined = browser
   return !matchMedia?.("(pointer: coarse)").matches;
 }
 
+/** Water reflections start off on touch devices (coarse primary pointer) and on elsewhere, including on the server. */
+export function defaultWaterReflections(matchMedia: MatchMedia | undefined = browserMatchMedia()): boolean {
+  return !matchMedia?.("(pointer: coarse)").matches;
+}
+
 function browserMatchMedia(): MatchMedia | undefined {
   if (typeof window === "undefined" || typeof window.matchMedia !== "function") return undefined;
   return (query) => window.matchMedia(query);
 }
 
-/** The defaults for this device: the static defaults plus the device-dependent shadow quality and bloom. */
+/** The defaults for this device: the static defaults plus the device-dependent shadow quality, bloom and water reflections. */
 export function defaultGameSettings(matchMedia?: MatchMedia): GameSettings {
   return {
     ...DEFAULT_GAME_SETTINGS,
     shadowQuality: defaultShadowQuality(matchMedia),
     bloomEnabled: defaultBloomEnabled(matchMedia),
+    waterReflections: defaultWaterReflections(matchMedia),
   };
 }
 
@@ -109,5 +117,6 @@ export function normalizeGameSettings(settings: Partial<Record<keyof GameSetting
     touchJoystickMode: allowedOption(settings.touchJoystickMode, TOUCH_JOYSTICK_MODES, DEFAULT_GAME_SETTINGS.touchJoystickMode),
     shadowQuality: allowedOption(settings.shadowQuality, SHADOW_QUALITIES, defaultShadowQuality()),
     bloomEnabled: booleanOrFallback(settings.bloomEnabled, defaultBloomEnabled()),
+    waterReflections: booleanOrFallback(settings.waterReflections, defaultWaterReflections()),
   };
 }
