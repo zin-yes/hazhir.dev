@@ -108,6 +108,8 @@ export function PauseMenu({
             }}
             fieldOfViewDegrees={gameSettings.fieldOfViewDegrees}
             onFieldOfViewChange={(fieldOfViewDegrees) => onGameSettingsChange({ fieldOfViewDegrees })}
+            shadowQuality={gameSettings.shadowQuality}
+            onShadowQualityChange={(shadowQuality) => onGameSettingsChange({ shadowQuality })}
           />
         )}
         {activeTab === "controls" && (

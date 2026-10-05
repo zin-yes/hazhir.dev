@@ -9,6 +9,7 @@ import {
   FIELD_OF_VIEW_MAXIMUM_DEGREES,
   FIELD_OF_VIEW_MINIMUM_DEGREES,
   type GameSettings,
+  type ShadowQuality,
 } from "../../settings/game-settings";
 import { ChoiceSetting, SettingsHeading, SettingsHint, SliderSetting } from "./setting-rows";
 
@@ -18,6 +19,12 @@ const FAR_TERRAIN_STEPS = [0, 32, 64, 128, 256, 512];
 const VOLUME_SHAPE_CHOICES: readonly { value: RenderSettings["shape"]; label: string }[] = [
   { value: "cylinder", label: "Full height" },
   { value: "ellipsoid", label: "Rounded" },
+];
+
+const SHADOW_QUALITY_CHOICES: readonly { value: ShadowQuality; label: string }[] = [
+  { value: "off", label: "Off" },
+  { value: "low", label: "Low" },
+  { value: "high", label: "High" },
 ];
 
 export interface VideoSettingsValues {
@@ -33,6 +40,8 @@ interface VideoSettingsProps {
   onChange: (values: Partial<VideoSettingsValues>) => void;
   fieldOfViewDegrees: GameSettings["fieldOfViewDegrees"];
   onFieldOfViewChange: (degrees: number) => void;
+  shadowQuality: GameSettings["shadowQuality"];
+  onShadowQualityChange: (shadowQuality: ShadowQuality) => void;
 }
 
 function nearestFarTerrainStep(chunks: number): number {
@@ -43,7 +52,14 @@ function nearestFarTerrainStep(chunks: number): number {
   return bestStep;
 }
 
-export function VideoSettings({ values, onChange, fieldOfViewDegrees, onFieldOfViewChange }: VideoSettingsProps) {
+export function VideoSettings({
+  values,
+  onChange,
+  fieldOfViewDegrees,
+  onFieldOfViewChange,
+  shadowQuality,
+  onShadowQualityChange,
+}: VideoSettingsProps) {
   const farTerrainStep = nearestFarTerrainStep(values.farTerrainChunks);
   const farTerrainChunks = FAR_TERRAIN_STEPS[farTerrainStep];
 
@@ -58,6 +74,7 @@ export function VideoSettings({ values, onChange, fieldOfViewDegrees, onFieldOfV
         value={fieldOfViewDegrees}
         onChange={onFieldOfViewChange}
       />
+      <ChoiceSetting label="Shadows" choices={SHADOW_QUALITY_CHOICES} value={shadowQuality} onChange={onShadowQualityChange} />
 
       <SettingsHeading>Chunks</SettingsHeading>
       <SliderSetting
