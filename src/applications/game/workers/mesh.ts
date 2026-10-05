@@ -20,6 +20,7 @@ import {
 } from "../vertex-format";
 import {
   emitFaceQuad,
+  faceLightLevel,
   lightKnownByOutsideFlags,
   sampleFaceSurface,
   updateLightKnownFlags,
@@ -222,10 +223,7 @@ function emitCubeFaces(
       continue;
     }
 
-    const faceLevel =
-      isEdgeCell && lightKnownByOutsideFlags[OUTSIDE_FACE_FLAGS[neighborIndex]] === 0
-        ? ownLevel
-        : LIGHT_LEVEL_OF_PACKED_LIGHT[light[neighborIndex]];
+    const faceLevel = faceLightLevel(face, cellIndex, isEdgeCell, ownLevel);
     const mergeDirections = sampleFaceSurface(
       face,
       cellIndex,
@@ -405,7 +403,16 @@ export function generateMesh(
           recordPlant(block, x, y, z, cellIndex);
         } else if (kind === BLOCK_KIND_STAIRS) {
           const verticesBefore = opaqueStream.vertexCount;
-          emitStairs(opaqueStream, block, x, y, z, LIGHT_LEVEL_OF_PACKED_LIGHT[light[cellIndex]], cellIndex);
+          emitStairs(
+            opaqueStream,
+            block,
+            x,
+            y,
+            z,
+            cellIndex,
+            isEdgeRow || z === 0 || z === CHUNK_LENGTH - 1,
+            rowIndexOf(x, y)
+          );
           const quads = (opaqueStream.vertexCount - verticesBefore) / VERTICES_PER_QUAD;
           stats.stairCells++;
           stats.stairQuads += quads;

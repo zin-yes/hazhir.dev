@@ -57,6 +57,19 @@ export function updateLightKnownFlags(hasLightBorderForFace: boolean[]) {
 }
 
 /**
+ * The light a face of a block catches: that of the cell it looks at. Opaque cells
+ * hold no light and cells beyond an unloaded neighbor are unknown, so a face looking
+ * at either (a slab's exposed top under a stone block, a stair step) takes the
+ * block's own light instead of going black.
+ */
+export function faceLightLevel(face: number, cellIndex: number, isEdgeCell: boolean, ownLevel: number): number {
+  const neighborIndex = cellIndex + FACE_NEIGHBOR_DELTAS[face];
+  if (OCCLUDES_AMBIENT_LIGHT[paddedBlockGrid.cells[neighborIndex]] === 1) return ownLevel;
+  if (isEdgeCell && lightKnownByOutsideFlags[OUTSIDE_FACE_FLAGS[neighborIndex]] === 0) return ownLevel;
+  return LIGHT_LEVEL_OF_PACKED_LIGHT[paddedLightGrid.cells[neighborIndex]];
+}
+
+/**
  * Fills cornerAmbientOcclusion and cornerLightSteps for a face of the block at
  * cellIndex. Each corner averages the light of the cell the face looks at and of
  * the open cells touching that corner, and is darkened by blocks pressed against

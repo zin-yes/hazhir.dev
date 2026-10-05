@@ -148,7 +148,7 @@ export function buildReferenceQuads({ chunk, light, borders = {}, borderLights =
         const block = blockAt(x, y, z);
         if (!isCubeLikeBlock(block)) continue;
         const ownLevel = lightLevelAt(x, y, z)!;
-        const receivesOcclusion = !isTranslucent(block) && !isSlab(block);
+        const receivesOcclusion = !isTranslucent(block);
 
         let height = 1;
         if (isSlab(block)) height = 0.5;
@@ -164,7 +164,10 @@ export function buildReferenceQuads({ chunk, light, borders = {}, borderLights =
 
         FACE_NORMALS.forEach((normal, face) => {
           if (isFaceCulled(block, blockAt(x + normal[0], y + normal[1], z + normal[2]), face)) return;
-          const faceLevel = lightLevelAt(x + normal[0], y + normal[1], z + normal[2]) ?? ownLevel;
+          const faceNeighbor = [x + normal[0], y + normal[1], z + normal[2]] as const;
+          const faceLevel = occludesAmbientLight(blockAt(...faceNeighbor))
+            ? ownLevel
+            : (lightLevelAt(...faceNeighbor) ?? ownLevel);
           const [firstTangent, secondTangent] = [0, 1, 2].filter((axis) => normal[axis] === 0);
 
           const corners: SurfaceCorner[] = FACE_CORNERS[face].map((flags, cornerIndex) => {

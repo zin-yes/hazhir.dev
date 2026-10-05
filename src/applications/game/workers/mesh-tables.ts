@@ -38,9 +38,7 @@ export const OCCLUDES_AMBIENT_LIGHT = buildBlockLookup(
   (block) =>
     block !== BlockType.AIR && !TRANSPARENT_BLOCKS.includes(block) && !TRANSLUCENT_BLOCKS.includes(block)
 );
-export const RECEIVES_AMBIENT_OCCLUSION = buildBlockLookup(
-  (block) => !TRANSLUCENT_BLOCKS.includes(block) && !isSlab(block)
-);
+export const RECEIVES_AMBIENT_OCCLUSION = buildBlockLookup((block) => !TRANSLUCENT_BLOCKS.includes(block));
 
 /** How the mesher handles a block: air is skipped, plants become instances, stairs and slabs are never merged. */
 export const BLOCK_KIND_AIR = 0;
