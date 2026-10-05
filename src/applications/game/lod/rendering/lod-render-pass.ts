@@ -16,6 +16,8 @@ export class LodRenderPass {
   readonly tiles = new THREE.Group();
   private adoptedBackground: { object: THREE.Object3D; previousParent: THREE.Object3D | null; previousRenderOrder: number } | null = null;
   private hazeCubeTarget: THREE.WebGLCubeRenderTarget | null = null;
+  /** Runs after the LOD is drawn and before its depth is cleared (the depth is then still readable). */
+  beforeDepthClear: ((camera: THREE.PerspectiveCamera) => void) | null = null;
 
   constructor() {
     this.scene.name = "lod";
@@ -82,6 +84,7 @@ export class LodRenderPass {
     renderer.autoClear = false;
     try {
       renderer.render(this.scene, this.camera);
+      this.beforeDepthClear?.(this.camera);
       renderer.clearDepth();
     } finally {
       renderer.autoClear = previousAutoClear;

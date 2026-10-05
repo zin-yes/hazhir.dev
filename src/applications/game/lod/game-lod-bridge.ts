@@ -25,6 +25,8 @@ export interface GameLodBridgeOptions {
   workerCount: number;
   /** The sky: it must already be in the main scene, where it returns while the LOD is off. */
   background: THREE.Object3D;
+  /** Called with the LOD camera after the far terrain is drawn, before its depth is cleared. */
+  onFarTerrainDrawn?: (camera: THREE.PerspectiveCamera) => void;
   createManager?: typeof createLodManager;
 }
 
@@ -158,6 +160,7 @@ export class GameLodBridge {
       renderDistanceChunks: this.renderDistanceChunks,
     });
     manager.adoptBackground(this.options.background);
+    manager.setBeforeDepthClear(this.options.onFarTerrainDrawn ?? null);
     this.manager = manager;
     this.hasCapturedHaze = false;
     chunks?.forEachChunk((record) => {

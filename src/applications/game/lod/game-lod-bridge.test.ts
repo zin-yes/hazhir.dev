@@ -22,6 +22,7 @@ function createRecordingFactory() {
       update: record("update"),
       render: record("render"),
       adoptBackground: record("adoptBackground"),
+      setBeforeDepthClear: record("setBeforeDepthClear"),
       setFogColor: record("setFogColor"),
       captureBackgroundHaze: record("captureBackgroundHaze"),
       setRenderDistanceChunks: (chunks: number) => {

@@ -64,6 +64,8 @@ export interface LodManager {
   update(camera: THREE.PerspectiveCamera, viewportHeightPixels: number): void;
   /** Draws the LOD pass (background first, then tiles) and clears depth for the main scene. */
   render(renderer: THREE.WebGLRenderer, camera: THREE.PerspectiveCamera): void;
+  /** Called with the LOD camera after the tiles are drawn, right before the LOD pass clears depth. */
+  setBeforeDepthClear(handler: ((camera: THREE.PerspectiveCamera) => void) | null): void;
   /** Moves the sky into the LOD pass so it draws behind the tiles. */
   adoptBackground(background: THREE.Object3D): void;
   setFogColor(srgbHex: number): void;
@@ -265,6 +267,10 @@ class LodManagerImplementation implements LodManager {
     const finestAddress: TileAddress = { level: 0, tileX: Math.floor(blockX / tileSize), tileZ: Math.floor(blockZ / tileSize) };
     const range = this.heightRangeFor(finestAddress);
     return range !== undefined && cameraBlockPosition.y < range.minHeight - UNDERGROUND_MARGIN_BLOCKS;
+  }
+
+  setBeforeDepthClear(handler: ((camera: THREE.PerspectiveCamera) => void) | null): void {
+    this.pass.beforeDepthClear = handler;
   }
 
   adoptBackground(background: THREE.Object3D): void {
