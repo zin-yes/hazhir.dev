@@ -17,6 +17,10 @@ import { buildTextureFlagUniforms } from "./sky/texture-flags";
 import { shadowUniforms } from "./shadows/shadow-glsl";
 import { ShadowPass } from "./shadows/shadow-pass";
 import { BloomPass } from "./post/bloom-pass";
+import { WorldSnapshot, worldSnapshotUniforms } from "./post/world-snapshot";
+
+/** Translucent chunk surfaces (water, glass) draw in their own pass so they can read a copy of the opaque world. */
+const TRANSLUCENT_LAYER = 1;
 
 import {
   CHUNK_HEIGHT,
@@ -231,6 +235,7 @@ export default function Game() {
   const skyControllerRef = useRef<SkyController | null>(null);
   const shadowPassRef = useRef<ShadowPass | null>(null);
   const bloomPassRef = useRef<BloomPass | null>(null);
+  const worldSnapshotRef = useRef<WorldSnapshot | null>(null);
   const seedRef = useRef(Math.floor(Math.random() * 100000000));
   const networkManager = useRef(new NetworkManager());
   const remotePlayers = useRef<Map<string, RemotePlayer>>(new Map());
@@ -319,16 +324,16 @@ export default function Game() {
 
   const { settings: gameSettings, settingsRef: gameSettingsRef, updateSettings: updateGameSettings } = useGameSettings();
 
-  const camera = useMemo(
-    () =>
-      new THREE.PerspectiveCamera(
-        gameSettingsRef.current.fieldOfViewDegrees,
-        window.innerWidth / window.innerHeight,
-        0.1,
-        10000,
-      ),
-    [],
-  );
+  const camera = useMemo(() => {
+    const gameCamera = new THREE.PerspectiveCamera(
+      gameSettingsRef.current.fieldOfViewDegrees,
+      window.innerWidth / window.innerHeight,
+      0.1,
+      10000,
+    );
+    gameCamera.layers.enable(TRANSLUCENT_LAYER);
+    return gameCamera;
+  }, []);
 
   const resizeObserver = useMemo(
     () =>
@@ -760,6 +765,7 @@ export default function Game() {
       skyControllerRef.current = skyController;
       shadowPassRef.current = new ShadowPass(renderer);
       bloomPassRef.current = new BloomPass(renderer);
+      worldSnapshotRef.current = new WorldSnapshot(renderer);
       const sky = skyController.dome;
       scene.add(sky);
       lodBridgeRef.current = new GameLodBridge({
@@ -955,6 +961,7 @@ export default function Game() {
                 ...textureFlagUniforms,
                 ...skyLightingUniforms,
                 ...shadowUniforms,
+                ...worldSnapshotUniforms,
               },
               vertexShader: VERTEX_SHADER,
               fragmentShader: FRAGMENT_SHADER,
@@ -978,6 +985,7 @@ export default function Game() {
                 ...textureFlagUniforms,
                 ...skyLightingUniforms,
                 ...shadowUniforms,
+                ...worldSnapshotUniforms,
               },
               vertexShader: VERTEX_SHADER,
               fragmentShader: FRAGMENT_SHADER,
@@ -998,6 +1006,7 @@ export default function Game() {
                 ...textureFlagUniforms,
                 ...skyLightingUniforms,
                 ...shadowUniforms,
+                ...worldSnapshotUniforms,
               },
               defines: { IS_PLANT_MATERIAL: "" },
               vertexShader: PLANT_VERTEX_SHADER,
@@ -1213,6 +1222,8 @@ export default function Game() {
         shadowPassRef.current = null;
         bloomPassRef.current?.dispose();
         bloomPassRef.current = null;
+        worldSnapshotRef.current?.dispose();
+        worldSnapshotRef.current = null;
 
         document.removeEventListener("keyup", onKeyUp);
         if (container) {
@@ -1628,17 +1639,17 @@ export default function Game() {
         vertexCount: meshResult.transparent.byteLength / 8,
         bytesByAttribute: { packedVertices: meshResult.transparent.byteLength },
       });
-      meshes.push(
-        placeChunkMesh(
-          transparentGeometry,
-          transparent,
-          chunkName + "_transparent",
-          1,
-          chunkX,
-          chunkY,
-          chunkZ,
-        ),
+      const transparentMesh = placeChunkMesh(
+        transparentGeometry,
+        transparent,
+        chunkName + "_transparent",
+        1,
+        chunkX,
+        chunkY,
+        chunkZ,
       );
+      transparentMesh.layers.set(TRANSLUCENT_LAYER);
+      meshes.push(transparentMesh);
     }
 
     let plantVertexCount = 0;
@@ -2572,16 +2583,31 @@ export default function Game() {
     }
 
     const bloomPass = bloomPassRef.current;
-    bloomPass?.setEnabled(gameSettingsRef.current.bloomEnabled);
+    const worldSnapshot = worldSnapshotRef.current;
+    const waterReflections = gameSettingsRef.current.waterReflections;
+    bloomPass?.setBloomEnabled(gameSettingsRef.current.bloomEnabled);
+    bloomPass?.setOffscreenRequired(waterReflections);
     bloomPass?.beginFrame();
+    const worldTarget = bloomPass?.worldTarget ?? null;
+    const readsOpaqueWorld = waterReflections && worldTarget !== null && worldSnapshot !== null;
 
     renderer.clear();
     const drawFarTerrain = () => lodBridgeRef.current?.renderPass(renderer, camera);
+    if (readsOpaqueWorld) camera.layers.disable(TRANSLUCENT_LAYER);
     if (profiledRenderRef.current) {
       profiledRenderRef.current.render(drawFarTerrain);
     } else {
       drawFarTerrain();
       renderer.render(scene, camera);
+    }
+    if (readsOpaqueWorld) {
+      camera.layers.enable(TRANSLUCENT_LAYER);
+      camera.layers.disable(0);
+      worldSnapshot?.capture(worldTarget, camera);
+      renderer.render(scene, camera);
+      camera.layers.enable(0);
+    } else {
+      worldSnapshot?.release();
     }
     sky?.cloudPass.render(camera);
     bloomPass?.endFrame();

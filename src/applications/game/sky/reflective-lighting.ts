@@ -6,39 +6,40 @@
 export const REFLECTIVE_LIGHTING_GLSL = `
 const int WAVE_COUNT = 6;
 
+float waterFractalNoise(vec2 point) {
+  return 0.55 * fogNoise(point) + 0.3 * fogNoise(point * 2.13 + 7.7) + 0.15 * fogNoise(point * 4.31 + 23.1);
+}
+
 /**
- * Slope of the water surface. Six travelling waves at unrelated angles and frequencies, their positions bent by slow
- * noise and their strength varied from place to place, so no pattern repeats; the fine ones fade out with distance
- * so they never shimmer.
+ * Slope of the water surface. Long swells and short chop travelling at unrelated angles, their positions bent by slow
+ * noise. Wind gusts (large patches drifting across the water) switch between glassy calm and rough chop, and the
+ * strength of every wave varies from place to place, so the surface never settles into a pattern. The fine waves fade
+ * out with distance so they never shimmer.
  */
 vec3 waterSurfaceNormal(vec3 worldPosition, float distanceToCamera) {
   const vec2 directions[WAVE_COUNT] = vec2[WAVE_COUNT](
     vec2(0.92, 0.39), vec2(-0.55, 0.83), vec2(0.31, -0.95), vec2(-0.88, -0.47), vec2(0.12, 0.99), vec2(-0.97, 0.24)
   );
-  const float frequencies[WAVE_COUNT] = float[WAVE_COUNT](0.43, 0.97, 1.71, 2.93, 4.37, 6.11);
-  const float amplitudes[WAVE_COUNT] = float[WAVE_COUNT](0.075, 0.055, 0.04, 0.03, 0.022, 0.016);
-  const float speeds[WAVE_COUNT] = float[WAVE_COUNT](0.7, 1.1, 1.6, 2.3, 3.1, 3.9);
+  const float frequencies[WAVE_COUNT] = float[WAVE_COUNT](0.11, 0.27, 0.61, 1.37, 2.89, 5.3);
+  const float amplitudes[WAVE_COUNT] = float[WAVE_COUNT](0.5, 0.3, 0.16, 0.08, 0.04, 0.02);
+  const float speeds[WAVE_COUNT] = float[WAVE_COUNT](0.5, 0.75, 1.1, 1.7, 2.6, 3.6);
   vec2 position = worldPosition.xz;
   vec2 bend = vec2(
-    fogNoise(position * 0.045 + skyFogTime * 0.015),
-    fogNoise(position * 0.045 + 41.0 - skyFogTime * 0.012)
+    waterFractalNoise(position * 0.03 + skyFogTime * 0.012),
+    waterFractalNoise(position * 0.03 + 41.0 - skyFogTime * 0.01)
   ) - 0.5;
-  position += bend * 14.0;
+  position += bend * 12.0;
+  float gust = smoothstep(0.3, 0.7, waterFractalNoise(position * 0.012 + vec2(skyFogTime * 0.02, -skyFogTime * 0.013)));
+  float calm = mix(0.35, 1.5, gust);
   vec2 slope = vec2(0.0);
   for (int wave = 0; wave < WAVE_COUNT; wave++) {
-    float fade = 1.0 - smoothstep(35.0 * float(WAVE_COUNT - wave), 80.0 * float(WAVE_COUNT - wave) + 50.0, distanceToCamera);
-    float strength = 0.35 + 1.3 * fogNoise(position * 0.06 + float(wave) * 13.7);
+    float fade = 1.0 - smoothstep(30.0 * float(WAVE_COUNT - wave), 70.0 * float(WAVE_COUNT - wave) + 40.0, distanceToCamera);
+    float choppiness = wave < 2 ? 1.0 : calm;
+    float strength = 0.25 + 1.5 * waterFractalNoise(position * (0.05 + 0.02 * float(wave)) + float(wave) * 13.7);
     float phase = dot(directions[wave], position) * frequencies[wave] + skyFogTime * speeds[wave] + float(wave) * 2.4;
-    slope += directions[wave] * cos(phase) * amplitudes[wave] * frequencies[wave] * fade * strength * 3.0;
+    slope += directions[wave] * cos(phase) * amplitudes[wave] * frequencies[wave] * fade * strength * choppiness;
   }
-  vec2 turn = vec2(0.8, 0.6);
-  vec2 turned = vec2(dot(position, turn), dot(position, vec2(-turn.y, turn.x)));
-  vec2 detail = vec2(
-    fogNoise(turned * 5.3 + skyFogTime * 0.5) + 0.5 * fogNoise(turned * 11.9 - skyFogTime * 0.8),
-    fogNoise(turned * 5.3 + 19.0 - skyFogTime * 0.45) + 0.5 * fogNoise(turned * 11.9 + 7.0 + skyFogTime * 0.7)
-  ) - 0.75;
-  slope += detail * 0.07 * (1.0 - smoothstep(20.0, 90.0, distanceToCamera));
-  return normalize(vec3(-slope.x, 1.0, -slope.y));
+  return normalize(vec3(-slope.x * 0.9, 1.0, -slope.y * 0.9));
 }
 
 /**

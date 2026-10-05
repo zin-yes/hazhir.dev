@@ -26,6 +26,7 @@ import {
 import { TEXTURE_FLAG_LOOKUP_GLSL } from "../sky/texture-flags";
 import { DAYLIGHT_GLSL, FOG_GLSL } from "../sky/sky-lighting";
 import { REFLECTIVE_LIGHTING_GLSL } from "../sky/reflective-lighting";
+import { SCREEN_SPACE_WATER_GLSL } from "../sky/screen-space-water";
 import { SKY_EXPOSURE_BRIGHT_LEVEL, SKY_EXPOSURE_DARK_LEVEL, SURFACE_LIGHTING_GLSL } from "../sky/surface-lighting";
 
 /**
@@ -186,6 +187,7 @@ ${SURFACE_LIGHTING_GLSL}
 ${TEXTURE_FLAG_LOOKUP_GLSL}
 ${SAMPLE_TILED_TEXTURE_GLSL}
 ${REFLECTIVE_LIGHTING_GLSL}
+${SCREEN_SPACE_WATER_GLSL}
 varying vec2 TextureCoordinates;
 varying float vShade;
 varying float vSkyExposure;
@@ -205,7 +207,8 @@ void main() {
   vec3 finalColor;
   float alpha = textureColor.a;
   if (isWater) {
-    vec4 water = shadeWater(textureColor.rgb, vShade, surfaceNormal, vFogWorldPosition, vSkyExposure, 0.7);
+    vec4 plainWater = shadeWater(textureColor.rgb, vShade, surfaceNormal, vFogWorldPosition, vSkyExposure, 0.7);
+    vec4 water = shadeScreenSpaceWater(textureColor.rgb, vShade, surfaceNormal, vFogWorldPosition, vSkyExposure, 0.7, plainWater);
     finalColor = water.rgb;
     alpha = water.a;
   } else {
