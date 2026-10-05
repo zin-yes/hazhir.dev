@@ -27,6 +27,11 @@ const SHADOW_QUALITY_CHOICES: readonly { value: ShadowQuality; label: string }[]
   { value: "high", label: "High" },
 ];
 
+const BLOOM_CHOICES: readonly { value: "off" | "on"; label: string }[] = [
+  { value: "off", label: "Off" },
+  { value: "on", label: "On" },
+];
+
 export interface VideoSettingsValues {
   renderDistanceChunks: number;
   farTerrainChunks: number;
@@ -42,6 +47,8 @@ interface VideoSettingsProps {
   onFieldOfViewChange: (degrees: number) => void;
   shadowQuality: GameSettings["shadowQuality"];
   onShadowQualityChange: (shadowQuality: ShadowQuality) => void;
+  bloomEnabled: GameSettings["bloomEnabled"];
+  onBloomEnabledChange: (bloomEnabled: boolean) => void;
 }
 
 function nearestFarTerrainStep(chunks: number): number {
@@ -59,6 +66,8 @@ export function VideoSettings({
   onFieldOfViewChange,
   shadowQuality,
   onShadowQualityChange,
+  bloomEnabled,
+  onBloomEnabledChange,
 }: VideoSettingsProps) {
   const farTerrainStep = nearestFarTerrainStep(values.farTerrainChunks);
   const farTerrainChunks = FAR_TERRAIN_STEPS[farTerrainStep];
@@ -75,6 +84,12 @@ export function VideoSettings({
         onChange={onFieldOfViewChange}
       />
       <ChoiceSetting label="Shadows" choices={SHADOW_QUALITY_CHOICES} value={shadowQuality} onChange={onShadowQualityChange} />
+      <ChoiceSetting
+        label="Bloom"
+        choices={BLOOM_CHOICES}
+        value={bloomEnabled ? "on" : "off"}
+        onChange={(choice) => onBloomEnabledChange(choice === "on")}
+      />
 
       <SettingsHeading>Chunks</SettingsHeading>
       <SliderSetting
