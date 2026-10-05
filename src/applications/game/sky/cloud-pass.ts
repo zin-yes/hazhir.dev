@@ -106,11 +106,19 @@ class DepthCopy {
     const { gl } = this;
     const state = this.renderer.state;
     gl.getError();
-    state.bindFramebuffer(gl.READ_FRAMEBUFFER, null);
+    state.bindFramebuffer(gl.READ_FRAMEBUFFER, this.currentWorldFramebuffer());
     state.bindFramebuffer(gl.DRAW_FRAMEBUFFER, this.framebuffer);
     gl.blitFramebuffer(0, 0, width, height, 0, 0, width, height, gl.DEPTH_BUFFER_BIT, gl.NEAREST);
-    state.bindFramebuffer(gl.FRAMEBUFFER, null);
+    state.bindFramebuffer(gl.FRAMEBUFFER, this.currentWorldFramebuffer());
     return gl.getError() === gl.NO_ERROR;
+  }
+
+  /** The framebuffer the world is being drawn into: the canvas, or an offscreen target (bloom) when one is bound. */
+  private currentWorldFramebuffer(): WebGLFramebuffer | null {
+    const target = this.renderer.getRenderTarget();
+    if (target === null) return null;
+    const framebuffer = (this.renderer.properties.get(target) as { __webglFramebuffer?: WebGLFramebuffer }).__webglFramebuffer;
+    return framebuffer ?? null;
   }
 
   dispose(): void {
@@ -146,7 +154,7 @@ class DepthCopy {
       0,
     );
     gl.drawBuffers([gl.NONE]);
-    state.bindFramebuffer(gl.FRAMEBUFFER, null);
+    state.bindFramebuffer(gl.FRAMEBUFFER, this.currentWorldFramebuffer());
 
     this.depthTexture = depthTexture;
     this.framebuffer = framebuffer;
