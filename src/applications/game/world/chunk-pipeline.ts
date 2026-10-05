@@ -337,6 +337,7 @@ export class ChunkPipeline {
    */
   isReadyToShow(record: ChunkRecord): boolean {
     if (record.appliedMeshVersion < 0) return false;
+    if (this.isNextToPlayer(record)) return true;
     for (const delta of FACE_NEIGHBOR_KEY_DELTAS) {
       const neighbor = this.store.getByKey(record.key + delta);
       if (neighbor && neighbor.appliedMeshVersion < 0 && this.isInDrawnVolume(neighbor)) return false;

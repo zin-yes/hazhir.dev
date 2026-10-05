@@ -666,7 +666,6 @@ export default function Game() {
           if (mesh) addChunkMesh(mesh, chunkName, record.chunkX, record.chunkY, record.chunkZ);
           else pruneChunkMesh(chunkName);
           refreshChunkAndNeighborVisibility(record);
-          lodBridgeRef.current?.onChunkMeshed(record);
         },
         onChunkUnloaded: (record) => {
           profiler.addCounter("game.chunks.pruned");
@@ -1560,6 +1559,12 @@ export default function Game() {
     return mesh;
   }
 
+  /** The far terrain only hides under chunks that are on screen, so a held or dropped chunk never leaves a hole. */
+  function reportDrawnToFarTerrain(record: ChunkRecord, isDrawn: boolean) {
+    if (isDrawn) lodBridgeRef.current?.onChunkMeshed(record);
+    else lodBridgeRef.current?.onChunkUnmeshed(record);
+  }
+
   /** Shows a meshed chunk once the pipeline says its neighbors will not leave its buried faces exposed. */
   function refreshChunkVisibility(record: ChunkRecord) {
     const chunkName = chunkNameOf(record.chunkX, record.chunkY, record.chunkZ);
@@ -1567,6 +1572,7 @@ export default function Game() {
     const held = heldChunksRef.current;
     if (!meshes) {
       held.delete(chunkName);
+      reportDrawnToFarTerrain(record, record.appliedMeshVersion >= 0);
       return;
     }
     const heldSinceMs = held.get(chunkName)?.heldSinceMs;
@@ -1577,6 +1583,7 @@ export default function Game() {
     if (isReady) held.delete(chunkName);
     else if (heldSinceMs === undefined) held.set(chunkName, { record, heldSinceMs: performance.now() });
     for (const mesh of meshes) mesh.visible = isReady;
+    reportDrawnToFarTerrain(record, isReady);
     const plantDetail = plantDetailRef.current.get(chunkName);
     if (isReady && plantDetail) applyPlantDetail(plantDetail);
   }

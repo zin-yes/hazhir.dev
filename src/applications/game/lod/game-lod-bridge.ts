@@ -84,6 +84,10 @@ export class GameLodBridge {
     this.manager?.onRealChunkMeshed(record.chunkX, record.chunkY, record.chunkZ);
   }
 
+  onChunkUnmeshed(record: ChunkRecord): void {
+    this.manager?.onRealChunkUnmeshed(record.chunkX, record.chunkY, record.chunkZ);
+  }
+
   onChunkUnloaded(record: ChunkRecord): void {
     this.manager?.onRealChunkUnloaded(record.chunkX, record.chunkY, record.chunkZ);
   }

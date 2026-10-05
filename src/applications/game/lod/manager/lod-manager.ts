@@ -83,6 +83,8 @@ export interface LodManager {
   onRealChunkLoaded(chunkX: number, chunkY: number, chunkZ: number, blocks: Uint8Array): void;
   /** A real chunk's mesh is in the scene (call it for chunks without faces too). */
   onRealChunkMeshed(chunkX: number, chunkY: number, chunkZ: number): void;
+  /** A real chunk is no longer drawn (its mesh was dropped or is held hidden) but its blocks stay known. */
+  onRealChunkUnmeshed(chunkX: number, chunkY: number, chunkZ: number): void;
   onRealChunkUnloaded(chunkX: number, chunkY: number, chunkZ: number): void;
   /** Blocks of a loaded chunk changed (player edits, water, network). */
   onBlocksEdited(chunkX: number, chunkY: number, chunkZ: number, blocks: Uint8Array): void;
@@ -291,6 +293,10 @@ class LodManagerImplementation implements LodManager {
 
   onRealChunkMeshed(chunkX: number, chunkY: number, chunkZ: number): void {
     this.realData.coverage.markMeshed(chunkX, chunkY, chunkZ);
+  }
+
+  onRealChunkUnmeshed(chunkX: number, chunkY: number, chunkZ: number): void {
+    this.realData.coverage.markUnloaded(chunkX, chunkY, chunkZ);
   }
 
   onRealChunkUnloaded(chunkX: number, chunkY: number, chunkZ: number): void {

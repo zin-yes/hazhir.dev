@@ -34,6 +34,7 @@ function createRecordingFactory() {
       isCameraUnderground: false,
       onRealChunkLoaded: (chunkX: number, chunkY: number, chunkZ: number) => void recorded.calls.push(`loaded ${chunkX},${chunkY},${chunkZ}`),
       onRealChunkMeshed: (chunkX: number, chunkY: number, chunkZ: number) => void recorded.calls.push(`meshed ${chunkX},${chunkY},${chunkZ}`),
+      onRealChunkUnmeshed: (chunkX: number, chunkY: number, chunkZ: number) => void recorded.calls.push(`unmeshed ${chunkX},${chunkY},${chunkZ}`),
       onRealChunkUnloaded: record("unloaded"),
       onBlocksEdited: (chunkX: number, chunkY: number, chunkZ: number) => void recorded.calls.push(`edited ${chunkX},${chunkY},${chunkZ}`),
       getStats: () => ({}) as ReturnType<LodManager["getStats"]>,
