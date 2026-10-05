@@ -23,9 +23,9 @@ import {
   EDGE_OUTWARD_SHIFT,
   PLANT_UV_UNITS_PER_TEXTURE,
 } from "../vertex-format";
-import { FOLIAGE_LOOKUP_GLSL } from "../sky/foliage-textures";
+import { TEXTURE_FLAG_LOOKUP_GLSL } from "../sky/texture-flags";
 import { DAYLIGHT_GLSL, FOG_GLSL } from "../sky/sky-lighting";
-import { WATER_LIGHTING_GLSL } from "../sky/water-lighting";
+import { REFLECTIVE_LIGHTING_GLSL } from "../sky/reflective-lighting";
 import { SKY_EXPOSURE_BRIGHT_LEVEL, SKY_EXPOSURE_DARK_LEVEL, SURFACE_LIGHTING_GLSL } from "../sky/surface-lighting";
 
 /**
@@ -183,9 +183,9 @@ vec4 sampleTiledTexture(sampler2DArray textureArray, vec2 unwrappedCoordinates, 
 export const FRAGMENT_SHADER = `
 ${FOG_GLSL}
 ${SURFACE_LIGHTING_GLSL}
-${FOLIAGE_LOOKUP_GLSL}
+${TEXTURE_FLAG_LOOKUP_GLSL}
 ${SAMPLE_TILED_TEXTURE_GLSL}
-${WATER_LIGHTING_GLSL}
+${REFLECTIVE_LIGHTING_GLSL}
 varying vec2 TextureCoordinates;
 varying float vShade;
 varying float vSkyExposure;
@@ -198,7 +198,8 @@ uniform int waterTextureIndex;
 void main() {
   vec4 textureColor = sampleTiledTexture(Texture, TextureCoordinates, TextureIndex);
   bool isWater = TextureIndex == waterTextureIndex;
-  if (!isWater && textureColor.a < 0.5) discard;
+  bool isGlass = isGlassTexture(TextureIndex);
+  if (!isWater && !isGlass && textureColor.a < 0.5) discard;
 
   vec3 surfaceNormal = flatNormalAt(vFogWorldPosition);
   vec3 finalColor;
@@ -214,6 +215,15 @@ void main() {
     float foliage = isFoliageTexture(TextureIndex) ? 1.0 : 0.0;
 #endif
     finalColor = shadeSurface(textureColor.rgb, vShade, surfaceNormal, vFogWorldPosition, vSkyExposure, foliage);
+    if (isGlass || isGlossyTexture(TextureIndex)) {
+      vec4 mirrored = shadeMirrorSurface(finalColor, textureColor.a, surfaceNormal, vFogWorldPosition, vShade, vSkyExposure, isGlass ? 0.14 : 0.07);
+      finalColor = mirrored.rgb;
+      alpha = isGlass ? mirrored.a : max(alpha, mirrored.a);
+    }
+    if (isEmissiveTexture(TextureIndex)) {
+      float glow = smoothstep(0.1, 0.4, dot(textureColor.rgb, vec3(0.2126, 0.7152, 0.0722)));
+      finalColor = mix(finalColor, srgbEncode(textureColor.rgb * 1.15) * skyEmissiveGain, glow);
+    }
   }
 
   gl_FragColor = vec4(applyFog(finalColor, vFogWorldPosition), alpha);

@@ -8,6 +8,8 @@ import { LIGHTING_GLSL } from "./sky-lighting";
 
 /** Scales the summed light before tone mapping so a sunlit face lands near its old flat brightness. */
 const LIGHT_EXPOSURE = 0.62;
+/** Emissive colour is multiplied by this while bloom is on, so it overshoots white and feeds the glow. */
+export const EMISSIVE_BLOOM_GAIN = 2.6;
 /** Baked light levels (0-15) between which the sun fades in; below it nothing direct reaches (caves under unloaded ground). */
 export const SKY_EXPOSURE_DARK_LEVEL = 5;
 export const SKY_EXPOSURE_BRIGHT_LEVEL = 10;

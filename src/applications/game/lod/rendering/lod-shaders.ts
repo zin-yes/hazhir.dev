@@ -6,7 +6,7 @@
 
 import { DAYLIGHT_GLSL, FOG_GLSL } from "../../sky/sky-lighting";
 import { SKY_EXPOSURE_BRIGHT_LEVEL, SKY_EXPOSURE_DARK_LEVEL, SURFACE_LIGHTING_GLSL } from "../../sky/surface-lighting";
-import { WATER_LIGHTING_GLSL } from "../../sky/water-lighting";
+import { REFLECTIVE_LIGHTING_GLSL } from "../../sky/reflective-lighting";
 import { COVERAGE_NORMAL_NUDGE_BLOCKS } from "../coverage/real-chunk-coverage";
 import { BLOCK_RENDER_OFFSET, CHUNK_SIZE_BLOCKS } from "../core/lod-constants";
 import {
@@ -69,7 +69,7 @@ void main() {
 export const LOD_FRAGMENT_SHADER = `
 ${FOG_GLSL}
 ${SURFACE_LIGHTING_GLSL}
-${WATER_LIGHTING_GLSL}
+${REFLECTIVE_LIGHTING_GLSL}
 in vec3 vWorldPosition;
 in vec3 vColor;
 in float vShade;

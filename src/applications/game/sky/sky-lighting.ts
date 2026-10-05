@@ -30,6 +30,8 @@ export const skyLightingUniforms = {
   skyGroundColor: { value: new THREE.Vector3(0.3, 0.3, 0.3) },
   skyZenithColor: { value: new THREE.Vector3(0.1, 0.3, 0.8) },
   skyHorizonColor: { value: new THREE.Vector3(0.6, 0.75, 0.9) },
+  /** Multiplier on emissive surfaces: above 1 when bloom is on, so their colour overshoots white and glows. */
+  skyEmissiveGain: { value: 1 },
 };
 
 export const DAYLIGHT_GLSL = `
@@ -80,6 +82,7 @@ uniform vec3 skyAmbientColor;
 uniform vec3 skyGroundColor;
 uniform vec3 skyZenithColor;
 uniform vec3 skyHorizonColor;
+uniform float skyEmissiveGain;
 
 vec3 srgbEncode(vec3 linearColor) {
   vec3 clamped = clamp(linearColor, 0.0, 1.0);

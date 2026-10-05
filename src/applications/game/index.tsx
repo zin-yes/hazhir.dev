@@ -13,9 +13,10 @@ import { toast } from "sonner";
 import { HumidityMap } from "./sky/climate/humidity-map";
 import { SkyController } from "./sky/sky-controller";
 import { skyLightingUniforms } from "./sky/sky-lighting";
-import { buildFoliageTextureBits } from "./sky/foliage-textures";
+import { buildTextureFlagUniforms } from "./sky/texture-flags";
 import { shadowUniforms } from "./shadows/shadow-glsl";
 import { ShadowPass } from "./shadows/shadow-pass";
+import { BloomPass } from "./post/bloom-pass";
 
 import {
   CHUNK_HEIGHT,
@@ -229,6 +230,7 @@ export default function Game() {
 
   const skyControllerRef = useRef<SkyController | null>(null);
   const shadowPassRef = useRef<ShadowPass | null>(null);
+  const bloomPassRef = useRef<BloomPass | null>(null);
   const seedRef = useRef(Math.floor(Math.random() * 100000000));
   const networkManager = useRef(new NetworkManager());
   const remotePlayers = useRef<Map<string, RemotePlayer>>(new Map());
@@ -757,6 +759,7 @@ export default function Game() {
       );
       skyControllerRef.current = skyController;
       shadowPassRef.current = new ShadowPass(renderer);
+      bloomPassRef.current = new BloomPass(renderer);
       const sky = skyController.dome;
       scene.add(sky);
       lodBridgeRef.current = new GameLodBridge({
@@ -935,7 +938,7 @@ export default function Game() {
               Texture.WATER,
             );
 
-            const foliageTextureBits = buildFoliageTextureBits(Object.keys(Texture));
+            const textureFlagUniforms = buildTextureFlagUniforms(Object.keys(Texture));
             shadowPassRef.current?.setBlockTextures(textureArray);
 
             materialsRef.current.opaque = new THREE.ShaderMaterial({
@@ -949,7 +952,7 @@ export default function Game() {
                 edgeExpansion: {
                   value: EDGE_EXPANSION_PER_DEPTH,
                 },
-                foliageTextureBits: { value: foliageTextureBits },
+                ...textureFlagUniforms,
                 ...skyLightingUniforms,
                 ...shadowUniforms,
               },
@@ -972,7 +975,7 @@ export default function Game() {
                 edgeExpansion: {
                   value: 0,
                 },
-                foliageTextureBits: { value: foliageTextureBits },
+                ...textureFlagUniforms,
                 ...skyLightingUniforms,
                 ...shadowUniforms,
               },
@@ -992,7 +995,7 @@ export default function Game() {
                 waterTextureIndex: {
                   value: waterTextureIndex,
                 },
-                foliageTextureBits: { value: foliageTextureBits },
+                ...textureFlagUniforms,
                 ...skyLightingUniforms,
                 ...shadowUniforms,
               },
@@ -1208,6 +1211,8 @@ export default function Game() {
         skyControllerRef.current = null;
         shadowPassRef.current?.dispose();
         shadowPassRef.current = null;
+        bloomPassRef.current?.dispose();
+        bloomPassRef.current = null;
 
         document.removeEventListener("keyup", onKeyUp);
         if (container) {
@@ -2566,6 +2571,10 @@ export default function Game() {
       shadowPass.update(camera);
     }
 
+    const bloomPass = bloomPassRef.current;
+    bloomPass?.setEnabled(gameSettingsRef.current.bloomEnabled);
+    bloomPass?.beginFrame();
+
     renderer.clear();
     const drawFarTerrain = () => lodBridgeRef.current?.renderPass(renderer, camera);
     if (profiledRenderRef.current) {
@@ -2575,6 +2584,7 @@ export default function Game() {
       renderer.render(scene, camera);
     }
     sky?.cloudPass.render(camera);
+    bloomPass?.endFrame();
     // stats.end();
     profiler.endFrame();
   };
