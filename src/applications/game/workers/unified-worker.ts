@@ -12,6 +12,7 @@ import {
 import { lightRegionFromSlabs } from "./region-surroundings";
 import { generateMesh, listTransferables } from "./mesh";
 import { loadTextureArray } from "./texture-array";
+import { sampleHumidityGrid } from "../sky/climate/humidity-grid";
 import {
   beginWorkerTask,
   finishWorkerTask,
@@ -40,6 +41,10 @@ addEventListener("message", async (event: MessageEvent) => {
     } else if (method === "lightRegionFromSlabs") {
       result = lightRegionFromSlabs(params[0], params[1]);
       transfer = listRegionTransferables(result);
+    } else if (method === "sampleHumidityGrid") {
+      const humidityBytes = sampleHumidityGrid(params[0], params[1], params[2], params[3], params[4]);
+      result = humidityBytes;
+      transfer = [humidityBytes.buffer];
     } else if (method === "generateMesh") {
       result = generateMesh(
         params[0],
