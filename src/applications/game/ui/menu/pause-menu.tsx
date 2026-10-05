@@ -112,6 +112,8 @@ export function PauseMenu({
             onShadowQualityChange={(shadowQuality) => onGameSettingsChange({ shadowQuality })}
             bloomEnabled={gameSettings.bloomEnabled}
             onBloomEnabledChange={(bloomEnabled) => onGameSettingsChange({ bloomEnabled })}
+            waterReflections={gameSettings.waterReflections}
+            onWaterReflectionsChange={(waterReflections) => onGameSettingsChange({ waterReflections })}
           />
         )}
         {activeTab === "controls" && (

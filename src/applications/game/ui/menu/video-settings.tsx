@@ -32,6 +32,11 @@ const BLOOM_CHOICES: readonly { value: "off" | "on"; label: string }[] = [
   { value: "on", label: "On" },
 ];
 
+const WATER_REFLECTIONS_CHOICES: readonly { value: "off" | "on"; label: string }[] = [
+  { value: "off", label: "Off" },
+  { value: "on", label: "On" },
+];
+
 export interface VideoSettingsValues {
   renderDistanceChunks: number;
   farTerrainChunks: number;
@@ -49,6 +54,8 @@ interface VideoSettingsProps {
   onShadowQualityChange: (shadowQuality: ShadowQuality) => void;
   bloomEnabled: GameSettings["bloomEnabled"];
   onBloomEnabledChange: (bloomEnabled: boolean) => void;
+  waterReflections: GameSettings["waterReflections"];
+  onWaterReflectionsChange: (waterReflections: boolean) => void;
 }
 
 function nearestFarTerrainStep(chunks: number): number {
@@ -68,6 +75,8 @@ export function VideoSettings({
   onShadowQualityChange,
   bloomEnabled,
   onBloomEnabledChange,
+  waterReflections,
+  onWaterReflectionsChange,
 }: VideoSettingsProps) {
   const farTerrainStep = nearestFarTerrainStep(values.farTerrainChunks);
   const farTerrainChunks = FAR_TERRAIN_STEPS[farTerrainStep];
@@ -89,6 +98,12 @@ export function VideoSettings({
         choices={BLOOM_CHOICES}
         value={bloomEnabled ? "on" : "off"}
         onChange={(choice) => onBloomEnabledChange(choice === "on")}
+      />
+      <ChoiceSetting
+        label="Water reflections"
+        choices={WATER_REFLECTIONS_CHOICES}
+        value={waterReflections ? "on" : "off"}
+        onChange={(choice) => onWaterReflectionsChange(choice === "on")}
       />
 
       <SettingsHeading>Chunks</SettingsHeading>
