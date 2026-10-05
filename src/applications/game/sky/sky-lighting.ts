@@ -20,6 +20,8 @@ export const skyLightingUniforms = {
   /** Output-space (sRGB) colour, like the final fragment colour it is mixed with. */
   skyFogColor: { value: new THREE.Vector3(0.7, 0.75, 0.8) },
   skyFogTime: { value: 0 },
+  /** 0..1: how deep inside a cloud the viewer is; thick white mist at any height. */
+  skyMist: { value: 0 },
 };
 
 export const DAYLIGHT_GLSL = `
@@ -33,6 +35,7 @@ export const FOG_GLSL = `
 uniform float skyFogDensity;
 uniform vec3 skyFogColor;
 uniform float skyFogTime;
+uniform float skyMist;
 
 float fogHash(vec2 cell) {
   return fract(sin(dot(cell, vec2(127.1, 311.7))) * 43758.5453);
@@ -50,13 +53,13 @@ float fogNoise(vec2 point) {
 }
 
 vec3 applyFog(vec3 color, vec3 worldPosition) {
-  if (skyFogDensity < 0.00002) return color;
+  if (skyFogDensity < 0.00002 && skyMist < 0.001) return color;
   float distanceToCamera = length(worldPosition - cameraPosition);
   float averageHeight = 0.5 * (worldPosition.y + cameraPosition.y);
   float heightFactor = exp(-max(averageHeight - ${FOG_FLOOR_Y.toFixed(1)}, 0.0) / ${FOG_FALLOFF_BLOCKS.toFixed(1)});
   vec2 drift = vec2(skyFogTime * 0.03, skyFogTime * 0.012);
   float banks = 0.65 + 0.7 * fogNoise(worldPosition.xz * 0.005 + drift) * (0.6 + 0.4 * fogNoise(worldPosition.xz * 0.019 - drift));
-  float opticalDepth = skyFogDensity * heightFactor * banks * distanceToCamera;
+  float opticalDepth = (skyFogDensity * heightFactor * banks + skyMist * 0.05) * distanceToCamera;
   float amount = 1.0 - exp(-opticalDepth * sqrt(opticalDepth));
   return mix(color, skyFogColor, clamp(amount, 0.0, 1.0));
 }

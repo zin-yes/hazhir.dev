@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import type { HumidityUniforms } from "./climate/humidity-map";
+import { MAX_CLOUD_CARVES } from "./cloud-carves";
 import { SKY_FRAGMENT_SHADER, SKY_VERTEX_SHADER } from "./sky-shaders";
 import type { SkyState } from "./sky-state";
 
@@ -10,6 +11,8 @@ export interface SkyDomeInputs {
   weatherShift: number;
   /** 0 clear .. 1 densest fog. */
   fogStrength: number;
+  /** 0..1: how deep inside a cloud the viewer is. */
+  cloudMist: number;
 }
 
 /** A unit cube drawn at the far plane around the camera; the shader turns each pixel's direction into sky. */
@@ -35,6 +38,9 @@ export class SkyDome extends THREE.Mesh<THREE.BoxGeometry, THREE.ShaderMaterial>
           weatherShift: { value: 0 },
           fogColor: { value: new THREE.Vector3() },
           fogStrength: { value: 0 },
+          mistColor: { value: new THREE.Vector3() },
+          cloudMist: { value: 0 },
+          cloudCarves: { value: Array.from({ length: MAX_CLOUD_CARVES }, () => new THREE.Vector4()) },
           humidityTexture: { value: humidityTexture },
           ...humidityUniforms,
         },
@@ -48,7 +54,11 @@ export class SkyDome extends THREE.Mesh<THREE.BoxGeometry, THREE.ShaderMaterial>
     this.frustumCulled = false;
   }
 
-  apply({ state, viewerPosition, elapsedSeconds, weatherShift, fogStrength }: SkyDomeInputs): void {
+  get carveUniform(): THREE.Vector4[] {
+    return this.material.uniforms.cloudCarves!.value;
+  }
+
+  apply({ state, viewerPosition, elapsedSeconds, weatherShift, fogStrength, cloudMist }: SkyDomeInputs): void {
     const uniforms = this.material.uniforms;
     uniforms.viewerPosition!.value.copy(viewerPosition);
     uniforms.elapsedSeconds!.value = elapsedSeconds;
@@ -67,5 +77,7 @@ export class SkyDome extends THREE.Mesh<THREE.BoxGeometry, THREE.ShaderMaterial>
     uniforms.weatherShift!.value = weatherShift;
     uniforms.fogColor!.value.set(...state.fogColor);
     uniforms.fogStrength!.value = fogStrength;
+    uniforms.mistColor!.value.set(...state.mistColor);
+    uniforms.cloudMist!.value = cloudMist;
   }
 }

@@ -10,8 +10,8 @@ export const ORBIT_TILT = 0.25;
 
 export const CLOUD_BASE_Y = 300;
 export const CLOUD_LAYER_COUNT = 3;
-export const CLOUD_CELL_WIDTH = 24;
-export const CLOUD_CELL_HEIGHT = 9;
+export const CLOUD_CELL_WIDTH = 40;
+export const CLOUD_CELL_HEIGHT = 14;
 export const CLOUD_MAX_DISTANCE = 2400;
 export const CLOUD_MAX_STEPS = 72;
 export const CLOUD_WIND_BLOCKS_PER_SECOND = { x: 3.2, z: 1.1 };
@@ -19,7 +19,7 @@ export const CLOUD_WIND_BLOCKS_PER_SECOND = { x: 3.2, z: 1.1 };
 export const CLOUD_EVOLUTION_PER_SECOND = 0.004;
 
 /** Coverage (0 clear, 1 overcast) = base + humidity * gain + weather shift. */
-export const CLOUD_BASE_COVERAGE = 0.15;
-export const CLOUD_HUMIDITY_GAIN = 0.55;
+export const CLOUD_BASE_COVERAGE = 0.22;
+export const CLOUD_HUMIDITY_GAIN = 0.5;
 export const WEATHER_SHIFT_RANGE = 0.22;
 export const WEATHER_PERIOD_SECONDS = 540;

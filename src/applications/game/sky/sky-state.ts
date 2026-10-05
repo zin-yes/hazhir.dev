@@ -22,6 +22,8 @@ export interface SkyState {
   starVisibility: number;
   /** Linear colour distant fog fades to: the horizon, washed towards grey in daylight. */
   fogColor: Rgb;
+  /** Linear colour of the mist inside a cloud. */
+  mistColor: Rgb;
   /** 1 in full daylight, 0 at night; scales the lighting of the terrain. */
   daylight: number;
 }
@@ -36,8 +38,8 @@ interface PaletteStop {
 }
 
 const PALETTE_STOPS: PaletteStop[] = [
-  { sunElevation: -0.35, zenith: 0x03050d, horizon: 0x0a1124, glow: 0x1a2650, glowStrength: 0.0, sunLight: 0x2a3a66 },
-  { sunElevation: -0.12, zenith: 0x0b1433, horizon: 0x2a2a52, glow: 0x6a3f78, glowStrength: 0.35, sunLight: 0x3a3f70 },
+  { sunElevation: -0.35, zenith: 0x061436, horizon: 0x112c5e, glow: 0x1a2650, glowStrength: 0.0, sunLight: 0x2a3a66 },
+  { sunElevation: -0.12, zenith: 0x0d1a45, horizon: 0x2c3470, glow: 0x6a3f78, glowStrength: 0.35, sunLight: 0x3a3f70 },
   { sunElevation: -0.03, zenith: 0x1f3470, horizon: 0xd2677a, glow: 0xff7a4a, glowStrength: 0.9, sunLight: 0xff7a40 },
   { sunElevation: 0.06, zenith: 0x35609f, horizon: 0xf29a58, glow: 0xffa860, glowStrength: 1.0, sunLight: 0xffa860 },
   { sunElevation: 0.22, zenith: 0x4a82d4, horizon: 0xc7dcea, glow: 0xffe2a8, glowStrength: 0.6, sunLight: 0xffe8c4 },
@@ -160,6 +162,15 @@ export function computeSkyState(timeOfDay: number, moonPhaseIndex: number, overc
   const fogGrey = greyOf(overcastHorizon);
   const fogColor = mixRgb(overcastHorizon, scaleRgb(fogGrey, 1.25), 0.4 + 0.3 * daylight);
 
+  const skyTint = mixRgb(overcastHorizon, overcastZenith, 0.3);
+  const night = 1 - daylight;
+  const mistGrey = greyOf(skyTint);
+  const mistColor: Rgb = [
+    mistGrey[0] * 0.8 + sampled.sunLight[0] * 0.35 * daylight + 0.03 * night,
+    mistGrey[1] * 0.8 + sampled.sunLight[1] * 0.35 * daylight + 0.07 * night,
+    mistGrey[2] * 0.8 + sampled.sunLight[2] * 0.35 * daylight + 0.16 * night,
+  ];
+
   return {
     sunDirection,
     moonDirection,
@@ -173,6 +184,7 @@ export function computeSkyState(timeOfDay: number, moonPhaseIndex: number, overc
     sunLightColor: sampled.sunLight,
     starVisibility,
     fogColor,
+    mistColor,
     daylight,
   };
 }
