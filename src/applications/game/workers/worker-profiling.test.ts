@@ -352,6 +352,38 @@ describe("lighting profiling", () => {
     expect(unitsOf(profile, DIMENSIONS.lightKind).flood).toBe(profile.counters.bfsNodesVisited);
   });
 
+  test("border seeding counters split by direction and by light channel", () => {
+    const chunk = new Uint8Array(BLOCKS);
+    const neighborLight = new Uint8Array(BLOCKS);
+    const neighborChunk = new Uint8Array(BLOCKS);
+    neighborLight.fill(0xf0);
+    for (let y = 0; y < CHUNK_HEIGHT; y++) {
+      for (let z = 0; z < CHUNK_LENGTH; z++) neighborLight[calculateOffset(0, y, z)] = 0x0c;
+    }
+    chunk[calculateOffset(CHUNK_WIDTH - 1, 5, 5)] = BlockType.STONE;
+    const initialized = initializeChunkLight(chunk, WORLD_SEED, 0, SEA_LEVEL_CHUNK_Y, 0);
+    const { profile } = recordTask(() =>
+      propagateChunkLight(
+        chunk,
+        initialized.light,
+        { "1,0,0": neighborChunk, "0,1,0": neighborChunk },
+        { "1,0,0": neighborLight, "0,1,0": neighborLight },
+        initialized.queue,
+      ),
+    );
+    const { counters } = profile;
+    const directionNames = ["positiveX", "negativeX", "positiveY", "negativeY", "positiveZ", "negativeZ"];
+    const examinedByDirection = directionNames.map((name) => counters[`borderCellsExamined.${name}`] ?? 0);
+    const seededByDirection = directionNames.map((name) => counters[`borderCellsSeeded.${name}`] ?? 0);
+
+    expect(sum(examinedByDirection)).toBe(counters.borderCellsExamined);
+    expect(sum(seededByDirection)).toBe(counters.borderCellsSeeded);
+    expect(examinedByDirection[0]).toBe(CHUNK_HEIGHT * CHUNK_LENGTH - 1);
+    expect(counters.borderCellsOpaque).toBe(1);
+    expect(seededByDirection[0]).toBeGreaterThan(0);
+    expect(unitsOf(profile, DIMENSIONS.lightChannel).block).toBeGreaterThan(0);
+  });
+
   test("propagateChunkLight on a mixed chunk gives the same light with and without profiling", () => {
     const chunk = mixedChunk();
     const first = lightFor(chunk);
