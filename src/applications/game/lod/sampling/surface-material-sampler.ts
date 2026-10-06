@@ -33,6 +33,12 @@ export class SurfaceMaterialSampler {
   private currentLocalX = 0;
   private currentLocalZ = 0;
   ruleEvaluations = 0;
+  /** Cells by outcome and cache behavior since construction (profiler counters read deltas). */
+  underwaterCells = 0;
+  seaIceCells = 0;
+  snowCoverCells = 0;
+  snowTemperatureChecks = 0;
+  resultTableMisses = 0;
 
   constructor(private readonly context: SeedWorldgenContext) {
     const { settings, surfaceSystem, temperature } = context;
@@ -60,6 +66,7 @@ export class SurfaceMaterialSampler {
     if (resultIndex === NO_RULE_MATCH) return this.defaultGameBlock;
     let gameBlock = this.gameBlockByResultIndex[resultIndex];
     if (gameBlock === undefined) {
+      this.resultTableMisses++;
       gameBlock = toGameBlockOrAir(this.context.surfaceResults.states[resultIndex]!).gameBlock;
       if (gameBlock === BlockType.AIR) gameBlock = this.defaultGameBlock;
       this.gameBlockByResultIndex[resultIndex] = gameBlock;
@@ -90,13 +97,17 @@ export class SurfaceMaterialSampler {
     const waterHeight = isUnderwater ? seaLevel : NO_WATER_HEIGHT;
     const topBlock = this.evaluateAt(blockX, topY - 1, blockZ, 1, waterHeight);
     const { temperature } = this.context;
+    this.snowTemperatureChecks++;
     if (isUnderwater) {
+      this.underwaterCells++;
       if (temperature.isColdEnoughToSnow(biomeId, blockX, seaLevel - 1, blockZ)) {
+        this.seaIceCells++;
         return { topBlock: BlockType.ICE, sideBlock: BlockType.ICE, waterSurfaceY: undefined };
       }
       return { topBlock, sideBlock: topBlock, waterSurfaceY: seaLevel };
     }
     if (temperature.isColdEnoughToSnow(biomeId, blockX, topY, blockZ)) {
+      this.snowCoverCells++;
       return { topBlock: BlockType.SNOW_LAYER, sideBlock: topBlock === BlockType.GRASS ? BlockType.GRASS_SNOWY : topBlock, waterSurfaceY: undefined };
     }
     return { topBlock, sideBlock: topBlock, waterSurfaceY: undefined };

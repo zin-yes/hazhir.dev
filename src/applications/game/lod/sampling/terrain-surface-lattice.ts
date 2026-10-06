@@ -30,18 +30,53 @@ interface LatticeColumn {
   crossingLevel: number;
 }
 
+/** Work done by the surface search since the last `reset`, reported as worker counters. */
+export interface LatticeSearchStatistics {
+  crossingSearches: number;
+  crossingReuses: number;
+  solidGuessSearches: number;
+  airGuessSearches: number;
+  climbSteps: number;
+  descentSteps: number;
+  skyProbeRounds: number;
+  skyProbeResumes: number;
+  densityMemoHits: number;
+  onLatticeTopLookups: number;
+  offLatticeInterpolations: number;
+  interpolatedDensityReads: number;
+}
+
+function createLatticeSearchStatistics(): LatticeSearchStatistics {
+  return {
+    crossingSearches: 0,
+    crossingReuses: 0,
+    solidGuessSearches: 0,
+    airGuessSearches: 0,
+    climbSteps: 0,
+    descentSteps: 0,
+    skyProbeRounds: 0,
+    skyProbeResumes: 0,
+    densityMemoHits: 0,
+    onLatticeTopLookups: 0,
+    offLatticeInterpolations: 0,
+    interpolatedDensityReads: 0,
+  };
+}
+
 function floorDivide(value: number, divisor: number): number {
   return Math.floor(value / divisor);
 }
 
 export class TerrainSurfaceLattice {
   private readonly columns = new Map<number, LatticeColumn>();
+  searchStatistics = createLatticeSearchStatistics();
 
   constructor(private readonly density: ColumnDensity) {}
 
-  /** Forget the columns of the previous tile. */
+  /** Forget the columns of the previous tile (and the search statistics with them). */
   reset(): void {
     this.columns.clear();
+    this.searchStatistics = createLatticeSearchStatistics();
   }
 
   get columnCount(): number {
@@ -66,6 +101,8 @@ export class TerrainSurfaceLattice {
     if (Number.isNaN(value)) {
       value = this.density.at(column.blockX, level * LATTICE_SPACING, column.blockZ);
       column.densities[index] = value;
+    } else {
+      this.searchStatistics.densityMemoHits++;
     }
     return value;
   }
@@ -83,13 +120,17 @@ export class TerrainSurfaceLattice {
     let stride = 1;
     let airLevel = solidStartLevel + 1;
     while (airLevel <= HIGHEST_LEVEL && this.isSolidAtLevel(column, airLevel)) {
+      this.searchStatistics.climbSteps++;
       solidLevel = airLevel;
       stride = Math.min(MAX_UPWARD_STRIDE, stride * 2);
       airLevel = Math.min(HIGHEST_LEVEL + 1, airLevel + stride);
     }
     if (airLevel > HIGHEST_LEVEL) return SOLID_TO_THE_TOP;
     let level = airLevel - 1;
-    while (level > solidLevel && !this.isSolidAtLevel(column, level)) level--;
+    while (level > solidLevel && !this.isSolidAtLevel(column, level)) {
+      this.searchStatistics.descentSteps++;
+      level--;
+    }
     return level;
   }
 
@@ -100,20 +141,31 @@ export class TerrainSurfaceLattice {
    * so the open sky above it is probed at a few heights and the climb resumes from any rock found there.
    */
   private resolveCrossing(column: LatticeColumn, guessY: number): void {
-    if (!Number.isNaN(column.crossingLevel)) return;
+    if (!Number.isNaN(column.crossingLevel)) {
+      this.searchStatistics.crossingReuses++;
+      return;
+    }
+    this.searchStatistics.crossingSearches++;
     const guessLevel = Math.max(LOWEST_LEVEL, Math.min(HIGHEST_LEVEL, floorDivide(guessY, LATTICE_SPACING)));
     let crossingLevel: number;
     if (this.isSolidAtLevel(column, guessLevel)) {
+      this.searchStatistics.solidGuessSearches++;
       crossingLevel = this.climbToCrossing(column, guessLevel);
     } else {
+      this.searchStatistics.airGuessSearches++;
       crossingLevel = guessLevel - 1;
-      while (crossingLevel >= LOWEST_LEVEL && !this.isSolidAtLevel(column, crossingLevel)) crossingLevel--;
+      while (crossingLevel >= LOWEST_LEVEL && !this.isSolidAtLevel(column, crossingLevel)) {
+        this.searchStatistics.descentSteps++;
+        crossingLevel--;
+      }
     }
     for (let attempt = 0; attempt < MAXIMUM_SKY_PROBE_ROUNDS && crossingLevel < SOLID_TO_THE_TOP; attempt++) {
+      this.searchStatistics.skyProbeRounds++;
       const rockAbove = SKY_PROBE_OFFSETS.map((offset) => crossingLevel + offset).find(
         (level) => level <= HIGHEST_LEVEL && this.isSolidAtLevel(column, level),
       );
       if (rockAbove === undefined) break;
+      this.searchStatistics.skyProbeResumes++;
       crossingLevel = this.climbToCrossing(column, rockAbove);
     }
     column.crossingLevel = crossingLevel;
@@ -155,7 +207,11 @@ export class TerrainSurfaceLattice {
     const northZ = floorDivide(blockZ, LATTICE_SPACING) * LATTICE_SPACING;
     const fractionX = (blockX - westX) / LATTICE_SPACING;
     const fractionZ = (blockZ - northZ) / LATTICE_SPACING;
-    if (fractionX === 0 && fractionZ === 0) return this.latticeColumnTopY(blockX, blockZ);
+    if (fractionX === 0 && fractionZ === 0) {
+      this.searchStatistics.onLatticeTopLookups++;
+      return this.latticeColumnTopY(blockX, blockZ);
+    }
+    this.searchStatistics.offLatticeInterpolations++;
     const corners = [
       this.columnAt(westX, northZ),
       this.columnAt(westX + LATTICE_SPACING, northZ),
@@ -174,6 +230,7 @@ export class TerrainSurfaceLattice {
       highestCrossing = Math.max(highestCrossing, corner.crossingLevel);
     }
     const interpolatedDensityAt = (level: number): number => {
+      this.searchStatistics.interpolatedDensityReads++;
       let value = 0;
       for (let cornerIndex = 0; cornerIndex < 4; cornerIndex++) {
         if (weights[cornerIndex] === 0) continue;

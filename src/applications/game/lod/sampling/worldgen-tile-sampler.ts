@@ -3,9 +3,11 @@
 // chunk data are taken from the overlay and never sampled. A coarser tile of the same area (the hint) seeds every
 // height search, which is what makes refining a tile cheaper than sampling it cold.
 
-import { addWorkerCounter, endWorkerSection, isWorkerProfiling, startWorkerSection } from "../../profiler/worker-recorder";
+import { DIMENSIONS } from "../../profiler/dimensions";
+import { addWorkerCounter, endWorkerSection, isWorkerProfiling, startWorkerSampledSection, startWorkerSection } from "../../profiler/worker-recorder";
 import { GAME_Y_OFFSET } from "../../worldgen/constants";
 import { cellSizeOfLevel, NO_WATER, TILE_CELLS, tileSizeOfLevel } from "../core/lod-constants";
+import { lodLevelKey } from "../core/lod-level-keys";
 import type { TileAddress } from "../core/tile-address";
 import { cellIndexOf, createTileSurface, type TileSurface } from "../data/tile-surface";
 import type { SeedWorldgenContext } from "./seed-worldgen-context";
@@ -49,9 +51,14 @@ function sampleOffsetWithinCell(cellSize: number): number {
   return Math.floor(cellSize / 2);
 }
 
-function profiledSection<Result>(isProfiling: boolean, name: string, work: () => Result): Result {
+const LATTICE_SEARCH_SAMPLE_EVERY = 4;
+const BIOME_LOOKUP_SAMPLE_EVERY = 4;
+const INTERPOLATE_TOP_SAMPLE_EVERY = 32;
+const SURFACE_RULES_SAMPLE_EVERY = 16;
+
+function profiledSection<Result>(isProfiling: boolean, name: string, work: () => Result, dimension?: string, key?: string): Result {
   if (!isProfiling) return work();
-  startWorkerSection(name);
+  startWorkerSection(name, dimension, key);
   try {
     return work();
   } finally {
@@ -72,6 +79,19 @@ export class WorldgenTileSampler {
     const isProfiling = isWorkerProfiling();
     const evaluationsBefore = this.context.density.evaluations;
     const ruleEvaluationsBefore = this.materials.ruleEvaluations;
+    const underwaterCellsBefore = this.materials.underwaterCells;
+    const seaIceCellsBefore = this.materials.seaIceCells;
+    const snowCoverCellsBefore = this.materials.snowCoverCells;
+    const snowChecksBefore = this.materials.snowTemperatureChecks;
+    const resultTableMissesBefore = this.materials.resultTableMisses;
+    const memoBefore = isProfiling ? { ...this.context.density.memoStatistics } : null;
+    const levelKey = lodLevelKey(address.level);
+    let hintGuesses = 0;
+    let hintOutsideTile = 0;
+    let latticeColumnReuses = 0;
+    let onLatticeCells = 0;
+    let offLatticeCells = 0;
+    let frozenSeaCells = 0;
     const cellSize = cellSizeOfLevel(address.level);
     const originX = address.tileX * tileSizeOfLevel(address.level);
     const originZ = address.tileZ * tileSizeOfLevel(address.level);
@@ -95,7 +115,11 @@ export class WorldgenTileSampler {
       const hintOriginZ = hint.address.tileZ * tileSizeOfLevel(hint.address.level);
       const hintCellX = Math.floor((blockX - hintOriginX) / hintCellSize);
       const hintCellZ = Math.floor((blockZ - hintOriginZ) / hintCellSize);
-      if (hintCellX < 0 || hintCellZ < 0 || hintCellX >= TILE_CELLS || hintCellZ >= TILE_CELLS) return undefined;
+      if (hintCellX < 0 || hintCellZ < 0 || hintCellX >= TILE_CELLS || hintCellZ >= TILE_CELLS) {
+        hintOutsideTile++;
+        return undefined;
+      }
+      hintGuesses++;
       return hint.surface.heights[cellIndexOf(hintCellX, hintCellZ)]! - GAME_Y_OFFSET;
     };
 
@@ -109,13 +133,26 @@ export class WorldgenTileSampler {
     // while the column memos of the climate functions still hold this column.
     const prepareLatticeColumn = (blockX: number, blockZ: number) => {
       const quartKey = quartKeyOf(blockX, blockZ);
-      if (biomeByQuart.has(quartKey)) return;
+      if (biomeByQuart.has(quartKey)) {
+        latticeColumnReuses++;
+        return;
+      }
       const guessY = (guessFromHint(blockX, blockZ) ?? previousGuessY) + GUESS_HEADROOM_BLOCKS;
-      this.lattice.prepareLatticeColumn(blockX, blockZ, guessY);
+      if (isProfiling) startWorkerSampledSection("lod.sample.latticeSearch", LATTICE_SEARCH_SAMPLE_EVERY);
+      try {
+        this.lattice.prepareLatticeColumn(blockX, blockZ, guessY);
+      } finally {
+        if (isProfiling) endWorkerSection();
+      }
       const topY = this.lattice.latticeColumnTopY(blockX, blockZ);
       previousGuessY = topY;
       biomeLookups++;
-      biomeByQuart.set(quartKey, this.context.biomeSource.findBiome(this.context.climateSampler.sample(blockX >> 2, (topY - 1) >> 2, blockZ >> 2)));
+      if (isProfiling) startWorkerSampledSection("lod.sample.biomeLookup", BIOME_LOOKUP_SAMPLE_EVERY);
+      try {
+        biomeByQuart.set(quartKey, this.context.biomeSource.findBiome(this.context.climateSampler.sample(blockX >> 2, (topY - 1) >> 2, blockZ >> 2)));
+      } finally {
+        if (isProfiling) endWorkerSection();
+      }
     };
 
     profiledSection(isProfiling, "lod.sample.heights", () => {
@@ -126,9 +163,11 @@ export class WorldgenTileSampler {
           const blockX = sampleXOf(cellX);
           const blockZ = sampleZOf(cellZ);
           if (isOnLattice) {
+            onLatticeCells++;
             prepareLatticeColumn(blockX, blockZ);
             continue;
           }
+          offLatticeCells++;
           const westX = Math.floor(blockX / LATTICE_CELL_BLOCKS) * LATTICE_CELL_BLOCKS;
           const northZ = Math.floor(blockZ / LATTICE_CELL_BLOCKS) * LATTICE_CELL_BLOCKS;
           prepareLatticeColumn(westX, northZ);
@@ -144,10 +183,15 @@ export class WorldgenTileSampler {
             minecraftTopY[index] = overlay!.surface.heights[index]! - GAME_Y_OFFSET;
             continue;
           }
-          minecraftTopY[index] = this.lattice.topYAtBlock(sampleXOf(cellX), sampleZOf(cellZ));
+          if (isProfiling) startWorkerSampledSection("lod.sample.interpolateTop", INTERPOLATE_TOP_SAMPLE_EVERY);
+          try {
+            minecraftTopY[index] = this.lattice.topYAtBlock(sampleXOf(cellX), sampleZOf(cellZ));
+          } finally {
+            if (isProfiling) endWorkerSection();
+          }
         }
       }
-    });
+    }, DIMENSIONS.lodLevel, levelKey);
 
     const biomeAt = (blockX: number, blockZ: number): string => {
       const biome = biomeByQuart.get(quartKeyOf(blockX, blockZ));
@@ -175,15 +219,23 @@ export class WorldgenTileSampler {
           const spanZ = (Math.min(TILE_CELLS - 1, cellZ + 1) - Math.max(0, cellZ - 1)) * cellSize;
           const slopeX = (heightAt(cellX + 1, cellZ) - heightAt(cellX - 1, cellZ)) / spanX;
           const slopeZ = (heightAt(cellX, cellZ + 1) - heightAt(cellX, cellZ - 1)) / spanZ;
-          const material = this.materials.sample(blockX, blockZ, topY, slopeX, slopeZ, biomeAt(blockX, blockZ));
+          const biome = biomeAt(blockX, blockZ);
+          if (isProfiling) startWorkerSampledSection("lod.sample.surfaceRules", SURFACE_RULES_SAMPLE_EVERY);
+          let material: ReturnType<SurfaceMaterialSampler["sample"]>;
+          try {
+            material = this.materials.sample(blockX, blockZ, topY, slopeX, slopeZ, biome);
+          } finally {
+            if (isProfiling) endWorkerSection();
+          }
           const isFrozenSea = material.waterSurfaceY === undefined && topY < this.context.settings.seaLevel;
+          if (isFrozenSea) frozenSeaCells++;
           surface.heights[index] = (isFrozenSea ? this.context.settings.seaLevel : topY) + GAME_Y_OFFSET;
           surface.topBlocks[index] = material.topBlock;
           surface.sideBlocks[index] = material.sideBlock;
           surface.waterLevels[index] = material.waterSurfaceY === undefined ? NO_WATER : material.waterSurfaceY + GAME_Y_OFFSET;
         }
       }
-    });
+    }, DIMENSIONS.lodLevel, levelKey);
 
     const statistics: TileSamplingStatistics = {
       sampledCells,
@@ -200,6 +252,36 @@ export class WorldgenTileSampler {
       addWorkerCounter("lodDensityEvaluations", statistics.densityEvaluations);
       addWorkerCounter("lodBiomeLookups", statistics.biomeLookups);
       addWorkerCounter("lodSurfaceRuleEvaluations", statistics.ruleEvaluations);
+      addWorkerCounter("lodHintGuesses", hintGuesses);
+      addWorkerCounter("lodHintOutsideTile", hintOutsideTile);
+      addWorkerCounter("lodLatticeColumnReuses", latticeColumnReuses);
+      addWorkerCounter("lodOnLatticeCells", onLatticeCells);
+      addWorkerCounter("lodOffLatticeCells", offLatticeCells);
+      addWorkerCounter("lodFrozenSeaCells", frozenSeaCells);
+      addWorkerCounter("lodUnderwaterCells", this.materials.underwaterCells - underwaterCellsBefore);
+      addWorkerCounter("lodSeaIceCells", this.materials.seaIceCells - seaIceCellsBefore);
+      addWorkerCounter("lodSnowCoverCells", this.materials.snowCoverCells - snowCoverCellsBefore);
+      addWorkerCounter("lodSnowTemperatureChecks", this.materials.snowTemperatureChecks - snowChecksBefore);
+      addWorkerCounter("lodSurfaceResultTableMisses", this.materials.resultTableMisses - resultTableMissesBefore);
+      const memo = this.context.density.memoStatistics;
+      const memoStart = memoBefore ?? memo;
+      addWorkerCounter("lodFlatCacheHits", memo.flatCacheHits - memoStart.flatCacheHits);
+      addWorkerCounter("lodFlatCacheMisses", memo.flatCacheMisses - memoStart.flatCacheMisses);
+      addWorkerCounter("lodCache2dHits", memo.cache2dHits - memoStart.cache2dHits);
+      addWorkerCounter("lodCache2dMisses", memo.cache2dMisses - memoStart.cache2dMisses);
+      const search = this.lattice.searchStatistics;
+      addWorkerCounter("lodCrossingSearches", search.crossingSearches);
+      addWorkerCounter("lodCrossingReuses", search.crossingReuses);
+      addWorkerCounter("lodSolidGuessSearches", search.solidGuessSearches);
+      addWorkerCounter("lodAirGuessSearches", search.airGuessSearches);
+      addWorkerCounter("lodClimbSteps", search.climbSteps);
+      addWorkerCounter("lodDescentSteps", search.descentSteps);
+      addWorkerCounter("lodSkyProbeRounds", search.skyProbeRounds);
+      addWorkerCounter("lodSkyProbeResumes", search.skyProbeResumes);
+      addWorkerCounter("lodDensityMemoHits", search.densityMemoHits);
+      addWorkerCounter("lodOnLatticeTopLookups", search.onLatticeTopLookups);
+      addWorkerCounter("lodOffLatticeInterpolations", search.offLatticeInterpolations);
+      addWorkerCounter("lodInterpolatedDensityReads", search.interpolatedDensityReads);
     }
     return { surface, statistics };
   }

@@ -17,6 +17,14 @@ import { MarkerNode } from "../../worldgen/engine/density/nodes/structural-nodes
 
 let nextColumnCacheIdentity = 1;
 
+/** How often the two column memos answered from their one-column cache or had to evaluate (profiler counters). */
+export interface ColumnMemoStatistics {
+  flatCacheHits: number;
+  flatCacheMisses: number;
+  cache2dHits: number;
+  cache2dMisses: number;
+}
+
 class ColumnMemoNode extends DensityNode {
   private lastBlockX = Number.NaN;
   private lastBlockZ = Number.NaN;
@@ -26,6 +34,7 @@ class ColumnMemoNode extends DensityNode {
   constructor(
     private readonly wrapped: DensityNode,
     private readonly sampleAtQuartOriginAndYZero: boolean,
+    private readonly statistics: ColumnMemoStatistics,
   ) {
     super();
   }
@@ -46,15 +55,21 @@ class ColumnMemoNode extends DensityNode {
       blockZ = (blockZ >> 2) << 2;
     }
     if (blockX !== this.lastBlockX || blockZ !== this.lastBlockZ) {
+      if (this.sampleAtQuartOriginAndYZero) this.statistics.flatCacheMisses++;
+      else this.statistics.cache2dMisses++;
       this.lastBlockX = blockX;
       this.lastBlockZ = blockZ;
       this.lastValue = this.wrapped.compute(this.sampleAtQuartOriginAndYZero ? new SinglePointContext(blockX, 0, blockZ) : context);
+    } else if (this.sampleAtQuartOriginAndYZero) {
+      this.statistics.flatCacheHits++;
+    } else {
+      this.statistics.cache2dHits++;
     }
     return this.lastValue;
   }
 
   mapAll(visitor: DensityVisitor): DensityNode {
-    return visitor.apply(new ColumnMemoNode(visitor.map(this.wrapped), this.sampleAtQuartOriginAndYZero));
+    return visitor.apply(new ColumnMemoNode(visitor.map(this.wrapped), this.sampleAtQuartOriginAndYZero, this.statistics));
   }
 
   children(): readonly DensityNode[] {
@@ -67,9 +82,13 @@ class ColumnMemoNode extends DensityNode {
 }
 
 class ColumnCachingVisitor extends StripMarkersVisitor {
+  constructor(private readonly memoStatistics: ColumnMemoStatistics) {
+    super();
+  }
+
   protected wrapNew(node: DensityNode): DensityNode {
     if (node instanceof MarkerNode && (node.type === "flat_cache" || node.type === "cache_2d")) {
-      return new ColumnMemoNode(node.wrapped, node.type === "flat_cache");
+      return new ColumnMemoNode(node.wrapped, node.type === "flat_cache", this.memoStatistics);
     }
     return super.wrapNew(node);
   }
@@ -80,6 +99,8 @@ export interface ColumnDensity {
   at(blockX: number, blockY: number, blockZ: number): number;
   /** Number of evaluations so far (for profiler counters and benchmarks). */
   readonly evaluations: number;
+  /** Hits and misses of the column memos, accumulated over the router's lifetime. */
+  readonly memoStatistics: Readonly<ColumnMemoStatistics>;
 }
 
 export interface ColumnClimateSampler {
@@ -98,7 +119,8 @@ export interface ColumnCachedRouter {
  * search.
  */
 export function createColumnCachedRouter(router: NoiseRouter): ColumnCachedRouter {
-  const visitor = new ColumnCachingVisitor();
+  const memoStatistics: ColumnMemoStatistics = { flatCacheHits: 0, flatCacheMisses: 0, cache2dHits: 0, cache2dMisses: 0 };
+  const visitor = new ColumnCachingVisitor(memoStatistics);
   const finalDensity = visitor.map(router.finalDensity);
   const temperature = visitor.map(router.temperature);
   const humidity = visitor.map(router.vegetation);
@@ -116,6 +138,7 @@ export function createColumnCachedRouter(router: NoiseRouter): ColumnCachedRoute
       get evaluations() {
         return evaluations;
       },
+      memoStatistics,
     },
     climate: {
       sample(quartX, quartY, quartZ) {
