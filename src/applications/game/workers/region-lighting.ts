@@ -1,8 +1,9 @@
-import type { LightChunkSource } from "../edits/chunk-cluster";
+import { CELLS_PER_CHUNK, type LightChunkSource } from "../edits/chunk-cluster";
 import { mergeLightUpdatesInPlace } from "../edits/merge-light";
 import {
   addWorkerCounter,
   endWorkerSection,
+  startWorkerSampledSection,
   startWorkerSection,
 } from "../profiler/worker-recorder";
 import { initializeChunkLightFromAbove, propagateChunkLight } from "./lighting";
@@ -41,6 +42,8 @@ const FACE_NEIGHBORS: { key: string; dx: number; dy: number; dz: number }[] = [
   { key: "0,0,-1", dx: 0, dy: 0, dz: -1 },
 ];
 
+const NEIGHBOR_GATHER_SAMPLE_INTERVAL = 8;
+
 const chunkKey = (chunkX: number, chunkY: number, chunkZ: number) =>
   `${chunkX},${chunkY},${chunkZ}`;
 
@@ -61,14 +64,19 @@ export function lightChunkRegion(
   surroundings?: LightChunkSource,
 ): RegionLightResult {
   const regionIndexByKey = new Map<string, number>();
+  startWorkerSection("indexRegionChunks");
   for (let position = 0; position < chunks.length; position++) {
     const { chunkX, chunkY, chunkZ } = chunks[position];
     regionIndexByKey.set(chunkKey(chunkX, chunkY, chunkZ), position);
   }
+  endWorkerSection();
 
   const initialLights: Uint8Array[] = new Array(chunks.length);
   const seedQueues: Uint32Array[] = new Array(chunks.length);
 
+  let columnsAboveInRegion = 0;
+  let columnsAboveInSurroundings = 0;
+  let columnsWithNothingAbove = 0;
   startWorkerSection("initializeRegionColumns");
   const topDownOrder = Array.from({ length: chunks.length }, (_, position) => position)
     .sort((first, second) => chunks[second].chunkY - chunks[first].chunkY);
@@ -83,6 +91,9 @@ export function lightChunkRegion(
       aboveIndex !== undefined
         ? initialLights[aboveIndex]
         : surroundings?.getLight(chunkX, chunkY + 1, chunkZ);
+    if (aboveIndex !== undefined) columnsAboveInRegion++;
+    else if (topBlocks) columnsAboveInSurroundings++;
+    else columnsWithNothingAbove++;
     const { light, queue } = initializeChunkLightFromAbove(
       blocks,
       chunkY,
@@ -100,9 +111,15 @@ export function lightChunkRegion(
   );
   const surroundingUpdatesByKey = new Map<string, RegionChunkLight & { updates: Uint8Array[] }>();
 
+  let neighborsInRegion = 0;
+  let neighborsInSurroundings = 0;
+  let neighborsMissing = 0;
+  let updatesRoutedToRegion = 0;
+  let updatesRoutedToSurroundings = 0;
   startWorkerSection("propagateRegionChunks");
   for (let position = 0; position < chunks.length; position++) {
     const { chunkX, chunkY, chunkZ, blocks } = chunks[position];
+    startWorkerSampledSection("gatherNeighbors", NEIGHBOR_GATHER_SAMPLE_INTERVAL);
     const neighborBlocks: { [key: string]: Uint8Array } = {};
     const neighborLights: { [key: string]: Uint8Array } = {};
     for (const { key, dx, dy, dz } of FACE_NEIGHBORS) {
@@ -117,10 +134,16 @@ export function lightChunkRegion(
         neighborIndex !== undefined
           ? initialLights[neighborIndex]
           : surroundings?.getLight(chunkX + dx, chunkY + dy, chunkZ + dz);
-      if (!neighborBlocksArray || !neighborLightArray) continue;
+      if (!neighborBlocksArray || !neighborLightArray) {
+        neighborsMissing++;
+        continue;
+      }
+      if (neighborIndex !== undefined) neighborsInRegion++;
+      else neighborsInSurroundings++;
       neighborBlocks[key] = neighborBlocksArray;
       neighborLights[key] = neighborLightArray;
     }
+    endWorkerSection();
 
     const { centerLight, neighborLightUpdates } = propagateChunkLight(
       blocks,
@@ -131,6 +154,7 @@ export function lightChunkRegion(
     );
     regionUpdates[position].push(centerLight);
 
+    startWorkerSampledSection("routeNeighborUpdates", NEIGHBOR_GATHER_SAMPLE_INTERVAL);
     for (const { key, dx, dy, dz } of FACE_NEIGHBORS) {
       const update = neighborLightUpdates[key];
       if (!update) continue;
@@ -139,9 +163,11 @@ export function lightChunkRegion(
       const neighborZ = chunkZ + dz;
       const neighborIndex = regionIndexByKey.get(chunkKey(neighborX, neighborY, neighborZ));
       if (neighborIndex !== undefined) {
+        updatesRoutedToRegion++;
         regionUpdates[neighborIndex].push(update);
         continue;
       }
+      updatesRoutedToSurroundings++;
       const surroundingKey = chunkKey(neighborX, neighborY, neighborZ);
       const existing = surroundingUpdatesByKey.get(surroundingKey);
       if (existing) existing.updates.push(update);
@@ -154,14 +180,18 @@ export function lightChunkRegion(
           updates: [update],
         });
     }
+    endWorkerSection();
   }
   endWorkerSection();
 
   startWorkerSection("mergeRegionUpdates");
+  let lightUpdatesMerged = 0;
   const chunkLights: RegionChunkLight[] = [];
+  startWorkerSection("mergeRegionChunks");
   for (let position = 0; position < chunks.length; position++) {
     const { chunkX, chunkY, chunkZ } = chunks[position];
     const updates = regionUpdates[position];
+    lightUpdatesMerged += updates.length - 1;
     chunkLights.push({
       chunkX,
       chunkY,
@@ -169,8 +199,11 @@ export function lightChunkRegion(
       light: mergeLightUpdatesInPlace(updates[0], updates.slice(1)),
     });
   }
+  endWorkerSection();
   const surroundingUpdates: RegionChunkLight[] = [];
+  startWorkerSection("mergeSurroundingChunks");
   for (const entry of surroundingUpdatesByKey.values()) {
+    lightUpdatesMerged += entry.updates.length - 1;
     surroundingUpdates.push({
       chunkX: entry.chunkX,
       chunkY: entry.chunkY,
@@ -179,9 +212,20 @@ export function lightChunkRegion(
     });
   }
   endWorkerSection();
+  endWorkerSection();
 
   addWorkerCounter("regionChunksLit", chunks.length);
   addWorkerCounter("surroundingChunksUpdated", surroundingUpdates.length);
+  addWorkerCounter("regionColumnsAboveInRegion", columnsAboveInRegion);
+  addWorkerCounter("regionColumnsAboveInSurroundings", columnsAboveInSurroundings);
+  addWorkerCounter("regionColumnsNothingAbove", columnsWithNothingAbove);
+  addWorkerCounter("regionNeighborsInRegion", neighborsInRegion);
+  addWorkerCounter("regionNeighborsInSurroundings", neighborsInSurroundings);
+  addWorkerCounter("regionNeighborsMissing", neighborsMissing);
+  addWorkerCounter("regionUpdatesRoutedToRegion", updatesRoutedToRegion);
+  addWorkerCounter("regionUpdatesRoutedToSurroundings", updatesRoutedToSurroundings);
+  addWorkerCounter("regionLightUpdatesMerged", lightUpdatesMerged);
+  addWorkerCounter("regionLightCloneBytes", chunks.length * CELLS_PER_CHUNK);
   return { chunkLights, surroundingUpdates };
 }
 
@@ -208,6 +252,8 @@ export function createSurroundingsSource(
 
 /** Every buffer in the result, for the transfer list of a worker reply. */
 export function listRegionTransferables(result: RegionLightResult): Transferable[] {
+  addWorkerCounter("regionResultChunkBytes", result.chunkLights.length * CELLS_PER_CHUNK);
+  addWorkerCounter("regionResultSurroundingBytes", result.surroundingUpdates.length * CELLS_PER_CHUNK);
   return [...result.chunkLights, ...result.surroundingUpdates].map(
     (entry) => entry.light.buffer,
   );

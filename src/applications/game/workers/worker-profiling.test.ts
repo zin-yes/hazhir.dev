@@ -11,6 +11,7 @@ import { VERTICES_PER_QUAD } from "../vertex-format";
 import { calculateOffset } from "../utils";
 import { createSurfaceHeightSampler, generateChunk } from "./generation";
 import { initializeChunkLight, propagateChunkLight } from "./lighting";
+import { createSurroundingsSource, lightChunkRegion, listRegionTransferables } from "./region-lighting";
 import { generateMesh, listTransferables } from "./mesh";
 import { buildPlantTemplate } from "./plant-voxels";
 
@@ -396,6 +397,50 @@ describe("lighting profiling", () => {
     expect(bufferEquals(profiled.centerLight.buffer as ArrayBuffer, plain.centerLight.buffer as ArrayBuffer)).toBe(true);
     expect(rootPaths(profile)).toContain("bfsFlood");
     expect(profile.counters.bfsNodesVisited).toBeGreaterThan(0);
+  });
+});
+
+describe("region lighting profiling", () => {
+  test("neighbor lookups, routed updates and merges add up for a region with a lit surrounding", () => {
+    const glowAtBothSides = new Uint8Array(BLOCKS);
+    glowAtBothSides[calculateOffset(CHUNK_WIDTH - 1, 5, 8)] = BlockType.GLOWSTONE;
+    glowAtBothSides[calculateOffset(0, 5, 8)] = BlockType.GLOWSTONE;
+    const upperChunk = new Uint8Array(BLOCKS);
+    const eastChunk = new Uint8Array(BLOCKS);
+    const westBlocks = new Uint8Array(BLOCKS);
+    const westLight = initializeChunkLight(westBlocks, WORLD_SEED, -1, SEA_LEVEL_CHUNK_Y, 0).light;
+    const surroundings = createSurroundingsSource([
+      { chunkX: -1, chunkY: SEA_LEVEL_CHUNK_Y, chunkZ: 0, blocks: westBlocks, light: westLight },
+    ]);
+    const { result, profile } = recordTask(() => {
+      const lit = lightChunkRegion(
+        [
+          { chunkX: 0, chunkY: SEA_LEVEL_CHUNK_Y, chunkZ: 0, blocks: glowAtBothSides },
+          { chunkX: 0, chunkY: SEA_LEVEL_CHUNK_Y + 1, chunkZ: 0, blocks: upperChunk },
+          { chunkX: 1, chunkY: SEA_LEVEL_CHUNK_Y, chunkZ: 0, blocks: eastChunk },
+        ],
+        surroundings,
+      );
+      listRegionTransferables(lit);
+      return lit;
+    });
+    const { counters } = profile;
+
+    expect(counters.regionNeighborsInRegion).toBe(4);
+    expect(counters.regionNeighborsInSurroundings).toBe(1);
+    expect(counters.regionNeighborsInRegion + counters.regionNeighborsInSurroundings + counters.regionNeighborsMissing).toBe(18);
+    expect(counters.regionColumnsAboveInRegion).toBe(1);
+    expect(counters.regionColumnsNothingAbove).toBe(2);
+    expect(counters.regionUpdatesRoutedToRegion).toBeGreaterThan(0);
+    expect(counters.regionUpdatesRoutedToSurroundings).toBeGreaterThan(0);
+    expect(counters.regionLightUpdatesMerged).toBe(
+      counters.regionUpdatesRoutedToRegion + counters.regionUpdatesRoutedToSurroundings - result.surroundingUpdates.length,
+    );
+    expect(counters.regionResultChunkBytes + counters.regionResultSurroundingBytes).toBe(
+      (result.chunkLights.length + result.surroundingUpdates.length) * BLOCKS,
+    );
+    expect(callsAt(profile, "propagateRegionChunks>gatherNeighbors")).toBe(3);
+    expect(callsAt(profile, "mergeRegionUpdates>mergeRegionChunks")).toBe(1);
   });
 });
 
