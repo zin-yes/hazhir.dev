@@ -265,7 +265,7 @@ export class BloomPass {
         this.levelTargetBytes = levelSizes.map(({ levelWidth, levelHeight }) => estimateColorTargetBytes(levelWidth, levelHeight, false));
       }
       profiler.addCounter("game.post.bloom.targetsCreated", 1 + this.levelTargets.length);
-      profiler.recordBytes("bytes.post.targetsAllocated", this.sceneTargetBytes + this.totalLevelBytes());
+      profiler.recordBytes("bytes.post.bloomTargetsAllocated", this.sceneTargetBytes + this.totalLevelBytes());
     } finally {
       profiler.end(scopeToken);
     }
