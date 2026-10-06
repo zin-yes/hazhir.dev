@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { LOAD_STAGES, LoadTracker, type LoadSnapshot } from "./load-progress";
+import { counterTotal, gaugeLast, timerCallCount, withEnabledProfiler } from "./world/profiler-readings.test-helper";
 
 function createTracker() {
   const snapshots: LoadSnapshot[] = [];
@@ -49,5 +50,26 @@ describe("LoadTracker", () => {
     tracker.report("terrain", 0.8);
     tracker.report("terrain", 0.3);
     expect(tracker.snapshot().progress).toBeCloseTo(0.25 * 0.8, 10);
+  });
+
+  test("profiling counts reports that moved nothing and times each stage once, from first progress to completion", () => {
+    const { tracker } = createTracker();
+    withEnabledProfiler(() => {
+      tracker.report("terrain", 0.5);
+      tracker.report("terrain", 0.5);
+      tracker.report("terrain", 0.25);
+      tracker.report("terrain", 1);
+      tracker.report("terrain", 1);
+      expect(counterTotal("game.load.reports")).toBe(5);
+      expect(counterTotal("game.load.reportsWithoutProgress")).toBe(3);
+      expect(timerCallCount("latency.load.stage.terrain")).toBe(1);
+      expect(gaugeLast("game.load.stageFraction.terrain")).toBe(1);
+
+      tracker.finish();
+      expect(timerCallCount("latency.load.worldOnScreen")).toBe(1);
+      expect(timerCallCount("latency.load.stage.terrain")).toBe(1);
+      expect(timerCallCount("latency.load.stage.meshing")).toBe(1);
+      expect(counterTotal("game.load.finishes")).toBe(1);
+    });
   });
 });

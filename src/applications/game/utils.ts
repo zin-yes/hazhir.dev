@@ -1,4 +1,5 @@
 import { CHUNK_HEIGHT, CHUNK_WIDTH } from "./config";
+import { profiler } from "./profiler";
 import { createSurfaceHeightSampler } from "./worldgen/surface-height";
 import { findSpawnPoint, type SpawnPoint } from "./worldgen/spawn-point";
 
@@ -7,17 +8,35 @@ export function getSurfaceHeightFromSeed(
   x: number,
   z: number
 ): number {
-  return createSurfaceHeightSampler(seed)(x, z);
+  const scopeToken = profiler.begin("main.worldgen.surfaceHeightFromSeed");
+  try {
+    const createToken = profiler.begin("main.worldgen.surfaceHeightFromSeed.createSampler");
+    const sampler = createSurfaceHeightSampler(seed);
+    profiler.end(createToken);
+    profiler.addCounter("game.worldgen.surfaceHeightSamplersCreated");
+    return sampler(x, z);
+  } finally {
+    profiler.end(scopeToken);
+  }
 }
 
 const spawnPointBySeed = new Map<number, SpawnPoint>();
 
 export function getSpawnPointFromSeed(seed: number): SpawnPoint {
   let spawnPoint = spawnPointBySeed.get(seed);
-  if (!spawnPoint) {
-    spawnPoint = findSpawnPoint(seed);
-    spawnPointBySeed.set(seed, spawnPoint);
+  if (spawnPoint) {
+    profiler.addCounter("game.worldgen.spawnPointCacheHits");
+    return spawnPoint;
   }
+  profiler.addCounter("game.worldgen.spawnPointCacheMisses");
+  const searchToken = profiler.begin("main.worldgen.findSpawnPoint");
+  try {
+    spawnPoint = findSpawnPoint(seed);
+  } finally {
+    profiler.end(searchToken);
+  }
+  spawnPointBySeed.set(seed, spawnPoint);
+  profiler.sampleGauge("game.worldgen.spawnPointsCached", spawnPointBySeed.size);
   return spawnPoint;
 }
 
