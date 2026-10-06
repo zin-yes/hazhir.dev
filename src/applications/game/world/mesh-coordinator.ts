@@ -8,7 +8,6 @@
 
 import { MAX_LIGHT } from "../edits/light-tables";
 import { profiler } from "../profiler";
-import { DIMENSIONS } from "../profiler/dimensions";
 import { BlockType } from "../blocks";
 import { type BorderFace, extractBorderSlab } from "../chunk-borders";
 import type { ChunkFaceBuffers, ChunkMeshResult } from "../workers/mesh-types";
@@ -62,9 +61,6 @@ function isTouchingLayerSolid(neighbor: ChunkRecord | undefined, direction: numb
   layerScanStats.foundSolidLayer++;
   return true;
 }
-
-/** Metric names of the border extraction per face direction, built once. */
-const BORDER_FACE_BYTE_METERS = BORDER_FACE_BY_DIRECTION.map((face) => `bytes.mesh.border.${face}`);
 
 interface QueuedMesh {
   key: number;
@@ -418,7 +414,6 @@ export class MeshCoordinator {
         borderLights[face] = new Uint8Array(BORDER_CELLS).fill(SKY_LIT_AIR_LIGHT).buffer;
         slabsSynthesizedFromOpenSky++;
         borderBytes += BORDER_CELLS * 2;
-        profiler.recordBreakdown(DIMENSIONS.borderFace, face, { units: BORDER_CELLS * 2, calls: 1 });
         continue;
       }
       if (!neighbor?.blocks) {
@@ -433,8 +428,6 @@ export class MeshCoordinator {
       }
       slabsCopied++;
       borderBytes += faceBytes;
-      profiler.recordBytes(BORDER_FACE_BYTE_METERS[direction]!, faceBytes);
-      profiler.recordBreakdown(DIMENSIONS.borderFace, face, { units: faceBytes, calls: 1 });
     }
     profiler.addCounter("game.mesh.borderSlabsCopied", slabsCopied);
     profiler.addCounter("game.mesh.borderSlabsSynthesizedFromOpenSky", slabsSynthesizedFromOpenSky);

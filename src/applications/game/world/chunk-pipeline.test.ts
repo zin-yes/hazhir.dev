@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import { BlockType } from "../blocks";
 import { ChunkPipeline } from "./chunk-pipeline";
 import { createColumnCoordinates, packChunkKey, packColumnKey, unpackColumnKey } from "./chunk-key";
@@ -28,6 +28,13 @@ const SMALL_VIEW: Partial<RenderSettings> = { horizontalRadius: 2, verticalUp: 1
 /** Standing on the ground of chunk y 1. */
 const GROUND_POSITION = { x: 16, y: GROUND_LEVEL + 2, z: 16 };
 
+const createdPipelines: ChunkPipeline[] = [];
+
+/** A pipeline that is still alive keeps publishing to the profiler, so every test's pipelines are disposed. */
+afterEach(() => {
+  for (const pipeline of createdPipelines.splice(0)) pipeline.dispose();
+});
+
 function createPipeline(options: {
   generationWorkers?: number;
   lightingWorkers?: number;
@@ -55,6 +62,7 @@ function createPipeline(options: {
       savedEditsFor: (chunkX, chunkY, chunkZ) => options.savedEdits?.get(packChunkKey(chunkX, chunkY, chunkZ)),
     },
   });
+  createdPipelines.push(pipeline);
   return {
     pipeline,
     generation,

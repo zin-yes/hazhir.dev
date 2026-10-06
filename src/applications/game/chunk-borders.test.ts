@@ -1,7 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import { extractBorderSlab } from "./chunk-borders";
 import { CHUNK_HEIGHT, CHUNK_LENGTH, CHUNK_WIDTH } from "./config";
+import { DIMENSIONS } from "./profiler/dimensions";
 import { calculateOffset } from "./utils";
+import { breakdownUnits, byteTotal, counterTotal, withEnabledProfiler } from "./world/profiler-readings.test-helper";
 
 // Every block holds a value that identifies its coordinates, so a slab read from
 // the wrong layer or in the wrong layout cannot match by accident.
@@ -55,5 +57,24 @@ describe("extractBorderSlab", () => {
     expect(new Uint8Array(extractBorderSlab(chunk, "right")).buffer).not.toBe(
       chunk.buffer,
     );
+  });
+});
+
+describe("extractBorderSlab profiling", () => {
+  test("counts every face by copy strategy and the bytes copied, with the strided faces called out", () => {
+    const chunk = labeledChunk();
+    withEnabledProfiler(() => {
+      for (const face of ["top", "bottom", "left", "right", "front", "back"] as const) extractBorderSlab(chunk, face);
+      extractBorderSlab(chunk, "front");
+      const slabBytes = CHUNK_WIDTH * CHUNK_LENGTH;
+      expect(counterTotal("game.border.slabsExtracted")).toBe(7);
+      expect(counterTotal("game.border.slabsBySlice")).toBe(2);
+      expect(counterTotal("game.border.slabsByRows")).toBe(2);
+      expect(counterTotal("game.border.slabsByStridedCopy")).toBe(3);
+      expect(counterTotal("game.border.stridedBytesCopied")).toBe(3 * slabBytes);
+      expect(byteTotal("bytes.border.front")).toBe(2 * slabBytes);
+      expect(breakdownUnits(DIMENSIONS.borderFace, "front")).toBe(2 * slabBytes);
+      expect(breakdownUnits(DIMENSIONS.borderFace, "left")).toBe(slabBytes);
+    });
   });
 });

@@ -1,9 +1,35 @@
 import { CHUNK_HEIGHT, CHUNK_LENGTH, CHUNK_WIDTH } from "./config";
+import { profiler } from "./profiler";
+import { DIMENSIONS } from "./profiler/dimensions";
 
 export type BorderFace = "top" | "bottom" | "left" | "right" | "front" | "back";
 
 const X_STRIDE = CHUNK_HEIGHT * CHUNK_HEIGHT;
 const Y_STRIDE = CHUNK_HEIGHT;
+
+/** How a face is copied: one contiguous slice, whole z rows per x, or one byte at a time along a strided column. */
+const COPY_STRATEGY_BY_FACE: { [face in BorderFace]: "slice" | "rows" | "strided" } = {
+  top: "rows",
+  bottom: "rows",
+  right: "slice",
+  left: "slice",
+  front: "strided",
+  back: "strided",
+};
+
+const SLABS_COUNTER_BY_STRATEGY = {
+  slice: "game.border.slabsBySlice",
+  rows: "game.border.slabsByRows",
+  strided: "game.border.slabsByStridedCopy",
+};
+const BYTES_METER_BY_FACE: { [face in BorderFace]: string } = {
+  top: "bytes.border.top",
+  bottom: "bytes.border.bottom",
+  left: "bytes.border.left",
+  right: "bytes.border.right",
+  front: "bytes.border.front",
+  back: "bytes.border.back",
+};
 
 /**
  * The one-block-thick slab of a chunk that its neighbor in the opposite direction
@@ -17,6 +43,21 @@ export function extractBorderSlab(
   chunk: Uint8Array,
   face: BorderFace,
 ): ArrayBuffer {
+  const slab = copyBorderSlab(chunk, face);
+  if (profiler.enabled) recordExtraction(face, slab.byteLength);
+  return slab;
+}
+
+function recordExtraction(face: BorderFace, bytes: number) {
+  const strategy = COPY_STRATEGY_BY_FACE[face];
+  profiler.addCounter("game.border.slabsExtracted");
+  profiler.addCounter(SLABS_COUNTER_BY_STRATEGY[strategy]);
+  if (strategy === "strided") profiler.addCounter("game.border.stridedBytesCopied", bytes);
+  profiler.recordBytes(BYTES_METER_BY_FACE[face], bytes);
+  profiler.recordBreakdown(DIMENSIONS.borderFace, face, { units: bytes, calls: 1 });
+}
+
+function copyBorderSlab(chunk: Uint8Array, face: BorderFace): ArrayBuffer {
   switch (face) {
     case "top":
       return copyRowsAlongZ(chunk, 0);
