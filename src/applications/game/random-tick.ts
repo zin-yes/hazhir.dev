@@ -1,4 +1,21 @@
+import { BlockType } from "./blocks";
 import { profiler } from "./profiler";
+import { DIMENSIONS } from "./profiler/dimensions";
+
+/** Credits the reacting blocks a rescan found to their block type, so the report shows what populates the tick index. */
+function recordTickablePopulation(chunk: Uint8Array, indices: Uint32Array) {
+  const countByBlock = new Map<number, number>();
+  for (const index of indices) {
+    const block = chunk[index];
+    countByBlock.set(block, (countByBlock.get(block) ?? 0) + 1);
+  }
+  countByBlock.forEach((count, block) => {
+    profiler.recordBreakdown(DIMENSIONS.randomTickBlock, BlockType[block] ?? `block${block}`, {
+      units: count,
+      calls: 1,
+    });
+  });
+}
 
 /**
  * Random ticks pick uniformly random blocks, but only a few block types react.
@@ -22,16 +39,29 @@ export class TickableBlockIndex {
       profiler.addCounter("game.randomTick.indexCacheHits");
       return cached.indices;
     }
+    profiler.addCounter(
+      cached
+        ? "game.randomTick.indexRescansStale"
+        : "game.randomTick.indexRescansFirstSeen",
+    );
 
     const scopeToken = profiler.begin("main.interval.randomTick.rescanTickable");
     const found: number[] = [];
     for (let index = 0; index < chunk.length; index++) {
       if (reactsToTicks(chunk[index])) found.push(index);
     }
+    const buildToken = profiler.begin("main.interval.randomTick.rescanTickable.buildIndex");
     const indices = Uint32Array.from(found);
+    profiler.end(buildToken);
     this.cache.set(chunk, { version, indices });
     profiler.addCounter("game.randomTick.indexRescans");
     profiler.addCounter("game.randomTick.blocksScanned", chunk.length);
+    if (profiler.enabled) {
+      profiler.addCounter("game.randomTick.tickableBlocksFound", indices.length);
+      profiler.sampleGauge("game.randomTick.tickableBlocksPerChunk", indices.length);
+      profiler.recordBytes("bytes.randomTick.tickableIndex", indices.byteLength);
+      recordTickablePopulation(chunk, indices);
+    }
     profiler.end(scopeToken);
     return indices;
   }
@@ -49,12 +79,17 @@ export function pickTickedBlocks(
 ): number[] {
   const hits: number[] = [];
   profiler.addCounter("game.randomTick.picksRolled", picks);
-  if (tickableIndices.length === 0) return hits;
+  if (tickableIndices.length === 0) {
+    profiler.addCounter("game.randomTick.chunksWithoutTickables");
+    return hits;
+  }
   const hitChance = tickableIndices.length / blockCount;
   for (let pick = 0; pick < picks; pick++) {
     if (random() < hitChance) {
       hits.push(tickableIndices[Math.floor(random() * tickableIndices.length)]);
     }
   }
+  profiler.addCounter("game.randomTick.hitsFound", hits.length);
+  profiler.addCounter("game.randomTick.randomCalls", picks + hits.length);
   return hits;
 }

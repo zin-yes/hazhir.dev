@@ -1,4 +1,7 @@
 import { describe, expect, test } from "bun:test";
+import { BlockType } from "./blocks";
+import { profiler } from "./profiler";
+import { DIMENSIONS } from "./profiler/dimensions";
 import { TickableBlockIndex, pickTickedBlocks } from "./random-tick";
 
 describe("TickableBlockIndex", () => {
@@ -47,5 +50,37 @@ describe("pickTickedBlocks", () => {
 
   test("a chunk with nothing to tick costs no picks", () => {
     expect(pickTickedBlocks(new Uint32Array(0), 32768, 100)).toEqual([]);
+  });
+});
+
+describe("random tick profiling", () => {
+  test("a rescan credits the tickable population per block type and separates first scans from stale ones", () => {
+    profiler.reset("random-tick-test");
+    profiler.setEnabled(true);
+    try {
+      const chunk = new Uint8Array(32768).fill(BlockType.STONE);
+      for (const index of [10, 500, 9000]) chunk[index] = BlockType.SAPLING;
+      for (const index of [1, 2, 3, 4, 5]) chunk[index] = BlockType.GRASS;
+      const reactsToTicks = (block: number) => block === BlockType.SAPLING || block === BlockType.GRASS;
+      const tickableIndex = new TickableBlockIndex();
+
+      tickableIndex.indicesFor(chunk, 0, reactsToTicks);
+      tickableIndex.indicesFor(chunk, 0, reactsToTicks);
+      chunk[20000] = BlockType.GRASS;
+      tickableIndex.indicesFor(chunk, 1, reactsToTicks);
+
+      const snapshot = profiler.snapshot();
+      const counterTotal = (name: string) => snapshot.counters.find((counter) => counter.name === name)?.total;
+      expect(counterTotal("game.randomTick.indexRescansFirstSeen")).toBe(1);
+      expect(counterTotal("game.randomTick.indexRescansStale")).toBe(1);
+      expect(counterTotal("game.randomTick.indexCacheHits")).toBe(1);
+      expect(counterTotal("game.randomTick.tickableBlocksFound")).toBe(8 + 9);
+      const entries =
+        snapshot.breakdowns.find((breakdown) => breakdown.dimension === DIMENSIONS.randomTickBlock)?.entries ?? [];
+      expect(entries.find((entry) => entry.key === "SAPLING")?.units).toBe(6);
+      expect(entries.find((entry) => entry.key === "GRASS")?.units).toBe(5 + 6);
+    } finally {
+      profiler.setEnabled(false);
+    }
   });
 });
