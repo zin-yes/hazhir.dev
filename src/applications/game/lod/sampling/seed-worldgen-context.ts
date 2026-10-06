@@ -2,6 +2,7 @@
 // the noise router (final density with column memos), the climate sampler and biome table, and the compiled surface
 // rules with the noises and temperature model they need. Nothing here generates chunks.
 
+import { addWorkerCounter, workerSection } from "../../profiler/worker-recorder";
 import { createNoiseRouter } from "../../worldgen/engine/density";
 import { MultiNoiseBiomeSource } from "../../worldgen/engine/biome-source";
 import { createRootRandomFactory, NoiseRegistry, type NoiseParameters } from "../../worldgen/engine/noise";
@@ -35,41 +36,53 @@ const MAX_CACHED_SEEDS = 2;
 const contextsBySeed = new Map<number, SeedWorldgenContext>();
 
 function createSeedWorldgenContext(seed: number): SeedWorldgenContext {
-  const { registries, overworldDimension } = loadTerralithRegistries();
+  const { registries, overworldDimension } = workerSection("lod.context.registries", () => loadTerralithRegistries());
   const settings = readOverworldSettings(registries, overworldDimension);
   const seedBigInt = BigInt(Math.trunc(seed));
-  const router = createNoiseRouter({ registries, noiseSettingsId: settings.noiseSettingsId, seed: seedBigInt });
+  const router = workerSection("lod.context.noiseRouter", () =>
+    createNoiseRouter({ registries, noiseSettingsId: settings.noiseSettingsId, seed: seedBigInt }),
+  );
   const randomFactory = createRootRandomFactory(seedBigInt);
-  const parametersById: Record<string, NoiseParameters> = {};
-  for (const [noiseId, json] of Object.entries(registries.noise as Record<string, JsonObject>)) {
-    parametersById[noiseId] = { firstOctave: json.firstOctave as number, amplitudes: json.amplitudes as number[] };
-  }
-  const noises = new NoiseRegistry(parametersById, randomFactory);
+  const noises = workerSection("lod.context.noises", () => {
+    const parametersById: Record<string, NoiseParameters> = {};
+    for (const [noiseId, json] of Object.entries(registries.noise as Record<string, JsonObject>)) {
+      parametersById[noiseId] = { firstOctave: json.firstOctave as number, amplitudes: json.amplitudes as number[] };
+    }
+    return new NoiseRegistry(parametersById, randomFactory);
+  });
   const biomeClimate = createBiomeClimateLookup(registries.biome);
-  const surfaceSystem = createSurfaceSystem({
-    noises,
-    randomFactory,
-    surfaceRule: settings.surfaceRule,
-    seaLevel: settings.seaLevel,
-    defaultBlock: settings.defaultBlock,
-    minY: settings.minY,
-    height: settings.height,
-    biomeClimate,
-  });
+  const surfaceSystem = workerSection("lod.context.surfaceSystem", () =>
+    createSurfaceSystem({
+      noises,
+      randomFactory,
+      surfaceRule: settings.surfaceRule,
+      seaLevel: settings.seaLevel,
+      defaultBlock: settings.defaultBlock,
+      minY: settings.minY,
+      height: settings.height,
+      biomeClimate,
+    }),
+  );
   const surfaceResults = new SurfaceResultTable();
-  const surfaceRule = compileSurfaceRules(settings.surfaceRule, {
-    noises,
-    randomFactory,
-    resultTable: surfaceResults,
-    getBandResultIndex: (blockX, blockY, blockZ) => surfaceResults.indexOf(surfaceSystem.getBandState(blockX, blockY, blockZ)),
-  });
-  const columnCachedRouter = createColumnCachedRouter(router);
+  const surfaceRule = workerSection("lod.context.surfaceRules", () =>
+    compileSurfaceRules(settings.surfaceRule, {
+      noises,
+      randomFactory,
+      resultTable: surfaceResults,
+      getBandResultIndex: (blockX, blockY, blockZ) => surfaceResults.indexOf(surfaceSystem.getBandState(blockX, blockY, blockZ)),
+    }),
+  );
+  const columnCachedRouter = workerSection("lod.context.columnCache", () => createColumnCachedRouter(router));
+  const biomeSource = workerSection(
+    "lod.context.biomeSource",
+    () => new MultiNoiseBiomeSource((overworldDimension.generator as JsonObject).biome_source as JsonObject),
+  );
   return {
     seed,
     settings,
     density: columnCachedRouter.density,
     climateSampler: columnCachedRouter.climate,
-    biomeSource: new MultiNoiseBiomeSource((overworldDimension.generator as JsonObject).biome_source as JsonObject),
+    biomeSource,
     surfaceSystem,
     surfaceRule,
     surfaceResults,
@@ -81,8 +94,11 @@ export function getSeedWorldgenContext(seed: number): SeedWorldgenContext {
   let context = contextsBySeed.get(seed);
   if (context === undefined) {
     if (contextsBySeed.size >= MAX_CACHED_SEEDS) contextsBySeed.delete(contextsBySeed.keys().next().value as number);
-    context = createSeedWorldgenContext(seed);
+    context = workerSection("lod.context.create", () => createSeedWorldgenContext(seed));
     contextsBySeed.set(seed, context);
+    addWorkerCounter("lodWorldgenContextsCreated", 1);
+  } else {
+    addWorkerCounter("lodWorldgenContextHits", 1);
   }
   return context;
 }

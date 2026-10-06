@@ -3,7 +3,7 @@
 // Construct it with a literal URL so the bundler emits it:
 //   new Worker(new URL("./lod/worker/lod-worker.ts", import.meta.url), { name: "lod" })
 
-import { beginWorkerTask, finishWorkerTask } from "../../profiler/worker-recorder";
+import { addWorkerCounter, beginWorkerTask, finishWorkerTask, workerSection } from "../../profiler/worker-recorder";
 import { getSeedWorldgenContext } from "../sampling/seed-worldgen-context";
 import { loadTerralithRegistries } from "../../worldgen/terralith/load-terralith-registries";
 import { buildLodTile, listLodTileTransferables, type LodTileBuildRequest } from "./lod-tile-builder";
@@ -24,8 +24,9 @@ workerScope.addEventListener("message", (event: MessageEvent) => {
       result = true;
     } else if (method === "prepareWorldgen") {
       const seed = params[0] as number | undefined;
-      if (seed === undefined) loadTerralithRegistries();
-      else getSeedWorldgenContext(seed);
+      if (seed === undefined) workerSection("lod.prepareRegistries", () => loadTerralithRegistries());
+      else workerSection("lod.prepareSeedContext", () => getSeedWorldgenContext(seed));
+      addWorkerCounter("lodPrepareCalls", 1);
       result = true;
     } else if (method === "buildLodTile") {
       const built = buildLodTile(params[0] as LodTileBuildRequest);

@@ -3,6 +3,7 @@
 // a bit mask when the whole tile shares one water level. The header also carries the height range, which selection
 // reads without unpacking.
 
+import { addWorkerCounter, endWorkerSection, startWorkerSection } from "../../profiler/worker-recorder";
 import { NO_WATER, TILE_CELL_COUNT } from "../core/lod-constants";
 import { createTileSurface, heightRangeOf, type HeightRange, type TileSurface } from "./tile-surface";
 
@@ -42,6 +43,7 @@ function describeWater(surface: TileSurface): { encoding: number; uniformLevel: 
 }
 
 export function packTileSurface(surface: TileSurface): PackedTileSurface {
+  startWorkerSection("lod.pack.analyze");
   const { minHeight, maxHeight } = heightRangeOf(surface);
   let lowestHeight = Infinity;
   let highestHeight = -Infinity;
@@ -66,7 +68,9 @@ export function packTileSurface(surface: TileSurface): PackedTileSurface {
   }
   const bitsPerIndex = bitsForPaletteSize(palettePairs.length);
   const water = describeWater(surface);
+  endWorkerSection();
 
+  startWorkerSection("lod.pack.encode");
   const paletteBytes = palettePairs.length * 2;
   const heightBytes = heightEncoding === HEIGHTS_AS_BYTE_OFFSETS ? TILE_CELL_COUNT : TILE_CELL_COUNT * 2;
   const indexBytes = packedIndexBytes(bitsPerIndex);
@@ -117,6 +121,15 @@ export function packTileSurface(surface: TileSurface): PackedTileSurface {
       view.setInt16(offset + index * 2, level, true);
     }
   }
+  endWorkerSection();
+  addWorkerCounter("lodPackedPaletteEntries", palettePairs.length);
+  addWorkerCounter("lodPackedPaletteBytes", paletteBytes);
+  addWorkerCounter("lodPackedHeightBytes", heightBytes);
+  addWorkerCounter("lodPackedIndexBytes", indexBytes);
+  addWorkerCounter("lodPackedWaterBytes", waterBytes);
+  if (heightEncoding === HEIGHTS_AS_INT16) addWorkerCounter("lodPackedInt16HeightTiles", 1);
+  if (water.encoding === WATER_UNIFORM_MASK) addWorkerCounter("lodPackedUniformWaterTiles", 1);
+  if (water.encoding === WATER_INT16) addWorkerCounter("lodPackedInt16WaterTiles", 1);
   return buffer;
 }
 
@@ -131,6 +144,8 @@ export function unpackTileSurface(packed: PackedTileSurface): TileSurface {
   const waterEncoding = view.getUint8(11);
   const uniformWaterLevel = view.getInt16(12, true);
   const surface = createTileSurface();
+  addWorkerCounter("lodUnpackedTiles", 1);
+  addWorkerCounter("lodUnpackedBytes", packed.byteLength);
 
   let offset = HEADER_BYTES;
   const palettePairs: number[] = [];

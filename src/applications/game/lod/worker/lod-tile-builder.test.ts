@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import { DIMENSIONS } from "../../profiler/dimensions";
+import { beginWorkerTask, finishWorkerTask } from "../../profiler/worker-recorder";
 import { childAddressesOf, parentAddressOf } from "../core/tile-address";
 import { unpackTileSurface } from "../data/packed-tile-surface";
 import { buildLodTile, type LodTileBuildResult } from "./lod-tile-builder";
@@ -57,6 +59,47 @@ describe("LOD tile builder", () => {
     });
     expect(result.source).toBe("worldgen");
     expect(result.sampling!.sampledCells).toBe(1024);
+  });
+});
+
+describe("LOD tile builder profiling", () => {
+  test("worker counters add up to the built mesh and the build is attributed to its level", () => {
+    const address = { level: 4, tileX: 3, tileZ: -2 };
+    beginWorkerTask(true);
+    const result = buildLodTile({ seed: SEED, address });
+    const profile = finishWorkerTask()!;
+    const { counters } = profile;
+
+    expect(counters.lodVertices).toBe(result.vertices.length / 2);
+    expect(counters.lodTerrainQuads! + counters.lodWaterQuads!).toBe(result.vertices.length / 8);
+    expect(counters.lodMeshTopRectangles! + counters.lodMeshWallQuads! + counters.lodMeshSkirtQuads!).toBe(result.terrainQuadCount);
+    expect(counters.lodTriangles).toBe(counters.lodVertices! / 2);
+    expect(counters.lodPackedSurfaceBytes).toBe(result.packedSurface.byteLength);
+    expect(counters.lodTilesFromWorldgen).toBe(1);
+    expect(counters.lodColdRequests).toBe(1);
+    expect(counters.lodCrossingSearches!).toBeGreaterThan(0);
+    expect(counters.lodCrossingSearches).toBe(counters.lodBiomeLookups);
+    expect(counters.lodDensityEvaluations!).toBeGreaterThan(counters.lodCrossingSearches!);
+
+    const levelEntries = profile.breakdowns[DIMENSIONS.lodLevel]!;
+    expect(levelEntries.find((entry) => entry.key === "L4")?.units).toBe(result.vertices.length / 2);
+    const sectionPaths = profile.callTree.map((node) => node.path);
+    expect(sectionPaths.some((path) => path.endsWith("lod.mesh>lod.mesh.tops"))).toBe(true);
+    expect(sectionPaths.some((path) => path.endsWith("lod.sampleWorldgen>lod.sample.heights"))).toBe(true);
+  });
+
+  test("a build from four children reports the downsample and never touches worldgen", () => {
+    const parent = { level: 3, tileX: 1, tileZ: -1 };
+    const children = childAddressesOf(parent).map((childAddress) => buildLodTile({ seed: SEED, address: childAddress }).packedSurface);
+    beginWorkerTask(true);
+    buildLodTile({ seed: SEED, address: parent, children });
+    const { counters, callTree } = finishWorkerTask()!;
+
+    expect(counters.lodTilesFromChildren).toBe(1);
+    expect(counters.lodRequestChildrenBytes).toBe(children.reduce((total, child) => total + child.byteLength, 0));
+    expect(counters.lodUnpackedTiles).toBe(4);
+    expect(counters.lodDensityEvaluations).toBeUndefined();
+    expect(callTree.some((node) => node.path.endsWith("lod.downsampleChildren>lod.downsampleChild"))).toBe(true);
   });
 });
 
