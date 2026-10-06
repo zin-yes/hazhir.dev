@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { PointerLockControls } from "three/addons/controls/PointerLockControls.js";
+import { countInputEvent, finishInputEvent, startInputEvent } from "./input-profiling";
 import { PhysicsEngine } from "./physics-engine";
 import { profiler } from "./profiler";
 import { DIMENSIONS } from "./profiler/dimensions";
@@ -45,7 +46,10 @@ export class PlayerControls {
 
     this.initInputListeners();
 
+    this.controls.addEventListener("lock", () => countInputEvent("pointerLock"));
+    this.controls.addEventListener("change", () => countInputEvent("mouseMove"));
     this.controls.addEventListener("unlock", () => {
+      countInputEvent("pointerUnlock");
       this.moveForward = false;
       this.moveBackward = false;
       this.moveLeft = false;
@@ -57,7 +61,19 @@ export class PlayerControls {
   }
 
   private onKeyDown = (event: KeyboardEvent) => {
-    if (!this.controls.isLocked) return;
+    if (!this.controls.isLocked) {
+      profiler.addCounter("game.input.keyDownsIgnored");
+      return;
+    }
+    const startedAtMs = startInputEvent();
+    try {
+      this.handleKeyDown(event);
+    } finally {
+      finishInputEvent("keyDown", startedAtMs);
+    }
+  };
+
+  private handleKeyDown(event: KeyboardEvent) {
     profiler.addCounter("game.input.keyDown");
 
     switch (event.code) {
@@ -106,13 +122,23 @@ export class PlayerControls {
         }
         break;
       case "KeyV":
+        profiler.addCounter("game.input.flyToggles");
         this.isFlying = !this.isFlying;
         this.velocity.set(0, 0, 0);
         break;
     }
-  };
+  }
 
   private onKeyUp = (event: KeyboardEvent) => {
+    const startedAtMs = startInputEvent();
+    try {
+      this.handleKeyUp(event);
+    } finally {
+      finishInputEvent("keyUp", startedAtMs);
+    }
+  };
+
+  private handleKeyUp(event: KeyboardEvent) {
     switch (event.code) {
       case "ArrowUp":
       case "KeyW":
@@ -139,7 +165,7 @@ export class PlayerControls {
         this.moveDown = false;
         break;
     }
-  };
+  }
 
   private initInputListeners() {
     document.addEventListener("keydown", this.onKeyDown);
@@ -172,6 +198,11 @@ export class PlayerControls {
 
   public rotateCamera(deltaX: number, deltaY: number) {
     profiler.addCounter("game.input.cameraRotations");
+    profiler.addCounter(
+      "game.input.cameraRotationPixels",
+      Math.abs(deltaX) + Math.abs(deltaY),
+      "pixels",
+    );
     const euler = new THREE.Euler(0, 0, 0, "YXZ");
     euler.setFromQuaternion(this.controls.object.quaternion);
     euler.y -= deltaX * 0.003 * this.lookSensitivity;
@@ -217,6 +248,7 @@ export class PlayerControls {
   }
 
   public toggleFlying() {
+    profiler.addCounter("game.input.flyToggles");
     this.isFlying = !this.isFlying;
     this.velocity.set(0, 0, 0);
   }
@@ -246,6 +278,7 @@ export class PlayerControls {
   }
 
   private updateMovement(delta: number) {
+    if (profiler.enabled) this.countFrameState();
     const lastEyeHeight = this.currentEyeHeight;
     // Interpolate eye height
     const targetEyeHeight = this.isShifting
@@ -302,6 +335,7 @@ export class PlayerControls {
     const position = this.controls.object.position;
 
     if (this.physics.isInWater(position, this.currentEyeHeight)) {
+      profiler.addCounter("game.player.frames.swim");
       this.velocity.y -= this.gravity * delta * 0.1;
       this.velocity.multiplyScalar(0.9);
 
@@ -388,5 +422,19 @@ export class PlayerControls {
     } else {
       this.canJump = false;
     }
+    profiler.addCounter(
+      this.canJump ? "game.player.frames.walk" : "game.player.frames.airborne",
+    );
+  }
+
+  /** Frame counters for the facts that hold before movement is resolved. */
+  private countFrameState() {
+    if (this.isFlying) profiler.addCounter("game.player.frames.fly");
+    if (this.isShifting) profiler.addCounter("game.player.frames.shifting");
+    profiler.addCounter(
+      this.controls.isLocked || this.isMobile
+        ? "game.player.frames.steerable"
+        : "game.player.frames.unsteered",
+    );
   }
 }
