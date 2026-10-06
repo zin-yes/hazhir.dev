@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { BlockType } from "../blocks";
+import { counterTotal, gaugeMax, withEnabledProfiler } from "../world/profiler-readings.test-helper";
 import { sphereEdits } from "./block-edit-batch";
 import { splitBatchByChunk } from "./edit-slicing";
 
@@ -27,5 +28,19 @@ describe("edit slicing", () => {
     expect(Math.floor(firstPiece.ys[0]! / 32)).toBe(Math.floor(center.y / 32));
     expect(Math.floor(firstPiece.zs[0]! / 32)).toBe(Math.floor(center.z / 32));
     console.log(`slicing test: ${pieces.length} pieces, ${(performance.now() - startedAt).toFixed(0)} ms`);
+  });
+
+  test("profiling counts the pieces and every cell that was split", () => {
+    const center = { x: -40, y: 100, z: 15 };
+    const sphere = sphereEdits(center, 20, BlockType.STONE, "fill");
+    withEnabledProfiler(() => {
+      const pieces = splitBatchByChunk(sphere, center);
+      expect(pieces.length).toBeGreaterThan(2);
+      expect(counterTotal("game.edit.slice.batchesSplit")).toBe(1);
+      expect(counterTotal("game.edit.slice.piecesCreated")).toBe(pieces.length);
+      expect(counterTotal("game.edit.slice.cellsSplit")).toBe(sphere.length);
+      expect(gaugeMax("game.edit.slice.largestPieceCells")).toBe(Math.max(...pieces.map((piece) => piece.length)));
+      expect(counterTotal("game.edit.slice.chunkRunSwitches")).toBeGreaterThanOrEqual(pieces.length);
+    });
   });
 });
