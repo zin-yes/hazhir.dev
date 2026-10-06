@@ -1,6 +1,7 @@
 // Where tile builds run. In the game: the LOD worker pool (WorkerPool, so the profiler sees queue waits, transfer
 // sizes and worker sections). In tests and the headless benchmark: in-process, same builder.
 
+import { profiler } from "../../profiler";
 import { WorkerPool } from "../../worker-pool";
 import { buildLodTile, type LodTileBuildRequest, type LodTileBuildResult } from "../worker/lod-tile-builder";
 
@@ -20,6 +21,8 @@ export function createWorkerPoolExecutor(workerFactory: () => Worker, workerCoun
     build: (request, transfer) => pool.execLazy("buildLodTile", () => ({ params: [request], transfer })),
     terminate: () => pool.terminate(),
     prepare: (seed) => {
+      profiler.addCounter("game.lod.executor.prepareCalls");
+      profiler.addCounter("game.lod.executor.prepareTasks", workerCount);
       for (let worker = 0; worker < workerCount; worker++) void pool.exec("prepareWorldgen", [seed]).catch(() => undefined);
     },
   };

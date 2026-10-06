@@ -4,6 +4,7 @@
 
 import type * as THREE from "three";
 import { CHUNK_HEIGHT, CHUNK_LENGTH, CHUNK_WIDTH } from "../config";
+import { profiler } from "../profiler";
 import type { PipelineEditResult } from "../world/chunk-pipeline";
 import type { ChunkRecord } from "../world/chunk-record";
 import { createLodManager, type LodManager } from "./manager/lod-manager";
@@ -43,8 +44,14 @@ export class GameLodBridge {
 
   constructor(private readonly options: GameLodBridgeOptions) {
     this.createManager = options.createManager ?? createLodManager;
-    this.executor = shareExecutor(createWorkerPoolExecutor(options.createWorker, options.workerCount));
-    this.executor.prepare?.();
+    const token = profiler.begin("main.lod.bridge.startWorkers");
+    try {
+      this.executor = shareExecutor(createWorkerPoolExecutor(options.createWorker, options.workerCount));
+      this.executor.prepare?.();
+      profiler.addCounter("game.lod.bridge.workersStarted", options.workerCount);
+    } finally {
+      profiler.end(token);
+    }
   }
 
   /** The sky changed: the far terrain's haze cube is re-rendered on the next frame. */
@@ -58,26 +65,39 @@ export class GameLodBridge {
 
   /** A new world (or seed): drops the old LOD before any chunk of the new one loads. */
   startWorld(seed: number, renderDistanceChunks: number): void {
-    this.disposeManager();
-    this.seed = seed;
-    this.renderDistanceChunks = renderDistanceChunks;
-    if (renderDistanceChunks > 0) this.createForCurrentWorld(null);
+    const token = profiler.begin("main.lod.bridge.startWorld");
+    try {
+      profiler.addCounter("game.lod.bridge.worldsStarted");
+      this.disposeManager();
+      this.seed = seed;
+      this.renderDistanceChunks = renderDistanceChunks;
+      if (renderDistanceChunks > 0) this.createForCurrentWorld(null);
+    } finally {
+      profiler.end(token);
+    }
   }
 
   /** Applies a new far terrain distance live; turning it on mid-game replays the loaded chunks. */
   setRenderDistance(renderDistanceChunks: number, chunks: LodChunkSource | null): void {
-    this.renderDistanceChunks = renderDistanceChunks;
-    if (renderDistanceChunks === 0) {
-      this.disposeManager();
-    } else if (this.manager) {
-      this.manager.setRenderDistanceChunks(renderDistanceChunks);
-    } else if (this.seed !== null) {
-      this.createForCurrentWorld(chunks);
+    const token = profiler.begin("main.lod.bridge.setRenderDistance");
+    try {
+      profiler.addCounter("game.lod.bridge.distanceChanges");
+      this.renderDistanceChunks = renderDistanceChunks;
+      if (renderDistanceChunks === 0) {
+        this.disposeManager();
+      } else if (this.manager) {
+        this.manager.setRenderDistanceChunks(renderDistanceChunks);
+      } else if (this.seed !== null) {
+        this.createForCurrentWorld(chunks);
+      }
+    } finally {
+      profiler.end(token);
     }
   }
 
   onChunkGenerated(record: ChunkRecord): void {
     if (record.blocks) this.manager?.onRealChunkLoaded(record.chunkX, record.chunkY, record.chunkZ, record.blocks);
+    else profiler.addCounter("game.lod.bridge.chunksGeneratedWithoutBlocks");
   }
 
   onChunkMeshed(record: ChunkRecord): void {
@@ -100,15 +120,31 @@ export class GameLodBridge {
     if (!this.manager || result.changes.count === 0) return;
     this.editedChunkSource = chunks;
     const { changes } = result;
-    let lastKey = "";
-    for (let position = 0; position < changes.count; position++) {
-      const chunkX = Math.floor(changes.x[position] / CHUNK_WIDTH);
-      const chunkY = Math.floor(changes.y[position] / CHUNK_HEIGHT);
-      const chunkZ = Math.floor(changes.z[position] / CHUNK_LENGTH);
-      const key = `${chunkX},${chunkY},${chunkZ}`;
-      if (key === lastKey) continue;
-      lastKey = key;
-      this.pendingEditedChunks.set(key, [chunkX, chunkY, chunkZ]);
+    const token = profiler.begin("main.lod.bridge.collectEdits");
+    try {
+      let lastKey = "";
+      let skippedAsSameRun = 0;
+      let alreadyQueued = 0;
+      for (let position = 0; position < changes.count; position++) {
+        const chunkX = Math.floor(changes.x[position] / CHUNK_WIDTH);
+        const chunkY = Math.floor(changes.y[position] / CHUNK_HEIGHT);
+        const chunkZ = Math.floor(changes.z[position] / CHUNK_LENGTH);
+        const key = `${chunkX},${chunkY},${chunkZ}`;
+        if (key === lastKey) {
+          skippedAsSameRun++;
+          continue;
+        }
+        lastKey = key;
+        if (this.pendingEditedChunks.has(key)) alreadyQueued++;
+        this.pendingEditedChunks.set(key, [chunkX, chunkY, chunkZ]);
+      }
+      profiler.addCounter("game.lod.edit.batches");
+      profiler.addCounter("game.lod.edit.changesScanned", changes.count);
+      profiler.addCounter("game.lod.edit.changesInSameChunkRun", skippedAsSameRun);
+      profiler.addCounter("game.lod.edit.chunksAlreadyQueued", alreadyQueued);
+      profiler.sampleGauge("queue.lod.pendingEditedChunks", this.pendingEditedChunks.size);
+    } finally {
+      profiler.end(token);
     }
   }
 
@@ -117,12 +153,30 @@ export class GameLodBridge {
     const manager = this.manager;
     const chunks = this.editedChunkSource;
     if (!manager || !chunks || this.pendingEditedChunks.size === 0) return;
-    const startedAt = performance.now();
-    for (const [key, [chunkX, chunkY, chunkZ]] of this.pendingEditedChunks) {
-      this.pendingEditedChunks.delete(key);
-      const blocks = chunks.store.get(chunkX, chunkY, chunkZ)?.blocks;
-      if (blocks) manager.onBlocksEdited(chunkX, chunkY, chunkZ, blocks);
-      if (performance.now() - startedAt >= budgetMilliseconds) break;
+    const token = profiler.begin("main.lod.bridge.flushEdits");
+    try {
+      const startedAt = performance.now();
+      let flushedChunks = 0;
+      let chunksWithoutBlocks = 0;
+      for (const [key, [chunkX, chunkY, chunkZ]] of this.pendingEditedChunks) {
+        this.pendingEditedChunks.delete(key);
+        const blocks = chunks.store.get(chunkX, chunkY, chunkZ)?.blocks;
+        if (blocks) {
+          manager.onBlocksEdited(chunkX, chunkY, chunkZ, blocks);
+          flushedChunks++;
+        } else {
+          chunksWithoutBlocks++;
+        }
+        if (performance.now() - startedAt >= budgetMilliseconds) {
+          profiler.addCounter("game.lod.edit.flushBudgetHits");
+          break;
+        }
+      }
+      profiler.addCounter("game.lod.edit.chunksFlushed", flushedChunks);
+      profiler.addCounter("game.lod.edit.chunksWithoutBlocks", chunksWithoutBlocks);
+      profiler.sampleGauge("queue.lod.pendingEditedChunks", this.pendingEditedChunks.size);
+    } finally {
+      profiler.end(token);
     }
   }
 
@@ -130,13 +184,24 @@ export class GameLodBridge {
   renderPass(renderer: THREE.WebGLRenderer, camera: THREE.PerspectiveCamera): void {
     const manager = this.manager;
     if (!manager) return;
-    if (!this.hasCapturedHaze) {
-      manager.captureBackgroundHaze(renderer);
-      this.hasCapturedHaze = true;
+    const token = profiler.begin("main.lod.bridge.renderPass");
+    try {
+      profiler.addCounter("game.lod.bridge.frames");
+      if (!this.hasCapturedHaze) {
+        const hazeToken = profiler.begin("main.lod.bridge.captureHaze");
+        try {
+          manager.captureBackgroundHaze(renderer);
+        } finally {
+          profiler.end(hazeToken);
+        }
+        this.hasCapturedHaze = true;
+      }
+      this.flushEditedChunks();
+      manager.update(camera, renderer.domElement.clientHeight);
+      manager.render(renderer, camera);
+    } finally {
+      profiler.end(token);
     }
-    this.flushEditedChunks();
-    manager.update(camera, renderer.domElement.clientHeight);
-    manager.render(renderer, camera);
   }
 
   stats(): (LodStats & { renderDistanceChunks: number; isCameraUnderground: boolean }) | null {
@@ -150,32 +215,67 @@ export class GameLodBridge {
   }
 
   dispose(): void {
-    this.disposeManager();
-    this.executor.terminateShared();
-    this.seed = null;
+    const token = profiler.begin("main.lod.bridge.dispose");
+    try {
+      this.disposeManager();
+      this.executor.terminateShared();
+      this.seed = null;
+    } finally {
+      profiler.end(token);
+    }
   }
 
   private createForCurrentWorld(chunks: LodChunkSource | null): void {
     if (this.seed === null) return;
-    const manager = this.createManager({
-      seed: this.seed,
-      executor: this.executor,
-      workerCount: this.options.workerCount,
-      renderDistanceChunks: this.renderDistanceChunks,
-    });
-    manager.adoptBackground(this.options.background);
-    manager.setBeforeDepthClear(this.options.onFarTerrainDrawn ?? null);
-    this.manager = manager;
-    this.hasCapturedHaze = false;
-    chunks?.forEachChunk((record) => {
-      this.onChunkGenerated(record);
-      if (record.appliedMeshVersion >= 0) this.onChunkMeshed(record);
-    });
+    const token = profiler.begin("main.lod.bridge.createManager");
+    try {
+      const manager = this.createManager({
+        seed: this.seed,
+        executor: this.executor,
+        workerCount: this.options.workerCount,
+        renderDistanceChunks: this.renderDistanceChunks,
+      });
+      manager.adoptBackground(this.options.background);
+      manager.setBeforeDepthClear(this.options.onFarTerrainDrawn ?? null);
+      this.manager = manager;
+      this.hasCapturedHaze = false;
+      profiler.addCounter("game.lod.bridge.managersCreated");
+      if (chunks === null) return;
+      const replayToken = profiler.begin("main.lod.bridge.replayChunks");
+      try {
+        let replayedChunks = 0;
+        let replayedMeshed = 0;
+        chunks.forEachChunk((record) => {
+          this.onChunkGenerated(record);
+          replayedChunks++;
+          if (record.appliedMeshVersion >= 0) {
+            this.onChunkMeshed(record);
+            replayedMeshed++;
+          }
+        });
+        profiler.addCounter("game.lod.bridge.replayedChunks", replayedChunks);
+        profiler.addCounter("game.lod.bridge.replayedMeshedChunks", replayedMeshed);
+      } finally {
+        profiler.end(replayToken);
+      }
+    } finally {
+      profiler.end(token);
+    }
   }
 
   private disposeManager(): void {
-    this.pendingEditedChunks.clear();
-    this.manager?.dispose();
-    this.manager = null;
+    if (this.manager === null) {
+      this.pendingEditedChunks.clear();
+      return;
+    }
+    const token = profiler.begin("main.lod.bridge.disposeManager");
+    try {
+      profiler.addCounter("game.lod.bridge.pendingEditsDiscarded", this.pendingEditedChunks.size);
+      this.pendingEditedChunks.clear();
+      this.manager.dispose();
+      this.manager = null;
+    } finally {
+      profiler.end(token);
+    }
   }
 }

@@ -85,14 +85,39 @@ Design points worth knowing:
 
 ## Profiler
 
-Main thread: `main.lod.update` (with `main.lod.select`), `main.lod.createTileMesh`, `main.lod.render`,
-`main.lod.summarizeChunk`, `main.lod.applyRealColumns`; gauges `game.lod.drawnTiles`, `game.lod.missingTiles`,
-`queue.lod.waitingBuilds`, `memory.lod.tileCache`, `memory.lod.realData`; counter `game.lod.tilesBuilt`, bytes
-`bytes.lod.tileGeometry`. Workers (pool `lod`, method `buildLodTile`): sections `lod.sampleWorldgen`
-(`lod.sample.heights`, `lod.sample.materials`), `lod.downsampleChildren`, `lod.mesh`, `lod.pack`; counters
-`lodCellsSampled`, `lodOverlayCells`, `lodLatticeColumns`, `lodDensityEvaluations`, `lodBiomeLookups`,
-`lodSurfaceRuleEvaluations`, `lodTilesBuilt`, `lodVertices`, `lodPackedSurfaceBytes`. The sky now renders in the LOD
-pass, so the profiler's sky pass is empty.
+Per-level cost uses the `lod.level` breakdown (key `L<level>`, built once in `core/lod-level-keys.ts`); per-level
+counters, bytes and gauges carry an `.L<level>` suffix. Everything is a no-op while the profiler is off.
+
+Main thread scopes (nested under `main.lod.update` and `main.lod.render`):
+
+| Area | Scopes |
+| --- | --- |
+| Plan | `main.lod.plan` > `main.lod.select` (`.traverse`, `.balance`, `.coverageCull`, `.renderSet`), `.plan.candidates`, `.plan.queueReplace`, `.plan.pinAndEvict`, `.plan.clipPlanes`, `main.lod.cache.enforceBudget` |
+| Builds | `main.lod.dispatchBuilds` > `main.lod.overlayFor`, `.dispatch.sources`, `.dispatch.execute`; `main.lod.createTileMesh` (`.geometry`, `.display`, `.cache`), `main.lod.tileMesh.dispose`, `.sharedQuadIndex` |
+| Display and pass | `main.lod.display.reconcile`, `.display.advance`, `main.lod.coverageTexture`, `main.lod.pass.cameraSetup`, `.sceneRender`, `.beforeDepthClear`, `.captureBackground`, `main.lod.createMaterials` |
+| Real data | `main.lod.summarizeChunk` (`.scan`, `.compare`), `main.lod.applyRealColumns` (`.assemble`, `.coverage`, `.pyramid`), `main.lod.pyramid.enforceBudget` |
+| Bridge | `main.lod.bridge.renderPass`, `.captureHaze`, `.collectEdits`, `.flushEdits`, `.startWorld`, `.setRenderDistance`, `.createManager`, `.replayChunks`, `.disposeManager`, `.startWorkers`, `.dispose` |
+
+Counters, by prefix: `game.lod.select.*` (nodes visited, split, merged, culled, hysteresis holds, balance work, per level),
+`game.lod.renderSet.*`, `game.lod.cache.*` (hits, misses, evictions per level), `game.lod.queue.*` (offered, carried over,
+dropped before dispatch, dispatched by urgency), `game.lod.build.*` (request sources, vertices, triangles, quads per
+level), `game.lod.display.*` (added, kept, fade-outs, removed), `game.lod.plan.*` (rebuilt, reused, replan reasons),
+`game.lod.stateVersion.*` (what invalidated the plan), `game.lod.real.*`, `game.lod.summary.*`, `game.lod.assemble.*`,
+`game.lod.pyramid.*`, `game.lod.coverage.*`, `game.lod.overlay.*`, `game.lod.edit.*`, `game.lod.bridge.*`.
+Latencies: `latency.lod.buildQueueWait`, `.buildRoundTrip`, `.buildQueueToDone` (also per level). Gauges: cache entries
+and bytes per level, drawn tiles and triangles per level, `queue.lod.inFlight`, `queue.lod.candidates`,
+`queue.lod.pendingEditedChunks`, `game.lod.pyramid.nodes`, near and far plane. Bytes: `bytes.lod.tileGeometry` and
+`bytes.lod.packedSurface` (also per level), `bytes.lod.build.*Request`, `bytes.lod.overlay.snapshot`,
+`bytes.lod.coverageTexture`, `bytes.lod.cache.evicted`, `bytes.lod.tileMeshDisposed`.
+
+Workers (pool `lod`, method `buildLodTile`): sections `lod.sampleWorldgen` (per level; `lod.sample.heights` >
+`lod.sample.latticeSearch`, `.biomeLookup`, `.interpolateTop`; `lod.sample.materials` > `lod.sample.surfaceRules`),
+`lod.downsampleChildren` (`lod.unpackChild`, `lod.downsampleChild`), `lod.applyOverlay`, `lod.unpackHint`,
+`lod.createSampler`, `lod.mesh` (`lod.mesh.prepare`, `.tops`, `.walls`, `.skirts`, `.water`, `.finish`), `lod.pack`
+(`lod.pack.analyze`, `.encode`); `prepareWorldgen` sections `lod.context.*`. Counters are the `lod*` names (cells,
+lattice search steps, memo hits and misses, mesh quads and rectangles, packed bytes by part, request payload bytes).
+The sky now renders in the LOD pass, so the profiler's sky pass is empty; the haze cube capture runs inside the LOD GPU
+pass, so it is timed on the CPU only (`main.lod.pass.captureBackground`).
 
 ## Benchmark
 

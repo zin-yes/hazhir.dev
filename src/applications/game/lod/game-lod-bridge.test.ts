@@ -1,8 +1,9 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import * as THREE from "three";
 import type { ChunkRecord } from "../world/chunk-record";
 import { GameLodBridge, type LodChunkSource } from "./game-lod-bridge";
 import type { LodManager, LodManagerOptions } from "./manager/lod-manager";
+import { counterTotal, gaugeLast, startLodProfiling, stopLodProfiling, timerCalls } from "./testing/profiler-readout.test-helper";
 
 interface RecordedManager {
   options: LodManagerOptions;
@@ -98,6 +99,38 @@ describe("game LOD bridge", () => {
     expect(managers[0]!.calls.filter((call) => call.startsWith("edited"))).toEqual([]);
     bridge.flushEditedChunks(1000);
     expect(managers[0]!.calls.filter((call) => call.startsWith("edited")).sort()).toEqual(["edited -1,3,0", "edited 0,3,0"]);
+    bridge.dispose();
+  });
+});
+
+describe("game LOD bridge profiling", () => {
+  beforeEach(startLodProfiling);
+  afterEach(stopLodProfiling);
+
+  test("counts edit changes, chunks queued once per run, chunks flushed and replayed chunks", () => {
+    const { createManager } = createRecordingFactory();
+    const bridge = new GameLodBridge({ createWorker: createFakeWorker, workerCount: 1, background: new THREE.Object3D(), createManager });
+    bridge.startWorld(7, 128);
+    const chunks = fakeChunkSource([fakeRecord(0, 3, 0, true), fakeRecord(-1, 3, 0, true), fakeRecord(0, 4, 0, false)]);
+    const changes = { count: 3, x: Int32Array.from([5, 6, -1]), y: Int32Array.from([100, 100, 101]), z: Int32Array.from([5, 5, 31]) };
+    bridge.onBlocksEdited({ changes, changedChunks: [] } as never, chunks);
+    bridge.onBlocksEdited({ changes: { count: 1, x: Int32Array.from([7]), y: Int32Array.from([100]), z: Int32Array.from([9]) }, changedChunks: [] } as never, chunks);
+
+    expect(counterTotal("game.lod.edit.batches")).toBe(2);
+    expect(counterTotal("game.lod.edit.changesScanned")).toBe(4);
+    expect(counterTotal("game.lod.edit.changesInSameChunkRun")).toBe(1);
+    expect(counterTotal("game.lod.edit.chunksAlreadyQueued")).toBe(1);
+    expect(gaugeLast("queue.lod.pendingEditedChunks")).toBe(2);
+
+    bridge.flushEditedChunks(1000);
+    expect(counterTotal("game.lod.edit.chunksFlushed")).toBe(2);
+    expect(gaugeLast("queue.lod.pendingEditedChunks")).toBe(0);
+
+    bridge.setRenderDistance(0, null);
+    bridge.setRenderDistance(128, chunks);
+    expect(counterTotal("game.lod.bridge.replayedChunks")).toBe(3);
+    expect(counterTotal("game.lod.bridge.replayedMeshedChunks")).toBe(2);
+    expect(timerCalls("main.lod.bridge.replayChunks")).toBe(1);
     bridge.dispose();
   });
 });

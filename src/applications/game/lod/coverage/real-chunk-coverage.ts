@@ -35,8 +35,24 @@ interface CoverageActivity {
   partialChecksHit: number;
 }
 
-function createCoverageActivity(): CoverageActivity {
-  return {
+function clearCoverageActivity(activity: CoverageActivity): void {
+  activity.refreshes = 0;
+  activity.meshChunkChecks = 0;
+  activity.becameCovered = 0;
+  activity.becameUncovered = 0;
+  activity.fullChecks = 0;
+  activity.fullChecksEarlyOut = 0;
+  activity.fullChecksColumnLookups = 0;
+  activity.fullChecksCovered = 0;
+  activity.partialChecks = 0;
+  activity.partialChecksColumnScans = 0;
+  activity.partialChecksHit = 0;
+}
+
+export class RealChunkCoverage {
+  private readonly columns = new Map<number, ColumnState>();
+  private readonly coveredColumns = new Map<number, { chunkX: number; chunkZ: number }>();
+  private readonly activity: CoverageActivity = {
     refreshes: 0,
     meshChunkChecks: 0,
     becameCovered: 0,
@@ -49,12 +65,6 @@ function createCoverageActivity(): CoverageActivity {
     partialChecksColumnScans: 0,
     partialChecksHit: 0,
   };
-}
-
-export class RealChunkCoverage {
-  private readonly columns = new Map<number, ColumnState>();
-  private readonly coveredColumns = new Map<number, { chunkX: number; chunkZ: number }>();
-  private activity = createCoverageActivity();
   /** Increases whenever the covered set changes. */
   version = 0;
 
@@ -179,8 +189,10 @@ export class RealChunkCoverage {
   /** Flushes the operation counts since the last call and samples the covered column count. Call once per frame. */
   reportToProfiler(): void {
     const activity = this.activity;
-    this.activity = createCoverageActivity();
-    if (!profiler.enabled) return;
+    if (!profiler.enabled) {
+      clearCoverageActivity(activity);
+      return;
+    }
     profiler.addCounter("game.lod.coverage.refreshes", activity.refreshes);
     profiler.addCounter("game.lod.coverage.meshChunkChecks", activity.meshChunkChecks);
     profiler.addCounter("game.lod.coverage.columnsBecameCovered", activity.becameCovered);
@@ -194,6 +206,7 @@ export class RealChunkCoverage {
     profiler.addCounter("game.lod.coverage.partialChecksHit", activity.partialChecksHit);
     profiler.sampleGauge("game.lod.coverage.coveredColumns", this.coveredColumns.size);
     profiler.sampleGauge("game.lod.coverage.trackedColumns", this.columns.size);
+    clearCoverageActivity(activity);
   }
 }
 
