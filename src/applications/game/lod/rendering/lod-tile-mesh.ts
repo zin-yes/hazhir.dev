@@ -4,7 +4,9 @@
 // cross-fade value into the shared materials.
 
 import * as THREE from "three";
+import { profiler } from "../../profiler";
 import { BLOCK_RENDER_OFFSET, cellSizeOfLevel, TILE_CELLS, tileSizeOfLevel } from "../core/lod-constants";
+import { metricNameOfLevel, perLevelMetricNames } from "../core/lod-level-keys";
 import type { TileAddress } from "../core/tile-address";
 import { MAXIMUM_TILE_QUADS, VERTICES_PER_QUAD } from "../meshing/heightfield-mesher";
 import type { LodMaterials } from "./lod-materials";
@@ -28,17 +30,39 @@ export interface LodTileMesh {
   dispose(): void;
 }
 
+const DISPOSED_PER_LEVEL = perLevelMetricNames("game.lod.tileMesh.disposed.");
+
 let sharedQuadIndex: THREE.BufferAttribute | null = null;
+let liveTileMeshCount = 0;
+let tileFadeUniformUpdateCount = 0;
+
+/** Tile meshes created and not yet disposed (GPU geometries the LOD holds). */
+export function liveLodTileMeshCount(): number {
+  return liveTileMeshCount;
+}
+
+/** Per-draw fade uniform writes since the last call (they happen inside the renderer's draw loop). */
+export function takeTileFadeUniformUpdateCount(): number {
+  const count = tileFadeUniformUpdateCount;
+  tileFadeUniformUpdateCount = 0;
+  return count;
+}
 
 /** Two triangles per quad (0 1 2, 0 2 3), enough for the largest possible tile; uploaded once for all tiles. */
 function quadIndex(): THREE.BufferAttribute {
   if (sharedQuadIndex === null) {
-    const indices = new Uint16Array(MAXIMUM_TILE_QUADS * INDICES_PER_QUAD);
-    for (let quad = 0; quad < MAXIMUM_TILE_QUADS; quad++) {
-      const firstVertex = quad * VERTICES_PER_QUAD;
-      indices.set([firstVertex, firstVertex + 1, firstVertex + 2, firstVertex, firstVertex + 2, firstVertex + 3], quad * INDICES_PER_QUAD);
+    const token = profiler.begin("main.lod.tileMesh.sharedQuadIndex");
+    try {
+      const indices = new Uint16Array(MAXIMUM_TILE_QUADS * INDICES_PER_QUAD);
+      for (let quad = 0; quad < MAXIMUM_TILE_QUADS; quad++) {
+        const firstVertex = quad * VERTICES_PER_QUAD;
+        indices.set([firstVertex, firstVertex + 1, firstVertex + 2, firstVertex, firstVertex + 2, firstVertex + 3], quad * INDICES_PER_QUAD);
+      }
+      sharedQuadIndex = new THREE.BufferAttribute(indices, 1);
+      profiler.recordBytes("bytes.lod.sharedQuadIndex", indices.byteLength);
+    } finally {
+      profiler.end(token);
     }
-    sharedQuadIndex = new THREE.BufferAttribute(indices, 1);
   }
   return sharedQuadIndex;
 }
@@ -70,6 +94,8 @@ export function createLodTileMesh(address: TileAddress, buffers: TileGeometryBuf
   mesh.updateMatrix();
   mesh.name = `lod ${address.level}/${address.tileX}/${address.tileZ}`;
 
+  liveTileMeshCount++;
+  let isDisposed = false;
   const tileMesh: LodTileMesh = {
     mesh,
     geometryBytes: buffers.vertices.byteLength,
@@ -78,9 +104,16 @@ export function createLodTileMesh(address: TileAddress, buffers: TileGeometryBuf
       // Disposing a geometry also deletes its index buffer on the GPU, which every other tile still uses.
       geometry.setIndex(null);
       geometry.dispose();
+      if (isDisposed) return;
+      isDisposed = true;
+      liveTileMeshCount--;
+      profiler.addCounter("game.lod.tileMesh.disposed");
+      profiler.addCounter(metricNameOfLevel(DISPOSED_PER_LEVEL, address.level));
+      profiler.recordBytes("bytes.lod.tileMeshDisposed", buffers.vertices.byteLength);
     },
   };
   mesh.onBeforeRender = (_renderer, _scene, _camera, _geometry, material) => {
+    tileFadeUniformUpdateCount++;
     const shaderMaterial = material as THREE.ShaderMaterial;
     shaderMaterial.uniforms.tileFade!.value = tileMesh.fade;
     shaderMaterial.uniformsNeedUpdate = true;

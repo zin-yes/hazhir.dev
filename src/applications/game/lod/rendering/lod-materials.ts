@@ -2,6 +2,7 @@
 // coverage texture); only the per-tile cross-fade value is set per draw, from the tile mesh's onBeforeRender.
 
 import * as THREE from "three";
+import { profiler } from "../../profiler";
 import { shadowUniforms } from "../../shadows/shadow-glsl";
 import { skyLightingUniforms } from "../../sky/sky-lighting";
 import { LOD_FRAGMENT_SHADER, LOD_VERTEX_SHADER } from "./lod-shaders";
@@ -38,6 +39,15 @@ export function srgbHexToVector(hex: number): THREE.Vector3 {
 }
 
 export function createLodMaterials(fogColorHex: number): LodMaterials {
+  const token = profiler.begin("main.lod.createMaterials");
+  try {
+    return buildLodMaterials(fogColorHex);
+  } finally {
+    profiler.end(token);
+  }
+}
+
+function buildLodMaterials(fogColorHex: number): LodMaterials {
   const coverageTexels = new Uint8Array(COVERAGE_TEXTURE_SIZE * COVERAGE_TEXTURE_SIZE);
   const coverageTexture = new THREE.DataTexture(coverageTexels, COVERAGE_TEXTURE_SIZE, COVERAGE_TEXTURE_SIZE, THREE.RedFormat, THREE.UnsignedByteType);
   coverageTexture.magFilter = THREE.NearestFilter;

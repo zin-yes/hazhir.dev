@@ -5,6 +5,7 @@
 // The sky has to draw in this pass (first), because after the depth clear it would cover the LOD.
 
 import * as THREE from "three";
+import { profiler } from "../../profiler";
 
 const BACKGROUND_RENDER_ORDER = -1_000_000;
 const HAZE_CUBE_SIZE = 32;
@@ -32,19 +33,26 @@ export class LodRenderPass {
    */
   captureBackground(renderer: THREE.WebGLRenderer): THREE.CubeTexture | null {
     if (this.adoptedBackground === null) return null;
-    this.hazeCubeTarget ??= new THREE.WebGLCubeRenderTarget(HAZE_CUBE_SIZE, { type: THREE.HalfFloatType, generateMipmaps: false });
-    const cubeCamera = new THREE.CubeCamera(1, 1_000_000, this.hazeCubeTarget);
-    const previousTilesVisible = this.tiles.visible;
-    const previousAutoClear = renderer.autoClear;
-    this.tiles.visible = false;
-    renderer.autoClear = true;
+    // The cube render runs inside the LOD GPU pass, so it is timed on the CPU only (a nested GPU pass is not allowed).
+    const token = profiler.begin("main.lod.pass.captureBackground");
     try {
-      cubeCamera.update(renderer, this.scene);
+      this.hazeCubeTarget ??= new THREE.WebGLCubeRenderTarget(HAZE_CUBE_SIZE, { type: THREE.HalfFloatType, generateMipmaps: false });
+      const cubeCamera = new THREE.CubeCamera(1, 1_000_000, this.hazeCubeTarget);
+      const previousTilesVisible = this.tiles.visible;
+      const previousAutoClear = renderer.autoClear;
+      this.tiles.visible = false;
+      renderer.autoClear = true;
+      try {
+        cubeCamera.update(renderer, this.scene);
+      } finally {
+        this.tiles.visible = previousTilesVisible;
+        renderer.autoClear = previousAutoClear;
+      }
+      profiler.addCounter("game.lod.pass.hazeCaptures");
+      return this.hazeCubeTarget.texture;
     } finally {
-      this.tiles.visible = previousTilesVisible;
-      renderer.autoClear = previousAutoClear;
+      profiler.end(token);
     }
-    return this.hazeCubeTarget.texture;
   }
 
   dispose(): void {
@@ -54,6 +62,7 @@ export class LodRenderPass {
 
   /** Moves the sky (or any backdrop) into this pass, drawn before every tile. */
   adoptBackground(object: THREE.Object3D): void {
+    profiler.addCounter("game.lod.pass.backgroundAdopted");
     this.releaseBackground();
     this.adoptedBackground = { object, previousParent: object.parent, previousRenderOrder: object.renderOrder };
     object.renderOrder = BACKGROUND_RENDER_ORDER;
@@ -62,6 +71,7 @@ export class LodRenderPass {
 
   releaseBackground(): void {
     if (this.adoptedBackground === null) return;
+    profiler.addCounter("game.lod.pass.backgroundReleased");
     const { object, previousParent, previousRenderOrder } = this.adoptedBackground;
     object.renderOrder = previousRenderOrder;
     if (previousParent !== null) previousParent.add(object);
@@ -71,6 +81,7 @@ export class LodRenderPass {
 
   /** Renders the LOD scene from the view camera's pose with the given clip planes, then clears depth. */
   render(renderer: THREE.WebGLRenderer, viewCamera: THREE.PerspectiveCamera, nearPlane: number, farPlane: number): void {
+    const setupToken = profiler.begin("main.lod.pass.cameraSetup");
     viewCamera.updateMatrixWorld();
     this.camera.fov = viewCamera.fov;
     this.camera.aspect = viewCamera.aspect;
@@ -80,12 +91,26 @@ export class LodRenderPass {
     this.camera.updateProjectionMatrix();
     viewCamera.matrixWorld.decompose(this.camera.position, this.camera.quaternion, this.camera.scale);
     this.camera.updateMatrixWorld(true);
+    profiler.end(setupToken);
     const previousAutoClear = renderer.autoClear;
     renderer.autoClear = false;
     try {
-      renderer.render(this.scene, this.camera);
-      this.beforeDepthClear?.(this.camera);
+      const sceneToken = profiler.begin("main.lod.pass.sceneRender");
+      try {
+        renderer.render(this.scene, this.camera);
+      } finally {
+        profiler.end(sceneToken);
+      }
+      if (this.beforeDepthClear !== null) {
+        const handlerToken = profiler.begin("main.lod.pass.beforeDepthClear");
+        try {
+          this.beforeDepthClear(this.camera);
+        } finally {
+          profiler.end(handlerToken);
+        }
+      }
       renderer.clearDepth();
+      profiler.sampleGauge("game.lod.pass.sceneObjects", this.tiles.children.length);
     } finally {
       renderer.autoClear = previousAutoClear;
     }
