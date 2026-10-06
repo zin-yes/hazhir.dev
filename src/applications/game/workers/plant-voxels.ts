@@ -26,6 +26,7 @@ const CROP_FAR_SHEET = TEXTURE_SIZE - 1 - CROP_NEAR_SHEET;
 const FLAT_QUAD_LAYER = 1;
 
 const FULLY_LIT_AMBIENT_OCCLUSION = 3;
+const CORNERS_PER_QUAD = 4;
 const TEXTURE_FILE_NAMES = Object.values(Texture);
 
 interface VoxelCell {
@@ -197,6 +198,7 @@ export function buildPlantTemplate(block: BlockType): PlantTemplate {
 
   startWorkerSection("emitVoxelFaces");
   let hiddenFaces = 0;
+  let flippedDiagonals = 0;
   for (const cell of cells.values()) {
     const u32 = cell.pixelColumn * 2 + 1;
     const v32 = cell.pixelRow * 2 + 1;
@@ -244,6 +246,7 @@ export function buildPlantTemplate(block: BlockType): PlantTemplate {
       const [first, second, third, fourth] = shouldFlipDiagonal
         ? [2, 3, 1, 0]
         : [1, 2, 0, 3];
+      if (shouldFlipDiagonal) flippedDiagonals++;
       stream.pushQuad(
         positionWords[first],
         surfaceWords[first],
@@ -266,6 +269,9 @@ export function buildPlantTemplate(block: BlockType): PlantTemplate {
   const quadCount = stream.vertexCount / 4;
   addWorkerCounter("plantTemplateQuads", quadCount);
   addWorkerCounter("plantTemplateHiddenFaces", hiddenFaces);
+  addWorkerCounter("plantTemplateFacesTested", cells.size * VOXEL_FACES.length);
+  addWorkerCounter("plantTemplateCornersOccluded", quadCount * CORNERS_PER_QUAD);
+  addWorkerCounter("plantTemplateFlippedDiagonals", flippedDiagonals);
   addWorkerCounter("plantTemplateBytes", vertexBuffer.byteLength);
   endWorkerSection();
   return { blockType: block, vertexBuffer, quadCount };

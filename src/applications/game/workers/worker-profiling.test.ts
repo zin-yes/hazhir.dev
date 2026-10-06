@@ -507,6 +507,10 @@ describe("plant template profiling", () => {
     expect(profile.counters.plantTemplateQuads).toBe(template.quadCount);
     expect(profile.counters.plantTemplateQuads).toBeGreaterThan(50);
     expect(profile.counters.plantVoxelCells).toBeGreaterThan(20);
+    expect(profile.counters.plantTemplateHiddenFaces + profile.counters.plantTemplateQuads).toBe(
+      profile.counters.plantTemplateFacesTested,
+    );
+    expect(profile.counters.plantTemplateFacesTested).toBe(profile.counters.plantVoxelCells * 6);
     expect(profile.breakdowns[DIMENSIONS.meshPart].map((entry) => entry.key)).toContain(
       "plantTemplate.TALL_GRASS",
     );
