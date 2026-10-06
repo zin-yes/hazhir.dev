@@ -17,7 +17,13 @@ export const PATH_SEPARATOR = ">";
 export const CROSS_KEY_SEPARATOR = "|";
 
 export function pathDepth(path: string): number {
-  return path.split(PATH_SEPARATOR).length - 1;
+  let depth = 0;
+  let separatorIndex = path.indexOf(PATH_SEPARATOR);
+  while (separatorIndex !== -1) {
+    depth++;
+    separatorIndex = path.indexOf(PATH_SEPARATOR, separatorIndex + 1);
+  }
+  return depth;
 }
 
 export function parentPath(path: string): string {
@@ -33,9 +39,32 @@ export function isOverflowNode(node: CallTreeNode): boolean {
   return leafName(node.path) === OVERFLOW_NODE_NAME;
 }
 
+interface TreeRootTotals {
+  allTopLevelMs: number;
+  topLevelMsByName: Map<string, number>;
+}
+
+/** Snapshot trees never change, so each tree's top-level totals are computed once, however many nodes ask. */
+const rootTotalsByTree = new WeakMap<CallTree, TreeRootTotals>();
+
+function rootTotalsOf(tree: CallTree): TreeRootTotals {
+  const cached = rootTotalsByTree.get(tree);
+  if (cached) return cached;
+  const topLevelMsByName = new Map<string, number>();
+  let allTopLevelMs = 0;
+  for (const node of tree.nodes) {
+    if (pathDepth(node.path) !== 0) continue;
+    allTopLevelMs += node.totalMs;
+    if (!topLevelMsByName.has(node.path)) topLevelMsByName.set(node.path, node.totalMs);
+  }
+  const totals = { allTopLevelMs, topLevelMsByName };
+  rootTotalsByTree.set(tree, totals);
+  return totals;
+}
+
 /** Sum of the inclusive time of the top-level nodes: everything the tree accounts for. */
 export function treeTotalMs(tree: CallTree): number {
-  return tree.nodes.reduce((sum, node) => (pathDepth(node.path) === 0 ? sum + node.totalMs : sum), 0);
+  return rootTotalsOf(tree).allTopLevelMs;
 }
 
 /**
@@ -45,8 +74,9 @@ export function treeTotalMs(tree: CallTree): number {
  */
 export function rootTotalMsForNode(tree: CallTree, node: CallTreeNode): number {
   if (tree.thread === "worker") return treeTotalMs(tree);
-  const topLevelName = node.path.split(PATH_SEPARATOR)[0];
-  return tree.nodes.find((candidate) => candidate.path === topLevelName)?.totalMs ?? 0;
+  const firstSeparatorIndex = node.path.indexOf(PATH_SEPARATOR);
+  const topLevelName = firstSeparatorIndex === -1 ? node.path : node.path.slice(0, firstSeparatorIndex);
+  return rootTotalsOf(tree).topLevelMsByName.get(topLevelName) ?? 0;
 }
 
 export function percentOf(part: number, whole: number): number {

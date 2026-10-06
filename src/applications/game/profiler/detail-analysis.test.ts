@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import {
   buildCrossMatrix,
+  pathDepth,
+  rootTotalMsForNode,
   rankedBreakdownEntries,
   selectCallTreeRows,
   topSelfTimePaths,
@@ -92,5 +94,29 @@ describe("breakdown helpers", () => {
     };
     expect(rankedBreakdownEntries(unitsOnly).map((entry) => entry.key)).toEqual(["stone", "dirt"]);
     expect(rankedBreakdownEntries(crossSummary)[0].key).toBe("forest|features");
+  });
+});
+
+describe("rootTotalMsForNode", () => {
+  const mainTree: CallTree = {
+    root: "main",
+    thread: "main",
+    nodes: [node("main.frame", 600, 100), node("main.frame>main.render", 400, 400), node("main.interval", 90, 90)],
+    droppedNodes: 0,
+  };
+
+  test("on the main thread a node is a share of the top-level scope it sits under", () => {
+    expect(rootTotalMsForNode(mainTree, mainTree.nodes[1])).toBe(600);
+    expect(rootTotalMsForNode(mainTree, mainTree.nodes[2])).toBe(90);
+  });
+
+  test("in a worker tree every node is a share of all top-level time", () => {
+    const workerTree: CallTree = { ...wideTree(), nodes: [...wideTree().nodes, node("second", 250, 250)] };
+    expect(rootTotalMsForNode(workerTree, workerTree.nodes[1])).toBe(1250);
+  });
+
+  test("counts path depth by separators", () => {
+    expect(pathDepth("a")).toBe(0);
+    expect(pathDepth("a>b>c")).toBe(2);
   });
 });
