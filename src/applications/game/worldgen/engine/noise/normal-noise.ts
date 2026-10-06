@@ -33,6 +33,11 @@ export class NormalNoise {
     return new NormalNoise(random, parameters, true);
   }
 
+  /** ImprovedNoise evaluations of one getValue (both stacks, every octave with a non-zero amplitude). */
+  get improvedNoiseEvaluationsPerSample(): number {
+    return this.first.activeOctaveCount + this.second.activeOctaveCount;
+  }
+
   /** Java `createLegacyNetherBiome`: legacy PerlinNoise initialization (only for legacy-random noise settings). */
   static createLegacyNetherBiome(random: RandomSource, parameters: NoiseParameters): NormalNoise {
     return new NormalNoise(random, parameters, false);

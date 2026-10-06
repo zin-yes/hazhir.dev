@@ -152,6 +152,9 @@ export class ClimateRTree {
   private lastLeafNodeId = -1;
   private searchCount = 0;
   private nodeDistanceCount = 0;
+  private lastLeafWinCount = 0;
+  /** Nodes of the flattened tree (leaves and subtrees), for the cold start report. */
+  readonly nodeCount: number;
 
   /** @param reuseLastLeaf mirrors vanilla's thread-local last-leaf hint: faster on coherent queries, but exact ties then depend on query order. */
   constructor(
@@ -189,6 +192,7 @@ export class ClimateRTree {
       }
     }
 
+    this.nodeCount = orderedNodes.length;
     this.nodeBounds = new Float64Array(orderedNodes.length * CLIMATE_DIMENSION_COUNT * 2);
     this.nodeLeafIndex = new Int32Array(orderedNodes.length).fill(-1);
     this.nodeChildStart = new Int32Array(orderedNodes.length);
@@ -233,16 +237,26 @@ export class ClimateRTree {
       this.bestDistance = this.nodeDistance(this.lastLeafNodeId);
       this.bestNodeId = this.lastLeafNodeId;
     }
+    const previousLeafNodeId = this.lastLeafNodeId;
     this.searchFromRoot();
+    if (this.bestNodeId === previousLeafNodeId) this.lastLeafWinCount++;
     this.lastLeafNodeId = this.bestNodeId;
     return this.bestNodeId < 0 ? -1 : this.nodeLeafIndex[this.bestNodeId];
   }
 
-  /** Returns the searches and bounding box distance evaluations since the last call, then resets both. */
-  drainSearchStatistics(): { searches: number; nodeDistanceEvaluations: number } {
-    const statistics = { searches: this.searchCount, nodeDistanceEvaluations: this.nodeDistanceCount };
+  /**
+   * Returns the searches, bounding box distance evaluations and searches won by the previous query's leaf since the
+   * last call, then resets them.
+   */
+  drainSearchStatistics(): { searches: number; nodeDistanceEvaluations: number; lastLeafWins: number } {
+    const statistics = {
+      searches: this.searchCount,
+      nodeDistanceEvaluations: this.nodeDistanceCount,
+      lastLeafWins: this.lastLeafWinCount,
+    };
     this.searchCount = 0;
     this.nodeDistanceCount = 0;
+    this.lastLeafWinCount = 0;
     return statistics;
   }
 

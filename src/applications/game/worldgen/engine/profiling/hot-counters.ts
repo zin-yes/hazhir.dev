@@ -8,6 +8,8 @@
 import { addWorkerCounter, isWorkerProfiling } from "@/applications/game/profiler/worker-recorder";
 import { flushColdStartLedger } from "./cold-start-ledger";
 
+/** Fixed capacity: a counter registered while a window is open (a cache built lazily) must still have its slot. */
+const MAX_HOT_COUNTERS = 2048;
 const counterNames: string[] = [];
 const slotByName = new Map<string, number>();
 
@@ -15,6 +17,7 @@ const slotByName = new Map<string, number>();
 export function defineHotCounter(name: string): number {
   let slot = slotByName.get(name);
   if (slot === undefined) {
+    if (counterNames.length >= MAX_HOT_COUNTERS) throw new Error(`More than ${MAX_HOT_COUNTERS} hot counters; raise MAX_HOT_COUNTERS`);
     slot = counterNames.length;
     counterNames.push(name);
     slotByName.set(name, slot);
@@ -35,11 +38,11 @@ export function noteHotAmount(slot: number, amount: number): void {
 }
 
 let nestingDepth = 0;
-let sharedCounts = new Float64Array(0);
+const sharedCounts = new Float64Array(MAX_HOT_COUNTERS);
 
 function flushCountsIntoProfile(): void {
   const counts = sharedCounts;
-  for (let slot = 0; slot < counts.length; slot++) {
+  for (let slot = 0; slot < counterNames.length; slot++) {
     const count = counts[slot]!;
     if (count === 0) continue;
     counts[slot] = 0;
@@ -51,7 +54,6 @@ function flushCountsIntoProfile(): void {
 export function beginHotCounting(): boolean {
   if (!isWorkerProfiling()) return false;
   if (nestingDepth === 0) {
-    if (sharedCounts.length !== counterNames.length) sharedCounts = new Float64Array(counterNames.length);
     hotCounterProbe.counts = sharedCounts;
     flushColdStartLedger();
   }

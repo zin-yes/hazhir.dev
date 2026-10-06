@@ -101,7 +101,7 @@ export class FeatureDecorator {
     });
     this.possibleBiomeOrder = [...params.possibleBiomes];
     this.possibleBiomes = new Set(params.possibleBiomes);
-    this.originCache = new BoundedLruCache(params.maxCachedOrigins ?? 48);
+    this.originCache = new BoundedLruCache(params.maxCachedOrigins ?? 48, "decorationOrigins");
     const biomeFeatures = this.biomeFeatures;
     const temperatureSampler = new BiomeTemperatureSampler(createBiomeClimateLookup(params.registries.biome));
     this.generator = {

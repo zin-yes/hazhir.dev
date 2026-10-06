@@ -10,7 +10,7 @@ import {
   startWorkerSection,
 } from "@/applications/game/profiler/worker-recorder";
 import { createColumnMemoizedDensity } from "../density/column-memoization";
-import { compileDensityFunction, type CompiledDensityFunction } from "../density/density-codegen";
+import { compileDensityFunction, type CompiledDensityFunction, noteCompiledDensityEvaluations } from "../density/density-codegen";
 import type { NoiseRouter } from "../density/router-wiring";
 
 const INITIAL_DENSITY_SURFACE_THRESHOLD = 0.390625;
@@ -62,6 +62,8 @@ export class PreliminarySurfaceLevelCache {
       endWorkerSection();
       addWorkerCounter("preliminarySurfaceCacheMisses", 1);
       addWorkerCounter("preliminarySurfaceDensityProbes", densityProbes);
+      addWorkerCounter("preliminarySurfaceLevelsFound", level === NO_SURFACE_LEVEL ? 0 : 1);
+      noteCompiledDensityEvaluations(evaluateInitialDensity, densityProbes, 1);
     }
     this.slotIsFilled[slot] = 1;
     this.slotQuartX[slot] = quartX;

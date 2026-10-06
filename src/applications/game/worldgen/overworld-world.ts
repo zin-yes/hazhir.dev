@@ -102,7 +102,7 @@ function createFullWorld(seed: number): FullWorld {
     possibleBiomes: possibleBiomesOfDimension(overworldDimension),
     maxCachedOrigins: CACHED_DECORATION_ORIGINS,
   });
-  const decoratedColumns = new BoundedLruCache<number, ChunkBlocks>(CACHED_DECORATED_COLUMNS);
+  const decoratedColumns = new BoundedLruCache<number, ChunkBlocks>(CACHED_DECORATED_COLUMNS, "decoratedColumns");
   return {
     generator,
     decorator,

@@ -72,12 +72,29 @@ export function endColdStart(label: ColdStartLabel, token: number, units = 0): v
   entry.units += units;
 }
 
+/** Adds a size to a label without timing anything (for statistics of work another label timed). */
+export function recordColdStartUnits(label: ColdStartLabel, units: number): void {
+  if (units <= 0) return;
+  if (isWorkerProfiling()) {
+    addWorkerCounter(label.unitsCounterName, units);
+    return;
+  }
+  let entry = pendingEntries.get(label);
+  if (entry === undefined) {
+    entry = { label, calls: 0, totalMilliseconds: 0, units: 0 };
+    pendingEntries.set(label, entry);
+  }
+  entry.units += units;
+}
+
 /** Moves events recorded while no profile was active into the current profile as counters, then forgets them. */
 export function flushColdStartLedger(): void {
   if (pendingEntries.size === 0) return;
   for (const entry of pendingEntries.values()) {
-    addWorkerCounter(entry.label.deferredCallsCounterName, entry.calls);
-    addWorkerCounter(entry.label.deferredMicrosecondsCounterName, Math.round(entry.totalMilliseconds * MICROSECONDS_PER_MILLISECOND));
+    if (entry.calls > 0) {
+      addWorkerCounter(entry.label.deferredCallsCounterName, entry.calls);
+      addWorkerCounter(entry.label.deferredMicrosecondsCounterName, Math.round(entry.totalMilliseconds * MICROSECONDS_PER_MILLISECOND));
+    }
     if (entry.units > 0) addWorkerCounter(entry.label.deferredUnitsCounterName, entry.units);
   }
   pendingEntries.clear();

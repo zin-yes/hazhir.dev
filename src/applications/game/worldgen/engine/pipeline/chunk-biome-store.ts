@@ -14,11 +14,14 @@ import {
 import { type NoiseRouter, quantizeClimateCoordinate } from "../density";
 import type { TargetPoint } from "../density";
 import { createColumnMemoizedDensity } from "../density/column-memoization";
-import { compileDensityFunction, type CompiledDensityFunction } from "../density/density-codegen";
+import { compileDensityFunction, type CompiledDensityFunction, noteCompiledDensityEvaluations } from "../density/density-codegen";
 import { NoiseChunk } from "../terrain";
 import { isCornerSamplingExact } from "../terrain/corner-column-sampler";
 import type { MultiNoiseBiomeSource } from "../biome-source";
+import { defineHotCounter, noteHot } from "../profiling/hot-counters";
 import { BoundedLruCache, packChunkColumnKey } from "./bounded-lru-cache";
+
+const BIOMES_INTERNED = defineHotCounter("biomeStore.biomesInterned");
 
 const QUARTS_PER_CHUNK_SIDE = 4;
 
@@ -74,10 +77,11 @@ class ChunkBiomeGrid {
       }
     }
     if (isProfiling) {
-      const { searches, nodeDistanceEvaluations } = this.biomeSource.drainSearchStatistics();
+      const { searches, nodeDistanceEvaluations, lastLeafWins } = this.biomeSource.drainSearchStatistics();
       addWorkerCounter("biomeQuartCellsSampled", this.biomeIndices.length);
       addWorkerCounter("biomeRTreeSearches", searches);
       addWorkerCounter("biomeRTreeNodeVisits", nodeDistanceEvaluations);
+      addWorkerCounter("biomeRTreeLastLeafWins", lastLeafWins);
     }
   }
 
@@ -160,6 +164,14 @@ class ChunkClimateSamples {
         }
       }
     }
+    const samplesPerField = QUARTS_PER_CHUNK_SIDE * QUARTS_PER_CHUNK_SIDE * this.quartYCount;
+    const columnsPerField = QUARTS_PER_CHUNK_SIDE * QUARTS_PER_CHUNK_SIDE;
+    noteCompiledDensityEvaluations(temperature, samplesPerField, columnsPerField);
+    noteCompiledDensityEvaluations(vegetation, samplesPerField, columnsPerField);
+    noteCompiledDensityEvaluations(continents, samplesPerField, columnsPerField);
+    noteCompiledDensityEvaluations(erosion, samplesPerField, columnsPerField);
+    noteCompiledDensityEvaluations(depth, samplesPerField, columnsPerField);
+    noteCompiledDensityEvaluations(ridges, samplesPerField, columnsPerField);
   }
 }
 
@@ -216,7 +228,7 @@ export class ChunkBiomeStore {
   private gridMisses = 0;
 
   constructor(private readonly params: ChunkBiomeStoreParams) {
-    this.grids = new BoundedLruCache(params.maxCachedChunks);
+    this.grids = new BoundedLruCache(params.maxCachedChunks, "biomeGrids");
     this.minQuartY = params.minY >> 2;
     this.quartYCount = params.height >> 2;
   }
@@ -225,6 +237,7 @@ export class ChunkBiomeStore {
     let index = this.indicesByBiomeId.get(biomeId);
     if (index === undefined) {
       index = this.biomeIds.length;
+      noteHot(BIOMES_INTERNED);
       this.biomeIds.push(biomeId);
       this.indicesByBiomeId.set(biomeId, index);
     }
@@ -248,7 +261,10 @@ export class ChunkBiomeStore {
       const grid = new ChunkBiomeGrid(chunkX, chunkZ, this.quartYCount, this.minQuartY, this.params.biomeSource, this.internBiome);
       const climate = (this.climateSamples ??= new ChunkClimateSamples(this.params.router, this.minQuartY, this.quartYCount));
       this.climateSamplesAreExact ??= ChunkClimateSamples.isExactFor(this.params.router);
-      if (isProfiling) startWorkerSection("biome.sampleClimate");
+      if (isProfiling) {
+        startWorkerSection("biome.sampleClimate");
+        addWorkerCounter(this.climateSamplesAreExact ? "biomeClimateChunksCompiled" : "biomeClimateChunksViaNoiseChunk", 1);
+      }
       if (this.climateSamplesAreExact) climate.sampleChunk(chunkX, chunkZ);
       else sampleClimateThroughNoiseChunk(climate, this.params.router, chunkX, chunkZ, this.params.minY, this.params.height, this.minQuartY, this.quartYCount);
       if (isProfiling) endWorkerSection();

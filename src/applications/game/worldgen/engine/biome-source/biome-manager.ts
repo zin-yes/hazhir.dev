@@ -1,7 +1,19 @@
 // Mirrors net.minecraft.world.level.biome.BiomeManager: getBiome(BlockPos) zooms quart-resolution biomes to
 // block resolution with a fiddled (jittered) nearest-of-8-cells lookup keyed by the obfuscated world seed.
 import { sha256 } from "../random";
+import { defineHotCounter, noteHot } from "../profiling/hot-counters";
 import { cellFiddles, computeCellFiddles } from "./linear-congruential-generator";
+
+const BIOME_QUERIES = defineHotCounter("biomeManager.queries");
+const LAST_CUBE_HITS = defineHotCounter("biomeManager.lastCubeHits");
+const CUBE_CACHE_HITS = defineHotCounter("biomeManager.cubeCacheHits");
+const CUBE_CACHE_FILLS = defineHotCounter("biomeManager.cubeCacheFills");
+const CUBE_DEFERRED_CHUNKS_MISSING = defineHotCounter("biomeManager.cubesDeferredForMissingChunks");
+const UNIFORM_CUBE_ANSWERS = defineHotCounter("biomeManager.uniformCubeAnswers");
+const ZOOMED_QUERIES = defineHotCounter("biomeManager.zoomedQueries");
+const FIDDLE_CACHE_HITS = defineHotCounter("biomeManager.fiddleCacheHits");
+const FIDDLE_CACHE_FILLS = defineHotCounter("biomeManager.fiddleCacheFills");
+const ZOOMED_RAW_BIOME_READS = defineHotCounter("biomeManager.zoomedRawBiomeReads");
 
 export type RawBiomeAtQuart = (quartX: number, quartY: number, quartZ: number) => string;
 /** Whether raw biomes of the chunk holding a quart column are already at hand (reading them costs no generation). */
@@ -76,6 +88,7 @@ export class BiomeManager {
       this.cachedCellY[slot] !== cellY ||
       this.cachedCellZ[slot] !== cellZ
     ) {
+      noteHot(FIDDLE_CACHE_FILLS);
       computeCellFiddles(this.zoomSeedHigh, this.zoomSeedLow, cellX, cellY, cellZ);
       this.cachedCellIsFilled[slot] = 1;
       this.cachedCellX[slot] = cellX;
@@ -84,6 +97,8 @@ export class BiomeManager {
       this.cachedFiddles[slot * 3] = cellFiddles.x;
       this.cachedFiddles[slot * 3 + 1] = cellFiddles.y;
       this.cachedFiddles[slot * 3 + 2] = cellFiddles.z;
+    } else {
+      noteHot(FIDDLE_CACHE_HITS);
     }
     return slot * 3;
   }
@@ -98,7 +113,11 @@ export class BiomeManager {
       this.cubeZ[slot] !== baseQuartZ
     ) {
       const spansSeveralChunks = (baseQuartX & 3) === 3 || (baseQuartZ & 3) === 3;
-      if (spansSeveralChunks && !this.areCandidateChunksCached(baseQuartX, baseQuartZ)) return undefined;
+      if (spansSeveralChunks && !this.areCandidateChunksCached(baseQuartX, baseQuartZ)) {
+        noteHot(CUBE_DEFERRED_CHUNKS_MISSING);
+        return undefined;
+      }
+      noteHot(CUBE_CACHE_FILLS);
       const firstBiome = this.rawBiomeAtQuart(baseQuartX, baseQuartY, baseQuartZ);
       let isUniform = true;
       for (let candidate = 1; candidate < 8 && isUniform; candidate++) {
@@ -114,6 +133,8 @@ export class BiomeManager {
       this.cubeZ[slot] = baseQuartZ;
       this.cubeState[slot] = isUniform ? CUBE_UNIFORM : CUBE_MIXED;
       this.cubeBiome[slot] = firstBiome;
+    } else {
+      noteHot(CUBE_CACHE_HITS);
     }
     return this.cubeState[slot] === CUBE_UNIFORM ? this.cubeBiome[slot] : undefined;
   }
@@ -136,17 +157,21 @@ export class BiomeManager {
     const baseQuartX = shiftedX >> 2;
     const baseQuartY = shiftedY >> 2;
     const baseQuartZ = shiftedZ >> 2;
+    noteHot(BIOME_QUERIES);
     if (baseQuartX === this.lastUniformCubeX && baseQuartY === this.lastUniformCubeY && baseQuartZ === this.lastUniformCubeZ) {
+      noteHot(LAST_CUBE_HITS);
       return this.lastUniformCubeBiome;
     }
     const uniformBiome = this.uniformCubeBiome(baseQuartX, baseQuartY, baseQuartZ);
     if (uniformBiome !== undefined) {
+      noteHot(UNIFORM_CUBE_ANSWERS);
       this.lastUniformCubeX = baseQuartX;
       this.lastUniformCubeY = baseQuartY;
       this.lastUniformCubeZ = baseQuartZ;
       this.lastUniformCubeBiome = uniformBiome;
       return uniformBiome;
     }
+    noteHot(ZOOMED_QUERIES);
     const fractionX = (shiftedX & 3) / 4;
     const fractionY = (shiftedY & 3) / 4;
     const fractionZ = (shiftedZ & 3) / 4;
@@ -169,6 +194,7 @@ export class BiomeManager {
         closestDistance = distance;
       }
     }
+    noteHot(ZOOMED_RAW_BIOME_READS);
     return this.rawBiomeAtQuart(
       (closestCandidate & 4) === 0 ? baseQuartX : baseQuartX + 1,
       (closestCandidate & 2) === 0 ? baseQuartY : baseQuartY + 1,

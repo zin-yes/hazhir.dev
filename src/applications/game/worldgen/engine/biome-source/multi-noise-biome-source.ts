@@ -1,5 +1,6 @@
 // Mirrors net.minecraft.world.level.biome.MultiNoiseBiomeSource backed by Climate.ParameterList / Climate.RTree.
 import type { JsonObject } from "../registry/datapack-loader";
+import { beginColdStart, defineColdStartLabel, endColdStart, recordColdStartUnits } from "../profiling/cold-start-ledger";
 import { ClimateRTree } from "./climate-rtree";
 import {
   findBestParameterPointBruteForce,
@@ -9,6 +10,10 @@ import {
   type TargetPoint,
 } from "./climate-parameter-list";
 
+const BUILD_LABEL = defineColdStartLabel("biomeSource.build");
+const PARAMETER_POINTS_LABEL = defineColdStartLabel("biomeSource.build.parameterPoints");
+const TREE_NODES_LABEL = defineColdStartLabel("biomeSource.build.treeNodes");
+
 export class MultiNoiseBiomeSource {
   private readonly parameterPoints: ParameterPoint[];
   private readonly searchTree: ClimateRTree;
@@ -16,8 +21,15 @@ export class MultiNoiseBiomeSource {
   /** @param biomeSourceJson the `generator.biome_source` object of a dimension (type minecraft:multi_noise with a direct `biomes` list).
    *  `reuseLastLeaf` enables vanilla's last-leaf search hint (faster for spatially coherent queries; ties then depend on query order). */
   constructor(biomeSourceJson: JsonObject, options: { reuseLastLeaf?: boolean } = {}) {
-    this.parameterPoints = parseParameterPoints(biomeSourceJson);
-    this.searchTree = new ClimateRTree(this.parameterPoints, options.reuseLastLeaf ?? false);
+    const coldStartToken = beginColdStart(BUILD_LABEL);
+    try {
+      this.parameterPoints = parseParameterPoints(biomeSourceJson);
+      this.searchTree = new ClimateRTree(this.parameterPoints, options.reuseLastLeaf ?? false);
+    } finally {
+      endColdStart(BUILD_LABEL, coldStartToken);
+    }
+    recordColdStartUnits(PARAMETER_POINTS_LABEL, this.parameterPoints.length);
+    recordColdStartUnits(TREE_NODES_LABEL, this.searchTree.nodeCount);
   }
 
   get parameterPointCount(): number {
@@ -38,7 +50,7 @@ export class MultiNoiseBiomeSource {
   }
 
   /** R-tree searches and node distance evaluations since the last call (profiler counters), then resets them. */
-  drainSearchStatistics(): { searches: number; nodeDistanceEvaluations: number } {
+  drainSearchStatistics(): { searches: number; nodeDistanceEvaluations: number; lastLeafWins: number } {
     return this.searchTree.drainSearchStatistics();
   }
 

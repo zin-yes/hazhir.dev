@@ -55,6 +55,12 @@ export class BlendedNoise {
 
   private compiled: (() => void) | null | undefined;
 
+  /** ImprovedNoise evaluations of one compute when no octave is skipped (limit octaves are skipped at saturated blends). */
+  get maxImprovedNoiseEvaluationsPerSample(): number {
+    const present = (octaves: (ImprovedNoise | null)[]) => octaves.filter((octave) => octave !== null).length;
+    return present(this.mainOctaves) + present(this.minLimitOctaves) + present(this.maxLimitOctaves);
+  }
+
   /** Java `compute(FunctionContext)` at integer block coordinates. */
   compute(blockX: number, blockY: number, blockZ: number): number {
     const sampler = this.compiledSampler();

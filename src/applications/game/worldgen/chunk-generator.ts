@@ -39,7 +39,7 @@ type GameColumn = Map<number, Uint8Array>;
 
 class SeedChunkSource {
   private readonly world: FullWorld;
-  private readonly gameColumns = new BoundedLruCache<number, GameColumn>(MAX_CACHED_GAME_COLUMNS);
+  private readonly gameColumns = new BoundedLruCache<number, GameColumn>(MAX_CACHED_GAME_COLUMNS, "gameColumns");
   private readonly gameBlockByPaletteId: BlockType[] = [];
   private readonly unknownByPaletteId: boolean[] = [];
 

@@ -136,6 +136,11 @@ export class PerlinNoise {
     this.maxValue = this.edgeValue(2.0);
   }
 
+  /** Octaves with a non-zero amplitude: the ImprovedNoise evaluations one getValue performs. */
+  get activeOctaveCount(): number {
+    return this.activeNoises.length;
+  }
+
   /** Java `getValue(x, y, z)`. */
   getValue(x: number, y: number, z: number): number {
     let total = 0.0;

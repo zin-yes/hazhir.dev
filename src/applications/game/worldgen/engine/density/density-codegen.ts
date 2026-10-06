@@ -5,6 +5,8 @@
 // computed closure variables: column values are kept until the evaluated (x, z) changes, point values for one call.
 
 import { buildGeneratedFunction } from "../generated-function";
+import { beginColdStart, defineColdStartLabel, endColdStart, recordColdStartUnits } from "../profiling/cold-start-ledger";
+import { defineHotCounter, hotCounterProbe } from "../profiling/hot-counters";
 import { BlendedNoise } from "../noise/blended-noise";
 import { NOISE_IO } from "../noise/inline-noise-source";
 import { NormalNoise } from "../noise/normal-noise";
@@ -38,6 +40,45 @@ import { MulOrAddNode, TwoArgumentNode } from "./nodes/two-argument-nodes";
 
 export type CompiledDensityFunction = (blockX: number, blockY: number, blockZ: number) => number;
 
+/** Static shape of one compiled density function (what the generated code contains, not what a call executes). */
+export interface CompiledDensityStatistics {
+  nodesEmitted: number;
+  noiseSites: number;
+  /** ImprovedNoise evaluations per call when no branch skips a noise, outside the column caches. */
+  octavesPerSample: number;
+  /** ImprovedNoise evaluations per distinct (x, z) column: the noise inside y-independent column caches. */
+  octavesPerColumn: number;
+  columnCaches: number;
+  pointCaches: number;
+}
+
+const statisticsByFunction = new WeakMap<CompiledDensityFunction, CompiledDensityStatistics>();
+
+const COMPILE_LABEL = defineColdStartLabel("codegen.densityFunction");
+const COMPILE_SOURCE_CHARACTERS_LABEL = defineColdStartLabel("codegen.densityFunction.sourceCharacters");
+const COMPILE_NODES_LABEL = defineColdStartLabel("codegen.densityFunction.nodes");
+const COMPILE_NOISE_SITES_LABEL = defineColdStartLabel("codegen.densityFunction.noiseSites");
+const COMPILE_COLUMN_CACHES_LABEL = defineColdStartLabel("codegen.densityFunction.columnCaches");
+const COMPILE_POINT_CACHES_LABEL = defineColdStartLabel("codegen.densityFunction.pointCaches");
+const COMPILED_CALLS_SLOT = defineHotCounter("density.compiledSamples");
+const COMPILED_COLUMNS_SLOT = defineHotCounter("density.compiledColumns");
+const NOMINAL_OCTAVES_SLOT = defineHotCounter("noise.octaveEvaluationsNominal");
+
+/**
+ * Counts the work of calling a compiled function: `sampleCount` evaluations over `columnCount` distinct columns.
+ * Octaves are nominal (every noise site assumed to run), an upper bound because branches can skip a noise.
+ * Callers invoke it from loops that already evaluate whole columns, only while a profile records.
+ */
+export function noteCompiledDensityEvaluations(evaluate: CompiledDensityFunction, sampleCount: number, columnCount: number): void {
+  const counts = hotCounterProbe.counts;
+  if (counts === null) return;
+  counts[COMPILED_CALLS_SLOT] += sampleCount;
+  counts[COMPILED_COLUMNS_SLOT] += columnCount;
+  const statistics = statisticsByFunction.get(evaluate);
+  if (statistics === undefined) return;
+  counts[NOMINAL_OCTAVES_SLOT] += sampleCount * statistics.octavesPerSample + columnCount * statistics.octavesPerColumn;
+}
+
 function literal(value: number): string {
   if (Object.is(value, -0)) return "(-0)";
   if (value === Number.POSITIVE_INFINITY) return "Infinity";
@@ -56,6 +97,21 @@ class DensityCodeWriter {
   readonly pointCacheIndices: number[] = [];
   private readonly cacheFunctionByNode = new Map<DensityNode, { name: string; index: number }>();
   private temporaryCount = 0;
+  readonly statistics: CompiledDensityStatistics = {
+    nodesEmitted: 0,
+    noiseSites: 0,
+    octavesPerSample: 0,
+    octavesPerColumn: 0,
+    columnCaches: 0,
+    pointCaches: 0,
+  };
+  private columnCacheDepth = 0;
+
+  private noteNoiseSite(improvedNoiseEvaluations: number): void {
+    this.statistics.noiseSites++;
+    if (this.columnCacheDepth > 0) this.statistics.octavesPerColumn += improvedNoiseEvaluations;
+    else this.statistics.octavesPerSample += improvedNoiseEvaluations;
+  }
 
   helper(value: unknown): string {
     let index = this.helperIndexByValue.get(value);
@@ -72,6 +128,7 @@ class DensityCodeWriter {
    * return their value through NOISE_IO, so no double crosses a call boundary (V8 would box it).
    */
   private noiseCall(noise: NormalNoiseSampler, x: string, y: string, z: string, statements: string[]): string {
+    this.noteNoiseSite(noise instanceof NormalNoise ? noise.improvedNoiseEvaluationsPerSample : 0);
     const sampler = noise instanceof NormalNoise ? noise.compiledSampler() : undefined;
     if (sampler === undefined) return `${this.helper(noise)}.getValue(${x}, ${y}, ${z})`;
     return this.ioCall(sampler, x, y, z, statements);
@@ -91,6 +148,7 @@ class DensityCodeWriter {
 
   /** Emits statements into `statements` computing `node`; returns the expression holding the value. */
   emit(node: DensityNode, statements: string[]): string {
+    this.statistics.nodesEmitted++;
     if (node instanceof ConstantNode) return literal(node.value);
     if (node instanceof BlendConstantNode) return literal(node.value);
     if (node instanceof BeardifierNode || node instanceof EndIslandsNode) return "0";
@@ -150,6 +208,7 @@ class DensityCodeWriter {
       return result;
     }
     if (node instanceof OldBlendedNoiseNode && node.sampler instanceof BlendedNoise) {
+      this.noteNoiseSite(node.sampler.maxImprovedNoiseEvaluationsPerSample);
       const sampler = node.sampler.compiledSampler();
       if (sampler !== undefined) return this.ioCall(sampler, "blockX", "blockY", "blockZ", statements);
     }
@@ -256,8 +315,15 @@ class DensityCodeWriter {
     this.cacheFunctionByNode.set(cacheNode, { name, index });
     this.cachedFunctionSources.push("");
     (scope === "column" ? this.columnCacheNames : this.pointCacheNames).push(name);
+    if (scope === "column") {
+      this.statistics.columnCaches++;
+      this.columnCacheDepth++;
+    } else {
+      this.statistics.pointCaches++;
+    }
     const statements: string[] = [];
     const value = this.emit(wrapped, statements);
+    if (scope === "column") this.columnCacheDepth--;
     // Cached values live in typed arrays: V8 boxes doubles held in closure variables, typed arrays store them raw.
     this.cachedFunctionSources[index] =
       `function ${name}(blockX, blockY, blockZ) {\n${statements.join("\n")}\n` +
@@ -269,6 +335,15 @@ class DensityCodeWriter {
 
 /** Compiles `root`; the result keeps column and point caches, so use one instance per thread. */
 export function compileDensityFunction(root: DensityNode): CompiledDensityFunction {
+  const coldStartToken = beginColdStart(COMPILE_LABEL);
+  try {
+    return compileDensityFunctionUntimed(root);
+  } finally {
+    endColdStart(COMPILE_LABEL, coldStartToken);
+  }
+}
+
+function compileDensityFunctionUntimed(root: DensityNode): CompiledDensityFunction {
   const writer = new DensityCodeWriter();
   const bodyStatements: string[] = [];
   const result = writer.emit(root, bodyStatements);
@@ -292,7 +367,16 @@ return function evaluate(blockX, blockY, blockZ) {
   return ${result};
 };`;
   const compiled = buildGeneratedFunction<CompiledDensityFunction>(["helpers"], source, [writer.helpers]);
-  if (compiled !== undefined) return compiled;
+  const { statistics } = writer;
+  recordColdStartUnits(COMPILE_SOURCE_CHARACTERS_LABEL, source.length);
+  recordColdStartUnits(COMPILE_NODES_LABEL, statistics.nodesEmitted);
+  recordColdStartUnits(COMPILE_NOISE_SITES_LABEL, statistics.noiseSites);
+  recordColdStartUnits(COMPILE_COLUMN_CACHES_LABEL, statistics.columnCaches);
+  recordColdStartUnits(COMPILE_POINT_CACHES_LABEL, statistics.pointCaches);
+  if (compiled !== undefined) {
+    statisticsByFunction.set(compiled, statistics);
+    return compiled;
+  }
   const context = { blockX: 0, blockY: 0, blockZ: 0 };
   return (blockX, blockY, blockZ) => {
     context.blockX = blockX;

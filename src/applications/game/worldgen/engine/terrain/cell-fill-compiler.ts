@@ -16,7 +16,15 @@ import {
 } from "../density/nodes/arithmetic-nodes";
 import { BeardifierNode, BlendDensityNode } from "../density/nodes/structural-nodes";
 import { MulOrAddNode, TwoArgumentNode } from "../density/nodes/two-argument-nodes";
+import { beginColdStart, defineColdStartLabel, endColdStart, recordColdStartUnits } from "../profiling/cold-start-ledger";
+import { defineHotCounter, noteHot } from "../profiling/hot-counters";
 import { NoiseInterpolator } from "./noise-chunk-caches";
+
+const PROGRAM_CACHE_HITS = defineHotCounter("cellFill.programCacheHits");
+const COMPILE_LABEL = defineColdStartLabel("codegen.cellFill");
+const COMPILE_STATEMENTS_LABEL = defineColdStartLabel("codegen.cellFill.statements");
+const COMPILE_INTERPOLATORS_LABEL = defineColdStartLabel("codegen.cellFill.interpolators");
+const COMPILE_UNSUPPORTED_LABEL = defineColdStartLabel("codegen.cellFill.unsupportedTrees");
 
 /** Fills a cell's values (cache_all_in_cell layout) from 8 corners per interpolator (000,100,010,110,001,101,011,111). */
 export type CompiledCellFill = (values: Float64Array, corners: Float64Array, cellStartBlockY: number) => void;
@@ -152,9 +160,21 @@ class CellFillCodeWriter {
 
 /** The compiled fill for `root` (what a cache_all_in_cell wraps), or undefined when the tree is not supported. */
 export function compileCellFill(root: DensityNode, cellWidth: number, cellHeight: number): CellFillProgram | undefined {
+  const coldStartToken = beginColdStart(COMPILE_LABEL);
+  try {
+    return compileCellFillUntimed(root, cellWidth, cellHeight);
+  } finally {
+    endColdStart(COMPILE_LABEL, coldStartToken);
+  }
+}
+
+function compileCellFillUntimed(root: DensityNode, cellWidth: number, cellHeight: number): CellFillProgram | undefined {
   const writer = new CellFillCodeWriter();
   const resultVariable = writer.emit(root);
-  if (resultVariable === undefined) return undefined;
+  if (resultVariable === undefined) {
+    recordColdStartUnits(COMPILE_UNSUPPORTED_LABEL, 1);
+    return undefined;
+  }
   const interpolatorCount = writer.interpolators.length;
   const rowSetup: string[] = [];
   const blockSetup: string[] = [];
@@ -189,6 +209,8 @@ export function compileCellFill(root: DensityNode, cellWidth: number, cellHeight
   if (interpolatorTemplates.some((template) => template === undefined)) return undefined;
   const fill = buildGeneratedFunction<CompiledCellFill>([], source, []);
   if (fill === undefined) return undefined;
+  recordColdStartUnits(COMPILE_STATEMENTS_LABEL, writer.statements.length);
+  recordColdStartUnits(COMPILE_INTERPOLATORS_LABEL, interpolatorCount);
   return { interpolatorTemplates: interpolatorTemplates as DensityNode[], fill };
 }
 
@@ -215,6 +237,8 @@ export function cellFillProgramFor(
   if (program === undefined) {
     program = compileCellFill(wiredRoot, cellWidth, cellHeight) ?? null;
     programsByLayout.set(key, program);
+  } else {
+    noteHot(PROGRAM_CACHE_HITS);
   }
   return program;
 }

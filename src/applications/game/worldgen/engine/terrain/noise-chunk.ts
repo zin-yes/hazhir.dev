@@ -15,6 +15,21 @@ import { CacheAllInCell, Cache2D, CacheOnce, FlatCache, NoiseInterpolator } from
 import { cellFillProgramFor } from "./cell-fill-compiler";
 import { cornerColumnSamplerFor } from "./corner-column-sampler";
 import { getNoiseChunkTemplate, type NoiseChunkTemplate } from "./noise-chunk-template";
+import { defineHotCounter, noteHot, noteHotAmount } from "../profiling/hot-counters";
+
+const NOISE_CHUNKS_CREATED = defineHotCounter("noiseChunk.created");
+const INTERPOLATORS_WIRED = defineHotCounter("noiseChunk.interpolatorsWired");
+const CELL_CACHES_WIRED = defineHotCounter("noiseChunk.cellCachesWired");
+const COMPILED_FILL_ATTACHED = defineHotCounter("noiseChunk.compiledFillAttached");
+const COMPILED_FILL_UNAVAILABLE = defineHotCounter("noiseChunk.compiledFillUnavailable");
+const CORNER_SAMPLERS_ATTACHED = defineHotCounter("noiseChunk.cornerSamplersAttached");
+const CORNER_SAMPLERS_UNAVAILABLE = defineHotCounter("noiseChunk.cornerSamplersUnavailable");
+const SLICES_FILLED = defineHotCounter("noiseChunk.slicesFilled");
+const CORNER_COLUMNS_FILLED = defineHotCounter("noiseChunk.cornerColumnsFilled");
+const GENERIC_COLUMNS_FILLED = defineHotCounter("noiseChunk.genericColumnsFilled");
+const CELLS_SELECTED = defineHotCounter("noiseChunk.cellsSelected");
+const COMPILED_CELL_FILLS = defineHotCounter("noiseChunk.compiledCellFills");
+const GENERIC_CELL_FILLS = defineHotCounter("noiseChunk.genericCellFills");
 
 export interface NoiseChunkSettings {
   /** Number of cells along x and z (16 / cellWidth for a full chunk). */
@@ -102,6 +117,7 @@ export class NoiseChunk implements FunctionContext, ContextProvider {
     this.firstNoiseZ = settings.firstBlockZ >> 2;
     this.noiseSizeXZ = (this.cellCountXZ * this.cellWidth) >> 2;
 
+    noteHot(NOISE_CHUNKS_CREATED);
     const chunk = this;
     this.sliceFillingContextProvider = {
       forIndex(arrayIndex: number): FunctionContext {
@@ -132,13 +148,18 @@ export class NoiseChunk implements FunctionContext, ContextProvider {
     for (const interpolator of this.interpolators) {
       if (interpolator.templateWrapped === undefined) continue;
       interpolator.cornerSampler = cornerColumnSamplerFor(interpolator.templateWrapped, this.cellNoiseMinY, this.cellHeight, this.cellCountY + 1);
+      noteHot(interpolator.cornerSampler === null ? CORNER_SAMPLERS_UNAVAILABLE : CORNER_SAMPLERS_ATTACHED);
     }
+    noteHotAmount(INTERPOLATORS_WIRED, this.interpolators.length);
     if (this.finalDensityForFill instanceof CacheAllInCell) this.attachCompiledFill(this.finalDensityForFill, template.finalDensityForFill, wiredFields);
   }
 
   private attachCompiledFill(cellCache: CacheAllInCell, templateRoot: DensityNode, wiredFields: ReadonlySet<string>): void {
     const program = cellFillProgramFor(templateRoot, cellCache.wrapped, this.cellWidth, this.cellHeight, [...wiredFields].join(","));
-    if (program === null) return;
+    if (program === null) {
+      noteHot(COMPILED_FILL_UNAVAILABLE);
+      return;
+    }
     const interpolatorByTemplate = new Map<DensityNode, NoiseInterpolator>();
     for (const interpolator of this.interpolators) {
       if (interpolator.templateWrapped !== undefined) interpolatorByTemplate.set(interpolator.templateWrapped, interpolator);
@@ -146,9 +167,13 @@ export class NoiseChunk implements FunctionContext, ContextProvider {
     const interpolators: NoiseInterpolator[] = [];
     for (const interpolatorTemplate of program.interpolatorTemplates) {
       const interpolator = interpolatorByTemplate.get(interpolatorTemplate);
-      if (interpolator === undefined) return;
+      if (interpolator === undefined) {
+        noteHot(COMPILED_FILL_UNAVAILABLE);
+        return;
+      }
       interpolators.push(interpolator);
     }
+    noteHot(COMPILED_FILL_ATTACHED);
     cellCache.compiledFill = program.fill;
     cellCache.compiledFillInterpolators = interpolators;
     cellCache.compiledFillCorners = new Float64Array(interpolators.length * 8);
@@ -183,6 +208,7 @@ export class NoiseChunk implements FunctionContext, ContextProvider {
       case "cache_all_in_cell": {
         const cellCache = new CacheAllInCell(this, marker.wrapped);
         this.cellCaches.push(cellCache);
+        noteHot(CELL_CACHES_WIRED);
         return cellCache;
       }
     }
@@ -223,10 +249,16 @@ export class NoiseChunk implements FunctionContext, ContextProvider {
       for (const interpolator of this.interpolators) {
         const column = (firstSlice ? interpolator.slice0 : interpolator.slice1)[cellOffsetZ]!;
         const cornerSampler = interpolator.cornerSampler;
-        if (cornerSampler === null) interpolator.fillArray(column, this.sliceFillingContextProvider);
-        else cornerSampler.fill(column, this.cellStartBlockX, this.cellStartBlockZ);
+        if (cornerSampler === null) {
+          interpolator.fillArray(column, this.sliceFillingContextProvider);
+          noteHot(GENERIC_COLUMNS_FILLED);
+        } else {
+          cornerSampler.fill(column, this.cellStartBlockX, this.cellStartBlockZ);
+          noteHot(CORNER_COLUMNS_FILLED);
+        }
       }
     }
+    noteHot(SLICES_FILLED);
     this.arrayInterpolationCounter++;
   }
 
@@ -248,12 +280,15 @@ export class NoiseChunk implements FunctionContext, ContextProvider {
     this.cellStartBlockY = (cellY + this.cellNoiseMinY) * this.cellHeight;
     this.cellStartBlockZ = (this.firstCellZ + cellOffsetZ) * this.cellWidth;
     this.arrayInterpolationCounter++;
+    noteHot(CELLS_SELECTED);
     for (const cellCache of this.cellCaches) {
       const compiledFill = cellCache.compiledFill;
       if (compiledFill === undefined) {
+        noteHot(GENERIC_CELL_FILLS);
         cellCache.wrapped.fillArray(cellCache.values, this);
         continue;
       }
+      noteHot(COMPILED_CELL_FILLS);
       const corners = cellCache.compiledFillCorners!;
       const interpolators = cellCache.compiledFillInterpolators;
       for (let index = 0; index < interpolators.length; index++) interpolators[index]!.writeCorners(corners, index * 8);

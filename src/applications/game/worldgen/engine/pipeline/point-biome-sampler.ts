@@ -28,7 +28,12 @@ export function createPointBiomeSampler(
     if (biomeId === undefined) {
       if (isProfiling) startWorkerSection("biome.samplePoint");
       biomeId = biomeSource.findBiome(climateSampler.sample(quartX, quartY, quartZ));
-      if (isProfiling) endWorkerSection();
+      if (isProfiling) {
+        endWorkerSection();
+        const { searches, nodeDistanceEvaluations } = biomeSource.drainSearchStatistics();
+        addWorkerCounter("carverBiomeRTreeSearches", searches);
+        addWorkerCounter("carverBiomeRTreeNodeVisits", nodeDistanceEvaluations);
+      }
       if (biomeByPoint.size >= MAX_MEMOIZED_POINTS) biomeByPoint.clear();
       biomeByPoint.set(key, biomeId);
     }

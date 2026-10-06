@@ -98,7 +98,7 @@ export function createOverworldGenerator(params: OverworldGeneratorParams): Over
     const carverSystem = createCarverSystem({ registries, blockTags, seed, rawBiomeAtQuart: carverBiomeSampler });
     stages.push(createCarverStage({ carverSystem, seedSurface, settings, router }));
   }
-  const columnCache = new BoundedLruCache<number, ChunkBlocks>(params.maxCachedColumns ?? MAX_CACHED_COLUMNS);
+  const columnCache = new BoundedLruCache<number, ChunkBlocks>(params.maxCachedColumns ?? MAX_CACHED_COLUMNS, "baseColumns");
   const carvingMaskByColumn = new WeakMap<ChunkBlocks, CarvingMask>();
   const motionBlockingByPaletteId: boolean[] = [];
   let baseColumnBuildCount = 0;

@@ -7,6 +7,11 @@ import { type DensityNode, MemoizingDensityVisitor } from "../density/density-fu
 import { createTwoArgument } from "../density/nodes/two-argument-nodes";
 import { BeardifierNode, HolderNode, MarkerNode } from "../density/nodes/structural-nodes";
 import { NOISE_ROUTER_FIELDS, type NoiseRouter } from "../density/router-wiring";
+import { beginColdStart, defineColdStartLabel, endColdStart } from "../profiling/cold-start-ledger";
+import { defineHotCounter, noteHot } from "../profiling/hot-counters";
+
+const TEMPLATE_CACHE_HITS = defineHotCounter("noiseChunkTemplate.cacheHits");
+const TEMPLATE_BUILT = defineColdStartLabel("noiseChunkTemplate.build");
 
 class NoiseChunkTemplateVisitor extends MemoizingDensityVisitor {
   protected wrapNew(node: DensityNode): DensityNode {
@@ -54,8 +59,15 @@ const templatesByRouter = new WeakMap<NoiseRouter, NoiseChunkTemplate>();
 export function getNoiseChunkTemplate(router: NoiseRouter): NoiseChunkTemplate {
   let template = templatesByRouter.get(router);
   if (template === undefined) {
-    template = new NoiseChunkTemplate(router);
+    const coldStartToken = beginColdStart(TEMPLATE_BUILT);
+    try {
+      template = new NoiseChunkTemplate(router);
+    } finally {
+      endColdStart(TEMPLATE_BUILT, coldStartToken);
+    }
     templatesByRouter.set(router, template);
+  } else {
+    noteHot(TEMPLATE_CACHE_HITS);
   }
   return template;
 }

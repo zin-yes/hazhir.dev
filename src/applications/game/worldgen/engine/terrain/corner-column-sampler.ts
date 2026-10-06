@@ -9,10 +9,21 @@
 // so they are kept in a bounded cache. `isCornerSamplingExact` guards the assumptions per subtree.
 
 import { BlockYDependence, createColumnMemoizedDensity } from "../density/column-memoization";
-import { compileDensityFunction, type CompiledDensityFunction } from "../density/density-codegen";
+import { compileDensityFunction, type CompiledDensityFunction, noteCompiledDensityEvaluations } from "../density/density-codegen";
 import type { DensityNode } from "../density/density-function";
 import { MarkerNode } from "../density/nodes/structural-nodes";
 import { BoundedLruCache } from "../pipeline/bounded-lru-cache";
+import { beginColdStart, defineColdStartLabel, endColdStart } from "../profiling/cold-start-ledger";
+import { defineHotCounter, noteHot, noteHotAmount } from "../profiling/hot-counters";
+
+const SAMPLER_FILL_CALLS = defineHotCounter("cornerSampler.fillCalls");
+const SAMPLER_BORDER_FILLS = defineHotCounter("cornerSampler.borderFills");
+const SAMPLER_COLUMNS_EVALUATED = defineHotCounter("cornerSampler.columnsEvaluated");
+const SAMPLER_SAMPLES_EVALUATED = defineHotCounter("cornerSampler.samplesEvaluated");
+const SAMPLER_LOOKUP_HITS = defineHotCounter("cornerSampler.samplerCacheHits");
+const SAMPLER_LOOKUP_CREATED = defineHotCounter("cornerSampler.samplersCreated");
+const SAMPLER_LOOKUP_UNAVAILABLE = defineHotCounter("cornerSampler.subtreesNeedingChunkCaches");
+const CORNER_SAMPLER_LABEL = defineColdStartLabel("cornerSampler.create");
 
 const MAX_CACHED_BORDER_COLUMNS = 1024;
 const CHUNK_SIZE = 16;
@@ -38,7 +49,7 @@ export function isCornerSamplingExact(root: DensityNode): boolean {
 
 export class CornerColumnSampler {
   private readonly evaluateDensity: CompiledDensityFunction;
-  private readonly borderColumns = new BoundedLruCache<number, Float64Array>(MAX_CACHED_BORDER_COLUMNS);
+  private readonly borderColumns = new BoundedLruCache<number, Float64Array>(MAX_CACHED_BORDER_COLUMNS, "cornerBorderColumns");
 
   constructor(
     templateWrapped: DensityNode,
@@ -51,11 +62,13 @@ export class CornerColumnSampler {
 
   /** Writes the corner samples at (cornerBlockX, cornerBlockZ), bottom cell first, into `values`. */
   fill(values: Float64Array, cornerBlockX: number, cornerBlockZ: number): void {
+    noteHot(SAMPLER_FILL_CALLS);
     const isOnChunkBorder = cornerBlockX % CHUNK_SIZE === 0 || cornerBlockZ % CHUNK_SIZE === 0;
     if (!isOnChunkBorder) {
       this.evaluate(values, cornerBlockX, cornerBlockZ);
       return;
     }
+    noteHot(SAMPLER_BORDER_FILLS);
     const key = (cornerBlockX + 0x2000000) * 0x4000000 + (cornerBlockZ + 0x2000000);
     const cached = this.borderColumns.get(key);
     if (cached !== undefined) {
@@ -71,6 +84,9 @@ export class CornerColumnSampler {
     for (let index = 0; index < this.sampleCount; index++) {
       values[index] = evaluateDensity(cornerBlockX, (index + this.cellNoiseMinY) * this.cellHeight, cornerBlockZ);
     }
+    noteHot(SAMPLER_COLUMNS_EVALUATED);
+    noteHotAmount(SAMPLER_SAMPLES_EVALUATED, this.sampleCount);
+    noteCompiledDensityEvaluations(evaluateDensity, this.sampleCount, 1);
   }
 }
 
@@ -91,10 +107,18 @@ export function cornerColumnSamplerFor(
   const layoutKey = `${cellNoiseMinY},${cellHeight},${sampleCount}`;
   let sampler = samplersByLayout.get(layoutKey);
   if (sampler === undefined) {
-    sampler = isCornerSamplingExact(templateWrapped)
-      ? new CornerColumnSampler(templateWrapped, cellNoiseMinY, cellHeight, sampleCount)
-      : null;
+    const coldStartToken = beginColdStart(CORNER_SAMPLER_LABEL);
+    try {
+      sampler = isCornerSamplingExact(templateWrapped)
+        ? new CornerColumnSampler(templateWrapped, cellNoiseMinY, cellHeight, sampleCount)
+        : null;
+    } finally {
+      endColdStart(CORNER_SAMPLER_LABEL, coldStartToken);
+    }
     samplersByLayout.set(layoutKey, sampler);
+    noteHot(sampler === null ? SAMPLER_LOOKUP_UNAVAILABLE : SAMPLER_LOOKUP_CREATED);
+  } else {
+    noteHot(SAMPLER_LOOKUP_HITS);
   }
   return sampler;
 }
