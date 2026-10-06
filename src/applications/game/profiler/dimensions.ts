@@ -76,6 +76,23 @@ export const DIMENSIONS = {
   borderFace: "border.face",
   /** Live chunk records per pipeline stage. Units = chunks (sampled once per second). */
   chunkStage: "chunk.stage",
+  // game systems: ui handlers, persistence, network, input, simulation
+  /** Main-thread time per UI event handler. Key: `${surface}.${handler}`. */
+  uiHandler: "ui.handler",
+  /** Time to apply one settings control change. Key: the control label. */
+  uiSetting: "ui.setting",
+  /** Network packet work per direction and type. Key: `${send|receive|broadcast}.${PACKET_TYPE}`. */
+  networkPacket: "network.packet",
+  /** Main-thread time per input event kind (keyDown, mouseMove, touchStart, ...). */
+  inputKind: "input.kind",
+  /** Random tick work per block type: tickable blocks found by rescans and blocks rolled. */
+  randomTickBlock: "randomTick.block",
+  /** Player collision work per block type (units = hitboxes tested). */
+  physicsBlock: "physics.block",
+  /** Water cell updates per resulting water level, 0 to 8 (units = cells). */
+  waterLevel: "water.level",
+  /** World store time per operation (put, getAll, delete, legacyImport). */
+  worldStoreOperation: "worldStore.operation",
 } as const;
 
 export type DimensionName = (typeof DIMENSIONS)[keyof typeof DIMENSIONS];
