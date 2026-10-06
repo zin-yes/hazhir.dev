@@ -19,14 +19,30 @@ Everything is a cheap early return while the profiler is disabled, so instrument
 | Main-thread CPU | `main.*` scopes, inclusive and self time | `main.frame.render`, `main.chunk.buildGeometry`, `main.interval.randomTick`, `main.react.commit.game` |
 | Worker CPU | `worker.<pool>.<method>.exec` and per section | `worker.mesh.generateMesh.faceGeneration` |
 | Work done | `work.<pool>.<method>.<counter>` | `facesEmitted`, `bfsNodesVisited`, `blocksGenerated`; the report divides time by units (ns per face, etc.) |
-| GPU | `gpu.frame`, `gpu.pass.<lod,sky,opaque,transparent,overlay>` | disjoint timer query, results arrive a few frames late; `gpu.frame` includes the far terrain (LOD) pass, which the pass breakdown reports as `lod` |
+| GPU | `gpu.frame`, `gpu.pass.<label>`, `gpu.passDraws.<label>.calls/.triangles` | disjoint timer query, results arrive a few frames late. `gpu.frame` is the sum of every pass in the frame (scene, shadow cascades, water translucent, bloom, clouds, world snapshot). The scene is `gpu.pass.scene` (far terrain, sky, chunks); the pass breakdown splits it into `lod`, `sky`, `opaque`, `transparent`, `overlay` |
 | WebGL driver CPU | `gl.cpu.upload`, `.draw`, `.programCompile`, `.sync` | time inside `bufferData`, `texSubImage3D`, `drawElements` |
 | Sending to GPU | `gl.upload.buffer`, `gl.upload.texture` bytes, `gpu.memory.*` | per-upload sizes, live buffer and texture memory |
 | Sending to workers | `main.workerPost.*`, `transfer.*`, `bytes.*` | postMessage serialization, transit latency, payload bytes, estimated receive-side clone cost |
 | Queues and pipelines | `queue.*`, `latency.*`, `chunk.pipeline.*`, `chunk.load.*` | wall-clock durations, not CPU |
 | Memory and data sizes | `memory.*`, `meshes.*` gauges | chunk and light data, geometry bytes, bytes per vertex by attribute, JS heap |
-| Browser | long tasks, long animation frames, event loop lag, GC estimates | Events tab |
+| Browser | long tasks, long animation frames, event loop lag and drift, GC estimates, input latency (`browser.input.*`: delay, processing, presentation, per event name), resource loads (`browser.resource.<kind>`, `bytes.resource.*`), tab visibility, devicePixelRatio, JS heap limit | Events tab |
+| Render passes | `gpu.pass.shadowCascade0..2`, `bloomDown0..4`, `bloomUp0..3`, `bloomComposite`, `worldSnapshotCopy`, `cloudDepthCapture`, `cloudMarch`, `cloudComposite`, `waterTranslucent` | each also has CPU `main.render.<label>`; the GPU tab and the markdown "GPU passes" table rank them with draws and triangles per pass |
+| Settings and display | `session.game` (shadow quality, bloom, water reflections, far terrain, FOV, volume shape), `gpu.drawingBufferPixels` | refreshed every second so every benchmark phase records the settings it ran with |
 | Network | `network.sent.<type>`, `network.received.<type>` | estimated packet bytes |
+
+### Coverage by area
+
+Each area documents its own metric names next to its code; this is where to look.
+
+| Area | Prefixes | Notes |
+| --- | --- | --- |
+| Shadows, post-processing, sky, clouds | `main.shadow.*`, `main.post.*`, `main.sky.*`, `game.shadow.*`, `game.post.*`, `game.sky.*`, `memory.shadowMaps.*`, `memory.post.*`, `memory.sky.*` | cascade redraw decisions and why (`game.shadow.cascade.decision.*`), render target memory, cloud density work |
+| Chunk streaming, scheduling, edits | `main.streaming.*`, `main.scheduler.*`, `main.affinity.*`, `main.edit.*`, `game.streaming.*`, `game.scheduler.*`, `game.edit.*`, `queue.scheduler.*` | see `world/README.md` and `edits/README.md` |
+| Mesh, light and region workers | `worker.mesh.*`, `worker.lighting.*`, `work.<pool>.<method>.*`, dimensions `mesh.faceDirection`, `mesh.vertexAttribute`, `light.channel` | sampled sections for hot loops; AO and packing are counters only |
+| Worker pools and chunk geometry | `game.pool.<pool>.*`, `pool.<pool>.*`, `bytes.pool.*`, `main.chunk.buildGeometry.*`, `game.geometry.*`, `memory.geometry.*` | dispatch kind (free, affinity hit, steal), spin-up, payload bytes |
+| Far terrain (LOD) | `main.lod.*`, `game.lod.*`, `bytes.lod.*`, `memory.lod.*`, `queue.lod.*`, `latency.lod.*`, dimension `lod.level` | see `lod/README.md` |
+| Worldgen | `work.generation.generateChunk.*`, `coldStart.*` | slot counters in `engine/profiling/hot-counters.ts`; the headless probe report has a "Worldgen detail" section |
+| UI, input, persistence, network, simulation | `main.ui.*`, `game.ui.*`, `main.settings.*`, `main.worldStore.*`, `game.worldStore.*`, `game.network.*`, `game.input.*`, `game.physics.*`, `game.water.*`, `game.randomTick.*` | per UI surface, per packet type, per input kind, per block |
 
 Frames are tracked as intervals between render callbacks. Every main-thread scope's self time inside an interval is added up as "busy"; the rest is "unattributed" (GC, compositor, vsync idle, GPU backpressure, unmeasured code). The 20 worst frames keep their top scopes, so a hitch can be traced to what ran in it.
 
@@ -115,7 +131,8 @@ renderer ──► profiled-render.ts ──► gl-instrumentation.ts + gpu-time
 | `profiled-render.ts`, `render-passes.ts` | Wraps `renderer.render`, optional pass split |
 | `gl-instrumentation.ts` (+ `gl-*.ts`) | Patches the GL context instance only while enabled, tracks uploads and GPU memory |
 | `gpu-timer.ts` | `EXT_disjoint_timer_query_webgl2` query pool, discards disjoint results |
-| `browser-observers.ts` | Long tasks, long animation frames, event loop lag, heap sampling, structured clone calibration |
+| `browser-observers.ts` | Long tasks, long animation frames, event loop lag and drift, input latency, resource timing, tab visibility, heap sampling, structured clone calibration |
+| `gpu-pass-registry.ts`, `gpu-pass-report.ts` | `measureGpuPass(label, fn)` for passes outside the scene render (CPU, GPU and draws per pass); the ranked pass table |
 | `scene-memory-sampler.ts` | Per-second gauges for chunk, light and geometry memory |
 | `report.ts`, `cost-model.ts`, `metric-names.ts`, `hints.ts`, `markdown-report.ts` | Ranking, efficiency lines, hints, markdown |
 | `benchmark.ts` | Phase plan, flight path, edit targets, runner |
@@ -126,6 +143,7 @@ Worker protocol: the pool sends `profile: true` with a request. The worker retur
 ## Caveats
 
 - `performance.now()` is clamped by the browser (about 100 microseconds, 5 when cross-origin isolated). Do not wrap sub-0.1 ms operations in a scope or section; count them with a counter.
+- A GPU pass cannot start inside another one (one timer query at a time), so a pass drawn inside the scene render (for example the far terrain depth copy) only gets a CPU scope.
 - GPU timing needs `EXT_disjoint_timer_query_webgl2`. Without it only CPU-side render cost is available.
 - Receive-side structured clone cost cannot be observed directly; it is estimated from bytes received and a startup calibration of `structuredClone` throughput.
 - JS heap numbers are quantized by Chrome, so allocation rate and GC counts are estimates.
@@ -158,6 +176,16 @@ import { workerSection, addWorkerCounter } from "../profiler/worker-recorder";
 const faces = workerSection("faceGeneration", () => buildFaces());
 addWorkerCounter("facesEmitted", faces);
 ```
+
+Passes rendered outside `renderer.render(scene, camera)` (shadow maps, post-processing, clouds) use `measureGpuPass`:
+
+```ts
+import { measureGpuPass } from "../profiler/gpu-pass-registry";
+
+measureGpuPass("shadowCascade0", () => renderer.render(casterScene, lightCamera));
+```
+
+Passes must not nest, and labels must come from a small fixed set.
 
 Naming: dotted, starting with where the cost lands (`main.`, `worker.`, `queue.`, `latency.`, `transfer.`, `bytes.`, `gpu.`, `gl.`, `memory.`, `game.`, `network.`). Reports group by these prefixes.
 
