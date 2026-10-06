@@ -4,6 +4,7 @@
 // hangs a skirt to the floor, two neighbouring tiles never leave a crack whatever their levels: the higher side's
 // skirt always spans the step, and the rest of it is hidden inside the lower tile's terrain.
 
+import { addWorkerCounter, workerSection } from "../../profiler/worker-recorder";
 import { sideColorOfBlock, topColorOfBlock, WATER_SURFACE_COLOR } from "../colors/block-color-table";
 import { NO_WATER, TILE_CELLS, WORLD_MIN_Y } from "../core/lod-constants";
 import { cellIndexOf, type TileSurface } from "../data/tile-surface";
@@ -111,9 +112,10 @@ class QuadWriter {
   }
 }
 
-/** Greedy rectangle cover of the cells whose key is not EMPTY_CELL_KEY; equal keys merge. */
-function greedyRectangles(keys: Float64Array, onRectangle: (minX: number, minZ: number, maxX: number, maxZ: number, firstIndex: number) => void) {
+/** Greedy rectangle cover of the cells whose key is not EMPTY_CELL_KEY; equal keys merge. Returns the rectangle count. */
+function greedyRectangles(keys: Float64Array, onRectangle: (minX: number, minZ: number, maxX: number, maxZ: number, firstIndex: number) => void): number {
   const consumed = new Uint8Array(TILE_CELLS * TILE_CELLS);
+  let rectangleCount = 0;
   for (let cellZ = 0; cellZ < TILE_CELLS; cellZ++) {
     for (let cellX = 0; cellX < TILE_CELLS; cellX++) {
       const index = cellIndexOf(cellX, cellZ);
@@ -131,8 +133,10 @@ function greedyRectangles(keys: Float64Array, onRectangle: (minX: number, minZ: 
       }
       for (let fillZ = cellZ; fillZ < endZ; fillZ++) for (let fillX = cellX; fillX < endX; fillX++) consumed[cellIndexOf(fillX, fillZ)] = 1;
       onRectangle(cellX, cellZ, endX, endZ, index);
+      rectangleCount++;
     }
   }
+  return rectangleCount;
 }
 
 function topLightOf(surface: TileSurface, index: number): number {
@@ -157,12 +161,14 @@ interface PendingWall {
 
 /**
  * Emits merged walls along one line of edges. `edgeAt(position)` describes the wall at each cell position along the
- * line (or null); consecutive identical walls merge into one quad.
+ * line (or null); consecutive identical walls merge into one quad. Returns how many cell edges had a wall.
  */
-function mergeWallsAlongLine(edgeAt: (position: number) => Omit<PendingWall, "start" | "end"> | null, emit: (wall: PendingWall) => void) {
+function mergeWallsAlongLine(edgeAt: (position: number) => Omit<PendingWall, "start" | "end"> | null, emit: (wall: PendingWall) => void): number {
   let pending: PendingWall | null = null;
+  let wallEdges = 0;
   for (let position = 0; position <= TILE_CELLS; position++) {
     const edge = position < TILE_CELLS ? edgeAt(position) : null;
+    if (edge !== null) wallEdges++;
     if (
       pending !== null &&
       edge !== null &&
@@ -177,87 +183,115 @@ function mergeWallsAlongLine(edgeAt: (position: number) => Omit<PendingWall, "st
     if (pending !== null) emit(pending);
     pending = edge === null ? null : { ...edge, start: position, end: position + 1 };
   }
+  return wallEdges;
 }
 
 export function meshTileSurface(surface: TileSurface): TileMesh {
-  const writer = new QuadWriter();
   const topColors = new Uint32Array(TILE_CELLS * TILE_CELLS);
   const sideColors = new Uint32Array(TILE_CELLS * TILE_CELLS);
-  for (let index = 0; index < TILE_CELLS * TILE_CELLS; index++) {
-    topColors[index] = topColorOfBlock(surface.topBlocks[index]!);
-    sideColors[index] = sideColorOfBlock(surface.sideBlocks[index]!);
-  }
-
   const topKeys = new Float64Array(TILE_CELLS * TILE_CELLS);
-  for (let index = 0; index < topKeys.length; index++) {
-    topKeys[index] = (surface.heights[index]! + 1024) * 2 ** 32 + topColors[index]! * 16 + topLightOf(surface, index);
-  }
-  greedyRectangles(topKeys, (minX, minZ, maxX, maxZ, firstIndex) => {
-    writer.topQuad(minX, minZ, maxX, maxZ, surface.heights[firstIndex]!, topLightOf(surface, firstIndex), topColors[firstIndex]!, LodMaterial.Terrain);
+  const writer = workerSection("lod.mesh.prepare", () => {
+    const quadWriter = new QuadWriter();
+    for (let index = 0; index < TILE_CELLS * TILE_CELLS; index++) {
+      topColors[index] = topColorOfBlock(surface.topBlocks[index]!);
+      sideColors[index] = sideColorOfBlock(surface.sideBlocks[index]!);
+    }
+    for (let index = 0; index < topKeys.length; index++) {
+      topKeys[index] = (surface.heights[index]! + 1024) * 2 ** 32 + topColors[index]! * 16 + topLightOf(surface, index);
+    }
+    return quadWriter;
   });
+
+  const topRectangles = workerSection("lod.mesh.tops", () =>
+    greedyRectangles(topKeys, (minX, minZ, maxX, maxZ, firstIndex) => {
+      writer.topQuad(minX, minZ, maxX, maxZ, surface.heights[firstIndex]!, topLightOf(surface, firstIndex), topColors[firstIndex]!, LodMaterial.Terrain);
+    }),
+  );
 
   const wallBetween = (higherIndex: number, lowerHeight: number) => {
     const topY = surface.heights[higherIndex]!;
     return { bottomY: lowerHeight, topY, color: sideColors[higherIndex]!, light: wallLightOf(surface, higherIndex, topY) };
   };
 
-  for (let planeX = 1; planeX < TILE_CELLS; planeX++) {
-    for (const facesPositiveX of [true, false]) {
-      mergeWallsAlongLine(
-        (cellZ) => {
-          const westIndex = cellIndexOf(planeX - 1, cellZ);
-          const eastIndex = cellIndexOf(planeX, cellZ);
-          const higherIndex = facesPositiveX ? westIndex : eastIndex;
-          const lowerIndex = facesPositiveX ? eastIndex : westIndex;
-          if (surface.heights[higherIndex]! <= surface.heights[lowerIndex]!) return null;
-          return wallBetween(higherIndex, surface.heights[lowerIndex]!);
-        },
-        (wall) => writer.wallAlongZ(planeX, wall.start, wall.end, wall.bottomY, wall.topY, facesPositiveX, wall.light, wall.color),
-      );
+  const quadsBeforeWalls = writer.quadCount;
+  const innerWallEdges = workerSection("lod.mesh.walls", () => {
+    let wallEdges = 0;
+    for (let planeX = 1; planeX < TILE_CELLS; planeX++) {
+      for (const facesPositiveX of [true, false]) {
+        wallEdges += mergeWallsAlongLine(
+          (cellZ) => {
+            const westIndex = cellIndexOf(planeX - 1, cellZ);
+            const eastIndex = cellIndexOf(planeX, cellZ);
+            const higherIndex = facesPositiveX ? westIndex : eastIndex;
+            const lowerIndex = facesPositiveX ? eastIndex : westIndex;
+            if (surface.heights[higherIndex]! <= surface.heights[lowerIndex]!) return null;
+            return wallBetween(higherIndex, surface.heights[lowerIndex]!);
+          },
+          (wall) => writer.wallAlongZ(planeX, wall.start, wall.end, wall.bottomY, wall.topY, facesPositiveX, wall.light, wall.color),
+        );
+      }
     }
-  }
-  for (let planeZ = 1; planeZ < TILE_CELLS; planeZ++) {
-    for (const facesPositiveZ of [true, false]) {
-      mergeWallsAlongLine(
-        (cellX) => {
-          const northIndex = cellIndexOf(cellX, planeZ - 1);
-          const southIndex = cellIndexOf(cellX, planeZ);
-          const higherIndex = facesPositiveZ ? northIndex : southIndex;
-          const lowerIndex = facesPositiveZ ? southIndex : northIndex;
-          if (surface.heights[higherIndex]! <= surface.heights[lowerIndex]!) return null;
-          return wallBetween(higherIndex, surface.heights[lowerIndex]!);
-        },
-        (wall) => writer.wallAlongX(planeZ, wall.start, wall.end, wall.bottomY, wall.topY, facesPositiveZ, wall.light, wall.color),
-      );
+    for (let planeZ = 1; planeZ < TILE_CELLS; planeZ++) {
+      for (const facesPositiveZ of [true, false]) {
+        wallEdges += mergeWallsAlongLine(
+          (cellX) => {
+            const northIndex = cellIndexOf(cellX, planeZ - 1);
+            const southIndex = cellIndexOf(cellX, planeZ);
+            const higherIndex = facesPositiveZ ? northIndex : southIndex;
+            const lowerIndex = facesPositiveZ ? southIndex : northIndex;
+            if (surface.heights[higherIndex]! <= surface.heights[lowerIndex]!) return null;
+            return wallBetween(higherIndex, surface.heights[lowerIndex]!);
+          },
+          (wall) => writer.wallAlongX(planeZ, wall.start, wall.end, wall.bottomY, wall.topY, facesPositiveZ, wall.light, wall.color),
+        );
+      }
     }
-  }
+    return wallEdges;
+  });
+  const quadsBeforeSkirts = writer.quadCount;
 
-  const skirtOf = (index: number) => wallBetween(index, SKIRT_BOTTOM_Y);
-  mergeWallsAlongLine(
-    (cellZ) => skirtOf(cellIndexOf(0, cellZ)),
-    (wall) => writer.wallAlongZ(0, wall.start, wall.end, wall.bottomY, wall.topY, false, wall.light, wall.color),
-  );
-  mergeWallsAlongLine(
-    (cellZ) => skirtOf(cellIndexOf(TILE_CELLS - 1, cellZ)),
-    (wall) => writer.wallAlongZ(TILE_CELLS, wall.start, wall.end, wall.bottomY, wall.topY, true, wall.light, wall.color),
-  );
-  mergeWallsAlongLine(
-    (cellX) => skirtOf(cellIndexOf(cellX, 0)),
-    (wall) => writer.wallAlongX(0, wall.start, wall.end, wall.bottomY, wall.topY, false, wall.light, wall.color),
-  );
-  mergeWallsAlongLine(
-    (cellX) => skirtOf(cellIndexOf(cellX, TILE_CELLS - 1)),
-    (wall) => writer.wallAlongX(TILE_CELLS, wall.start, wall.end, wall.bottomY, wall.topY, true, wall.light, wall.color),
-  );
+  workerSection("lod.mesh.skirts", () => {
+    const skirtOf = (index: number) => wallBetween(index, SKIRT_BOTTOM_Y);
+    mergeWallsAlongLine(
+      (cellZ) => skirtOf(cellIndexOf(0, cellZ)),
+      (wall) => writer.wallAlongZ(0, wall.start, wall.end, wall.bottomY, wall.topY, false, wall.light, wall.color),
+    );
+    mergeWallsAlongLine(
+      (cellZ) => skirtOf(cellIndexOf(TILE_CELLS - 1, cellZ)),
+      (wall) => writer.wallAlongZ(TILE_CELLS, wall.start, wall.end, wall.bottomY, wall.topY, true, wall.light, wall.color),
+    );
+    mergeWallsAlongLine(
+      (cellX) => skirtOf(cellIndexOf(cellX, 0)),
+      (wall) => writer.wallAlongX(0, wall.start, wall.end, wall.bottomY, wall.topY, false, wall.light, wall.color),
+    );
+    mergeWallsAlongLine(
+      (cellX) => skirtOf(cellIndexOf(cellX, TILE_CELLS - 1)),
+      (wall) => writer.wallAlongX(TILE_CELLS, wall.start, wall.end, wall.bottomY, wall.topY, true, wall.light, wall.color),
+    );
+  });
 
   const terrainQuadCount = writer.quadCount;
-  const waterKeys = new Float64Array(TILE_CELLS * TILE_CELLS);
-  for (let index = 0; index < waterKeys.length; index++) {
-    const water = surface.waterLevels[index]!;
-    waterKeys[index] = water !== NO_WATER && water > surface.heights[index]! ? water : EMPTY_CELL_KEY;
-  }
-  greedyRectangles(waterKeys, (minX, minZ, maxX, maxZ, firstIndex) => {
-    writer.topQuad(minX, minZ, maxX, maxZ, surface.waterLevels[firstIndex]!, MAXIMUM_SKY_LIGHT, WATER_SURFACE_COLOR, LodMaterial.Water);
+  let waterCells = 0;
+  const waterRectangles = workerSection("lod.mesh.water", () => {
+    const waterKeys = new Float64Array(TILE_CELLS * TILE_CELLS);
+    for (let index = 0; index < waterKeys.length; index++) {
+      const water = surface.waterLevels[index]!;
+      const isWet = water !== NO_WATER && water > surface.heights[index]!;
+      waterKeys[index] = isWet ? water : EMPTY_CELL_KEY;
+      if (isWet) waterCells++;
+    }
+    return greedyRectangles(waterKeys, (minX, minZ, maxX, maxZ, firstIndex) => {
+      writer.topQuad(minX, minZ, maxX, maxZ, surface.waterLevels[firstIndex]!, MAXIMUM_SKY_LIGHT, WATER_SURFACE_COLOR, LodMaterial.Water);
+    });
   });
-  return writer.finish(terrainQuadCount);
+  const mesh = workerSection("lod.mesh.finish", () => writer.finish(terrainQuadCount));
+  addWorkerCounter("lodMeshTopCells", TILE_CELLS * TILE_CELLS);
+  addWorkerCounter("lodMeshTopRectangles", topRectangles);
+  addWorkerCounter("lodMeshWallEdges", innerWallEdges);
+  addWorkerCounter("lodMeshWallQuads", quadsBeforeSkirts - quadsBeforeWalls);
+  addWorkerCounter("lodMeshSkirtQuads", terrainQuadCount - quadsBeforeSkirts);
+  addWorkerCounter("lodMeshWaterCells", waterCells);
+  addWorkerCounter("lodMeshWaterRectangles", waterRectangles);
+  addWorkerCounter("lodMeshColorLookups", 2 * TILE_CELLS * TILE_CELLS);
+  return mesh;
 }
