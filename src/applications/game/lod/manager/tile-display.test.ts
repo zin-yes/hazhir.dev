@@ -1,7 +1,8 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import * as THREE from "three";
 import { childAddressesOf, tileKeyOf, type TileAddress } from "../core/tile-address";
 import type { LodTileMesh } from "../rendering/lod-tile-mesh";
+import { counterTotal, gaugeLast, startLodProfiling, stopLodProfiling } from "../testing/profiler-readout.test-helper";
 import { TileDisplay } from "./tile-display";
 
 function fakeTileMesh(name: string): LodTileMesh {
@@ -60,5 +61,45 @@ describe("tile display cross-fades", () => {
     display.reconcile([first], meshOf, false);
     expect(visibleFraction(meshes.get(0)!.fade)).toBeCloseTo(firstVisibleBefore, 10);
     expect(firstVisibleBefore).toBeCloseTo(0.75, 10);
+  });
+});
+
+describe("tile display profiling", () => {
+  beforeEach(startLodProfiling);
+  afterEach(stopLodProfiling);
+
+  test("a parent replaced by its children is counted as four added, one fading out, then four kept and one removed", () => {
+    const display = new TileDisplay(new THREE.Scene(), 300);
+    const parent: TileAddress = { level: 3, tileX: 1, tileZ: 1 };
+    const children = childAddressesOf(parent);
+    const meshes = new Map<number, LodTileMesh>();
+    const meshOf = (address: TileAddress) => {
+      const key = tileKeyOf(address.level, address.tileX, address.tileZ);
+      if (!meshes.has(key)) {
+        const tileMesh = fakeTileMesh("tile");
+        tileMesh.mesh.geometry.addGroup(0, 600 * (address.level === 3 ? 4 : 1), 0);
+        meshes.set(key, tileMesh);
+      }
+      return meshes.get(key)!;
+    };
+    display.reconcile([parent], meshOf, true);
+    display.reconcile(children, meshOf, false);
+    display.reconcile(children, meshOf, false);
+
+    expect(counterTotal("game.lod.display.added")).toBe(5);
+    expect(counterTotal("game.lod.display.added.L2")).toBe(4);
+    expect(counterTotal("game.lod.display.fadeOutStarted.L3")).toBe(1);
+    expect(counterTotal("game.lod.display.kept")).toBe(4);
+
+    display.reportDrawnToProfiler();
+    expect(gaugeLast("game.lod.display.tiles")).toBe(5);
+    expect(gaugeLast("game.lod.display.leaving")).toBe(1);
+    expect(gaugeLast("game.lod.display.triangles.L3")).toBe(800);
+    expect(gaugeLast("game.lod.display.triangles.L2")).toBe(800);
+
+    display.advance(400);
+    expect(counterTotal("game.lod.display.removed")).toBe(1);
+    expect(counterTotal("game.lod.display.removed.L3")).toBe(1);
+    expect(gaugeLast("game.lod.display.fading")).toBe(0);
   });
 });
