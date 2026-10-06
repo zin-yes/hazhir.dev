@@ -37,6 +37,9 @@ export const DIMENSIONS = {
   simulationSystem: "sim.system",
   /** Main-thread time per UI surface. */
   uiSurface: "ui.surface",
+  // shadows, post and sky
+  /** Shadow cascade draws: calls and CPU time per cascade (`cascade0`, `cascade1`, `cascade2`). */
+  shadowCascade: "shadow.cascade",
 } as const;
 
 export type DimensionName = (typeof DIMENSIONS)[keyof typeof DIMENSIONS];
