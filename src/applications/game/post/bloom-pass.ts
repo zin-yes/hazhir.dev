@@ -4,10 +4,18 @@
 // glints) leaves the bloom empty, so ordinary surfaces stay crisp.
 
 import * as THREE from "three";
+import { profiler } from "../profiler";
+import { measureGpuPass } from "../profiler/gpu-pass-registry";
 import { EMISSIVE_BLOOM_GAIN } from "../sky/surface-lighting";
 import { skyLightingUniforms } from "../sky/sky-lighting";
+import { DEPTH_BYTES_PER_PIXEL, HALF_FLOAT_RGBA_BYTES_PER_PIXEL, estimateTargetBytes } from "./render-target-memory";
 
 const BLOOM_LEVELS = 5;
+/** Profiler names per level, built once so a frame never builds a string. Up passes are named by the level they write into. */
+const DOWNSAMPLE_PASS_LABELS = Array.from({ length: BLOOM_LEVELS }, (_, level) => `bloomDown${level}`);
+const UPSAMPLE_PASS_LABELS = Array.from({ length: BLOOM_LEVELS - 1 }, (_, level) => `bloomUp${level}`);
+const LEVEL_MEMORY_GAUGES = Array.from({ length: BLOOM_LEVELS }, (_, level) => `memory.post.bloomLevel${level}Bytes`);
+const COMPOSITE_PASS_LABEL = "bloomComposite";
 const BLOOM_STRENGTH = 0.9;
 /** Colour above this (display space) feeds the bloom. */
 const BLOOM_THRESHOLD = 1.0;
@@ -107,6 +115,10 @@ function createDepthStencilTexture(width: number, height: number): THREE.DepthTe
   return depthTexture;
 }
 
+function estimateColorTargetBytes(width: number, height: number, withDepth: boolean): number {
+  return estimateTargetBytes(width, height, HALF_FLOAT_RGBA_BYTES_PER_PIXEL + (withDepth ? DEPTH_BYTES_PER_PIXEL : 0));
+}
+
 function createTarget(width: number, height: number, withDepth: boolean): THREE.WebGLRenderTarget {
   const target = new THREE.WebGLRenderTarget(width, height, {
     type: THREE.HalfFloatType,
@@ -125,6 +137,8 @@ function createTarget(width: number, height: number, withDepth: boolean): THREE.
 export class BloomPass {
   private sceneTarget: THREE.WebGLRenderTarget | null = null;
   private levelTargets: THREE.WebGLRenderTarget[] = [];
+  private sceneTargetBytes = 0;
+  private levelTargetBytes: number[] = [];
   private isBloomEnabled = false;
   private isOffscreenRequired = false;
   private readonly size = new THREE.Vector2();
@@ -164,6 +178,7 @@ export class BloomPass {
 
   setBloomEnabled(isEnabled: boolean): void {
     if (isEnabled === this.isBloomEnabled) return;
+    profiler.addCounter("game.post.bloom.enabledChanges");
     this.isBloomEnabled = isEnabled;
     skyLightingUniforms.skyEmissiveGain.value = isEnabled ? EMISSIVE_BLOOM_GAIN : 1;
     this.releaseTargets();
@@ -172,31 +187,40 @@ export class BloomPass {
   /** Effects that sample the finished opaque world (water reflections) need it in an offscreen target. */
   setOffscreenRequired(isRequired: boolean): void {
     if (isRequired === this.isOffscreenRequired) return;
+    profiler.addCounter("game.post.offscreenRequiredChanges");
     this.isOffscreenRequired = isRequired;
     this.releaseTargets();
   }
 
   /** Points the renderer at the offscreen scene target (sized to the canvas); call before drawing the world. */
   beginFrame(): void {
-    if (!this.isOffscreen) return;
-    this.renderer.getDrawingBufferSize(this.size);
-    const width = Math.max(1, Math.floor(this.size.x));
-    const height = Math.max(1, Math.floor(this.size.y));
-    if (!this.sceneTarget || this.sceneTarget.width !== width || this.sceneTarget.height !== height) {
-      this.releaseTargets();
-      this.sceneTarget = createTarget(width, height, true);
-      if (this.isBloomEnabled) {
-        this.levelTargets = Array.from({ length: BLOOM_LEVELS }, (_, level) =>
-          createTarget(Math.max(1, width >> (level + 1)), Math.max(1, height >> (level + 1)), false),
-        );
+    const scopeToken = profiler.begin("main.post.bloom.beginFrame");
+    try {
+      this.countFrameMode();
+      if (!this.isOffscreen) {
+        if (profiler.enabled) profiler.sampleGauge("memory.post.totalBytes", 0, "bytes");
+        return;
       }
+      this.renderer.getDrawingBufferSize(this.size);
+      const width = Math.max(1, Math.floor(this.size.x));
+      const height = Math.max(1, Math.floor(this.size.y));
+      if (!this.sceneTarget || this.sceneTarget.width !== width || this.sceneTarget.height !== height) {
+        this.createTargets(width, height);
+      }
+      if (profiler.enabled) this.sampleMemoryGauges();
+      this.renderer.setRenderTarget(this.sceneTarget);
+    } finally {
+      profiler.end(scopeToken);
     }
-    this.renderer.setRenderTarget(this.sceneTarget);
   }
 
   /** Spreads the glow and writes the finished picture to the canvas; call after the whole world is drawn. */
   endFrame(): void {
-    if (!this.isOffscreen || !this.sceneTarget) return;
+    if (!this.isOffscreen || !this.sceneTarget) {
+      profiler.addCounter("game.post.bloom.endFrameSkipped");
+      return;
+    }
+    const scopeToken = profiler.begin("main.post.bloom.endFrame");
     const previousAutoClear = this.renderer.autoClear;
     this.renderer.autoClear = false;
     try {
@@ -204,31 +228,97 @@ export class BloomPass {
       this.compositeUniforms.scene.value = this.sceneTarget.texture;
       this.compositeUniforms.bloom.value = this.levelTargets[0]?.texture ?? this.sceneTarget.texture;
       this.compositeUniforms.strength.value = this.levelTargets.length > 0 ? BLOOM_STRENGTH : 0;
-      this.renderer.setRenderTarget(null);
-      this.renderer.render(this.compositeScene, this.camera);
+      if (profiler.enabled) {
+        measureGpuPass(COMPOSITE_PASS_LABEL, () => this.renderFullscreen(null, this.compositeScene));
+      } else {
+        this.renderFullscreen(null, this.compositeScene);
+      }
+      profiler.addCounter("game.post.bloom.composites");
     } finally {
       this.renderer.setRenderTarget(null);
       this.renderer.autoClear = previousAutoClear;
+      profiler.end(scopeToken);
     }
+  }
+
+  private countFrameMode(): void {
+    if (!profiler.enabled) return;
+    profiler.addCounter(this.isBloomEnabled ? "game.post.bloom.frames.enabled" : "game.post.bloom.frames.disabled");
+    if (!this.isOffscreen) profiler.addCounter("game.post.frames.drawnToCanvas");
+    else if (!this.isBloomEnabled) profiler.addCounter("game.post.frames.offscreenWithoutBloom");
+    else profiler.addCounter("game.post.frames.offscreenWithBloom");
+  }
+
+  private createTargets(width: number, height: number): void {
+    const scopeToken = profiler.begin("main.post.bloom.createTargets");
+    try {
+      profiler.addCounter(this.sceneTarget ? "game.post.bloom.targetResizes" : "game.post.bloom.targetCreates");
+      this.releaseTargets();
+      this.sceneTarget = createTarget(width, height, true);
+      this.sceneTargetBytes = estimateColorTargetBytes(width, height, true);
+      if (this.isBloomEnabled) {
+        const levelSizes = Array.from({ length: BLOOM_LEVELS }, (_, level) => ({
+          levelWidth: Math.max(1, width >> (level + 1)),
+          levelHeight: Math.max(1, height >> (level + 1)),
+        }));
+        this.levelTargets = levelSizes.map(({ levelWidth, levelHeight }) => createTarget(levelWidth, levelHeight, false));
+        this.levelTargetBytes = levelSizes.map(({ levelWidth, levelHeight }) => estimateColorTargetBytes(levelWidth, levelHeight, false));
+      }
+      profiler.addCounter("game.post.bloom.targetsCreated", 1 + this.levelTargets.length);
+      profiler.recordBytes("bytes.post.targetsAllocated", this.sceneTargetBytes + this.totalLevelBytes());
+    } finally {
+      profiler.end(scopeToken);
+    }
+  }
+
+  private totalLevelBytes(): number {
+    return this.levelTargetBytes.reduce((total, bytes) => total + bytes, 0);
+  }
+
+  private sampleMemoryGauges(): void {
+    profiler.sampleGauge("memory.post.sceneTargetBytes", this.sceneTargetBytes, "bytes");
+    this.levelTargetBytes.forEach((bytes, level) => profiler.sampleGauge(LEVEL_MEMORY_GAUGES[level]!, bytes, "bytes"));
+    const levelBytes = this.totalLevelBytes();
+    profiler.sampleGauge("memory.post.bloomLevelsBytes", levelBytes, "bytes");
+    profiler.sampleGauge("memory.post.totalBytes", this.sceneTargetBytes + levelBytes, "bytes");
+    profiler.sampleGauge("game.post.sceneTargetPixels", (this.sceneTarget?.width ?? 0) * (this.sceneTarget?.height ?? 0), "pixels");
+  }
+
+  private renderFullscreen(target: THREE.WebGLRenderTarget | null, scene: THREE.Scene): void {
+    this.renderer.setRenderTarget(target);
+    this.renderer.render(scene, this.camera);
   }
 
   private spreadGlow(): void {
     if (!this.sceneTarget) return;
-    let source: THREE.WebGLRenderTarget = this.sceneTarget;
-    this.levelTargets.forEach((levelTarget, level) => {
-      this.downsampleUniforms.source.value = source.texture;
-      this.downsampleUniforms.sourceTexelSize.value.set(0.5 / source.width, 0.5 / source.height);
-      this.downsampleUniforms.isFirstLevel.value = level === 0 ? 1 : 0;
-      this.renderer.setRenderTarget(levelTarget);
-      this.renderer.render(this.downsampleScene, this.camera);
-      source = levelTarget;
-    });
-    for (let level = BLOOM_LEVELS - 1; level > 0; level--) {
-      const smaller = this.levelTargets[level]!;
-      this.upsampleUniforms.source.value = smaller.texture;
-      this.upsampleUniforms.sourceTexelSize.value.set(0.5 / smaller.width, 0.5 / smaller.height);
-      this.renderer.setRenderTarget(this.levelTargets[level - 1]!);
-      this.renderer.render(this.upsampleScene, this.camera);
+    const scopeToken = profiler.begin("main.post.bloom.spreadGlow");
+    try {
+      let source: THREE.WebGLRenderTarget = this.sceneTarget;
+      this.levelTargets.forEach((levelTarget, level) => {
+        this.downsampleUniforms.source.value = source.texture;
+        this.downsampleUniforms.sourceTexelSize.value.set(0.5 / source.width, 0.5 / source.height);
+        this.downsampleUniforms.isFirstLevel.value = level === 0 ? 1 : 0;
+        if (profiler.enabled) {
+          measureGpuPass(DOWNSAMPLE_PASS_LABELS[level]!, () => this.renderFullscreen(levelTarget, this.downsampleScene));
+        } else {
+          this.renderFullscreen(levelTarget, this.downsampleScene);
+        }
+        source = levelTarget;
+      });
+      for (let level = BLOOM_LEVELS - 1; level > 0; level--) {
+        const smaller = this.levelTargets[level]!;
+        const larger = this.levelTargets[level - 1]!;
+        this.upsampleUniforms.source.value = smaller.texture;
+        this.upsampleUniforms.sourceTexelSize.value.set(0.5 / smaller.width, 0.5 / smaller.height);
+        if (profiler.enabled) {
+          measureGpuPass(UPSAMPLE_PASS_LABELS[level - 1]!, () => this.renderFullscreen(larger, this.upsampleScene));
+        } else {
+          this.renderFullscreen(larger, this.upsampleScene);
+        }
+      }
+      profiler.addCounter("game.post.bloom.glowSpreads");
+    } finally {
+      profiler.end(scopeToken);
     }
   }
 
@@ -243,9 +333,13 @@ export class BloomPass {
   }
 
   private releaseTargets(): void {
+    const releasedCount = (this.sceneTarget ? 1 : 0) + this.levelTargets.length;
+    if (releasedCount > 0) profiler.addCounter("game.post.bloom.targetsReleased", releasedCount);
     this.sceneTarget?.dispose();
     this.sceneTarget = null;
+    this.sceneTargetBytes = 0;
     for (const target of this.levelTargets) target.dispose();
     this.levelTargets = [];
+    this.levelTargetBytes = [];
   }
 }
