@@ -19,7 +19,7 @@ import {
 } from "../edits/apply-block-edits";
 import { BlockEditBatch, type BlockEdit } from "../edits/block-edit-batch";
 import { CELLS_PER_CHUNK, type LightChunkSource } from "../edits/chunk-cluster";
-import { mergeLightReportingFaces } from "../edits/merge-light";
+import { drainLightMergeStats, mergeLightReportingFaces } from "../edits/merge-light";
 import { AFFINITY_TILE_SIZE_IN_CHUNKS, chunkColumnAffinityKey } from "../worker-pool";
 import { collectSurroundingSlabs, type LitChunkView } from "../workers/region-surroundings";
 import type { RegionLightResult } from "../workers/region-lighting";
@@ -115,12 +115,32 @@ export function tileCoherentPriority(
   return tilePriority + tieBreaker * TILE_TIE_BREAKER_STEP + serpentineIndex * TILE_ORDER_STEP;
 }
 
-function countSetFaceBits(changedFaces: number): number {
+/** Merge faces in FACE_NEIGHBOR_KEY_DELTAS order (+x, -x, +y, -y, +z, -z). */
+const LIGHT_MERGE_FACE_COUNTERS = ["posX", "negX", "posY", "negY", "posZ", "negZ"].map(
+  (face) => `game.light.mergeSeam.${face}`,
+);
+
+/** Counts which chunk faces a merge brightened (the seams that force neighbor remeshes) and returns how many. */
+function recordMergeSeams(changedFaces: number): number {
   let count = 0;
   for (let faceBit = 0; faceBit < FACE_NEIGHBOR_KEY_DELTAS.length; faceBit++) {
-    if ((changedFaces & (1 << faceBit)) !== 0) count++;
+    if ((changedFaces & (1 << faceBit)) === 0) continue;
+    count++;
+    profiler.addCounter(LIGHT_MERGE_FACE_COUNTERS[faceBit]!);
   }
   return count;
+}
+
+function publishLightMergeStats(): void {
+  const merge = drainLightMergeStats();
+  profiler.addCounter("game.light.merge.wholeChunkMerges", merge.reportingMerges);
+  profiler.addCounter("game.light.merge.wholeChunkMergesChanged", merge.reportingMergesChanged);
+  profiler.addCounter("game.light.merge.wordsCompared", merge.wordsCompared);
+  profiler.addCounter("game.light.merge.wordsDiffering", merge.wordsDiffering);
+  profiler.addCounter("game.light.merge.wordsBrightened", merge.wordsBrightened);
+  profiler.addCounter("game.light.merge.cellsBrightened", merge.cellsBrightened);
+  profiler.addCounter("game.light.merge.unalignedMerges", merge.unalignedMerges);
+  profiler.addCounter("game.light.merge.inPlaceMerges", merge.inPlaceMerges);
 }
 
 /** The affinity tile a column belongs to, as one number. */
@@ -1161,12 +1181,13 @@ export class ChunkPipeline {
       const changedFaces = mergeLightReportingFaces(surrounding.ensureOwnLight() as Uint8Array, update.light);
       if (changedFaces !== 0) {
         mergesChangedLight++;
-        faceBitsChanged += countSetFaceBits(changedFaces);
+        faceBitsChanged += recordMergeSeams(changedFaces);
         this.meshes.markLightChanged(surrounding, changedFaces);
       }
     }
     profiler.end(surroundingToken);
     profiler.end(mergeToken);
+    if (profiler.enabled) publishLightMergeStats();
     profiler.addCounter("game.light.surroundingUpdates", result.surroundingUpdates.length);
     profiler.addCounter("game.light.surroundingMergesChanged", mergesChangedLight);
     profiler.addCounter("game.light.surroundingMergesUnchanged", result.surroundingUpdates.length - mergesChangedLight - mergesSkippedNotLit);

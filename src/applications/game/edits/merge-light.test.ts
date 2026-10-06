@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { NEGATIVE_X, NEGATIVE_Y, POSITIVE_X, POSITIVE_Y, POSITIVE_Z } from "./chunk-cluster";
 import {
   LIGHT_MERGE_CHANGED,
+  drainLightMergeStats,
   mergeLightInPlace,
   mergeLightReportingFaces,
   mergeLightUpdatesInPlace,
@@ -105,5 +106,29 @@ describe("mergeLightReportingFaces", () => {
     const changes = mergeLightReportingFaces(target, update);
     expect(changes).toBe(LIGHT_MERGE_CHANGED | (1 << POSITIVE_X) | (1 << NEGATIVE_Y) | (1 << POSITIVE_Z));
     expect(target[cellAt(31, 0, 31)]).toBe(0xfa);
+  });
+});
+
+describe("light merge stats", () => {
+  const cellAt = (x: number, y: number, z: number) => (x << 10) | (y << 5) | z;
+
+  test("count the words compared, the cells brightened and the faces reported, then reset when drained", () => {
+    drainLightMergeStats();
+    const target = new Uint8Array(CHUNK_CELLS).fill(0xf0);
+    const update = new Uint8Array(CHUNK_CELLS);
+    update[cellAt(31, 0, 31)] = 0x0a;
+    update[cellAt(31, 0, 30)] = 0x0b;
+    update[cellAt(10, 10, 10)] = 0x05;
+    mergeLightReportingFaces(target, update);
+    mergeLightReportingFaces(target, update);
+
+    const stats = drainLightMergeStats();
+    expect(stats.reportingMerges).toBe(2);
+    expect(stats.reportingMergesChanged).toBe(1);
+    expect(stats.wordsCompared).toBe(2 * (CHUNK_CELLS / 4));
+    expect(stats.wordsBrightened).toBe(2);
+    expect(stats.cellsBrightened).toBe(3);
+    expect(stats.faceBitsReported).toBe(3);
+    expect(drainLightMergeStats().reportingMerges).toBe(0);
   });
 });
