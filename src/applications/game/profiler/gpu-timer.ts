@@ -1,7 +1,8 @@
 import type { Profiler } from "./profiler";
 
 const DISJOINT_TIMER_EXTENSION = "EXT_disjoint_timer_query_webgl2";
-const DEFAULT_MAX_IN_FLIGHT_QUERIES = 8;
+/** A frame has about 20 timed passes (scene, shadow cascades, bloom levels, clouds, ...) and results arrive several frames late. */
+const DEFAULT_MAX_IN_FLIGHT_QUERIES = 160;
 const NANOSECONDS_PER_MILLISECOND = 1_000_000;
 const MAX_TRACKED_INCOMPLETE_FRAMES = 64;
 

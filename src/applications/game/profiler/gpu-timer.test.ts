@@ -155,4 +155,17 @@ describe("GpuTimer", () => {
     expect(timer.begin("scene", 1)).toBe(true);
     expect(timer.begin("bloom", 1)).toBe(false);
   });
+
+  test("keeps every pass of several frames in flight while the GPU lags behind", () => {
+    const { timer, profiler } = setup();
+    const passesPerFrame = 20;
+    const lagFrames = 6;
+    for (let frame = 1; frame <= lagFrames; frame++) {
+      for (let pass = 0; pass < passesPerFrame; pass++) {
+        expect(timer.begin(`pass${pass}`, frame)).toBe(true);
+        timer.end();
+      }
+    }
+    expect(profiler.snapshot().counters.find((c) => c.name === "gpu.timer.dropped")).toBeUndefined();
+  });
 });
