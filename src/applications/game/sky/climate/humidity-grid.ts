@@ -1,6 +1,8 @@
+import { addWorkerCounter, endWorkerSection, startWorkerSampledSection, workerSection } from "../../profiler/worker-recorder";
 import { getTerrainOnlyGenerator } from "../../worldgen/overworld-world";
 import { loadTerralithRegistries } from "../../worldgen/terralith/load-terralith-registries";
 
+const BIOME_LOOKUP_SAMPLE_EVERY = 32;
 const SAMPLE_HEIGHT_ABOVE_SEA_LEVEL = 3;
 const FALLBACK_DOWNFALL = 0.5;
 const MAX_CACHED_SEEDS = 2;
@@ -12,6 +14,7 @@ function downfallCacheForSeed(seed: number): Map<string, number> {
   if (downfallByBiomeName === undefined) {
     if (downfallByBiomeNameBySeed.size >= MAX_CACHED_SEEDS) {
       downfallByBiomeNameBySeed.delete(downfallByBiomeNameBySeed.keys().next().value as number);
+      addWorkerCounter("downfallCacheSeedsEvicted", 1);
     }
     downfallByBiomeName = new Map();
     downfallByBiomeNameBySeed.set(seed, downfallByBiomeName);
@@ -38,24 +41,33 @@ export function sampleHumidityGrid(
   cellSizeBlocks: number,
   gridCells: number,
 ): Uint8Array {
-  const generator = getTerrainOnlyGenerator(seed);
+  const generator = workerSection("acquireGenerator", () => getTerrainOnlyGenerator(seed));
   const sampleY = generator.settings.seaLevel + SAMPLE_HEIGHT_ABOVE_SEA_LEVEL;
   const downfallByBiomeName = downfallCacheForSeed(seed);
   const humidityBytes = new Uint8Array(gridCells * gridCells);
-  for (let cellZ = 0; cellZ < gridCells; cellZ++) {
-    for (let cellX = 0; cellX < gridCells; cellX++) {
-      const biomeName = generator.biomeAt(
-        originBlockX + cellX * cellSizeBlocks,
-        sampleY,
-        originBlockZ + cellZ * cellSizeBlocks,
-      );
-      let downfall = downfallByBiomeName.get(biomeName);
-      if (downfall === undefined) {
-        downfall = lookupDownfall(biomeName);
-        downfallByBiomeName.set(biomeName, downfall);
+  let downfallCacheMisses = 0;
+  workerSection("sampleGrid", () => {
+    for (let cellZ = 0; cellZ < gridCells; cellZ++) {
+      for (let cellX = 0; cellX < gridCells; cellX++) {
+        let biomeName: string;
+        startWorkerSampledSection("biomeAt", BIOME_LOOKUP_SAMPLE_EVERY);
+        try {
+          biomeName = generator.biomeAt(originBlockX + cellX * cellSizeBlocks, sampleY, originBlockZ + cellZ * cellSizeBlocks);
+        } finally {
+          endWorkerSection();
+        }
+        let downfall = downfallByBiomeName.get(biomeName);
+        if (downfall === undefined) {
+          downfallCacheMisses++;
+          downfall = workerSection("lookupDownfall", () => lookupDownfall(biomeName));
+          downfallByBiomeName.set(biomeName, downfall);
+        }
+        humidityBytes[cellZ * gridCells + cellX] = Math.round(Math.min(1, Math.max(0, downfall)) * 255);
       }
-      humidityBytes[cellZ * gridCells + cellX] = Math.round(Math.min(1, Math.max(0, downfall)) * 255);
     }
-  }
+  });
+  addWorkerCounter("cellsSampled", gridCells * gridCells);
+  addWorkerCounter("downfallCacheMisses", downfallCacheMisses);
+  addWorkerCounter("downfallCacheHits", gridCells * gridCells - downfallCacheMisses);
   return humidityBytes;
 }

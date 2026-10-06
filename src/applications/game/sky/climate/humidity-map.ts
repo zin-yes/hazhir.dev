@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { profiler } from "../../profiler";
 
 export const CELL_SIZE_BLOCKS = 64;
 export const GRID_CELLS = 48;
@@ -58,6 +59,7 @@ export class HumidityMap {
   /** A new world: forgets the old grid (clouds fall back to neutral humidity) and samples the new seed on the next update. */
   setSeed(seed: number): void {
     if (seed === this.seed) return;
+    profiler.addCounter("game.sky.humidity.seedChanges");
     this.seed = seed;
     this.seedVersion++;
     this.hasLoadedGrid = false;
@@ -67,16 +69,28 @@ export class HumidityMap {
   }
 
   update(cameraX: number, cameraZ: number): void {
-    if (this.isDisposed || this.isRequestInFlight) return;
-    if (performance.now() - this.lastFailureAtMs < RETRY_COOLDOWN_MS) return;
-    if (this.hasLoadedGrid && !this.isCameraFarFromGridCenter(cameraX, cameraZ)) return;
+    if (this.isDisposed) return;
+    if (this.isRequestInFlight) {
+      profiler.addCounter("game.sky.humidity.update.skippedRequestInFlight");
+      return;
+    }
+    if (performance.now() - this.lastFailureAtMs < RETRY_COOLDOWN_MS) {
+      profiler.addCounter("game.sky.humidity.update.skippedRetryCooldown");
+      return;
+    }
+    if (this.hasLoadedGrid && !this.isCameraFarFromGridCenter(cameraX, cameraZ)) {
+      profiler.addCounter("game.sky.humidity.update.skippedGridStillCentered");
+      return;
+    }
     const originBlockX = this.originForCenterCell(Math.round(cameraX / CELL_SIZE_BLOCKS));
     const originBlockZ = this.originForCenterCell(Math.round(cameraZ / CELL_SIZE_BLOCKS));
+    profiler.addCounter(this.hasLoadedGrid ? "game.sky.humidity.gridRecenterRequests" : "game.sky.humidity.gridFirstLoadRequests");
     void this.requestGrid(originBlockX, originBlockZ);
   }
 
   /** Bilinear humidity 0..1 at a world position, clamped to the edge outside the grid. */
   humidityAt(worldX: number, worldZ: number): number {
+    profiler.addCounter("game.sky.humidity.lookups");
     const cellX = this.clampCellCoordinate((worldX - this.uniforms.humidityOrigin.value.x) / CELL_SIZE_BLOCKS);
     const cellZ = this.clampCellCoordinate((worldZ - this.uniforms.humidityOrigin.value.y) / CELL_SIZE_BLOCKS);
     const lowCellX = Math.min(Math.floor(cellX), GRID_CELLS - 2);
@@ -116,6 +130,7 @@ export class HumidityMap {
   private async requestGrid(originBlockX: number, originBlockZ: number): Promise<void> {
     this.isRequestInFlight = true;
     const requestedSeedVersion = this.seedVersion;
+    const requestStartedAtMs = profiler.enabled ? profiler.now() : 0;
     try {
       const result = await this.execGridSampling("sampleHumidityGrid", [
         this.seed,
@@ -124,15 +139,29 @@ export class HumidityMap {
         CELL_SIZE_BLOCKS,
         GRID_CELLS,
       ]);
-      if (this.isDisposed || requestedSeedVersion !== this.seedVersion) return;
+      if (profiler.enabled) {
+        profiler.recordTimer("latency.sky.humidityGrid", profiler.now() - requestStartedAtMs, "latency");
+      }
+      if (this.isDisposed || requestedSeedVersion !== this.seedVersion) {
+        profiler.addCounter("game.sky.humidity.gridsDiscardedStale");
+        return;
+      }
       if (!(result instanceof Uint8Array) || result.length !== this.humidityBytes.length) {
         throw new Error("Humidity grid result has an unexpected shape");
       }
-      this.humidityBytes.set(result);
-      this.uniforms.humidityOrigin.value.set(originBlockX, originBlockZ);
-      this.texture.needsUpdate = true;
-      this.hasLoadedGrid = true;
+      const applyToken = profiler.begin("main.sky.climate.applyGrid");
+      try {
+        this.humidityBytes.set(result);
+        this.uniforms.humidityOrigin.value.set(originBlockX, originBlockZ);
+        this.texture.needsUpdate = true;
+        this.hasLoadedGrid = true;
+      } finally {
+        profiler.end(applyToken);
+      }
+      profiler.addCounter("game.sky.humidity.gridsApplied");
+      profiler.recordBytes("bytes.sky.humidityGridApplied", result.byteLength);
     } catch (error) {
+      profiler.addCounter("game.sky.humidity.gridRequestsFailed");
       this.lastFailureAtMs = performance.now();
       if (!this.hasLoggedFailure) {
         this.hasLoggedFailure = true;

@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { beginWorkerTask, finishWorkerTask } from "../../profiler/worker-recorder";
 import { sampleHumidityGrid } from "./humidity-grid";
 
 const SEED = 20240611;
@@ -57,5 +58,33 @@ describe("sampleHumidityGrid with the real terrain generator", () => {
       }
     }
     expect(comparedCellCount).toBeGreaterThan(200);
+  });
+});
+
+describe("sampleHumidityGrid profiling", () => {
+  const PROFILED_SEED = 424242;
+
+  function profiledSample() {
+    beginWorkerTask(true);
+    sampleHumidityGrid(PROFILED_SEED, 0, 0, CELL_SIZE_BLOCKS, GRID_CELLS);
+    return finishWorkerTask()!;
+  }
+
+  test("the first sample of a seed looks up each distinct biome once and a repeat is all cache hits", () => {
+    const cellCount = GRID_CELLS * GRID_CELLS;
+    const firstProfile = profiledSample();
+    expect(firstProfile.counters.cellsSampled).toBe(cellCount);
+    expect(firstProfile.counters.downfallCacheMisses).toBeGreaterThan(1);
+    expect(firstProfile.counters.downfallCacheMisses).toBeLessThan(cellCount);
+    expect(firstProfile.counters.downfallCacheHits! + firstProfile.counters.downfallCacheMisses!).toBe(cellCount);
+
+    const repeatProfile = profiledSample();
+    expect(repeatProfile.counters.downfallCacheMisses).toBe(0);
+    expect(repeatProfile.counters.downfallCacheHits).toBe(cellCount);
+  });
+
+  test("every cell goes through the sampled biome lookup section", () => {
+    const biomeLookup = profiledSample().callTree.find((node) => node.path.endsWith("biomeAt"));
+    expect(biomeLookup?.calls).toBe(GRID_CELLS * GRID_CELLS);
   });
 });
