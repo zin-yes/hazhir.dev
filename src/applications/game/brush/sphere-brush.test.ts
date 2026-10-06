@@ -7,6 +7,7 @@ import {
   hasDragMovedEnough,
   steppedBrushRadius,
 } from "./sphere-brush";
+import { counterTotal, withEnabledProfiler } from "../world/profiler-readings.test-helper";
 
 describe("sphere brush rules", () => {
   test("radius stays within 1..64 through steps, wheel deltas and junk input", () => {
@@ -45,5 +46,43 @@ describe("sphere brush rules", () => {
     expect(hasDragMovedEnough(start, { x: 4, y: 0, z: 0 }, 16)).toBe(true);
     expect(hasDragMovedEnough(start, start, 1)).toBe(false);
     expect(hasDragMovedEnough(start, { x: 1, y: 0, z: 0 }, 1)).toBe(true);
+  });
+});
+
+describe("sphere brush profiling", () => {
+  test("counts clamps, modes, centers and drag decisions", () => {
+    withEnabledProfiler(() => {
+      clampBrushRadius(200);
+      clampBrushRadius(3.4);
+      clampBrushRadius(Number.NaN);
+      clampBrushRadius(10);
+      expect(counterTotal("game.brush.radiusClamped")).toBe(1);
+      expect(counterTotal("game.brush.radiusRounded")).toBe(1);
+      expect(counterTotal("game.brush.radiusNotFinite")).toBe(1);
+
+      brushModeFor("paint", { replaceOnly: false, airOnly: true });
+      brushModeFor("erase", { replaceOnly: true, airOnly: true });
+      brushModeFor("erase", { replaceOnly: false, airOnly: false });
+      expect(counterTotal("game.brush.mode.erase")).toBe(2);
+      expect(counterTotal("game.brush.mode.fillAirOnly")).toBe(1);
+
+      const hit = { cell: [10, 64, -3] as const, faceNormal: [0, 1, 0] as const };
+      const camera = { x: 0, y: 70, z: 0 };
+      const forward = { x: 0, y: 0, z: -1 };
+      brushCenterFor("erase", hit, camera, forward);
+      brushCenterFor("paint", hit, camera, forward);
+      brushCenterFor("paint", null, camera, forward);
+      expect(counterTotal("game.brush.centerOnHitBlock")).toBe(1);
+      expect(counterTotal("game.brush.centerBesideHitFace")).toBe(1);
+      expect(counterTotal("game.brush.centerInFrontOfCamera")).toBe(1);
+
+      const start = { x: 0, y: 0, z: 0 };
+      hasDragMovedEnough(null, start, 16);
+      hasDragMovedEnough(start, { x: 3, y: 0, z: 0 }, 16);
+      hasDragMovedEnough(start, { x: 4, y: 0, z: 0 }, 16);
+      expect(counterTotal("game.brush.dragFirstPaint")).toBe(1);
+      expect(counterTotal("game.brush.dragSkipped")).toBe(1);
+      expect(counterTotal("game.brush.dragRepaints")).toBe(1);
+    });
   });
 });

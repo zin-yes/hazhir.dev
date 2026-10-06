@@ -2,6 +2,7 @@
 // lands and when a drag has moved far enough to paint again.
 
 import type { BlockPosition, BrushMode } from "../edits/block-edit-batch";
+import { profiler } from "../profiler";
 
 export const BRUSH_MINIMUM_RADIUS = 1;
 export const BRUSH_MAXIMUM_RADIUS = 64;
@@ -26,17 +27,38 @@ export interface BrushModifiers {
 }
 
 export function clampBrushRadius(radius: number): number {
-  if (!Number.isFinite(radius)) return BRUSH_DEFAULT_RADIUS;
-  return Math.min(BRUSH_MAXIMUM_RADIUS, Math.max(BRUSH_MINIMUM_RADIUS, Math.round(radius)));
+  if (!Number.isFinite(radius)) {
+    profiler.addCounter("game.brush.radiusNotFinite");
+    return BRUSH_DEFAULT_RADIUS;
+  }
+  const clamped = Math.min(BRUSH_MAXIMUM_RADIUS, Math.max(BRUSH_MINIMUM_RADIUS, Math.round(radius)));
+  if (clamped !== radius) profiler.addCounter(clamped === Math.round(radius) ? "game.brush.radiusRounded" : "game.brush.radiusClamped");
+  return clamped;
 }
 
 /** Radius steps grow with the radius, so [ and ] cover 1..64 in a handful of presses. */
 export function steppedBrushRadius(radius: number, direction: 1 | -1): number {
   const step = radius >= 32 ? 8 : radius >= 16 ? 4 : radius >= 8 ? 2 : 1;
-  return clampBrushRadius(radius + direction * step);
+  const steppedRadius = clampBrushRadius(radius + direction * step);
+  profiler.addCounter(direction === 1 ? "game.brush.radiusStepsUp" : "game.brush.radiusStepsDown");
+  profiler.sampleGauge("game.brush.radius", steppedRadius, "blocks");
+  return steppedRadius;
 }
 
+const BRUSH_MODE_COUNTERS: { [mode in BrushMode]: string } = {
+  fill: "game.brush.mode.fill",
+  erase: "game.brush.mode.erase",
+  fillAirOnly: "game.brush.mode.fillAirOnly",
+  replaceNonAirOnly: "game.brush.mode.replaceNonAirOnly",
+};
+
 export function brushModeFor(action: BrushAction, modifiers: BrushModifiers): BrushMode {
+  const mode = chooseBrushMode(action, modifiers);
+  profiler.addCounter(BRUSH_MODE_COUNTERS[mode]);
+  return mode;
+}
+
+function chooseBrushMode(action: BrushAction, modifiers: BrushModifiers): BrushMode {
   if (action === "erase") return "erase";
   if (modifiers.replaceOnly) return "replaceNonAirOnly";
   if (modifiers.airOnly) return "fillAirOnly";
@@ -60,11 +82,13 @@ export function brushCenterFor(
   reach: number = BRUSH_REACH_BLOCKS,
 ): BlockPosition {
   if (hit) {
+    profiler.addCounter(action === "erase" ? "game.brush.centerOnHitBlock" : "game.brush.centerBesideHitFace");
     const [cellX, cellY, cellZ] = hit.cell;
     if (action === "erase") return { x: cellX, y: cellY, z: cellZ };
     const [normalX, normalY, normalZ] = hit.faceNormal;
     return { x: cellX + normalX, y: cellY + normalY, z: cellZ + normalZ };
   }
+  profiler.addCounter("game.brush.centerInFrontOfCamera");
   // Blocks are centered on integer coordinates (block x spans x - 0.5 .. x + 0.5).
   return {
     x: Math.round(cameraPosition.x + viewDirection.x * reach),
@@ -75,7 +99,14 @@ export function brushCenterFor(
 
 /** A drag repaints only after the center moved a quarter radius, so holding still never reapplies the sphere. */
 export function hasDragMovedEnough(previousCenter: BlockPosition | null, center: BlockPosition, radius: number): boolean {
-  if (!previousCenter) return true;
+  if (!previousCenter) {
+    profiler.addCounter("game.brush.dragFirstPaint");
+    return true;
+  }
   const distance = Math.hypot(center.x - previousCenter.x, center.y - previousCenter.y, center.z - previousCenter.z);
-  return distance >= Math.max(1, radius * DRAG_STEP_FRACTION);
+  const requiredDistance = Math.max(1, radius * DRAG_STEP_FRACTION);
+  const hasMovedEnough = distance >= requiredDistance;
+  profiler.addCounter(hasMovedEnough ? "game.brush.dragRepaints" : "game.brush.dragSkipped");
+  profiler.sampleGauge("game.brush.dragDistanceShareOfRequired", distance / requiredDistance, "ratio");
+  return hasMovedEnough;
 }
