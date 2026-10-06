@@ -2,6 +2,7 @@
 // chunk in every direction is generated and lit but never meshed, so every drawn chunk has its neighbors' border
 // blocks and light before it is meshed.
 
+import { profiler } from "../profiler";
 import { buildLoadOrder, type LoadOrder, type LoadVolumeShape } from "./load-order";
 import type { ChunkStreamConfig } from "./streaming-plan";
 
@@ -45,9 +46,13 @@ export const WORLD_LOWEST_CHUNK_Y = -2;
 export const WORLD_HIGHEST_CHUNK_Y = 10;
 
 export function normalizeRenderSettings(settings: Partial<RenderSettings>): RenderSettings {
-  const wholeNonNegative = (value: number | undefined, fallback: number) =>
-    Number.isFinite(value) ? Math.max(0, Math.floor(value as number)) : fallback;
-  return {
+  let fieldsReplacedByDefault = 0;
+  const wholeNonNegative = (value: number | undefined, fallback: number) => {
+    if (Number.isFinite(value)) return Math.max(0, Math.floor(value as number));
+    fieldsReplacedByDefault++;
+    return fallback;
+  };
+  const normalized: RenderSettings = {
     horizontalRadius: wholeNonNegative(settings.horizontalRadius, DEFAULT_RENDER_SETTINGS.horizontalRadius),
     verticalUp: wholeNonNegative(settings.verticalUp, DEFAULT_RENDER_SETTINGS.verticalUp),
     verticalDown: wholeNonNegative(settings.verticalDown, DEFAULT_RENDER_SETTINGS.verticalDown),
@@ -56,6 +61,9 @@ export function normalizeRenderSettings(settings: Partial<RenderSettings>): Rend
       wholeNonNegative(settings.lodRenderDistanceChunks, DEFAULT_RENDER_SETTINGS.lodRenderDistanceChunks),
     ),
   };
+  profiler.addCounter("game.renderSettings.normalizations");
+  if (fieldsReplacedByDefault > 0) profiler.addCounter("game.renderSettings.fieldsReplacedByDefault", fieldsReplacedByDefault);
+  return normalized;
 }
 
 function normalizeLodRenderDistance(chunks: number): number {
@@ -68,6 +76,7 @@ export function streamConfigFor(
   surfaceChunkY: (chunkX: number, chunkZ: number) => number | undefined,
 ): ChunkStreamConfig {
   const loadedHorizontalRadius = settings.horizontalRadius + BORDER_RING_CHUNKS;
+  profiler.addCounter("game.renderSettings.streamConfigsBuilt");
   return {
     horizontalRadius: loadedHorizontalRadius,
     verticalUp: settings.verticalUp + BORDER_RING_CHUNKS,
@@ -84,20 +93,24 @@ export function streamConfigFor(
 
 /** The chunks kept loaded around the player (drawn volume plus the border ring), without unload hysteresis. */
 export function loadedVolumeOf(settings: RenderSettings): LoadOrder {
-  return buildLoadOrder({
+  const loadedVolume = buildLoadOrder({
     horizontalRadius: settings.horizontalRadius + BORDER_RING_CHUNKS,
     verticalUp: settings.verticalUp + BORDER_RING_CHUNKS,
     verticalDown: settings.verticalDown + BORDER_RING_CHUNKS,
     shape: settings.shape,
   });
+  profiler.sampleGauge("game.renderSettings.loadedVolumeChunks", loadedVolume.offsetCount);
+  return loadedVolume;
 }
 
 /** The chunks drawn around the player, as offsets from the player's chunk. */
 export function renderVolumeOf(settings: RenderSettings): LoadOrder {
-  return buildLoadOrder({
+  const drawnVolume = buildLoadOrder({
     horizontalRadius: settings.horizontalRadius,
     verticalUp: settings.verticalUp,
     verticalDown: settings.verticalDown,
     shape: settings.shape,
   });
+  profiler.sampleGauge("game.renderSettings.drawnVolumeChunks", drawnVolume.offsetCount);
+  return drawnVolume;
 }

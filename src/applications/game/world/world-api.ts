@@ -2,6 +2,7 @@
 // window.__voxelWorld while a game is mounted.
 
 import type { BlockEdit, BlockPosition, BrushMode } from "../edits/block-edit-batch";
+import { profiler } from "../profiler";
 import type { PipelineEditResult } from "./chunk-pipeline";
 import type { LodStats } from "../lod/manager/lod-stats";
 import type { RenderSettings } from "./render-settings";
@@ -50,21 +51,30 @@ export async function summarizeEdit(
   result: PipelineEditResult | null,
   startedAtMs: number,
 ): Promise<WorldEditSummary | null> {
-  if (!result) return null;
+  if (!result) {
+    profiler.addCounter("game.worldApi.editsWithoutResult");
+    return null;
+  }
   await Promise.all(result.meshesApplied);
   const { stats } = result;
+  const onScreenMilliseconds = performance.now() - startedAtMs;
+  profiler.addCounter("game.worldApi.editSummaries");
+  profiler.recordTimer("latency.edit.callToAllMeshesOnScreen", onScreenMilliseconds, "latency");
+  profiler.sampleGauge("game.worldApi.editChunksRebuilt", result.chunksToRemesh.length);
+  profiler.sampleGauge("game.worldApi.editBlocksChanged", stats.blocksChanged);
   return {
     blocksChanged: stats.blocksChanged,
     chunksRebuilt: result.chunksToRemesh.length,
     relightMilliseconds:
       stats.millisecondsWritingBlocks + stats.millisecondsRemovingLight + stats.millisecondsRefillingLight +
       stats.millisecondsCollecting,
-    onScreenMilliseconds: performance.now() - startedAtMs,
+    onScreenMilliseconds,
   };
 }
 
 export function installVoxelWorldApi(api: VoxelWorldApi): () => void {
   window.__voxelWorld = api;
+  profiler.addCounter("game.worldApi.installs");
   return () => {
     if (window.__voxelWorld === api) delete window.__voxelWorld;
   };
