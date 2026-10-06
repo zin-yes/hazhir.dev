@@ -2,6 +2,17 @@ import { BlockType, getWaterLevel, isWater } from "./blocks";
 import { profiler } from "./profiler";
 import { DIMENSIONS } from "./profiler/dimensions";
 
+const WATER_LEVEL_KEYS = ["0", "1", "2", "3", "4", "5", "6", "7", "8"];
+
+/**
+ * Call once per water interval tick with the number of queued cell updates, so
+ * the queue depth shows up as a gauge and ticks are counted.
+ */
+export function recordWaterTick(queuedUpdates: number) {
+  profiler.addCounter("game.water.ticks");
+  profiler.sampleGauge("game.water.queueDepth", queuedUpdates, "cells");
+}
+
 // Safe version of isWater that handles null
 const safeIsWater = (block: BlockType | null): block is BlockType => {
   return block !== null && isWater(block);
@@ -48,21 +59,30 @@ function updateWaterCell(
   if (
     currentBlock === null ||
     (!isWater(currentBlock) && currentBlock !== BlockType.AIR)
-  )
+  ) {
+    profiler.addCounter(
+      currentBlock === null
+        ? "game.water.skippedUnloaded"
+        : "game.water.skippedSolid",
+    );
     return;
+  }
 
   let newLevel = 0;
   let isSource = currentBlock === BlockType.WATER;
   let isFalling = false;
 
   if (isSource) {
+    profiler.addCounter("game.water.sourceCellsUpdated");
     newLevel = 8;
   } else {
     const blockAbove = getBlock(x, y + 1, z);
     if (safeIsWater(blockAbove)) {
+      profiler.addCounter("game.water.fedFromAbove");
       newLevel = 8;
       isFalling = true;
     } else {
+      profiler.addCounter("game.water.neighborArrayAllocations");
       // Check side neighbors
       let maxNeighborLevel = 0;
       let sourceNeighbors = 0;
@@ -96,6 +116,7 @@ function updateWaterCell(
         (blockBelow === BlockType.WATER || !isWater(blockBelow)); // Simplified solid check
 
       if (sourceNeighbors >= 2 && solidBelow) {
+        profiler.addCounter("game.water.infiniteSourceConversions");
         newLevel = 8;
         isSource = true; // Becomes source
       } else {
@@ -128,6 +149,13 @@ function updateWaterCell(
     }
 
     profiler.addCounter("game.water.stateChanges");
+    if (newLevel === 0) profiler.addCounter("game.water.cellsDrained");
+    if (profiler.enabled) {
+      profiler.recordBreakdown(DIMENSIONS.waterLevel, WATER_LEVEL_KEYS[newLevel], {
+        units: 1,
+        calls: 1,
+      });
+    }
     // Schedule neighbors for update
     scheduleUpdate(x + 1, y, z);
     scheduleUpdate(x - 1, y, z);
@@ -153,11 +181,13 @@ function updateWaterCell(
       safeGetWaterLevel(blockBelow) < 8 &&
       blockBelow !== BlockType.WATER
     ) {
+      profiler.addCounter("game.water.spreadDownIntoWater");
       setBlock(x, y - 1, z, BlockType.WATER_FALLING);
       scheduleUpdate(x, y - 1, z);
     } else if (blockBelow !== null && !safeIsWater(blockBelow)) {
       // Spread Sides (blockBelow is solid - not AIR and not water)
       const spreadLevel = newLevel - 1;
+      if (spreadLevel <= 0) profiler.addCounter("game.water.sideSpreadExhausted");
       if (spreadLevel > 0) {
         const spreadTo = (nx: number, ny: number, nz: number) => {
           const neighbor = getBlock(nx, ny, nz);
@@ -165,6 +195,8 @@ function updateWaterCell(
             profiler.addCounter("game.water.spreadSide");
             setBlock(nx, ny, nz, BlockType.WATER_LEVEL_1 + spreadLevel - 1);
             scheduleUpdate(nx, ny, nz);
+          } else {
+            profiler.addCounter("game.water.spreadSideBlocked");
           }
         };
 
@@ -173,6 +205,10 @@ function updateWaterCell(
         spreadTo(x, y, z + 1);
         spreadTo(x, y, z - 1);
       }
+    } else {
+      profiler.addCounter("game.water.spreadDownSettled");
     }
+  } else {
+    profiler.addCounter("game.water.cellsWithoutWater");
   }
 }
