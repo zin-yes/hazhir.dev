@@ -195,3 +195,60 @@ describe("WorkerPool affinity", () => {
     expect(workers.map((worker) => worker.receivedRequests.length)).toEqual([1, 1]);
   });
 });
+
+function counterTotal(name: string): number {
+  return profiler.snapshot().counters.find((counter) => counter.name === name)?.total ?? 0;
+}
+
+function gaugeNamed(name: string) {
+  return profiler.snapshot().gauges.find((gauge) => gauge.name === name);
+}
+
+describe("WorkerPool occupancy metrics", () => {
+  beforeEach(() => {
+    profiler.setEnabled(true);
+    profiler.reset("worker-pool-occupancy-test");
+  });
+
+  afterEach(() => {
+    profiler.setEnabled(false);
+  });
+
+  test("tells preferred-worker dispatches from steals, and tracks busy and idle workers", async () => {
+    const { pool, workers } = createPool(2, "generation");
+    void pool.exec("generateChunkColumn", [], undefined, { affinityKey: 1 });
+    void pool.exec("generateChunkColumn", [], undefined, { affinityKey: 1 });
+    void pool.exec("generateChunk", []);
+
+    expect(workers.map((worker) => worker.receivedRequests.length)).toEqual([1, 1]);
+    expect(counterTotal("game.pool.generation.dispatched.affineHit")).toBe(1);
+    expect(counterTotal("game.pool.generation.dispatched.affineSteal")).toBe(1);
+    expect(counterTotal("game.pool.generation.dispatched.free")).toBe(0);
+    expect(gaugeNamed("pool.generation.busyWorkers")?.max).toBe(2);
+    expect(gaugeNamed("pool.generation.idleWorkers")?.min).toBe(0);
+    expect(gaugeNamed("pool.generation.queueLength")?.last).toBe(1);
+
+    workers[1].deliver({ id: workers[1].receivedRequests[0].id, result: 1, profile: plausibleWorkerProfile(1) });
+    await Bun.sleep(1);
+    expect(counterTotal("game.pool.generation.dispatched.free")).toBe(1);
+    expect(timerNamed("queue.pool.generation.wait.free")?.count).toBe(1);
+    expect(timerNamed("latency.pool.generation.workerSpinUp")?.count).toBe(1);
+  });
+
+  test("counts the buffers handed over by transfer and the tasks dropped when the pool shuts down", () => {
+    const { pool } = createPool(1, "mesh");
+    const firstBuffer = new ArrayBuffer(4096);
+    const secondBuffer = new ArrayBuffer(1000);
+    void pool.execLazy("generateMesh", () => ({ params: [1], transfer: [firstBuffer, secondBuffer] }));
+    void pool.exec("generateMesh", [2]);
+    void pool.exec("generateMesh", [3]);
+    void pool.execLazy("generateMesh", () => null);
+    const transferredMeter = profiler.snapshot().bytes.find((meter) => meter.name === "bytes.pool.mesh.transferred");
+
+    expect(transferredMeter?.total).toBe(5096);
+    expect(counterTotal("game.pool.mesh.transferListBuffers")).toBe(2);
+    pool.terminate();
+    expect(counterTotal("game.pool.mesh.tasksInFlightOnTerminate")).toBe(1);
+    expect(counterTotal("game.pool.mesh.tasksDroppedOnTerminate")).toBe(3);
+  });
+});
