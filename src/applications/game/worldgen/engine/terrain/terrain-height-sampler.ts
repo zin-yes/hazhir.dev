@@ -7,13 +7,26 @@
 // (OCEAN_FLOOR_WG: highest solid block + 1; WORLD_SURFACE_WG: also counts the fluid below sea level).
 
 import { createColumnMemoizedDensity } from "../density/column-memoization";
-import { compileDensityFunction, type CompiledDensityFunction } from "../density/density-codegen";
+import { compileDensityFunction, type CompiledDensityFunction, noteCompiledDensityEvaluations } from "../density/density-codegen";
 import type { DensityNode } from "../density/density-function";
 import type { NoiseRouter } from "../density/router-wiring";
 import type { CompiledCellFill } from "./cell-fill-compiler";
 import { isCornerSamplingExact } from "./corner-column-sampler";
+import { beginColdStart, defineColdStartLabel, endColdStart } from "../profiling/cold-start-ledger";
+import { defineHotCounter, noteHot, noteHotAmount } from "../profiling/hot-counters";
 import { NoiseChunk } from "./noise-chunk";
 import { CacheAllInCell } from "./noise-chunk-caches";
+
+const HEIGHT_QUERIES = defineHotCounter("heightSampler.queries");
+const HEIGHT_CELLS_SCANNED = defineHotCounter("heightSampler.cellsScanned");
+const HEIGHT_QUERIES_WITHOUT_SOLID_BLOCK = defineHotCounter("heightSampler.queriesWithoutSolidBlock");
+const HEIGHT_CORNER_POSITION_HITS = defineHotCounter("heightSampler.cornerPositionHits");
+const HEIGHT_CORNER_POSITIONS_CREATED = defineHotCounter("heightSampler.cornerPositionsCreated");
+const HEIGHT_CORNER_POSITION_RESETS = defineHotCounter("heightSampler.cornerPositionResets");
+const HEIGHT_CORNER_COLUMNS_EXTENDED = defineHotCounter("heightSampler.cornerColumnsExtended");
+const HEIGHT_CORNER_SAMPLES = defineHotCounter("heightSampler.cornerSamples");
+const HEIGHT_CORNER_COLUMNS_REUSED = defineHotCounter("heightSampler.cornerColumnsReused");
+const SAMPLER_CREATE_LABEL = defineColdStartLabel("heightSampler.create");
 
 const CELL_WIDTH = 4;
 const CELL_HEIGHT = 4;
@@ -71,6 +84,15 @@ export class TerrainHeightSampler {
 
   /** A sampler for the router's aquifer-free fill, or undefined when its final density cannot be sampled this way. */
   static create(router: NoiseRouter, settings: TerrainHeightSamplerSettings): TerrainHeightSampler | undefined {
+    const coldStartToken = beginColdStart(SAMPLER_CREATE_LABEL);
+    try {
+      return TerrainHeightSampler.createUntimed(router, settings);
+    } finally {
+      endColdStart(SAMPLER_CREATE_LABEL, coldStartToken);
+    }
+  }
+
+  private static createUntimed(router: NoiseRouter, settings: TerrainHeightSamplerSettings): TerrainHeightSampler | undefined {
     const chunk = new NoiseChunk(router, {
       cellCountXZ: 4,
       firstBlockX: 0,
@@ -94,6 +116,7 @@ export class TerrainHeightSampler {
 
   /** Heightmap OCEAN_FLOOR_WG (first free y above the highest solid block, or minY). */
   oceanFloorHeight(blockX: number, blockZ: number): number {
+    noteHot(HEIGHT_QUERIES);
     const cellX = Math.floor(blockX / CELL_WIDTH);
     const cellZ = Math.floor(blockZ / CELL_WIDTH);
     const inCellX = blockX - cellX * CELL_WIDTH;
@@ -104,6 +127,7 @@ export class TerrainHeightSampler {
     cellCorners[2] = this.cornerPositionAt(cellX * CELL_WIDTH, (cellZ + 1) * CELL_WIDTH);
     cellCorners[3] = this.cornerPositionAt((cellX + 1) * CELL_WIDTH, (cellZ + 1) * CELL_WIDTH);
     for (let cellY = this.cellCountY - 1; cellY >= 0; cellY--) {
+      noteHot(HEIGHT_CELLS_SCANNED);
       this.gatherCorners(cellY);
       const cellStartBlockY = (cellY + this.cellNoiseMinY) * CELL_HEIGHT;
       this.compiledFill(this.cellValues, this.corners, cellStartBlockY);
@@ -112,6 +136,7 @@ export class TerrainHeightSampler {
         if (this.cellValues[valueIndex]! > 0) return cellStartBlockY + inCellY + 1;
       }
     }
+    noteHot(HEIGHT_QUERIES_WITHOUT_SOLID_BLOCK);
     return this.settings.minY;
   }
 
@@ -150,6 +175,11 @@ export class TerrainHeightSampler {
         values[index] = evaluateDensity(position.blockX, (index + this.cellNoiseMinY) * CELL_HEIGHT, position.blockZ);
       }
       position.lowestFilledIndexByInterpolator[interpolatorIndex] = cellY;
+      noteHot(HEIGHT_CORNER_COLUMNS_EXTENDED);
+      noteHotAmount(HEIGHT_CORNER_SAMPLES, lowestFilledIndex - cellY);
+      noteCompiledDensityEvaluations(evaluateDensity, lowestFilledIndex - cellY, lowestFilledIndex === this.cellCountY + 1 ? 1 : 0);
+    } else {
+      noteHot(HEIGHT_CORNER_COLUMNS_REUSED);
     }
     return values;
   }
@@ -158,9 +188,15 @@ export class TerrainHeightSampler {
     const key = (cornerBlockX + 0x2000000) * 0x4000000 + (cornerBlockZ + 0x2000000);
     let position = this.cornerPositions.get(key);
     if (position === undefined) {
-      if (this.cornerPositions.size >= MAX_CACHED_CORNER_POSITIONS) this.cornerPositions.clear();
+      if (this.cornerPositions.size >= MAX_CACHED_CORNER_POSITIONS) {
+        this.cornerPositions.clear();
+        noteHot(HEIGHT_CORNER_POSITION_RESETS);
+      }
       position = new CornerPosition(cornerBlockX, cornerBlockZ, this.interpolatorCount, this.cellCountY + 1);
       this.cornerPositions.set(key, position);
+      noteHot(HEIGHT_CORNER_POSITIONS_CREATED);
+    } else {
+      noteHot(HEIGHT_CORNER_POSITION_HITS);
     }
     return position;
   }

@@ -14,7 +14,32 @@ import { type FunctionContext, SinglePointContext } from "../density/density-fun
 import type { DensityNode } from "../density/density-function";
 import type { PositionalRandomFactory } from "../random";
 import { transientRandomAt } from "../random/xoroshiro-random-source";
+import { defineHotCounter, noteHot } from "../profiling/hot-counters";
 import { BLOCK_AIR, BLOCK_DEFAULT_FLUID, BLOCK_LAVA } from "./terrain-blocks";
+
+const ORIGINS_CLASSIFIED = defineHotCounter("aquifer.originsClassified");
+const ORIGINS_FOUND_UNIFORM = defineHotCounter("aquifer.originsUniform");
+const ORIGINS_FOUND_MIXED = defineHotCounter("aquifer.originsMixed");
+const SHORTCUT_LAVA_LEVEL = defineHotCounter("aquifer.shortcutLavaLevel");
+const SHORTCUT_UNIFORM_ORIGIN = defineHotCounter("aquifer.shortcutUniformOrigin");
+const SHORTCUT_UNRESOLVED = defineHotCounter("aquifer.shortcutUnresolved");
+const RESOLVED_UNIFORM_ORIGIN = defineHotCounter("aquifer.resolvedUniformOrigin");
+const RESOLVED_NO_NEIGHBOUR_SIMILARITY = defineHotCounter("aquifer.resolvedNoNeighbourSimilarity");
+const RESOLVED_LAVA_BELOW_WATER = defineHotCounter("aquifer.resolvedLavaBelowWater");
+const RESOLVED_SOLID_WALL = defineHotCounter("aquifer.resolvedSolidWall");
+const RESOLVED_FLUID = defineHotCounter("aquifer.resolvedFluid");
+const PRESSURE_LAVA_WATER = defineHotCounter("aquifer.pressureLavaAgainstWater");
+const PRESSURE_EQUAL_LEVELS = defineHotCounter("aquifer.pressureEqualLevels");
+const PRESSURE_BARRIER_EVALUATED = defineHotCounter("aquifer.pressureBarrierEvaluated");
+const PRESSURE_BARRIER_SKIPPED = defineHotCounter("aquifer.pressureBarrierSkipped");
+const FLUID_STATUS_CENTRE_ABOVE_SURFACE = defineHotCounter("aquifer.fluidStatusCentreAboveSurface");
+const FLUID_STATUS_NEIGHBOUR_EARLY_OUT = defineHotCounter("aquifer.fluidStatusNeighbourSurfaceEarlyOut");
+const FLUID_STATUS_FROM_NOISE = defineHotCounter("aquifer.fluidStatusFromNoise");
+const SURFACE_LEVEL_DEEP_DARK = defineHotCounter("aquifer.surfaceLevelDeepDark");
+const SURFACE_LEVEL_FLOODED = defineHotCounter("aquifer.surfaceLevelFlooded");
+const SURFACE_LEVEL_RANDOMIZED = defineHotCounter("aquifer.surfaceLevelRandomized");
+const SURFACE_LEVEL_DRY = defineHotCounter("aquifer.surfaceLevelDry");
+const FLUID_TYPE_LAVA_BY_NOISE = defineHotCounter("aquifer.fluidTypeLavaByNoise");
 
 /** Aquifer.computeSubstance returning null: the block is not decided by the aquifer. */
 export const NULL_SUBSTANCE = -1;
@@ -155,6 +180,7 @@ export class NoiseBasedAquifer {
   openBlockSubstanceWithoutContext(blockX: number, blockY: number, blockZ: number): number {
     if (blockY < this.lavaBelowY) {
       this.substanceLookups++;
+      noteHot(SHORTCUT_LAVA_LEVEL);
       return BLOCK_LAVA;
     }
     const originGridX = (blockX - 5) >> 4;
@@ -166,7 +192,11 @@ export class NoiseBasedAquifer {
       uniformity = this.classifyOrigin(originGridX, originGridY, originGridZ);
       this.originUniformity[originIndex] = uniformity;
     }
-    if (uniformity !== ORIGIN_UNIFORM) return UNRESOLVED_SUBSTANCE;
+    if (uniformity !== ORIGIN_UNIFORM) {
+      noteHot(SHORTCUT_UNRESOLVED);
+      return UNRESOLVED_SUBSTANCE;
+    }
+    noteHot(SHORTCUT_UNIFORM_ORIGIN);
     this.substanceLookups++;
     return this.fluidAtStatus(originIndex, blockY);
   }
@@ -258,7 +288,10 @@ export class NoiseBasedAquifer {
     }
     // When every candidate centre (the origin cell is one) has the same fluid status, all pressures are 0 and the
     // answer is that status's fluid.
-    if (uniformity === ORIGIN_UNIFORM) return this.fluidAtStatus(originIndex, blockY);
+    if (uniformity === ORIGIN_UNIFORM) {
+      noteHot(RESOLVED_UNIFORM_ORIGIN);
+      return this.fluidAtStatus(originIndex, blockY);
+    }
     let nearestDistance = MAX_INT;
     let secondDistance = MAX_INT;
     let thirdDistance = MAX_INT;
@@ -302,25 +335,41 @@ export class NoiseBasedAquifer {
     this.ensureStatus(nearestIndex);
     const nearestFluid = this.fluidAtStatus(nearestIndex, blockY);
     const nearestSimilarity = similarity(nearestDistance, secondDistance);
-    if (nearestSimilarity <= 0) return nearestFluid;
-    if (nearestFluid === BLOCK_DEFAULT_FLUID && this.globalFluidAt(blockY - 1) === BLOCK_LAVA) return nearestFluid;
+    if (nearestSimilarity <= 0) {
+      noteHot(RESOLVED_NO_NEIGHBOUR_SIMILARITY);
+      return nearestFluid;
+    }
+    if (nearestFluid === BLOCK_DEFAULT_FLUID && this.globalFluidAt(blockY - 1) === BLOCK_LAVA) {
+      noteHot(RESOLVED_LAVA_BELOW_WATER);
+      return nearestFluid;
+    }
 
     this.cachedBarrierValue = Number.NaN;
     this.ensureStatus(secondIndex);
     const firstPressure = nearestSimilarity * this.calculatePressure(context, nearestIndex, secondIndex);
-    if (density + firstPressure > 0) return NULL_SUBSTANCE;
+    if (density + firstPressure > 0) {
+      noteHot(RESOLVED_SOLID_WALL);
+      return NULL_SUBSTANCE;
+    }
 
     this.ensureStatus(thirdIndex);
     const nearestThirdSimilarity = similarity(nearestDistance, thirdDistance);
     if (nearestThirdSimilarity > 0) {
       const pressure = nearestSimilarity * nearestThirdSimilarity * this.calculatePressure(context, nearestIndex, thirdIndex);
-      if (density + pressure > 0) return NULL_SUBSTANCE;
+      if (density + pressure > 0) {
+        noteHot(RESOLVED_SOLID_WALL);
+        return NULL_SUBSTANCE;
+      }
     }
     const secondThirdSimilarity = similarity(secondDistance, thirdDistance);
     if (secondThirdSimilarity > 0) {
       const pressure = nearestSimilarity * secondThirdSimilarity * this.calculatePressure(context, secondIndex, thirdIndex);
-      if (density + pressure > 0) return NULL_SUBSTANCE;
+      if (density + pressure > 0) {
+        noteHot(RESOLVED_SOLID_WALL);
+        return NULL_SUBSTANCE;
+      }
     }
+    noteHot(RESOLVED_FLUID);
     return nearestFluid;
   }
 
@@ -359,6 +408,8 @@ export class NoiseBasedAquifer {
         }
       }
     }
+    noteHot(ORIGINS_CLASSIFIED);
+    noteHot(isUniform ? ORIGINS_FOUND_UNIFORM : ORIGINS_FOUND_MIXED);
     return isUniform ? ORIGIN_UNIFORM : ORIGIN_MIXED;
   }
 
@@ -372,12 +423,16 @@ export class NoiseBasedAquifer {
     const firstFluid = this.fluidAtStatus(firstIndex, blockY);
     const secondFluid = this.fluidAtStatus(secondIndex, blockY);
     if ((firstFluid === BLOCK_LAVA && secondFluid === BLOCK_DEFAULT_FLUID) || (firstFluid === BLOCK_DEFAULT_FLUID && secondFluid === BLOCK_LAVA)) {
+      noteHot(PRESSURE_LAVA_WATER);
       return 2;
     }
     const firstLevel = this.statusLevel[firstIndex]!;
     const secondLevel = this.statusLevel[secondIndex]!;
     const levelDifference = Math.abs(firstLevel - secondLevel);
-    if (levelDifference === 0) return 0;
+    if (levelDifference === 0) {
+      noteHot(PRESSURE_EQUAL_LEVELS);
+      return 0;
+    }
     const averageLevel = 0.5 * (firstLevel + secondLevel);
     const heightAboveAverage = blockY + 0.5 - averageLevel;
     const halfDifference = levelDifference / 2;
@@ -392,8 +447,13 @@ export class NoiseBasedAquifer {
     }
     let barrierValue = 0;
     if (!(gradient < -2 || gradient > 2)) {
-      if (Number.isNaN(this.cachedBarrierValue)) this.cachedBarrierValue = this.computeRouterFunction(this.params.barrier, context, "router.barrier");
+      if (Number.isNaN(this.cachedBarrierValue)) {
+        noteHot(PRESSURE_BARRIER_EVALUATED);
+        this.cachedBarrierValue = this.computeRouterFunction(this.params.barrier, context, "router.barrier");
+      }
       barrierValue = this.cachedBarrierValue;
+    } else {
+      noteHot(PRESSURE_BARRIER_SKIPPED);
     }
     return 2 * (barrierValue + gradient);
   }
@@ -423,6 +483,7 @@ export class NoiseBasedAquifer {
       const surfaceTop = (surfaceLevel + 8) | 0;
       const isCentre = chunkOffsetX === 0 && chunkOffsetZ === 0;
       if (isCentre && probeBottom > surfaceTop) {
+        noteHot(FLUID_STATUS_CENTRE_ABOVE_SURFACE);
         this.computedLevel = globalLevel;
         this.computedFluid = globalFluid;
         return;
@@ -434,6 +495,7 @@ export class NoiseBasedAquifer {
         if (surfaceTop < pickedLevel) {
           if (isCentre) fluidAtCentreSurface = true;
           if (isHigher) {
+            noteHot(FLUID_STATUS_NEIGHBOUR_EARLY_OUT);
             this.computedLevel = pickedLevel;
             this.computedFluid = pickedFluid;
             return;
@@ -442,6 +504,7 @@ export class NoiseBasedAquifer {
       }
       lowestSurface = Math.min(lowestSurface, surfaceLevel);
     }
+    noteHot(FLUID_STATUS_FROM_NOISE);
     const surfaceLevel = this.computeSurfaceLevel(blockX, blockY, blockZ, globalLevel, lowestSurface, fluidAtCentreSurface);
     this.computedLevel = surfaceLevel;
     this.computedFluid = this.computeFluidType(blockX, blockY, blockZ, globalFluid, surfaceLevel);
@@ -452,6 +515,7 @@ export class NoiseBasedAquifer {
     let floodedThreshold: number;
     let randomizedThreshold: number;
     if (this.isDeepDarkRegion(point)) {
+      noteHot(SURFACE_LEVEL_DEEP_DARK);
       floodedThreshold = -1;
       randomizedThreshold = -1;
     } else {
@@ -463,8 +527,15 @@ export class NoiseBasedAquifer {
       randomizedThreshold = floodedness - randomizedCutoff;
       floodedThreshold = floodedness - floodedCutoff;
     }
-    if (floodedThreshold > 0) return globalLevel;
-    if (randomizedThreshold > 0) return this.computeRandomizedFluidSurfaceLevel(blockX, blockY, blockZ, lowestSurface);
+    if (floodedThreshold > 0) {
+      noteHot(SURFACE_LEVEL_FLOODED);
+      return globalLevel;
+    }
+    if (randomizedThreshold > 0) {
+      noteHot(SURFACE_LEVEL_RANDOMIZED);
+      return this.computeRandomizedFluidSurfaceLevel(blockX, blockY, blockZ, lowestSurface);
+    }
+    noteHot(SURFACE_LEVEL_DRY);
     return WAY_BELOW_MIN_Y;
   }
 
@@ -493,7 +564,10 @@ export class NoiseBasedAquifer {
         new SinglePointContext(Math.floor(blockX / 64), Math.floor(blockY / 40), Math.floor(blockZ / 64)),
         "router.lava",
       );
-      if (Math.abs(lavaNoise) > 0.3) return BLOCK_LAVA;
+      if (Math.abs(lavaNoise) > 0.3) {
+        noteHot(FLUID_TYPE_LAVA_BY_NOISE);
+        return BLOCK_LAVA;
+      }
     }
     return globalFluid;
   }

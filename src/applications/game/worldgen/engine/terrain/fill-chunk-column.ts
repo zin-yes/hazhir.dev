@@ -18,6 +18,16 @@ import { CacheAllInCell } from "./noise-chunk-caches";
 import { NO_VEIN, OreVeinifier } from "./ore-veinifier";
 import { getPreliminarySurfaceLevelCache } from "./preliminary-surface-level";
 import { BLOCK_AIR, BLOCK_DEFAULT_BLOCK, BLOCK_DEFAULT_FLUID, BLOCK_LAVA } from "./terrain-blocks";
+import { defineHotCounter, noteHot } from "../profiling/hot-counters";
+
+const CELLS_WITHOUT_AQUIFER = defineHotCounter("fill.cellsWithoutAquifer");
+const CELLS_WITH_AQUIFER = defineHotCounter("fill.cellsWithAquifer");
+const CELLS_UNIFORM_SOLID = defineHotCounter("fill.cellsUniformSolid");
+const CELLS_UNIFORM_OPEN = defineHotCounter("fill.cellsUniformOpen");
+const CELLS_PER_BLOCK_PATH = defineHotCounter("fill.cellsPerBlockPath");
+const BLOCKS_NEEDING_AQUIFER_CONTEXT = defineHotCounter("fill.blocksNeedingAquiferContext");
+const BLOCKS_CHECKED_FOR_VEINS = defineHotCounter("fill.blocksCheckedForVeins");
+const BLOCKS_WITH_VEIN_FOUND = defineHotCounter("fill.blocksWithVeinFound");
 
 export {
   BLOCK_AIR,
@@ -249,8 +259,10 @@ function interpolateColumn(noiseChunk: NoiseChunk, settings: InterpolationSettin
       for (let cellY = cellCountY - 1; cellY >= 0; cellY--) {
         noiseChunk.selectCellYZ(cellY, cellZ);
         if (aquifer === undefined) {
+          noteHot(CELLS_WITHOUT_AQUIFER);
           fillCellWithoutAquifer(blocks, cellValues, noiseChunk, density, cellX, cellY, cellZ, minCellY, minY, seaLevel, chunkMinBlockX, chunkMinBlockZ);
         } else {
+          noteHot(CELLS_WITH_AQUIFER);
           fillCellWithAquifer(blocks, cellValues, noiseChunk, density, aquifer, oreVeinifier, cellX, cellY, cellZ, minCellY, minY, chunkMinBlockX, chunkMinBlockZ);
         }
       }
@@ -323,6 +335,7 @@ function fillCellWithAquifer(
   if (cellValues !== undefined && fillUniformCell(blocks, cellValues, aquifer, oreVeinifier, cellX, cellY, cellZ, cellWidth, cellHeight, minCellY, minY, chunkMinBlockX, chunkMinBlockZ)) {
     return;
   }
+  noteHot(CELLS_PER_BLOCK_PATH);
   const cellMayHoldVeins = oreVeinifier !== undefined && !oreVeinifier.selectedCellCannotHoldVeins();
   for (let yInCell = cellHeight - 1; yInCell >= 0; yInCell--) {
     const blockY = (minCellY + cellY) * cellHeight + yInCell;
@@ -345,15 +358,20 @@ function fillCellWithAquifer(
         }
         let symbol = densityValue > 0 ? NULL_SUBSTANCE : aquifer.openBlockSubstanceWithoutContext(blockX, blockY, blockZ);
         if (symbol === UNRESOLVED_SUBSTANCE) {
+          noteHot(BLOCKS_NEEDING_AQUIFER_CONTEXT);
           noiseChunk.moveToBlockInCell(xInCell, yInCell, zInCell);
           symbol = aquifer.computeSubstanceAt(noiseChunk, densityValue, blockX, blockY, blockZ);
         }
         if (symbol === NULL_SUBSTANCE) {
           symbol = BLOCK_DEFAULT_BLOCK;
           if (rowMayHoldVeins) {
+            noteHot(BLOCKS_CHECKED_FOR_VEINS);
             noiseChunk.moveToBlockInCell(xInCell, yInCell, zInCell);
             const vein = oreVeinifier!.compute(noiseChunk);
-            if (vein !== NO_VEIN) symbol = vein;
+            if (vein !== NO_VEIN) {
+              noteHot(BLOCKS_WITH_VEIN_FOUND);
+              symbol = vein;
+            }
           }
         }
         blocks[rowOffset + localZ * 16 + localX] = symbol;
@@ -395,6 +413,7 @@ function fillUniformCell(
       (oreVeinifier.mayHoldVeinAt(lowestBlockY) || oreVeinifier.mayHoldVeinAt(highestBlockY)) &&
       !oreVeinifier.selectedCellCannotHoldVeins();
     if (cellMayHoldVeins) return false;
+    noteHot(CELLS_UNIFORM_SOLID);
     for (let blockY = lowestBlockY; blockY <= highestBlockY; blockY++) fillCellRow(blocks, (blockY - minY) * 256, firstLocalX, firstLocalZ, cellWidth, BLOCK_DEFAULT_BLOCK);
     return true;
   }
@@ -408,6 +427,7 @@ function fillUniformCell(
     chunkMinBlockZ + firstLocalZ + cellWidth - 1,
   );
   if (statusIndex === -1) return false;
+  noteHot(CELLS_UNIFORM_OPEN);
   for (let blockY = lowestBlockY; blockY <= highestBlockY; blockY++) {
     const symbol = aquifer.isBelowLavaLevel(blockY) ? BLOCK_LAVA : aquifer.fluidOfStatusAt(statusIndex, blockY);
     if (symbol !== BLOCK_AIR) fillCellRow(blocks, (blockY - minY) * 256, firstLocalX, firstLocalZ, cellWidth, symbol);

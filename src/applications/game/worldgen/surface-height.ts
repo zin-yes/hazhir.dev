@@ -2,12 +2,29 @@
 // terrain: one block column at a time from the cell-corner densities, without filling chunks.
 
 import { GAME_Y_OFFSET } from "./constants";
+import { beginHotCounting, endHotCounting } from "./engine/profiling/hot-counters";
 import { getTerrainHeightSampler, getTerrainOnlyGenerator } from "./overworld-world";
 
 /** Game y of the highest solid block in a column, ignoring water, plants and trees. */
 export function createSurfaceHeightSampler(seed: number): (blockX: number, blockZ: number) => number {
   const heights = getTerrainHeightSampler(seed);
-  if (heights !== null) return (blockX, blockZ) => heights.oceanFloorHeight(blockX, blockZ) - 1 + GAME_Y_OFFSET;
+  if (heights !== null) {
+    return (blockX, blockZ) => {
+      const isCountingHot = beginHotCounting();
+      try {
+        return heights.oceanFloorHeight(blockX, blockZ) - 1 + GAME_Y_OFFSET;
+      } finally {
+        endHotCounting(isCountingHot);
+      }
+    };
+  }
   const generator = getTerrainOnlyGenerator(seed);
-  return (blockX, blockZ) => generator.surfaceHeight(blockX, blockZ, "OCEAN_FLOOR_WG") - 1 + GAME_Y_OFFSET;
+  return (blockX, blockZ) => {
+    const isCountingHot = beginHotCounting();
+    try {
+      return generator.surfaceHeight(blockX, blockZ, "OCEAN_FLOOR_WG") - 1 + GAME_Y_OFFSET;
+    } finally {
+      endHotCounting(isCountingHot);
+    }
+  };
 }

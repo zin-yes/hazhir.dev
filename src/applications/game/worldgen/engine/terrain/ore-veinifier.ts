@@ -8,6 +8,7 @@ import type { DensityNode } from "../density/density-function";
 import type { PositionalRandomFactory } from "../random";
 import { NoiseInterpolator } from "./noise-chunk-caches";
 import { transientRandomAt } from "../random/xoroshiro-random-source";
+import { defineHotCounter, noteHot } from "../profiling/hot-counters";
 import {
   BLOCK_COPPER_ORE,
   BLOCK_DEEPSLATE_IRON_ORE,
@@ -18,6 +19,16 @@ import {
 } from "./terrain-blocks";
 
 export const NO_VEIN = -1;
+
+const VEIN_CHECKS = defineHotCounter("oreVein.checks");
+const VEIN_OUTSIDE_HEIGHT_RANGE = defineHotCounter("oreVein.outsideHeightRange");
+const VEIN_BELOW_THRESHOLD = defineHotCounter("oreVein.belowThreshold");
+const VEIN_SKIPPED_BY_SOLIDNESS = defineHotCounter("oreVein.skippedBySolidness");
+const VEIN_SKIPPED_BY_RIDGE = defineHotCounter("oreVein.skippedByRidge");
+const VEIN_FILLER_BLOCKS = defineHotCounter("oreVein.fillerBlocks");
+const VEIN_ORE_BLOCKS = defineHotCounter("oreVein.oreBlocks");
+const VEIN_RAW_ORE_BLOCKS = defineHotCounter("oreVein.rawOreBlocks");
+const VEIN_CELLS_RULED_OUT = defineHotCounter("oreVein.cellsRuledOut");
 
 const VEININESS_THRESHOLD = Math.fround(0.4);
 const TOGGLE_ROUNDING_MARGIN = 1e-6;
@@ -69,7 +80,9 @@ export class OreVeinifier {
    */
   selectedCellCannotHoldVeins(): boolean {
     const toggle = this.veinToggle;
-    return toggle instanceof NoiseInterpolator && toggle.maxAbsoluteCorner() < VEININESS_THRESHOLD - TOGGLE_ROUNDING_MARGIN;
+    const cannotHoldVeins = toggle instanceof NoiseInterpolator && toggle.maxAbsoluteCorner() < VEININESS_THRESHOLD - TOGGLE_ROUNDING_MARGIN;
+    if (cannotHoldVeins) noteHot(VEIN_CELLS_RULED_OUT);
+    return cannotHoldVeins;
   }
 
   /** The BlockStateFiller of OreVeinifier.create: the vein block at the context's position, or NO_VEIN. */
@@ -79,8 +92,12 @@ export class OreVeinifier {
 
   private computeVein(context: FunctionContext): number {
     const blockY = context.blockY;
+    noteHot(VEIN_CHECKS);
     // Outside both vein height ranges the answer is NO_VEIN whatever the toggle (an interpolated read, no side effects).
-    if (blockY > COPPER_VEIN.maxY || blockY < IRON_VEIN.minY) return NO_VEIN;
+    if (blockY > COPPER_VEIN.maxY || blockY < IRON_VEIN.minY) {
+      noteHot(VEIN_OUTSIDE_HEIGHT_RANGE);
+      return NO_VEIN;
+    }
     const toggle = this.veinToggle.compute(context);
     const vein = toggle > 0 ? COPPER_VEIN : IRON_VEIN;
     const magnitude = Math.abs(toggle);
@@ -89,14 +106,29 @@ export class OreVeinifier {
     if (distanceToBottom < 0 || distanceToTop < 0) return NO_VEIN;
     const distanceToEdge = Math.min(distanceToTop, distanceToBottom);
     const edgeRoundoff = clampedMap(distanceToEdge, 0, EDGE_ROUNDOFF_BEGIN, -MAX_EDGE_ROUNDOFF, 0);
-    if (magnitude + edgeRoundoff < VEININESS_THRESHOLD) return NO_VEIN;
+    if (magnitude + edgeRoundoff < VEININESS_THRESHOLD) {
+      noteHot(VEIN_BELOW_THRESHOLD);
+      return NO_VEIN;
+    }
     const random = transientRandomAt(this.positionalRandomFactory, context.blockX, blockY, context.blockZ);
-    if (random.nextFloat() > VEIN_SOLIDNESS) return NO_VEIN;
-    if (this.veinRidged.compute(context) >= 0) return NO_VEIN;
+    if (random.nextFloat() > VEIN_SOLIDNESS) {
+      noteHot(VEIN_SKIPPED_BY_SOLIDNESS);
+      return NO_VEIN;
+    }
+    if (this.veinRidged.compute(context) >= 0) {
+      noteHot(VEIN_SKIPPED_BY_RIDGE);
+      return NO_VEIN;
+    }
     const richness = clampedMap(magnitude, VEININESS_THRESHOLD, MAX_RICHNESS_THRESHOLD, MIN_RICHNESS, MAX_RICHNESS);
     if (random.nextFloat() < richness && this.veinGap.compute(context) > SKIP_ORE_IF_GAP_NOISE_IS_BELOW) {
-      return random.nextFloat() < CHANCE_OF_RAW_ORE_BLOCK ? vein.rawOreBlock : vein.ore;
+      if (random.nextFloat() < CHANCE_OF_RAW_ORE_BLOCK) {
+        noteHot(VEIN_RAW_ORE_BLOCKS);
+        return vein.rawOreBlock;
+      }
+      noteHot(VEIN_ORE_BLOCKS);
+      return vein.ore;
     }
+    noteHot(VEIN_FILLER_BLOCKS);
     return vein.filler;
   }
 }
