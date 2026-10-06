@@ -1,4 +1,6 @@
 import { BlockType } from "../blocks";
+import { profiler } from "../profiler";
+import { DIMENSIONS } from "../profiler/dimensions";
 import {
   addWorkerCounter,
   endWorkerSection,
@@ -105,6 +107,20 @@ export interface BulkEditOptions {
   onPhase?: (phase: BulkEditPhase, hasStarted: boolean) => void;
 }
 
+/** What the session did besides flooding, counted as plain integers and reported once when the session ends. */
+interface EditSessionTally {
+  editsAlreadyMatching: number;
+  chunkRunSwitches: number;
+  seedSkippedChunkNotLit: number;
+  seedSkippedLightUnchanged: number;
+  seedSkyRemovals: number;
+  seedBlockRemovals: number;
+  seedEmitterRefills: number;
+  seedOpenSkyRefills: number;
+  seedLitNeighborsQueued: number;
+  changeRecordGrowths: number;
+}
+
 interface EditSession {
   cluster: ChunkCluster;
   skyRemovalQueue: CellQueue;
@@ -119,9 +135,57 @@ interface EditSession {
   removalMilliseconds: number;
   refillMilliseconds: number;
   onPhase: BulkEditOptions["onPhase"];
+  phaseProfilerToken: number;
+  tally: EditSessionTally;
+  /** Blocks written per new block id, filled only while the profiler is on. */
+  blocksWrittenByType: Uint32Array;
 }
 
 const INITIAL_CHANGE_CAPACITY = 4096;
+const BLOCK_ID_COUNT = 256;
+
+function emptyTally(): EditSessionTally {
+  return {
+    editsAlreadyMatching: 0,
+    chunkRunSwitches: 0,
+    seedSkippedChunkNotLit: 0,
+    seedSkippedLightUnchanged: 0,
+    seedSkyRemovals: 0,
+    seedBlockRemovals: 0,
+    seedEmitterRefills: 0,
+    seedOpenSkyRefills: 0,
+    seedLitNeighborsQueued: 0,
+    changeRecordGrowths: 0,
+  };
+}
+
+function clearTally(tally: EditSessionTally) {
+  tally.editsAlreadyMatching = 0;
+  tally.chunkRunSwitches = 0;
+  tally.seedSkippedChunkNotLit = 0;
+  tally.seedSkippedLightUnchanged = 0;
+  tally.seedSkyRemovals = 0;
+  tally.seedBlockRemovals = 0;
+  tally.seedEmitterRefills = 0;
+  tally.seedOpenSkyRefills = 0;
+  tally.seedLitNeighborsQueued = 0;
+  tally.changeRecordGrowths = 0;
+}
+
+const BLOCK_TYPE_NAMES: readonly string[] = Array.from(
+  { length: BLOCK_ID_COUNT },
+  (_, block) => BlockType[block] ?? `BLOCK_${block}`,
+);
+
+/**
+ * Phases the main thread's light engine already wraps in its own scopes (removeSkyLight, removeBlockLight and
+ * refillLight map to main.light.relight.*), so only the others get a scope here.
+ */
+const PHASE_PROFILER_SCOPES: { [phase in BulkEditPhase]?: string } = {
+  writeBlocks: "main.edit.writeBlocks",
+  seedLightChanges: "main.edit.seedLightChanges",
+  collectChunks: "main.edit.collectChunks",
+};
 
 const session: EditSession = {
   cluster: new ChunkCluster(),
@@ -137,15 +201,21 @@ const session: EditSession = {
   removalMilliseconds: 0,
   refillMilliseconds: 0,
   onPhase: undefined,
+  phaseProfilerToken: 0,
+  tally: emptyTally(),
+  blocksWrittenByType: new Uint32Array(BLOCK_ID_COUNT),
 };
 
 function beginPhase(phase: BulkEditPhase) {
   startWorkerSection(phase);
+  const scopeName = PHASE_PROFILER_SCOPES[phase];
+  if (scopeName) session.phaseProfilerToken = profiler.begin(scopeName);
   session.onPhase?.(phase, true);
 }
 
 function endPhase(phase: BulkEditPhase) {
   session.onPhase?.(phase, false);
+  if (PHASE_PROFILER_SCOPES[phase]) profiler.end(session.phaseProfilerToken);
   endWorkerSection();
 }
 
@@ -161,6 +231,8 @@ function beginSession(source: LightChunkSource, options: BulkEditOptions) {
   session.editedSlots.length = 0;
   session.removalMilliseconds = 0;
   session.refillMilliseconds = 0;
+  clearTally(session.tally);
+  if (profiler.enabled) session.blocksWrittenByType.fill(0);
 }
 
 function endSession() {
@@ -170,6 +242,7 @@ function endSession() {
 
 function recordChange(cell: number, oldBlock: number) {
   if (session.changeCount === session.changeCells.length) {
+    session.tally.changeRecordGrowths++;
     const grownCells = new Uint32Array(session.changeCells.length * 2);
     grownCells.set(session.changeCells);
     session.changeCells = grownCells;
@@ -225,10 +298,14 @@ function relightRecordedChanges() {
   const lightBySlot = cluster.lightBySlot;
 
   beginPhase("seedLightChanges");
+  const tally = session.tally;
   for (let record = 0; record < session.changeCount; record++) {
     const cell = session.changeCells[record];
     const slot = cell >>> CELL_INDEX_BITS;
-    if (cluster.isLitBySlot[slot] === 0) continue;
+    if (cluster.isLitBySlot[slot] === 0) {
+      tally.seedSkippedChunkNotLit++;
+      continue;
+    }
     const index = cell & CELL_INDEX_MASK;
     const oldBlock = session.changeOldBlocks[record];
     const newBlock = blocksBySlot[slot][index];
@@ -236,6 +313,7 @@ function relightRecordedChanges() {
     const isTransparent = IS_TRANSPARENT[newBlock];
     const newEmission = EMISSION[newBlock];
     if (wasTransparent === isTransparent && EMISSION[oldBlock] === newEmission) {
+      tally.seedSkippedLightUnchanged++;
       continue;
     }
 
@@ -246,23 +324,29 @@ function relightRecordedChanges() {
     if (wasTransparent === 1 && isTransparent === 0 && value >> 4 > 0) {
       skyRemovalQueue.push(cell, value >> 4);
       value &= 0x0f;
+      tally.seedSkyRemovals++;
     }
     const previousBlockLight = value & 0xf;
     if (previousBlockLight > newEmission) {
       blockRemovalQueue.push(cell, previousBlockLight);
       value &= 0xf0;
+      tally.seedBlockRemovals++;
     }
     if (newEmission > (value & 0xf)) {
       value = (value & 0xf0) | newEmission;
       refillQueue.push(cell);
+      tally.seedEmitterRefills++;
     }
     if (isTransparent === 1) {
       const isTopLayer = ((index >> CHUNK_SHIFT) & CHUNK_MASK) === CHUNK_MASK;
       if (wasTransparent === 0 && isTopLayer && isOpenSkyAbove(slot)) {
         value = (MAX_LIGHT << 4) | (value & 0xf);
         refillQueue.push(cell);
+        tally.seedOpenSkyRefills++;
       }
+      const refillQueuedBeforeNeighbors = refillQueue.pushedCount;
       queueLitNeighbors(slot, index);
+      tally.seedLitNeighborsQueued += refillQueue.pushedCount - refillQueuedBeforeNeighbors;
     }
     if (value !== initialValue) {
       light[index] = value;
@@ -291,6 +375,7 @@ function relightRecordedChanges() {
     session.restoredEmitterQueue,
     session.floodStats,
   );
+  const restoreToken = profiler.begin("main.edit.restoreEmitters");
   while (session.restoredEmitterQueue.length > 0) {
     const cell = session.restoredEmitterQueue.shift();
     const slot = cell >>> CELL_INDEX_BITS;
@@ -300,6 +385,7 @@ function relightRecordedChanges() {
       (light[index] & 0xf0) | EMISSION[blocksBySlot[slot][index]];
     refillQueue.push(cell);
   }
+  profiler.end(restoreToken);
   endPhase("removeBlockLight");
   session.removalMilliseconds = performance.now() - removalStartedAtMs;
 
@@ -321,6 +407,7 @@ function collectChangedChunks(): CollectedChunks {
   const slotCountBeforeCollecting = cluster.slotCount;
 
   // Looking up neighbors can add slots, so resolve them all before sizing the flags.
+  const resolveToken = profiler.begin("main.edit.collect.resolveNeighbors");
   for (let slot = 0; slot < slotCountBeforeCollecting; slot++) {
     if (cluster.contentChanged[slot] === 0) continue;
     changedSlots.push(slot);
@@ -330,6 +417,9 @@ function collectChangedChunks(): CollectedChunks {
     }
   }
 
+  profiler.end(resolveToken);
+
+  const flagToken = profiler.begin("main.edit.collect.flagRemesh");
   const remeshFlags = new Uint8Array(cluster.slotCount);
   for (const slot of changedSlots) {
     if (cluster.isLitBySlot[slot] === 0) continue;
@@ -345,19 +435,23 @@ function collectChangedChunks(): CollectedChunks {
   for (let slot = 0; slot < remeshFlags.length; slot++) {
     if (remeshFlags[slot] === 1) remeshSlots.push(slot);
   }
+  profiler.end(flagToken);
 
   const coordinateOf = (slot: number): ChunkCoordinate => ({
     x: cluster.chunkXBySlot[slot],
     y: cluster.chunkYBySlot[slot],
     z: cluster.chunkZBySlot[slot],
   });
-  return {
+  const sortToken = profiler.begin("main.edit.collect.sortNearestFirst");
+  const collected = {
     changedChunks: changedSlots.map(coordinateOf),
     chunksToRemesh: sortNearestFirst(
       remeshSlots.map(coordinateOf),
       session.editedSlots.map(coordinateOf),
     ),
   };
+  profiler.end(sortToken);
+  return collected;
 }
 
 function sortNearestFirst(
@@ -384,6 +478,15 @@ function sortNearestFirst(
 }
 
 function buildChangeLog(): BlockChangeLog {
+  const logToken = profiler.begin("main.edit.collect.buildChangeLog");
+  try {
+    return writeChangeLog();
+  } finally {
+    profiler.end(logToken);
+  }
+}
+
+function writeChangeLog(): BlockChangeLog {
   const { cluster } = session;
   const count = session.changeCount;
   const log: BlockChangeLog = {
@@ -464,8 +567,102 @@ function finishSession(
   addWorkerCounter("cellsRemoved", stats.cellsRemoved);
   addWorkerCounter("cellsLit", stats.cellsLit);
   addWorkerCounter("chunksToRemesh", chunksToRemesh.length);
+  if (profiler.enabled) publishSessionMetrics(stats, changedChunks.length, chunksToRemesh.length, changes);
   endSession();
   return { changedChunks, chunksToRemesh, changes, stats };
+}
+
+/** Reports what one edit session did: edit outcomes, seeding, flood work, queue and cluster use, memory. */
+function publishSessionMetrics(
+  stats: BulkEditStats,
+  changedChunkCount: number,
+  chunksToRemeshCount: number,
+  changes: BlockChangeLog,
+) {
+  const { floodStats, cluster, tally } = session;
+  profiler.addCounter("game.edit.sessions");
+  profiler.addCounter("game.edit.editsRequested", stats.editsRequested);
+  profiler.addCounter("game.edit.blocksChanged", stats.blocksChanged);
+  profiler.addCounter("game.edit.editsInUnloadedChunks", stats.editsInUnloadedChunks);
+  profiler.addCounter("game.edit.editsSkippedByReplaceRule", stats.editsSkippedByReplaceRule);
+  profiler.addCounter("game.edit.editsAlreadyMatching", tally.editsAlreadyMatching);
+  profiler.addCounter("game.edit.chunkRunSwitches", tally.chunkRunSwitches);
+  profiler.addCounter("game.edit.chunksMarkedChanged", changedChunkCount);
+  profiler.addCounter("game.edit.chunksTouched", stats.chunksTouched);
+  profiler.addCounter("game.edit.changeRecordGrowths", tally.changeRecordGrowths);
+  profiler.sampleGauge("game.edit.blocksChangedPerSession", stats.blocksChanged);
+  profiler.sampleGauge("game.edit.chunksToRemeshPerSession", chunksToRemeshCount);
+
+  profiler.addCounter("game.edit.seed.skippedChunkNotLit", tally.seedSkippedChunkNotLit);
+  profiler.addCounter("game.edit.seed.skippedLightUnchanged", tally.seedSkippedLightUnchanged);
+  profiler.addCounter("game.edit.seed.skyRemovals", tally.seedSkyRemovals);
+  profiler.addCounter("game.edit.seed.blockRemovals", tally.seedBlockRemovals);
+  profiler.addCounter("game.edit.seed.emitterRefills", tally.seedEmitterRefills);
+  profiler.addCounter("game.edit.seed.openSkyRefills", tally.seedOpenSkyRefills);
+  profiler.addCounter("game.edit.seed.litNeighborsQueued", tally.seedLitNeighborsQueued);
+
+  profiler.addCounter("game.edit.light.cellsVisited", floodStats.cellsVisited);
+  profiler.addCounter("game.edit.light.cellsLit", floodStats.cellsLit);
+  profiler.addCounter("game.edit.light.cellsRemoved", floodStats.cellsRemoved);
+  profiler.addCounter("game.edit.light.skyCellsRemoved", floodStats.skyCellsRemoved);
+  profiler.addCounter("game.edit.light.blockCellsRemoved", floodStats.blockCellsRemoved);
+  profiler.addCounter("game.edit.light.cellsQueuedBySpread", floodStats.cellsQueuedBySpread);
+  profiler.addCounter("game.edit.light.cellsQueuedByRemoval", floodStats.cellsQueuedByRemoval);
+  profiler.addCounter("game.edit.light.deadCellsSkipped", floodStats.deadCellsSkipped);
+  profiler.addCounter("game.edit.light.neighborsExamined", floodStats.neighborsExamined);
+  profiler.addCounter("game.edit.light.neighborsOutsideLitChunks", floodStats.neighborsOutsideLitChunks);
+  profiler.addCounter("game.edit.light.neighborsOpaque", floodStats.neighborsOpaque);
+  profiler.addCounter("game.edit.light.neighborsAlreadyBrightEnough", floodStats.neighborsAlreadyBrightEnough);
+  profiler.addCounter("game.edit.light.neighborsKeptForRefill", floodStats.neighborsKeptForRefill);
+  profiler.addCounter("game.edit.light.neighborsAlreadyDark", floodStats.neighborsAlreadyDark);
+  profiler.addCounter("game.edit.light.chunkBoundaryCrossings", floodStats.chunkBoundaryCrossings);
+  profiler.addCounter("game.edit.light.lightArraysDetached", floodStats.lightArraysDetached);
+  profiler.addCounter("game.edit.light.emittersRestoredByRemoval", floodStats.emittersRestored);
+  profiler.addCounter("game.edit.light.spreadCalls", floodStats.spreadCalls);
+  profiler.addCounter("game.edit.light.removeCalls", floodStats.removeCalls);
+  profiler.sampleGauge("game.edit.light.cellsVisitedPerChangedBlock", floodStats.cellsVisited / Math.max(1, stats.blocksChanged));
+  profiler.recordBreakdown(DIMENSIONS.lightFloodWave, "skyRemoval", { units: floodStats.skyCellsRemoved, calls: 1 });
+  profiler.recordBreakdown(DIMENSIONS.lightFloodWave, "blockRemoval", { units: floodStats.blockCellsRemoved, calls: 1 });
+  profiler.recordBreakdown(DIMENSIONS.lightFloodWave, "spread", { units: floodStats.cellsLit, calls: 1 });
+
+  const queues = [session.skyRemovalQueue, session.blockRemovalQueue, session.refillQueue, session.restoredEmitterQueue];
+  profiler.sampleGauge("game.edit.light.queuePeakSkyRemoval", session.skyRemovalQueue.peakLength);
+  profiler.sampleGauge("game.edit.light.queuePeakBlockRemoval", session.blockRemovalQueue.peakLength);
+  profiler.sampleGauge("game.edit.light.queuePeakRefill", session.refillQueue.peakLength);
+  profiler.sampleGauge("game.edit.light.queuePeakRestoredEmitters", session.restoredEmitterQueue.peakLength);
+  let queueGrowths = 0;
+  let queueCapacityBytes = 0;
+  for (const queue of queues) {
+    queueGrowths += queue.growthCount;
+    queueCapacityBytes += queue.capacityBytes;
+  }
+  profiler.addCounter("game.edit.light.queueGrowths", queueGrowths);
+  profiler.sampleGauge("memory.edit.lightQueueBytes", queueCapacityBytes, "bytes");
+
+  const clusterStats = cluster.stats;
+  profiler.sampleGauge("game.edit.cluster.slots", cluster.slotCount);
+  profiler.addCounter("game.edit.cluster.slotLookups", clusterStats.slotLookups);
+  profiler.addCounter("game.edit.cluster.slotLookupsFound", clusterStats.slotLookupsFound);
+  profiler.addCounter("game.edit.cluster.hashProbeSteps", clusterStats.hashProbeSteps);
+  profiler.addCounter("game.edit.cluster.slotsCreated", clusterStats.slotsCreated);
+  profiler.addCounter("game.edit.cluster.slotsWithoutBlocks", clusterStats.slotsWithoutBlocks);
+  profiler.addCounter("game.edit.cluster.slotsLoadedFromSource", clusterStats.slotsLoadedFromSource);
+  profiler.addCounter("game.edit.cluster.neighborResolutions", clusterStats.neighborResolutions);
+  profiler.addCounter("game.edit.cluster.neighborResolutionsNotLit", clusterStats.neighborResolutionsNotLit);
+  profiler.addCounter("game.edit.cluster.tableGrowths", clusterStats.tableGrowths);
+  profiler.addCounter("game.edit.cluster.lightArraysDetached", clusterStats.lightArraysDetached);
+
+  profiler.recordBytes("bytes.edit.changeRecords", session.changeCount * (Uint32Array.BYTES_PER_ELEMENT + 1));
+  profiler.recordBytes(
+    "bytes.edit.changeLog",
+    changes.x.byteLength + changes.y.byteLength + changes.z.byteLength + changes.oldBlock.byteLength + changes.newBlock.byteLength,
+  );
+  profiler.sampleGauge("memory.edit.changeRecordCapacityBytes", session.changeCells.byteLength + session.changeOldBlocks.byteLength, "bytes");
+
+  for (let block = 0; block < BLOCK_ID_COUNT; block++) {
+    const written = session.blocksWrittenByType[block]!;
+    if (written > 0) profiler.recordBreakdown(DIMENSIONS.editBlock, BLOCK_TYPE_NAMES[block]!, { units: written, calls: 1 });
+  }
 }
 
 function emptyChangeLog(): BlockChangeLog {
@@ -490,6 +687,7 @@ export function applyBlockEdits(
   edits: BlockEditBatch | ArrayLike<BlockEdit>,
   options: BulkEditOptions = {},
 ): BulkEditResult {
+  profiler.addCounter("game.edit.path.bulk");
   const batch =
     edits instanceof BlockEditBatch ? edits : BlockEditBatch.fromEdits(edits);
   beginSession(source, options);
@@ -504,6 +702,8 @@ export function applyBlockEdits(
   let lastChunkY = 0;
   let lastChunkZ = 0;
   let lastSlot = -1;
+  const isProfiling = profiler.enabled;
+  const blocksWrittenByType = session.blocksWrittenByType;
   for (let position = 0; position < batch.length; position++) {
     const x = xs[position];
     const y = ys[position];
@@ -518,6 +718,7 @@ export function applyBlockEdits(
       chunkZ !== lastChunkZ
     ) {
       lastSlot = cluster.slotForChunk(chunkX, chunkY, chunkZ);
+      session.tally.chunkRunSwitches++;
       lastChunkX = chunkX;
       lastChunkY = chunkY;
       lastChunkZ = chunkZ;
@@ -533,7 +734,10 @@ export function applyBlockEdits(
     const chunkBlocks = cluster.blocksBySlot[lastSlot];
     const oldBlock = chunkBlocks[index];
     const newBlock = newBlocks[position];
-    if (oldBlock === newBlock) continue;
+    if (oldBlock === newBlock) {
+      session.tally.editsAlreadyMatching++;
+      continue;
+    }
     if (!allowsReplacing(replaceRule, oldBlock)) {
       editsSkippedByReplaceRule++;
       continue;
@@ -541,6 +745,7 @@ export function applyBlockEdits(
     chunkBlocks[index] = newBlock;
     markCellChanged(lastSlot, index);
     recordChange((lastSlot << CELL_INDEX_BITS) | index, oldBlock);
+    if (isProfiling) blocksWrittenByType[newBlock]++;
   }
   endPhase("writeBlocks");
 
@@ -585,6 +790,7 @@ export function relightAfterBlocksWritten(
   changes: ArrayLike<{ x: number; y: number; z: number; oldBlock: number }>,
   options: BulkEditOptions = {},
 ): BulkEditResult {
+  profiler.addCounter("game.edit.path.relightAfterWrites");
   beginSession(source, options);
   let editsInUnloadedChunks = 0;
   for (let position = 0; position < changes.length; position++) {
@@ -609,6 +815,7 @@ export function relightAfterSingleBlockWritten(
   oldBlock: number,
   options: BulkEditOptions = {},
 ): BulkEditResult {
+  profiler.addCounter("game.edit.path.singleBlock");
   beginSession(source, options);
   const isLoaded = recordWrittenChange(x, y, z, oldBlock);
   return finishSession(

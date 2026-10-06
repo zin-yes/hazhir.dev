@@ -1,5 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import { BlockType } from "../blocks";
+import { DIMENSIONS } from "../profiler/dimensions";
+import {
+  breakdownUnits,
+  counterTotal,
+  gaugeMax,
+  withEnabledProfiler,
+} from "../world/profiler-readings.test-helper";
 import {
   beginWorkerTask,
   finishWorkerTask,
@@ -401,5 +408,36 @@ describe("applyBlockEdits against a from-scratch relight", () => {
     }
     expect(profile.counters.blocksChanged).toBeGreaterThan(100);
     expect(profile.counters.chunksToRemesh).toBeGreaterThan(0);
+  });
+});
+
+describe("applyBlockEdits profiling", () => {
+  test("flood and edit counters match the stats of the result for a sphere of glowstone and a sphere of stone", () => {
+    const world = smallWorld(11);
+    withEnabledProfiler(() => {
+      const glow = applyBlockEdits(world, sphereEdits({ x: -10, y: 4 * CHUNK_SIZE + 6, z: -8 }, 5, BlockType.GLOWSTONE, "fill"));
+      const stone = applyBlockEdits(world, sphereEdits({ x: -12, y: 4 * CHUNK_SIZE + 20, z: -9 }, 6, BlockType.STONE, "fill"));
+      const stats = [glow.stats, stone.stats];
+      const sum = (pick: (entry: BulkEditResult["stats"]) => number) => stats.reduce((total, entry) => total + pick(entry), 0);
+
+      expect(sum((entry) => entry.blocksChanged)).toBeGreaterThan(200);
+      expect(counterTotal("game.edit.sessions")).toBe(2);
+      expect(counterTotal("game.edit.blocksChanged")).toBe(sum((entry) => entry.blocksChanged));
+      expect(counterTotal("game.edit.light.cellsLit")).toBe(sum((entry) => entry.cellsLit));
+      expect(counterTotal("game.edit.light.cellsRemoved")).toBe(sum((entry) => entry.cellsRemoved));
+      expect(counterTotal("game.edit.light.cellsVisited")).toBe(sum((entry) => entry.cellsVisited));
+      expect(counterTotal("game.edit.light.skyCellsRemoved") + counterTotal("game.edit.light.blockCellsRemoved")).toBe(
+        sum((entry) => entry.cellsRemoved),
+      );
+      expect(counterTotal("game.edit.light.cellsLit")).toBeGreaterThan(1000);
+      expect(counterTotal("game.edit.light.neighborsExamined")).toBe(
+        6 * (counterTotal("game.edit.light.cellsVisited") - counterTotal("game.edit.light.deadCellsSkipped")),
+      );
+      expect(breakdownUnits(DIMENSIONS.editBlock, "GLOWSTONE")).toBe(glow.stats.blocksChanged);
+      expect(breakdownUnits(DIMENSIONS.editBlock, "STONE")).toBe(stone.stats.blocksChanged);
+      expect(counterTotal("game.edit.seed.emitterRefills")).toBeGreaterThan(0);
+      expect(counterTotal("game.edit.cluster.slotsCreated")).toBeGreaterThanOrEqual(4);
+      expect(gaugeMax("game.edit.light.queuePeakRefill")).toBeGreaterThan(1);
+    });
   });
 });

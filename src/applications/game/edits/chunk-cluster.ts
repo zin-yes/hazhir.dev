@@ -97,7 +97,37 @@ function hashChunk(chunkX: number, chunkY: number, chunkZ: number): number {
  * A slot exists for every chunk the flood asked about. It is "lit" when both
  * its blocks and its light are available: only lit slots take part in light.
  */
+/** Lookup traffic of one cluster, as plain integers the caller reads after a flood and reports. */
+export class ClusterStats {
+  slotLookups = 0;
+  slotLookupsFound = 0;
+  hashProbeSteps = 0;
+  slotsCreated = 0;
+  slotsWithoutBlocks = 0;
+  slotsLoadedFromSource = 0;
+  chunksRegisteredByCaller = 0;
+  neighborResolutions = 0;
+  neighborResolutionsNotLit = 0;
+  tableGrowths = 0;
+  lightArraysDetached = 0;
+
+  clear() {
+    this.slotLookups = 0;
+    this.slotLookupsFound = 0;
+    this.hashProbeSteps = 0;
+    this.slotsCreated = 0;
+    this.slotsWithoutBlocks = 0;
+    this.slotsLoadedFromSource = 0;
+    this.chunksRegisteredByCaller = 0;
+    this.neighborResolutions = 0;
+    this.neighborResolutionsNotLit = 0;
+    this.tableGrowths = 0;
+    this.lightArraysDetached = 0;
+  }
+}
+
 export class ChunkCluster {
+  readonly stats = new ClusterStats();
   blocksBySlot: Uint8Array[] = [];
   lightBySlot: Uint8Array[] = [];
   isLitBySlot = new Uint8Array(INITIAL_SLOT_CAPACITY);
@@ -118,6 +148,7 @@ export class ChunkCluster {
   private source: LightChunkSource = NO_CHUNKS_SOURCE;
 
   reset(source: LightChunkSource) {
+    this.stats.clear();
     this.source = source;
     this.slotCount = 0;
     this.blocksBySlot.length = 0;
@@ -127,6 +158,8 @@ export class ChunkCluster {
 
   /** The slot of a chunk, created (and loaded from the source) the first time it is asked for. */
   slotForChunk(chunkX: number, chunkY: number, chunkZ: number): number {
+    const stats = this.stats;
+    stats.slotLookups++;
     const mask = this.hashTable.length - 1;
     let position = hashChunk(chunkX, chunkY, chunkZ) & mask;
     for (;;) {
@@ -137,14 +170,18 @@ export class ChunkCluster {
         this.chunkYBySlot[slot] === chunkY &&
         this.chunkZBySlot[slot] === chunkZ
       ) {
+        stats.slotLookupsFound++;
         return slot;
       }
       position = (position + 1) & mask;
+      stats.hashProbeSteps++;
     }
     const blocks = this.source.getBlocks(chunkX, chunkY, chunkZ);
     const light = blocks
       ? this.source.getLight(chunkX, chunkY, chunkZ)
       : undefined;
+    stats.slotsLoadedFromSource++;
+    if (!blocks) stats.slotsWithoutBlocks++;
     return this.addSlot(chunkX, chunkY, chunkZ, blocks, light, false);
   }
 
@@ -157,6 +194,7 @@ export class ChunkCluster {
     light: Uint8Array,
     copyLightBeforeWriting: boolean,
   ): number {
+    this.stats.chunksRegisteredByCaller++;
     return this.addSlot(
       chunkX,
       chunkY,
@@ -176,18 +214,21 @@ export class ChunkCluster {
   }
 
   resolveNeighbor(slot: number, direction: number): number {
+    this.stats.neighborResolutions++;
     const neighbor = this.slotForChunk(
       this.chunkXBySlot[slot] + DIRECTION_OFFSET_X[direction],
       this.chunkYBySlot[slot] + DIRECTION_OFFSET_Y[direction],
       this.chunkZBySlot[slot] + DIRECTION_OFFSET_Z[direction],
     );
     const resolved = this.isLitBySlot[neighbor] === 1 ? neighbor : NO_CHUNK;
+    if (resolved === NO_CHUNK) this.stats.neighborResolutionsNotLit++;
     this.neighborSlots[slot * DIRECTION_COUNT + direction] = resolved;
     return resolved;
   }
 
   /** Gives the slot a private copy of its light before the first write into it. */
   detachLight(slot: number) {
+    this.stats.lightArraysDetached++;
     this.lightBySlot[slot] = this.lightBySlot[slot].slice();
     this.copyLightOnWrite[slot] = 0;
   }
@@ -200,10 +241,14 @@ export class ChunkCluster {
     light: Uint8Array | undefined,
     copyLightBeforeWriting: boolean,
   ): number {
-    if (this.slotCount === this.chunkXBySlot.length) this.grow();
+    if (this.slotCount === this.chunkXBySlot.length) {
+      this.grow();
+      this.stats.tableGrowths++;
+    }
     if (this.slotCount >= MAX_CLUSTER_SLOTS) {
       throw new Error("too many chunks in one light update");
     }
+    this.stats.slotsCreated++;
     const slot = this.slotCount++;
     this.chunkXBySlot[slot] = chunkX;
     this.chunkYBySlot[slot] = chunkY;
