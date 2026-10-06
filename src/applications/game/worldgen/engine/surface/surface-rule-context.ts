@@ -1,7 +1,19 @@
 // Mirrors SurfaceRules.Context: the per-column and per-block state the surface conditions read, with the
 // lazily refreshed values the Java class keeps behind its lastUpdate stamps.
 
+import { defineHotCounter, noteHot } from "../profiling/hot-counters";
 import type { BiomeAtBlock } from "./surface-types";
+
+const COLUMNS_UPDATED = defineHotCounter("surfaceContext.columnsUpdated");
+const BLOCKS_UPDATED = defineHotCounter("surfaceContext.blocksUpdated");
+const BIOME_LOOKUPS = defineHotCounter("surfaceContext.biomeLookups");
+const BIOME_STAMP_HITS = defineHotCounter("surfaceContext.biomeStampHits");
+const SECONDARY_COMPUTED = defineHotCounter("surfaceContext.secondaryComputed");
+const SECONDARY_STAMP_HITS = defineHotCounter("surfaceContext.secondaryStampHits");
+const MIN_SURFACE_LEVEL_COMPUTED = defineHotCounter("surfaceContext.minSurfaceLevelComputed");
+const MIN_SURFACE_LEVEL_STAMP_HITS = defineHotCounter("surfaceContext.minSurfaceLevelStampHits");
+const MIN_SURFACE_CORNER_RELOADS = defineHotCounter("surfaceContext.cornerLevelReloads");
+const STEEPNESS_CHECKS = defineHotCounter("surfaceContext.steepnessChecks");
 
 // Stamps come from one counter shared by every context so condition caches compiled once per seed can never
 // see a stamp value that an earlier chunk's context already used.
@@ -66,6 +78,7 @@ export class SurfaceRuleContext {
   }
 
   updateXZ(blockX: number, blockZ: number): void {
+    noteHot(COLUMNS_UPDATED);
     this.lastUpdateXZ = ++nextStamp;
     this.lastUpdateY = ++nextStamp;
     this.blockX = blockX;
@@ -74,6 +87,7 @@ export class SurfaceRuleContext {
   }
 
   updateY(stoneDepthAbove: number, stoneDepthBelow: number, waterHeight: number, blockX: number, blockY: number, blockZ: number): void {
+    noteHot(BLOCKS_UPDATED);
     this.lastUpdateY = ++nextStamp;
     this.blockX = blockX;
     this.blockY = blockY;
@@ -85,8 +99,11 @@ export class SurfaceRuleContext {
 
   getBiome(): string {
     if (this.biomeStamp !== this.lastUpdateY) {
+      noteHot(BIOME_LOOKUPS);
       this.biomeStamp = this.lastUpdateY;
       this.biomeValue = this.biomeAt(this.blockX, this.blockY, this.blockZ);
+    } else {
+      noteHot(BIOME_STAMP_HITS);
     }
     return this.biomeValue;
   }
@@ -97,18 +114,23 @@ export class SurfaceRuleContext {
 
   getSurfaceSecondary(): number {
     if (this.secondaryStamp !== this.lastUpdateXZ) {
+      noteHot(SECONDARY_COMPUTED);
       this.secondaryStamp = this.lastUpdateXZ;
       this.secondaryValue = this.services.getSurfaceSecondary(this.blockX, this.blockZ);
+    } else {
+      noteHot(SECONDARY_STAMP_HITS);
     }
     return this.secondaryValue;
   }
 
   getMinSurfaceLevel(): number {
     if (this.minSurfaceLevelStamp !== this.lastUpdateXZ) {
+      noteHot(MIN_SURFACE_LEVEL_COMPUTED);
       this.minSurfaceLevelStamp = this.lastUpdateXZ;
       const cellX = this.blockX >> PRELIMINARY_SURFACE_CELL_BITS;
       const cellZ = this.blockZ >> PRELIMINARY_SURFACE_CELL_BITS;
       if (cellX !== this.cornerCellX || cellZ !== this.cornerCellZ) {
+        noteHot(MIN_SURFACE_CORNER_RELOADS);
         this.cornerCellX = cellX;
         this.cornerCellZ = cellZ;
         const blockXOfCell = cellX << PRELIMINARY_SURFACE_CELL_BITS;
@@ -125,12 +147,15 @@ export class SurfaceRuleContext {
       const alongX1 = this.cornerLevels[2]! + deltaX * (this.cornerLevels[3]! - this.cornerLevels[2]!);
       const interpolatedLevel = Math.floor(alongX0 + deltaZ * (alongX1 - alongX0));
       this.minSurfaceLevelValue = interpolatedLevel + this.surfaceDepth - HOW_FAR_BELOW_PRELIMINARY_SURFACE_TO_BUILD;
+    } else {
+      noteHot(MIN_SURFACE_LEVEL_STAMP_HITS);
     }
     return this.minSurfaceLevelValue;
   }
 
   /** SteepMaterialCondition: a 4 block drop to a neighbouring column along z, or else along x. */
   isSteep(): boolean {
+    noteHot(STEEPNESS_CHECKS);
     const localX = this.blockX & 15;
     const localZ = this.blockZ & 15;
     const northHeight = this.heightmap.getHeight(localX, Math.max(localZ - 1, 0));

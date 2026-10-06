@@ -18,7 +18,14 @@ import type { JsonObject, TagRegistry, WorldgenRegistries } from "../registry/da
 import { type CarverConfig, parseConfiguredCarver, readBiomeAirCarverIds } from "./carver-config";
 import { carveCanyon } from "./canyon-world-carver";
 import { carveCaves } from "./cave-world-carver";
+import { defineHotCounter, noteHot } from "../profiling/hot-counters";
 import { type CarverAquifer, CarvingContext, type TopMaterialSource } from "./carving-context";
+
+const SOURCE_CHUNK_CACHE_HITS = defineHotCounter("carver.sourceChunkCacheHits");
+const SOURCE_CHUNK_CACHE_MISSES = defineHotCounter("carver.sourceChunkCacheMisses");
+const SOURCE_CHUNK_CACHE_CLEARS = defineHotCounter("carver.sourceChunkCacheClears");
+const BIOME_CARVER_LISTS_BUILT = defineHotCounter("carver.biomeCarverListsBuilt");
+const CARVER_CONFIGS_PARSED = defineHotCounter("carver.configsParsed");
 
 const SOURCE_CHUNK_RADIUS = 8;
 const MAX_CACHED_SOURCE_CHUNKS = 20_000;
@@ -90,6 +97,7 @@ export class CarverSystem {
       const json = this.config.registries.configured_carver[carverId];
       if (json === undefined) throw new Error(`Unknown configured carver ${carverId}`);
       carver = parseConfiguredCarver(carverId, json, this.config.blockTags);
+      noteHot(CARVER_CONFIGS_PARSED);
       this.carversByConfiguredId.set(carverId, carver);
     }
     return carver;
@@ -101,6 +109,7 @@ export class CarverSystem {
       const biomeJson: JsonObject | undefined = this.config.registries.biome[biomeId];
       if (biomeJson === undefined) throw new Error(`Unknown biome ${biomeId}`);
       carvers = readBiomeAirCarverIds(biomeJson).map((carverId) => this.carverById(carverId));
+      noteHot(BIOME_CARVER_LISTS_BUILT);
       this.carversByBiomeId.set(biomeId, carvers);
     }
     return carvers;
@@ -111,9 +120,15 @@ export class CarverSystem {
     const key = (chunkX + CHUNK_KEY_OFFSET) * CHUNK_KEY_STRIDE + (chunkZ + CHUNK_KEY_OFFSET);
     let carvers = this.carversBySourceChunk.get(key);
     if (carvers === undefined) {
+      noteHot(SOURCE_CHUNK_CACHE_MISSES);
       carvers = this.carversOfBiome(this.config.rawBiomeAtQuart(chunkX * 4, 0, chunkZ * 4));
-      if (this.carversBySourceChunk.size >= MAX_CACHED_SOURCE_CHUNKS) this.carversBySourceChunk.clear();
+      if (this.carversBySourceChunk.size >= MAX_CACHED_SOURCE_CHUNKS) {
+        noteHot(SOURCE_CHUNK_CACHE_CLEARS);
+        this.carversBySourceChunk.clear();
+      }
       this.carversBySourceChunk.set(key, carvers);
+    } else {
+      noteHot(SOURCE_CHUNK_CACHE_HITS);
     }
     return carvers;
   }
@@ -153,6 +168,20 @@ export class CarverSystem {
       addWorkerCounter("carverEllipsoids", context.ellipsoidsCarved);
       addWorkerCounter("carverBlocksTested", context.blocksTested);
       addWorkerCounter("carverBlocksRemoved", context.blocksRemoved);
+      addWorkerCounter("carver.ellipsoidsOutOfRange", context.ellipsoidsOutOfRange);
+      addWorkerCounter("carver.blocksAlreadyMasked", context.blocksAlreadyMasked);
+      addWorkerCounter("carver.blocksNotReplaceable", context.blocksNotReplaceable);
+      addWorkerCounter("carver.blocksKeptByAquifer", context.blocksKeptByAquifer);
+      addWorkerCounter("carver.lavaBlocksCarved", context.lavaBlocksCarved);
+      addWorkerCounter("carver.topMaterialLookups", context.topMaterialLookups);
+      addWorkerCounter("carver.roomsCreated", context.roomsCreated);
+      addWorkerCounter("carver.tunnelsStarted", context.tunnelsStarted);
+      addWorkerCounter("carver.tunnelBranches", context.tunnelBranches);
+      addWorkerCounter("carver.tunnelSteps", context.tunnelSteps);
+      addWorkerCounter("carver.stepsStaggered", context.tunnelStepsStaggered);
+      addWorkerCounter("carver.tunnelsEndedOutOfReach", context.tunnelsEndedOutOfReach);
+      addWorkerCounter("carver.canyonsStarted", context.canyonsStarted);
+      addWorkerCounter("carver.canyonSteps", context.canyonSteps);
       params.aquifer.drainProfileCounters?.();
     }
     return context.mask;

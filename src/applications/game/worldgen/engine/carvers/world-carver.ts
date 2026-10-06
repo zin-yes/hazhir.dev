@@ -38,7 +38,10 @@ export function carveEllipsoid(
   const chunkMinBlockX = context.chunkMinBlockX;
   const chunkMinBlockZ = context.chunkMinBlockZ;
   const maxDistance = 16 + horizontalRadius * 2;
-  if (Math.abs(x - (chunkMinBlockX + 8)) > maxDistance || Math.abs(z - (chunkMinBlockZ + 8)) > maxDistance) return false;
+  if (Math.abs(x - (chunkMinBlockX + 8)) > maxDistance || Math.abs(z - (chunkMinBlockZ + 8)) > maxDistance) {
+    context.ellipsoidsOutOfRange++;
+    return false;
+  }
   const minLocalX = Math.max(Math.floor(x - horizontalRadius) - chunkMinBlockX - 1, 0);
   const maxLocalX = Math.min(Math.floor(x + horizontalRadius) - chunkMinBlockX, 15);
   const minBlockY = Math.max(Math.floor(y - verticalRadius) - 1, context.minGenY + 1);
@@ -60,7 +63,10 @@ export function carveEllipsoid(
         const relativeY = (blockY - 0.5 - y) / verticalRadius;
         if (shouldSkip(relativeX, relativeY, relativeZ, blockY)) continue;
         const maskIndex = (blockY - context.minGenY) * 256 + localZ * 16 + localX;
-        if (context.mask[maskIndex] !== 0) continue;
+        if (context.mask[maskIndex] !== 0) {
+          context.blocksAlreadyMasked++;
+          continue;
+        }
         context.mask[maskIndex] = 1;
         if (carveBlock(context, config, lavaLevel, localX, blockY, localZ)) {
           carvedAny = true;
@@ -78,20 +84,27 @@ function carveBlock(context: CarvingContext, config: CarverBaseConfig, lavaLevel
   const index = (blockY - context.minGenY) * 256 + localZ * 16 + localX;
   const currentId = blocks[index]!;
   if (context.isGrassOrMycelium(currentId)) context.reachedSurface = true;
-  if (!context.isReplaceable(config, currentId)) return false;
+  if (!context.isReplaceable(config, currentId)) {
+    context.blocksNotReplaceable++;
+    return false;
+  }
 
   const blockX = context.chunkMinBlockX + localX;
   const blockZ = context.chunkMinBlockZ + localZ;
   let carveSymbol: number;
   if (blockY <= lavaLevel) {
     carveSymbol = BLOCK_LAVA;
+    context.lavaBlocksCarved++;
   } else {
     const point = context.point;
     point.blockX = blockX;
     point.blockY = blockY;
     point.blockZ = blockZ;
     carveSymbol = context.aquifer.computeSubstance(point, 0);
-    if (carveSymbol < 0) return false;
+    if (carveSymbol < 0) {
+      context.blocksKeptByAquifer++;
+      return false;
+    }
   }
   blocks[index] = context.paletteIdOfSymbol(carveSymbol);
 
@@ -99,6 +112,7 @@ function carveBlock(context: CarvingContext, config: CarverBaseConfig, lavaLevel
     const belowIndex = index - 256;
     if (context.isDirt(blocks[belowIndex]!)) {
       const hasFluid = carveSymbol !== BLOCK_AIR;
+      context.topMaterialLookups++;
       const material = context.topMaterial.topMaterial(blockX, blockY - 1, blockZ, hasFluid);
       if (material !== undefined) blocks[belowIndex] = context.chunk.palette.idOf(material);
     }

@@ -53,6 +53,7 @@ export function carveCaves(context: CarvingContext, config: CaveCarverConfig, ra
     if (random.nextIntBounded(4) === 0) {
       const yScale = config.yScale.sample(random);
       const roomThickness = fround(1 + fround(random.nextFloat() * 6));
+      context.roomsCreated++;
       createRoom(context, config, x, y, z, roomThickness, yScale, shouldSkip);
       tunnelCount += random.nextIntBounded(4);
     }
@@ -61,6 +62,7 @@ export function carveCaves(context: CarvingContext, config: CaveCarverConfig, ra
       const pitch = fround(fround(random.nextFloat() - 0.5) / 4);
       const thickness = getThickness(random);
       const maxSteps = maxDistance - random.nextIntBounded(Math.trunc(maxDistance / 4));
+      context.tunnelsStarted++;
       createTunnel(
         context, config, forkLegacyRandomFromNextLong(random), x, y, z, horizontalMultiplier, verticalMultiplier,
         thickness, yaw, pitch, 0, maxSteps, Y_SCALE, shouldSkip,
@@ -112,6 +114,7 @@ function createTunnel(
   let yawChange = 0;
   let pitchChange = 0;
   for (let step = startStep; step < maxSteps; step++) {
+    context.tunnelSteps++;
     const horizontalRadius = 1.5 + fround(mthSin(fround(fround(FLOAT_PI * step) / maxSteps)) * thickness);
     const verticalRadius = horizontalRadius * yScale;
     const cosinePitch = mthCos(pitch);
@@ -126,6 +129,7 @@ function createTunnel(
     pitchChange = fround(pitchChange + fround(fround(fround(tunnelRandom.nextFloat() - tunnelRandom.nextFloat()) * tunnelRandom.nextFloat()) * 2));
     yawChange = fround(yawChange + fround(fround(fround(tunnelRandom.nextFloat() - tunnelRandom.nextFloat()) * tunnelRandom.nextFloat()) * 4));
     if (step === branchStep && thickness > 1) {
+      context.tunnelBranches += 2;
       const leftSeed = forkLegacyRandomFromNextLong(tunnelRandom);
       const leftThickness = fround(fround(tunnelRandom.nextFloat() * fround(0.5)) + fround(0.5));
       createTunnel(
@@ -140,8 +144,14 @@ function createTunnel(
       );
       return;
     }
-    if (tunnelRandom.nextIntBounded(SKIP_STAGGER_CHANCE) === 0) continue;
-    if (!canReach(context.chunkMinBlockX, context.chunkMinBlockZ, x, z, step, maxSteps, thickness)) return;
+    if (tunnelRandom.nextIntBounded(SKIP_STAGGER_CHANCE) === 0) {
+      context.tunnelStepsStaggered++;
+      continue;
+    }
+    if (!canReach(context.chunkMinBlockX, context.chunkMinBlockZ, x, z, step, maxSteps, thickness)) {
+      context.tunnelsEndedOutOfReach++;
+      return;
+    }
     carveEllipsoid(context, config, x, y, z, horizontalRadius * horizontalMultiplier, verticalRadius * verticalMultiplier, shouldSkip);
   }
 }

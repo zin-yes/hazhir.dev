@@ -20,6 +20,7 @@ export function carveCanyon(context: CarvingContext, config: CanyonCarverConfig,
   const yScale = config.yScale.sample(random);
   const thickness = config.shape.thickness.sample(random);
   const length = Math.trunc(fround(maxLength * config.shape.distanceFactor.sample(random)));
+  context.canyonsStarted++;
   doCarve(context, config, forkLegacyRandomFromNextLong(random), x, y, z, thickness, yaw, pitch, 0, length, yScale);
   return true;
 }
@@ -70,6 +71,7 @@ function doCarve(
   let yawChange = 0;
   let pitchChange = 0;
   for (let step = startStep; step < length; step++) {
+    context.canyonSteps++;
     let horizontalRadius = 1.5 + fround(mthSin(fround(fround(fround(step) * FLOAT_PI) / length)) * thickness);
     let verticalRadius = horizontalRadius * yScale;
     horizontalRadius *= config.shape.horizontalRadiusFactor.sample(random);
@@ -86,8 +88,14 @@ function doCarve(
     yawChange = fround(yawChange * fround(0.5));
     pitchChange = fround(pitchChange + fround(fround(fround(random.nextFloat() - random.nextFloat()) * random.nextFloat()) * 2));
     yawChange = fround(yawChange + fround(fround(fround(random.nextFloat() - random.nextFloat()) * random.nextFloat()) * 4));
-    if (random.nextIntBounded(4) === 0) continue;
-    if (!canReach(context.chunkMinBlockX, context.chunkMinBlockZ, x, z, step, length, thickness)) return;
+    if (random.nextIntBounded(4) === 0) {
+      context.tunnelStepsStaggered++;
+      continue;
+    }
+    if (!canReach(context.chunkMinBlockX, context.chunkMinBlockZ, x, z, step, length, thickness)) {
+      context.tunnelsEndedOutOfReach++;
+      return;
+    }
     carveEllipsoid(context, config, x, y, z, horizontalRadius, verticalRadius, shouldSkip);
   }
 }

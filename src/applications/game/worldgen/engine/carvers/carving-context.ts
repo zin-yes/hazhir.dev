@@ -53,6 +53,20 @@ export class CarvingContext implements GenerationHeights {
   blocksRemoved = 0;
   blocksTested = 0;
   ellipsoidsCarved = 0;
+  ellipsoidsOutOfRange = 0;
+  blocksAlreadyMasked = 0;
+  blocksNotReplaceable = 0;
+  blocksKeptByAquifer = 0;
+  lavaBlocksCarved = 0;
+  topMaterialLookups = 0;
+  roomsCreated = 0;
+  tunnelsStarted = 0;
+  tunnelBranches = 0;
+  tunnelSteps = 0;
+  tunnelStepsStaggered = 0;
+  tunnelsEndedOutOfReach = 0;
+  canyonSteps = 0;
+  canyonsStarted = 0;
 
   private readonly symbolPaletteIds: number[];
   private blockFlagsById = new Uint8Array(1024);

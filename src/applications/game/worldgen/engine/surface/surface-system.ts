@@ -11,7 +11,8 @@ import {
 import type { ChunkBlocks } from "../chunk";
 import { createColumnMemoizedDensity } from "../density/column-memoization";
 import { transientRandomAt } from "../random/xoroshiro-random-source";
-import { compileDensityFunction } from "../density/density-codegen";
+import { compileDensityFunction, noteCompiledDensityEvaluations } from "../density/density-codegen";
+import { defineHotCounter, noteHot } from "../profiling/hot-counters";
 import { DensityNode } from "../density/density-function";
 import type { JsonObject } from "../registry/datapack-loader";
 import { generateClayBands, CLAY_BAND_COUNT } from "./clay-bands";
@@ -29,6 +30,10 @@ import type {
   SurfacePositionalRandomFactory,
 } from "./surface-types";
 import { BLOCK_KIND_AIR, BLOCK_KIND_FLUID, BLOCK_KIND_SOLID, SurfaceChunkAccess } from "./surface-chunk-access";
+
+const SURFACE_DEPTH_SAMPLES = defineHotCounter("surface.depthNoiseSamples");
+const SURFACE_SECONDARY_SAMPLES = defineHotCounter("surface.secondaryNoiseSamples");
+const SURFACE_CLAY_BAND_LOOKUPS = defineHotCounter("surface.clayBandLookups");
 
 /** One in this many evaluations is repeated through the per-type wrapped rules to time each rule and condition type. */
 const RULE_TYPE_SAMPLE_EVERY = 4096;
@@ -89,6 +94,7 @@ export class SurfaceSystem {
   private readonly preliminarySurfaceLevels = new Map<number, number>();
   private preliminaryRouter: SurfaceNoiseRouter | undefined;
   private preliminaryDensity: SurfaceNoiseRouter["initialDensityWithoutJaggedness"] | undefined;
+  private preliminaryEvaluate: ReturnType<typeof compileDensityFunction> | undefined;
   private readonly preliminaryProbe: DensityPoint = { blockX: 0, blockY: 0, blockZ: 0 };
 
   constructor(private readonly config: SurfaceSystemConfig) {
@@ -141,6 +147,7 @@ export class SurfaceSystem {
   }
 
   getBandResultIndex(blockX: number, blockY: number, blockZ: number): number {
+    noteHot(SURFACE_CLAY_BAND_LOOKUPS);
     const offset = Math.floor(this.clayBandsOffsetNoise.getValue(blockX, 0, blockZ) * 4 + 0.5);
     return this.clayBandResultIndices[(blockY + offset + CLAY_BAND_COUNT) % CLAY_BAND_COUNT]!;
   }
@@ -150,12 +157,14 @@ export class SurfaceSystem {
   }
 
   getSurfaceDepth(blockX: number, blockZ: number): number {
+    noteHot(SURFACE_DEPTH_SAMPLES);
     const noiseValue = this.surfaceNoise.getValue(blockX, 0, blockZ);
     const jitter = transientRandomAt(this.config.randomFactory, blockX, 0, blockZ).nextDouble();
     return Math.trunc(noiseValue * 2.75 + 3 + jitter * 0.25);
   }
 
   getSurfaceSecondary(blockX: number, blockZ: number): number {
+    noteHot(SURFACE_SECONDARY_SAMPLES);
     return this.surfaceSecondaryNoise.getValue(blockX, 0, blockZ);
   }
 
@@ -167,6 +176,7 @@ export class SurfaceSystem {
       const density = router.initialDensityWithoutJaggedness;
       if (density instanceof DensityNode) {
         const evaluate = compileDensityFunction(createColumnMemoizedDensity(density));
+        this.preliminaryEvaluate = evaluate;
         this.preliminaryDensity = { compute: (point) => evaluate(point.blockX, point.blockY, point.blockZ) };
       } else {
         this.preliminaryDensity = density;
@@ -186,18 +196,24 @@ export class SurfaceSystem {
       startWorkerSection("surface.preliminaryLevel");
     }
     let level = 2147483647;
+    let probeCount = 0;
     const density = this.preliminaryDensity!;
     const probe = this.preliminaryProbe;
     probe.blockX = quartAlignedX;
     probe.blockZ = quartAlignedZ;
     for (let blockY = this.minY + this.height; blockY >= this.minY; blockY -= PRELIMINARY_SURFACE_CELL_HEIGHT) {
       probe.blockY = blockY;
+      probeCount++;
       if (density.compute(probe) > INITIAL_DENSITY_SURFACE_THRESHOLD) {
         level = blockY;
         break;
       }
     }
-    if (isProfiling) endWorkerSection();
+    if (isProfiling) {
+      endWorkerSection();
+      addWorkerCounter("surfacePreliminaryLevelProbes", probeCount);
+      if (this.preliminaryEvaluate !== undefined) noteCompiledDensityEvaluations(this.preliminaryEvaluate, probeCount, 1);
+    }
     if (this.preliminarySurfaceLevels.size > PRELIMINARY_CACHE_LIMIT) this.preliminarySurfaceLevels.clear();
     this.preliminarySurfaceLevels.set(cacheKey, level);
     return level;
@@ -277,6 +293,12 @@ export class SurfaceSystem {
     const blocks = chunk.blocks;
     let ruleEvaluations = 0;
     let solidBlocksScanned = 0;
+    let airBlocksPassed = 0;
+    let fluidBlocksPassed = 0;
+    let stoneRegionScans = 0;
+    let deepRuleEvaluations = 0;
+    let blocksChanged = 0;
+    let blocksOtherThanDefault = 0;
 
     for (let localX = 0; localX < 16; localX++) {
       for (let localZ = 0; localZ < 16; localZ++) {
@@ -308,15 +330,18 @@ export class SurfaceSystem {
           const blockId = y > maxY ? 0 : blocks[(y - minY) * 256 + columnIndex]!;
           const kind = access.kindOf(blockId);
           if (kind === BLOCK_KIND_AIR) {
+            airBlocksPassed++;
             stoneDepthAbove = 0;
             waterHeight = NO_WATER_HEIGHT;
             continue;
           }
           if (kind === BLOCK_KIND_FLUID) {
+            fluidBlocksPassed++;
             if (waterHeight === NO_WATER_HEIGHT) waterHeight = y + 1;
             continue;
           }
           if (stoneRegionBottom >= y) {
+            stoneRegionScans++;
             stoneRegionBottom = WAY_BELOW_MIN_Y;
             for (let belowY = y - 1; belowY >= minY - 1; belowY--) {
               const belowBlockId = belowY < minY ? 0 : blocks[(belowY - minY) * 256 + columnIndex]!;
@@ -330,9 +355,13 @@ export class SurfaceSystem {
           solidBlocksScanned++;
           const stoneDepthBelow = y - stoneRegionBottom + 1;
           context.updateY(stoneDepthAbove, stoneDepthBelow, waterHeight, blockX, y, blockZ);
-          if (blockId !== defaultBlockId) continue;
+          if (blockId !== defaultBlockId) {
+            blocksOtherThanDefault++;
+            continue;
+          }
           ruleEvaluations++;
           const isDeep = y < deepBelowY && stoneDepthAbove > deepFloorDepth && stoneDepthBelow > deepCeilingDepth;
+          if (isDeep) deepRuleEvaluations++;
           const resultIndex = isDeep ? generatedRule!.deepRule(context) : rule(context);
           if (isProfiling) {
             if (ruleEvaluations % RULE_TYPE_SAMPLE_EVERY === 0) {
@@ -342,6 +371,7 @@ export class SurfaceSystem {
             }
           }
           if (resultIndex === NO_RULE_MATCH) continue;
+          blocksChanged++;
           access.setBlockId(localX, y, localZ, resultIdOf(resultIndex));
         }
         if (columnBiome === "minecraft:frozen_ocean" || columnBiome === "minecraft:deep_frozen_ocean") {
@@ -355,6 +385,12 @@ export class SurfaceSystem {
       addWorkerCounter("surfaceColumnsBuilt", 1);
       addWorkerCounter("surfaceSolidBlocksScanned", solidBlocksScanned);
       addWorkerCounter("surfaceRuleEvaluations", ruleEvaluations);
+      addWorkerCounter("surface.deepRuleEvaluations", deepRuleEvaluations);
+      addWorkerCounter("surface.blocksRewritten", blocksChanged);
+      addWorkerCounter("surface.blocksOtherThanDefaultSkipped", blocksOtherThanDefault);
+      addWorkerCounter("surface.airBlocksPassed", airBlocksPassed);
+      addWorkerCounter("surface.fluidBlocksPassed", fluidBlocksPassed);
+      addWorkerCounter("surface.stoneRegionScans", stoneRegionScans);
     }
   }
 

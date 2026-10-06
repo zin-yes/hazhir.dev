@@ -7,11 +7,17 @@ import type { JsonObject, JsonValue } from "../registry/datapack-loader";
 import { formatBlockState } from "../chunk";
 import { buildGeneratedFunction } from "../generated-function";
 import { transientRandomAt } from "../random/xoroshiro-random-source";
+import { beginColdStart, defineColdStartLabel, endColdStart, recordColdStartUnits } from "../profiling/cold-start-ledger";
 import { NO_WATER_HEIGHT, type SurfaceRuleContext } from "./surface-rule-context";
 import type { SurfaceRule, SurfaceRuleCompilerInputs } from "./surface-rule-compiler";
 import { withDefaultNamespace, type SurfaceNoiseSource, type SurfacePositionalRandomFactory } from "./surface-types";
 
 const NO_RULE_MATCH = -1;
+
+const GENERATE_LABEL = defineColdStartLabel("codegen.surfaceRule");
+const SOURCE_CHARACTERS_LABEL = defineColdStartLabel("codegen.surfaceRule.sourceCharacters");
+const FUNCTIONS_LABEL = defineColdStartLabel("codegen.surfaceRule.functions");
+const BIOME_CONDITIONS_LABEL = defineColdStartLabel("codegen.surfaceRule.biomeConditions");
 
 type VerticalAnchorResolver = (minGenY: number, genDepth: number) => number;
 
@@ -232,6 +238,9 @@ function buildRuleFunction(writer: SurfaceRuleCodeWriter, ruleJson: JsonObject):
   const rootFunction = writer.sequenceFunction([ruleJson]);
   const helperDeclarations = writer.helpers.map((_, index) => `const helper${index} = helpers[${index}];`).join("\n");
   const source = `${helperDeclarations}\n${writer.functionSources.join("\n")}\nreturn ${rootFunction};`;
+  recordColdStartUnits(SOURCE_CHARACTERS_LABEL, source.length);
+  recordColdStartUnits(FUNCTIONS_LABEL, writer.functionSources.length);
+  recordColdStartUnits(BIOME_CONDITIONS_LABEL, writer.biomeConditionSets.length);
   return buildGeneratedFunction<SurfaceRule>(["helpers"], source, [writer.helpers]);
 }
 
@@ -242,6 +251,15 @@ function buildDepthLimit(depthLimits: readonly string[]): StoneDepthLimits | und
 
 /** The surface rule as generated code (same results as the closures), or undefined when code generation is blocked. */
 export function generateSurfaceRule(ruleJson: JsonObject, inputs: SurfaceRuleCompilerInputs): GeneratedSurfaceRule | undefined {
+  const coldStartToken = beginColdStart(GENERATE_LABEL);
+  try {
+    return generateSurfaceRuleUntimed(ruleJson, inputs);
+  } finally {
+    endColdStart(GENERATE_LABEL, coldStartToken);
+  }
+}
+
+function generateSurfaceRuleUntimed(ruleJson: JsonObject, inputs: SurfaceRuleCompilerInputs): GeneratedSurfaceRule | undefined {
   const writer = new SurfaceRuleCodeWriter(inputs);
   const rule = buildRuleFunction(writer, ruleJson);
   const deepWriter = new SurfaceRuleCodeWriter(inputs, true);
