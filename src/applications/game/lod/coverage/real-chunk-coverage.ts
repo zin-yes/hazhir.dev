@@ -3,6 +3,7 @@
 // entirely under covered columns are not drawn at all; partly covered tiles discard the covered part in the shader
 // through a toroidal coverage texture centred on the camera (see writeCoverageTexels).
 
+import { profiler } from "../../profiler";
 import { BLOCK_RENDER_OFFSET, CHUNK_SIZE_BLOCKS } from "../core/lod-constants";
 import { tileBoundsOf, type TileAddress } from "../core/tile-address";
 
@@ -19,9 +20,41 @@ function columnKeyOf(chunkX: number, chunkZ: number): number {
   return (chunkX + COLUMN_KEY_OFFSET) * COLUMN_KEY_STRIDE + (chunkZ + COLUMN_KEY_OFFSET);
 }
 
+/** Operations since the last `reportToProfiler`, as plain integers so the per-tile queries stay cheap. */
+interface CoverageActivity {
+  refreshes: number;
+  meshChunkChecks: number;
+  becameCovered: number;
+  becameUncovered: number;
+  fullChecks: number;
+  fullChecksEarlyOut: number;
+  fullChecksColumnLookups: number;
+  fullChecksCovered: number;
+  partialChecks: number;
+  partialChecksColumnScans: number;
+  partialChecksHit: number;
+}
+
+function createCoverageActivity(): CoverageActivity {
+  return {
+    refreshes: 0,
+    meshChunkChecks: 0,
+    becameCovered: 0,
+    becameUncovered: 0,
+    fullChecks: 0,
+    fullChecksEarlyOut: 0,
+    fullChecksColumnLookups: 0,
+    fullChecksCovered: 0,
+    partialChecks: 0,
+    partialChecksColumnScans: 0,
+    partialChecksHit: 0,
+  };
+}
+
 export class RealChunkCoverage {
   private readonly columns = new Map<number, ColumnState>();
   private readonly coveredColumns = new Map<number, { chunkX: number; chunkZ: number }>();
+  private activity = createCoverageActivity();
   /** Increases whenever the covered set changes. */
   version = 0;
 
@@ -37,9 +70,11 @@ export class RealChunkCoverage {
 
   private refresh(chunkX: number, chunkZ: number, state: ColumnState): void {
     const key = columnKeyOf(chunkX, chunkZ);
+    this.activity.refreshes++;
     let isCovered = state.lowestSurfaceChunkY !== undefined && state.highestSurfaceChunkY !== undefined;
     if (isCovered) {
       for (let chunkY = state.lowestSurfaceChunkY!; chunkY <= state.highestSurfaceChunkY!; chunkY++) {
+        this.activity.meshChunkChecks++;
         if (!state.meshedChunkYs.has(chunkY)) {
           isCovered = false;
           break;
@@ -47,8 +82,14 @@ export class RealChunkCoverage {
       }
     }
     const wasCovered = this.coveredColumns.has(key);
-    if (isCovered && !wasCovered) this.coveredColumns.set(key, { chunkX, chunkZ });
-    if (!isCovered && wasCovered) this.coveredColumns.delete(key);
+    if (isCovered && !wasCovered) {
+      this.coveredColumns.set(key, { chunkX, chunkZ });
+      this.activity.becameCovered++;
+    }
+    if (!isCovered && wasCovered) {
+      this.coveredColumns.delete(key);
+      this.activity.becameUncovered++;
+    }
     if (isCovered !== wasCovered) this.version++;
     if (state.meshedChunkYs.size === 0 && state.lowestSurfaceChunkY === undefined) this.columns.delete(key);
   }
@@ -102,28 +143,57 @@ export class RealChunkCoverage {
 
   isTileFullyCovered(address: TileAddress): boolean {
     const { firstChunkX, firstChunkZ, chunksPerSide } = this.tileChunkRange(address);
-    if (chunksPerSide * chunksPerSide > this.coveredColumns.size) return false;
+    this.activity.fullChecks++;
+    if (chunksPerSide * chunksPerSide > this.coveredColumns.size) {
+      this.activity.fullChecksEarlyOut++;
+      return false;
+    }
     for (let offsetZ = 0; offsetZ < chunksPerSide; offsetZ++) {
       for (let offsetX = 0; offsetX < chunksPerSide; offsetX++) {
+        this.activity.fullChecksColumnLookups++;
         if (!this.isColumnCovered(firstChunkX + offsetX, firstChunkZ + offsetZ)) return false;
       }
     }
+    this.activity.fullChecksCovered++;
     return true;
   }
 
   isTilePartiallyCovered(address: TileAddress): boolean {
     const { firstChunkX, firstChunkZ, chunksPerSide } = this.tileChunkRange(address);
+    this.activity.partialChecks++;
     for (const column of this.coveredColumns.values()) {
+      this.activity.partialChecksColumnScans++;
       if (
         column.chunkX >= firstChunkX &&
         column.chunkX < firstChunkX + chunksPerSide &&
         column.chunkZ >= firstChunkZ &&
         column.chunkZ < firstChunkZ + chunksPerSide
       ) {
+        this.activity.partialChecksHit++;
         return true;
       }
     }
     return false;
+  }
+
+  /** Flushes the operation counts since the last call and samples the covered column count. Call once per frame. */
+  reportToProfiler(): void {
+    const activity = this.activity;
+    this.activity = createCoverageActivity();
+    if (!profiler.enabled) return;
+    profiler.addCounter("game.lod.coverage.refreshes", activity.refreshes);
+    profiler.addCounter("game.lod.coverage.meshChunkChecks", activity.meshChunkChecks);
+    profiler.addCounter("game.lod.coverage.columnsBecameCovered", activity.becameCovered);
+    profiler.addCounter("game.lod.coverage.columnsBecameUncovered", activity.becameUncovered);
+    profiler.addCounter("game.lod.coverage.fullChecks", activity.fullChecks);
+    profiler.addCounter("game.lod.coverage.fullChecksEarlyOut", activity.fullChecksEarlyOut);
+    profiler.addCounter("game.lod.coverage.fullChecksColumnLookups", activity.fullChecksColumnLookups);
+    profiler.addCounter("game.lod.coverage.fullChecksCovered", activity.fullChecksCovered);
+    profiler.addCounter("game.lod.coverage.partialChecks", activity.partialChecks);
+    profiler.addCounter("game.lod.coverage.partialChecksColumnScans", activity.partialChecksColumnScans);
+    profiler.addCounter("game.lod.coverage.partialChecksHit", activity.partialChecksHit);
+    profiler.sampleGauge("game.lod.coverage.coveredColumns", this.coveredColumns.size);
+    profiler.sampleGauge("game.lod.coverage.trackedColumns", this.columns.size);
   }
 }
 
@@ -135,13 +205,16 @@ function positiveModulo(value: number, divisor: number): number {
  * Fills a size x size R8 texture: texel (chunkX mod size, chunkZ mod size) is 255 for covered columns within half the
  * size of the centre column. The shader only consults it for fragments within that window, so wrapping never aliases.
  */
-export function writeCoverageTexels(coverage: RealChunkCoverage, centerChunkX: number, centerChunkZ: number, size: number, texels: Uint8Array): void {
+export function writeCoverageTexels(coverage: RealChunkCoverage, centerChunkX: number, centerChunkZ: number, size: number, texels: Uint8Array): number {
   texels.fill(0);
   const halfSize = size / 2;
+  let texelsWritten = 0;
   coverage.forEachCoveredColumn((chunkX, chunkZ) => {
     if (Math.abs(chunkX - centerChunkX) >= halfSize || Math.abs(chunkZ - centerChunkZ) >= halfSize) return;
     texels[positiveModulo(chunkX, size) + positiveModulo(chunkZ, size) * size] = 255;
+    texelsWritten++;
   });
+  return texelsWritten;
 }
 
 /** Distance a fragment is moved against its face normal before the coverage lookup, so walls on a column border

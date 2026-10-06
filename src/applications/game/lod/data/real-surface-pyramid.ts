@@ -3,7 +3,10 @@
 // all four child cells are). Only the updated quadrant of each ancestor is recomputed, so a chunk update costs about
 // 256 cell merges per level. Nodes are evicted least recently updated first beyond a memory budget.
 
+import { profiler } from "../../profiler";
+import { DIMENSIONS } from "../../profiler/dimensions";
 import { MAX_LOD_LEVEL, TILE_CELL_COUNT, TILE_CELLS } from "../core/lod-constants";
+import { lodLevelKey } from "../core/lod-level-keys";
 import { parentAddressOf, tileKeyOf, type TileAddress } from "../core/tile-address";
 import { cellIndexOf, createTileSurface, downsampleChildIntoParent, type TileSurface } from "./tile-surface";
 
@@ -56,6 +59,7 @@ export class RealSurfacePyramid {
       lastUpdateSequence: 0,
     };
     this.nodes.set(tileKeyOf(address.level, address.tileX, address.tileZ), node);
+    profiler.addCounter("game.lod.pyramid.nodesCreated");
     return node;
   }
 
@@ -70,6 +74,7 @@ export class RealSurfacePyramid {
    */
   setColumn(chunkX: number, chunkZ: number, surface: TileSurface, coveredCells: Uint8Array): TileAddress[] {
     this.updateSequence++;
+    profiler.addCounter("game.lod.pyramid.columnsSet");
     const changed: TileAddress[] = [];
     let childAddress: TileAddress = { level: 0, tileX: chunkX, tileZ: chunkZ };
     let coveredCount = 0;
@@ -86,6 +91,7 @@ export class RealSurfacePyramid {
       this.touch(child);
     } else {
       this.nodes.delete(tileKeyOf(0, chunkX, chunkZ));
+      profiler.addCounter("game.lod.pyramid.nodesDeleted");
     }
     changed.push(childAddress);
 
@@ -94,9 +100,14 @@ export class RealSurfacePyramid {
       const parent = this.nodeAt(parentAddress) ?? (child === undefined ? undefined : this.createNode(parentAddress));
       if (parent === undefined) break;
       this.refreshQuadrant(parent, child, quadrantOf(childAddress.tileX), quadrantOf(childAddress.tileZ));
+      if (profiler.enabled) {
+        profiler.addCounter("game.lod.pyramid.ancestorsRefreshed");
+        profiler.recordBreakdown(DIMENSIONS.lodLevel, lodLevelKey(level), { units: (TILE_CELLS / 2) ** 2, calls: 1 });
+      }
       changed.push(parentAddress);
       if (parent.coveredCellCount === 0) {
         this.nodes.delete(tileKeyOf(parentAddress.level, parentAddress.tileX, parentAddress.tileZ));
+        profiler.addCounter("game.lod.pyramid.nodesDeleted");
         child = undefined;
       } else {
         this.touch(parent);
@@ -133,12 +144,21 @@ export class RealSurfacePyramid {
   private enforceBudget(): void {
     const maximumNodes = Math.floor(this.memoryBudgetBytes / REAL_SURFACE_NODE_BYTES);
     if (this.nodes.size <= maximumNodes) return;
-    const evictable = [...this.nodes.entries()]
-      .filter(([, node]) => node.lastUpdateSequence !== this.updateSequence)
-      .sort(([, first], [, second]) => first.lastUpdateSequence - second.lastUpdateSequence || first.address.level - second.address.level);
-    for (const [key] of evictable) {
-      if (this.nodes.size <= maximumNodes) break;
-      this.nodes.delete(key);
+    const token = profiler.begin("main.lod.pyramid.enforceBudget");
+    try {
+      const evictable = [...this.nodes.entries()]
+        .filter(([, node]) => node.lastUpdateSequence !== this.updateSequence)
+        .sort(([, first], [, second]) => first.lastUpdateSequence - second.lastUpdateSequence || first.address.level - second.address.level);
+      profiler.addCounter("game.lod.pyramid.evictionCandidates", evictable.length);
+      let evicted = 0;
+      for (const [key] of evictable) {
+        if (this.nodes.size <= maximumNodes) break;
+        this.nodes.delete(key);
+        evicted++;
+      }
+      profiler.addCounter("game.lod.pyramid.nodesEvicted", evicted);
+    } finally {
+      profiler.end(token);
     }
   }
 }

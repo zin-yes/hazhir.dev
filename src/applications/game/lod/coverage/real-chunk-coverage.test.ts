@@ -1,6 +1,7 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { tileBoundsOf, type TileAddress } from "../core/tile-address";
 import { projectionScaleOf, selectTiles } from "../selection/quadtree-selection";
+import { counterTotal, gaugeLast, startLodProfiling, stopLodProfiling } from "../testing/profiler-readout.test-helper";
 import { isFragmentHiddenByCoverage, RealChunkCoverage, writeCoverageTexels } from "./real-chunk-coverage";
 
 const PLAYER_CHUNK_X = 30;
@@ -110,5 +111,30 @@ describe("real chunk coverage", () => {
     const aliasZ = PLAYER_CHUNK_Z * 32 + 5;
     expect(isFragmentHiddenByCoverage(texels, size, PLAYER_CHUNK_X, PLAYER_CHUNK_Z, aliasX, aliasZ, 0, 0)).toBe(false);
     expect(isFragmentHiddenByCoverage(texels, size, PLAYER_CHUNK_X, PLAYER_CHUNK_Z, PLAYER_CHUNK_X * 32 + 5, aliasZ, 0, 0)).toBe(true);
+  });
+});
+
+describe("real chunk coverage profiling", () => {
+  beforeEach(startLodProfiling);
+  afterEach(stopLodProfiling);
+
+  test("counts the columns that became covered, the early outs of the full check and the texels written", () => {
+    const coverage = coverageWithLoadedRing();
+    const insideRing: TileAddress = { level: 1, tileX: Math.floor(PLAYER_CHUNK_X / 2), tileZ: Math.floor(PLAYER_CHUNK_Z / 2) };
+    const hugeTile: TileAddress = { level: 5, tileX: 0, tileZ: 0 };
+    expect(coverage.isTileFullyCovered(insideRing)).toBe(true);
+    expect(coverage.isTileFullyCovered(hugeTile)).toBe(false);
+    expect(coverage.isTilePartiallyCovered(insideRing)).toBe(true);
+    const texelCount = writeCoverageTexels(coverage, PLAYER_CHUNK_X, PLAYER_CHUNK_Z, 64, new Uint8Array(64 * 64));
+    coverage.reportToProfiler();
+
+    expect(counterTotal("game.lod.coverage.columnsBecameCovered")).toBe(49);
+    expect(counterTotal("game.lod.coverage.fullChecks")).toBe(2);
+    expect(counterTotal("game.lod.coverage.fullChecksEarlyOut")).toBe(1);
+    expect(counterTotal("game.lod.coverage.fullChecksColumnLookups")).toBe(4);
+    expect(counterTotal("game.lod.coverage.fullChecksCovered")).toBe(1);
+    expect(counterTotal("game.lod.coverage.partialChecksHit")).toBe(1);
+    expect(gaugeLast("game.lod.coverage.coveredColumns")).toBe(49);
+    expect(texelCount).toBe(49);
   });
 });

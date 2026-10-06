@@ -4,6 +4,7 @@
 // is loaded too. The layout matches the game's chunks: index = x * 1024 + y * 32 + z.
 
 import { BlockType, isCrossBlock, isCrop, isFlatQuad, isWater } from "../../blocks";
+import { profiler } from "../../profiler";
 import { CHUNK_SIZE_BLOCKS, NO_WATER, TILE_CELL_COUNT, TILE_CELLS, WORLD_MAX_Y } from "../core/lod-constants";
 import { cellIndexOf, createTileSurface, type TileSurface } from "./tile-surface";
 
@@ -45,11 +46,17 @@ export function summarizeChunk(blocks: Uint8Array, chunkY: number): ChunkSurface
   const sideBlocks = new Uint8Array(TILE_CELL_COUNT);
   const waterTops = new Int16Array(TILE_CELL_COUNT).fill(NO_WATER);
   const baseY = chunkY * CHUNK_SIZE_BLOCKS;
+  let blocksScanned = 0;
+  let solidColumns = 0;
+  let waterColumns = 0;
+  let snowCoverColumns = 0;
+  let emptyColumns = 0;
   for (let localX = 0; localX < CHUNK_SIZE_BLOCKS; localX++) {
     for (let localZ = 0; localZ < CHUNK_SIZE_BLOCKS; localZ++) {
       const cell = cellIndexOf(localX, localZ);
       let hasSnowCover = false;
       for (let localY = CHUNK_SIZE_BLOCKS - 1; localY >= 0; localY--) {
+        blocksScanned++;
         const block = blocks[localX * X_STRIDE + localY * Y_STRIDE + localZ]!;
         const kind = BLOCK_KINDS[block];
         if (kind === BlockKind.Empty) continue;
@@ -66,7 +73,19 @@ export function summarizeChunk(blocks: Uint8Array, chunkY: number): ChunkSurface
         sideBlocks[cell] = hasSnowCover && block === BlockType.GRASS ? BlockType.GRASS_SNOWY : block;
         break;
       }
+      if (solidTops[cell] !== EMPTY_COLUMN) solidColumns++;
+      if (waterTops[cell] !== NO_WATER) waterColumns++;
+      if (hasSnowCover) snowCoverColumns++;
+      if (solidTops[cell] === EMPTY_COLUMN && waterTops[cell] === NO_WATER) emptyColumns++;
     }
+  }
+  if (profiler.enabled) {
+    profiler.addCounter("game.lod.summary.chunks");
+    profiler.addCounter("game.lod.summary.blocksScanned", blocksScanned);
+    profiler.addCounter("game.lod.summary.solidColumns", solidColumns);
+    profiler.addCounter("game.lod.summary.waterColumns", waterColumns);
+    profiler.addCounter("game.lod.summary.snowCoverColumns", snowCoverColumns);
+    profiler.addCounter("game.lod.summary.emptyColumns", emptyColumns);
   }
   return { chunkY, solidTops, topBlocks, sideBlocks, waterTops };
 }
@@ -98,13 +117,20 @@ export function assembleColumnSurface(summariesByChunkY: ReadonlyMap<number, Chu
   if (chunkYs.length === 0) return { surface, coveredCells, coveredCellCount, lowestSurfaceChunkY, highestSurfaceChunkY };
   const highestLoadedChunkY = chunkYs[0]!;
   const loadedTopFaceY = (highestLoadedChunkY + 1) * CHUNK_SIZE_BLOCKS;
+  let chunksScanned = 0;
+  let cellsBrokenByGap = 0;
+  let cellsRejectedForUnloadedAbove = 0;
   for (let cellZ = 0; cellZ < TILE_CELLS; cellZ++) {
     for (let cellX = 0; cellX < TILE_CELLS; cellX++) {
       const cell = cellIndexOf(cellX, cellZ);
       let waterTop = NO_WATER;
       let expectedChunkY = highestLoadedChunkY;
       for (const chunkY of chunkYs) {
-        if (chunkY !== expectedChunkY) break;
+        if (chunkY !== expectedChunkY) {
+          cellsBrokenByGap++;
+          break;
+        }
+        chunksScanned++;
         expectedChunkY--;
         const summary = summariesByChunkY.get(chunkY)!;
         if (waterTop === NO_WATER && summary.waterTops[cell] !== NO_WATER) waterTop = summary.waterTops[cell]!;
@@ -112,7 +138,10 @@ export function assembleColumnSurface(summariesByChunkY: ReadonlyMap<number, Chu
         if (solidTop === EMPTY_COLUMN) continue;
         const contentTop = Math.max(solidTop, waterTop);
         const hasEmptyBlockAbove = contentTop < loadedTopFaceY || highestLoadedChunkY >= HIGHEST_CHUNK_Y;
-        if (!hasEmptyBlockAbove) break;
+        if (!hasEmptyBlockAbove) {
+          cellsRejectedForUnloadedAbove++;
+          break;
+        }
         surface.heights[cell] = solidTop;
         surface.topBlocks[cell] = summary.topBlocks[cell]!;
         surface.sideBlocks[cell] = summary.sideBlocks[cell]!;
@@ -125,6 +154,14 @@ export function assembleColumnSurface(summariesByChunkY: ReadonlyMap<number, Chu
         break;
       }
     }
+  }
+  if (profiler.enabled) {
+    profiler.addCounter("game.lod.assemble.columns");
+    profiler.addCounter("game.lod.assemble.chunksScanned", chunksScanned);
+    profiler.addCounter("game.lod.assemble.cellsTrusted", coveredCellCount);
+    profiler.addCounter("game.lod.assemble.cellsBrokenByMissingChunk", cellsBrokenByGap);
+    profiler.addCounter("game.lod.assemble.cellsRejectedForUnloadedAbove", cellsRejectedForUnloadedAbove);
+    profiler.addCounter("game.lod.assemble.cellsWithoutSolid", TILE_CELLS * TILE_CELLS - coveredCellCount - cellsBrokenByGap - cellsRejectedForUnloadedAbove);
   }
   return { surface, coveredCells, coveredCellCount, lowestSurfaceChunkY, highestSurfaceChunkY };
 }

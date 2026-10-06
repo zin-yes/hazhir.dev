@@ -1,7 +1,8 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { BlockType } from "../../blocks";
 import { cellIndexOf } from "../data/tile-surface";
 import { createSyntheticChunk } from "../testing/synthetic-chunks.test-helper";
+import { counterTotal, gaugeLast, startLodProfiling, stopLodProfiling, timerCalls } from "../testing/profiler-readout.test-helper";
 import { syntheticHeightAt } from "../testing/synthetic-terrain.test-helper";
 import { RealDataTracker } from "./real-data-tracker";
 
@@ -62,5 +63,59 @@ describe("real data tracker", () => {
     expect(tracker.pyramid.nodeAt({ level: 0, tileX: CHUNK_X, tileZ: CHUNK_Z })).toBeDefined();
     tracker.recordChunkBlocks(CHUNK_X, 3, CHUNK_Z, createSyntheticChunk(CHUNK_X, 3, CHUNK_Z));
     expect(tracker.pendingColumnCount).toBe(1);
+  });
+});
+
+describe("real data tracker profiling", () => {
+  beforeEach(startLodProfiling);
+  afterEach(stopLodProfiling);
+
+  test("loading a column counts every chunk, the cells trusted and the pyramid levels refreshed", () => {
+    const { tracker } = loadedTracker();
+    tracker.reportToProfiler();
+
+    expect(counterTotal("game.lod.real.chunksSummarized")).toBe(8);
+    expect(counterTotal("game.lod.summary.chunks")).toBe(8);
+    expect(counterTotal("game.lod.summary.blocksScanned")).toBeGreaterThan(8 * 1024);
+    expect(counterTotal("game.lod.summary.solidColumns")).toBeGreaterThan(1024);
+    expect(counterTotal("game.lod.real.columnsDirtied")).toBe(1);
+    expect(counterTotal("game.lod.real.columnsApplied")).toBe(1);
+    const node = tracker.pyramid.nodeAt({ level: 0, tileX: CHUNK_X, tileZ: CHUNK_Z })!;
+    expect(counterTotal("game.lod.real.coveredCellsApplied")).toBe(node.coveredCellCount);
+    expect(counterTotal("game.lod.assemble.cellsTrusted")).toBe(node.coveredCellCount);
+    const assembledCells =
+      counterTotal("game.lod.assemble.cellsTrusted") +
+      counterTotal("game.lod.assemble.cellsBrokenByMissingChunk") +
+      counterTotal("game.lod.assemble.cellsRejectedForUnloadedAbove") +
+      counterTotal("game.lod.assemble.cellsWithoutSolid");
+    expect(assembledCells).toBe(1024);
+    expect(counterTotal("game.lod.pyramid.ancestorsRefreshed")).toBe(4);
+    expect(counterTotal("game.lod.pyramid.nodesCreated")).toBe(5);
+    expect(gaugeLast("game.lod.pyramid.nodes")).toBe(5);
+    expect(gaugeLast("game.lod.real.summaries")).toBe(8);
+    expect(timerCalls("main.lod.applyRealColumns.pyramid")).toBe(1);
+  });
+
+  test("an edit below the surface is a counted no-op while a surface edit dirties the column again", () => {
+    const { tracker, chunks } = loadedTracker();
+    const deepBlocks = chunks.get(1)!;
+    deepBlocks[blockIndex(5, 3, 7)] = BlockType.AIR;
+    tracker.recordChunkBlocks(CHUNK_X, 1, CHUNK_Z, deepBlocks);
+    expect(counterTotal("game.lod.real.summariesUnchanged")).toBe(1);
+    expect(counterTotal("game.lod.real.columnsDirtied")).toBe(1);
+
+    const towerBlocks = chunks.get(6)!;
+    towerBlocks[blockIndex(5, 8, 7)] = BlockType.COBBLESTONE;
+    tracker.recordChunkBlocks(CHUNK_X, 6, CHUNK_Z, towerBlocks);
+    expect(counterTotal("game.lod.real.summariesChanged")).toBe(1);
+    expect(counterTotal("game.lod.real.columnsDirtied")).toBe(2);
+
+    const overlay = tracker.overlayFor({ level: 0, tileX: CHUNK_X, tileZ: CHUNK_Z });
+    expect(overlay).toBeDefined();
+    expect(tracker.overlayFor({ level: 0, tileX: CHUNK_X + 40, tileZ: CHUNK_Z })).toBeUndefined();
+    expect(counterTotal("game.lod.overlay.requests")).toBe(2);
+    expect(counterTotal("game.lod.overlay.hits")).toBe(1);
+    expect(counterTotal("game.lod.overlay.misses")).toBe(1);
+    expect(counterTotal("game.lod.overlay.coveredCells")).toBe(tracker.pyramid.nodeAt({ level: 0, tileX: CHUNK_X, tileZ: CHUNK_Z })!.coveredCellCount);
   });
 });
