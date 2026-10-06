@@ -2,6 +2,8 @@
 // samples it (same trilinear wrap as the GPU) so the cloud density the viewer sits in is known without a read back.
 // Red holds big billowy shapes, green holds fine erosion detail.
 
+import { profiler } from "../profiler";
+
 export const CLOUD_NOISE_SIZE = 48;
 const CHANNELS = 2;
 
@@ -50,6 +52,15 @@ function toByte(unit: number): number {
 
 /** Interleaved red/green bytes, x fastest then y then z. */
 export function generateCloudNoise(size: number = CLOUD_NOISE_SIZE): Uint8Array {
+  const scopeToken = profiler.begin("main.sky.cloudNoise.generate");
+  try {
+    return fillCloudNoise(size);
+  } finally {
+    profiler.end(scopeToken);
+  }
+}
+
+function fillCloudNoise(size: number): Uint8Array {
   const data = new Uint8Array(size * size * size * CHANNELS);
   let index = 0;
   for (let z = 0; z < size; z++) {
@@ -71,6 +82,8 @@ export function generateCloudNoise(size: number = CLOUD_NOISE_SIZE): Uint8Array 
       }
     }
   }
+  profiler.addCounter("game.sky.cloudNoise.voxelsGenerated", size * size * size);
+  profiler.recordBytes("bytes.sky.cloudNoise", data.byteLength);
   return data;
 }
 

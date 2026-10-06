@@ -2,6 +2,7 @@
 // noise, thickened by humidity and weather, thinned by carved holes. The CPU needs it to know how deep inside a cloud
 // the viewer is (mist) and to carve holes the shader also honours.
 
+import { profiler } from "../profiler";
 import { sampleCloudNoise } from "./cloud-noise";
 import {
   CLOUD_BASE_COVERAGE,
@@ -65,9 +66,13 @@ export function windOffsetAt(elapsedSeconds: number): { x: number; z: number } {
 
 /** Cloud density 0..1 at a world position (0 outside the deck). */
 export function cloudDensityAt(worldX: number, worldY: number, worldZ: number, inputs: CloudFieldInputs): number {
+  profiler.addCounter("game.sky.cloudDensity.evaluations");
   const heightFraction = (worldY - CLOUD_BASE_Y) / CLOUD_THICKNESS;
   const profile = verticalProfile(heightFraction);
-  if (profile <= 0) return 0;
+  if (profile <= 0) {
+    profiler.addCounter("game.sky.cloudDensity.outsideDeck");
+    return 0;
+  }
 
   const wind = windOffsetAt(inputs.elapsedSeconds);
   const driftedX = worldX - wind.x;
@@ -86,7 +91,11 @@ export function cloudDensityAt(worldX: number, worldY: number, worldZ: number, i
   );
   const threshold = SHAPE_THRESHOLD_CLEAR + (SHAPE_THRESHOLD_OVERCAST - SHAPE_THRESHOLD_CLEAR) * coverage;
   let density = smoothstep(threshold, threshold + SHAPE_SOFTNESS, baseShape * profile);
-  if (density <= 0) return 0;
+  profiler.addCounter("game.sky.cloudDensity.noiseSamples");
+  if (density <= 0) {
+    profiler.addCounter("game.sky.cloudDensity.belowShapeThreshold");
+    return 0;
+  }
 
   const detail = sampleCloudNoise(
     inputs.noise,
@@ -96,5 +105,8 @@ export function cloudDensityAt(worldX: number, worldY: number, worldZ: number, i
     1,
   );
   density = Math.min(1, Math.max(0, density * 1.25 - (1 - detail) * 0.35));
+  profiler.addCounter("game.sky.cloudDensity.noiseSamples");
+  profiler.addCounter("game.sky.cloudDensity.insideCloud");
+  profiler.addCounter("game.sky.cloudDensity.carveChecks", inputs.carves.length);
   return density * carveFactor(worldX, worldY, worldZ, inputs.carves);
 }
