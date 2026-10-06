@@ -1,4 +1,10 @@
 import { BlockType } from "../blocks";
+import { CELLS_PER_CHUNK } from "../edits/chunk-cluster";
+import {
+  addWorkerCounter,
+  endWorkerSection,
+  startWorkerSection,
+} from "../profiler/worker-recorder";
 import { generateChunkBlocks } from "../worldgen/chunk-generator";
 import { uniformByteValue } from "../world/uniform-bytes";
 
@@ -30,6 +36,7 @@ export interface GeneratedColumn {
 }
 
 function isAirChunk(seed: number, chunkX: number, chunkY: number, chunkZ: number): boolean {
+  addWorkerCounter("surfaceProbeChunksGenerated", 1);
   return uniformByteValue(generateChunkBlocks(seed, chunkX, chunkY, chunkZ)) === BlockType.AIR;
 }
 
@@ -47,10 +54,15 @@ export function generateChunkColumn(
   let highestRequestedY = Number.NEGATIVE_INFINITY;
   let lowestRequestedY = Number.POSITIVE_INFINITY;
   let highestSolidRequestedY: number | null = null;
+  let uniformChunkCount = 0;
+  let airChunkCount = 0;
+  startWorkerSection("generateColumnChunks");
   for (let position = 0; position < chunkYs.length; position++) {
     const chunkY = chunkYs[position]!;
     const blocks = generateChunkBlocks(seed, chunkX, chunkY, chunkZ);
     const uniformBlock = uniformByteValue(blocks);
+    if (uniformBlock >= 0) uniformChunkCount++;
+    if (uniformBlock === BlockType.AIR) airChunkCount++;
     chunks.push({ chunkY, blocks: uniformBlock >= 0 ? null : (blocks.buffer as ArrayBuffer), uniformBlock });
     highestRequestedY = Math.max(highestRequestedY, chunkY);
     lowestRequestedY = Math.min(lowestRequestedY, chunkY);
@@ -58,7 +70,15 @@ export function generateChunkColumn(
       highestSolidRequestedY = Math.max(highestSolidRequestedY ?? chunkY, chunkY);
     }
   }
-  return { chunks, surfaceChunkY: findSurfaceChunkY(seed, chunkX, chunkZ, highestRequestedY, lowestRequestedY, highestSolidRequestedY) };
+  endWorkerSection();
+  startWorkerSection("findSurfaceChunk");
+  const surfaceChunkY = findSurfaceChunkY(seed, chunkX, chunkZ, highestRequestedY, lowestRequestedY, highestSolidRequestedY);
+  endWorkerSection();
+  addWorkerCounter("columnChunksRequested", chunkYs.length);
+  addWorkerCounter("columnChunksUniform", uniformChunkCount);
+  addWorkerCounter("columnChunksAir", airChunkCount);
+  addWorkerCounter("columnChunkBytesReturned", (chunkYs.length - uniformChunkCount) * CELLS_PER_CHUNK);
+  return { chunks, surfaceChunkY };
 }
 
 function findSurfaceChunkY(
