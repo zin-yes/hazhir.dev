@@ -55,6 +55,25 @@ export const DIMENSIONS = {
   geometryAttribute: "geometry.attribute",
   /** Texture array load time and bytes fetched per texture file. */
   textureFile: "texture.file",
+  // world and edits
+  /** Streaming planner decisions per reason (loaded, alreadyKnown, skippedAboveSurface, unloaded, ...). Units = chunks. */
+  streamingDecision: "streaming.decision",
+  /** Scheduler traffic per lane (generation, lighting, mesh): units = dispatched jobs, time = queue wait. */
+  schedulerLane: "scheduler.lane",
+  /** Chunk compression per chosen representation (uniform, palette, runs, raw): time and units = bytes in. */
+  compressionKind: "compression.kind",
+  /** Light flood cells per channel and wave (skyRemoved, blockRemoved, spread, ...). Units = cells. */
+  lightFloodWave: "lightFlood.wave",
+  /** Block edit work per brush mode (fill, erase, fillAirOnly, replaceNonAirOnly). Units = edited cells. */
+  editMode: "edit.mode",
+  /** Edit side effects per kind (savedEdit, savedEditOutsideLoaded, waterWake). Time and units. */
+  editSideEffect: "edit.sideEffect",
+  /** Voxel ray casts per outcome (hit, miss, startedInside). Units = steps walked. */
+  rayOutcome: "ray.outcome",
+  /** Border slab extraction per mesh face direction. Units = bytes copied. */
+  borderFace: "border.face",
+  /** Live chunk records per pipeline stage. Units = chunks (sampled once per second). */
+  chunkStage: "chunk.stage",
 } as const;
 
 export type DimensionName = (typeof DIMENSIONS)[keyof typeof DIMENSIONS];
