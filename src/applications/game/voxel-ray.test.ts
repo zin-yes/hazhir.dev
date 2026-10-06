@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { castVoxelRay } from "./voxel-ray";
+import { counterTotal, gaugeMax, withEnabledProfiler } from "./world/profiler-readings.test-helper";
 
 const solidAt =
   (...blocks: Array<[number, number, number]>) =>
@@ -45,5 +46,23 @@ describe("castVoxelRay", () => {
     const hit = castVoxelRay([0, 0, 0], [0, 0, -1], solidAt([0, 0, 0]), 5);
     expect(hit?.cell).toEqual([0, 0, 0]);
     expect(hit?.faceNormal).toEqual([0, 0, 1]);
+  });
+});
+
+describe("castVoxelRay profiling", () => {
+  test("counts the cells walked, the axis of every step and the outcome of each cast", () => {
+    withEnabledProfiler(() => {
+      castVoxelRay([0, 0, 0], [1, 0, 0], solidAt([3, 0, 0]), 5);
+      castVoxelRay([0, 0, 0], [1, 0, 0], solidAt([8, 0, 0]), 5);
+      castVoxelRay([0, 0, 0], [0, 1, 0], solidAt([0, 0, 0]), 5);
+      expect(counterTotal("game.ray.casts")).toBe(3);
+      expect(counterTotal("game.ray.hits")).toBe(1);
+      expect(counterTotal("game.ray.misses")).toBe(1);
+      expect(counterTotal("game.ray.startedInsideBlock")).toBe(1);
+      expect(counterTotal("game.ray.cellsExamined")).toBe(4 + 6 + 1);
+      expect(counterTotal("game.ray.stepsAlongX")).toBe(3 + 6);
+      expect(counterTotal("game.ray.stepsAlongY")).toBe(0);
+      expect(gaugeMax("game.ray.cellsPerCast")).toBe(6);
+    });
   });
 });
