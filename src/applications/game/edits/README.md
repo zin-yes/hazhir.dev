@@ -1,8 +1,12 @@
 # Bulk block edits and light
 
-Pure, typed-array code (no DOM, no main-thread profiler) that changes many
-blocks at once and relights them with one batched update. It also holds the
-flood-fill core that chunk lighting in `workers/lighting.ts` runs on.
+Typed-array code (no DOM) that changes many blocks at once and relights them
+with one batched update. It also holds the flood-fill core that chunk lighting
+in `workers/lighting.ts` runs on. `apply-block-edits.ts` and the other
+main-thread modules record into the game profiler; the modules the lighting
+worker shares (`light-flood`, `cell-queue`, `chunk-cluster`, `merge-light`)
+only keep plain integer stats (`FloodStats`, `ClusterStats`, queue peaks,
+`drainLightMergeStats`) for their caller to report.
 
 ## Using it
 
