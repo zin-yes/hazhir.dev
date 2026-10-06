@@ -14,6 +14,13 @@ import { initializeChunkLight, propagateChunkLight } from "./lighting";
 import { createSurroundingsSource, lightChunkRegion, listRegionTransferables } from "./region-lighting";
 import { generateMesh, listTransferables } from "./mesh";
 import { buildPlantTemplate } from "./plant-voxels";
+import {
+  SLAB_AXIS_X,
+  SURROUNDING_SLAB_DEPTH,
+  extractSurroundingSlab,
+  lightRegionFromSlabs,
+  slabCellCount,
+} from "./region-surroundings";
 
 const BLOCKS = CHUNK_WIDTH * CHUNK_HEIGHT * CHUNK_LENGTH;
 const WORLD_SEED = 20240607;
@@ -441,6 +448,48 @@ describe("region lighting profiling", () => {
     );
     expect(callsAt(profile, "propagateRegionChunks>gatherNeighbors")).toBe(3);
     expect(callsAt(profile, "mergeRegionUpdates>mergeRegionChunks")).toBe(1);
+  });
+});
+
+describe("region slab input profiling", () => {
+  test("slab counters tell uniform parts from copied ones and add up to the bytes received", () => {
+    const litNeighborBlocks = mixedChunk();
+    const litNeighborLight = lightFor(litNeighborBlocks).light;
+    const partialExtent = { axis: SLAB_AXIS_X, firstLayer: 0, layerCount: SURROUNDING_SLAB_DEPTH };
+    const partialSlab = extractSurroundingSlab(-1, SEA_LEVEL_CHUNK_Y, 0, litNeighborBlocks, litNeighborLight, -1, partialExtent);
+    const uniformStoneBlocks = new Uint8Array(BLOCKS).fill(BlockType.STONE);
+    const uniformSlab = extractSurroundingSlab(
+      0,
+      SEA_LEVEL_CHUNK_Y - 1,
+      0,
+      uniformStoneBlocks,
+      new Uint8Array(BLOCKS),
+      BlockType.STONE,
+      { axis: SLAB_AXIS_X, firstLayer: 0, layerCount: CHUNK_WIDTH },
+    );
+    const { profile } = recordTask(() =>
+      lightRegionFromSlabs(
+        [
+          { chunkX: 0, chunkY: SEA_LEVEL_CHUNK_Y, chunkZ: 0, blocks: mixedChunk(), uniformBlock: -1 },
+          { chunkX: 0, chunkY: SEA_LEVEL_CHUNK_Y + 1, chunkZ: 0, blocks: null, uniformBlock: BlockType.AIR },
+        ],
+        [partialSlab, uniformSlab],
+      ),
+    );
+    const { counters } = profile;
+
+    expect(partialSlab.blocks).not.toBeNull();
+    expect(counters.regionInputChunks).toBe(2);
+    expect(counters.regionInputUniformChunks).toBe(1);
+    expect(counters.regionInputFilledBytes).toBe(BLOCKS);
+    expect(counters.slabsReceived).toBe(2);
+    expect(counters.slabsWholeChunk).toBe(1);
+    expect(counters.slabsPartial).toBe(1);
+    expect(counters.slabsUniformBlocks).toBe(1);
+    expect(counters.slabBlockBytesReceived).toBe(slabCellCount(partialExtent));
+    expect(counters.slabCellsUnpacked).toBe(slabCellCount(partialExtent) + BLOCKS);
+    expect(callsAt(profile, "rebuildSurroundings>unpackSlabBlocks")).toBe(2);
+    expect(rootPaths(profile)).toContain("propagateRegionChunks");
   });
 });
 

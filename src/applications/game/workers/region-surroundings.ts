@@ -20,6 +20,12 @@ import {
   X_STRIDE,
   Y_STRIDE,
 } from "../edits/chunk-cluster";
+import {
+  addWorkerCounter,
+  endWorkerSection,
+  startWorkerSampledSection,
+  startWorkerSection,
+} from "../profiler/worker-recorder";
 import { uniformByteValue } from "../world/uniform-bytes";
 import {
   createSurroundingsSource,
@@ -57,6 +63,7 @@ export interface SurroundingSlab extends SlabExtent {
 
 const WHOLE_CHUNK: SlabExtent = { axis: SLAB_AXIS_X, firstLayer: 0, layerCount: CHUNK_SIZE };
 const DEEPEST_FIRST_LAYER = CHUNK_SIZE - SURROUNDING_SLAB_DEPTH;
+const SLAB_REBUILD_SAMPLE_INTERVAL = 8;
 
 /**
  * The layers of a surrounding chunk to send, given a bit per direction (chunk-cluster order, seen from the
@@ -164,11 +171,17 @@ export function extractSurroundingSlab(
 /** A full-size chunk from a slab: the slab's cells, stone with no light everywhere else. */
 export function rebuildSurroundingChunk(slab: SurroundingSlab): LitSurroundingChunk {
   const isWholeChunk = slab.layerCount === CHUNK_SIZE;
+  startWorkerSampledSection("allocateSlabChunk", SLAB_REBUILD_SAMPLE_INTERVAL);
   const blocks = new Uint8Array(CELLS_PER_CHUNK);
   const light = new Uint8Array(CELLS_PER_CHUNK);
   if (!isWholeChunk) blocks.fill(BlockType.STONE);
+  endWorkerSection();
+  startWorkerSampledSection("unpackSlabBlocks", SLAB_REBUILD_SAMPLE_INTERVAL);
   unpackSlab(slab.blocks, slab.uniformBlock, slab, blocks);
+  endWorkerSection();
+  startWorkerSampledSection("unpackSlabLight", SLAB_REBUILD_SAMPLE_INTERVAL);
   unpackSlab(slab.light, slab.uniformLight, slab, light);
+  endWorkerSection();
   return { chunkX: slab.chunkX, chunkY: slab.chunkY, chunkZ: slab.chunkZ, blocks, light };
 }
 
@@ -275,16 +288,57 @@ export function lightRegionFromSlabs(
   slabs: ArrayLike<SurroundingSlab>,
 ): RegionLightResult {
   const chunks: RegionChunk[] = [];
+  let uniformRegionChunks = 0;
+  startWorkerSection("rebuildRegionChunks");
   for (let position = 0; position < regionChunks.length; position++) {
     const { chunkX, chunkY, chunkZ, blocks, uniformBlock } = regionChunks[position]!;
+    if (!blocks) uniformRegionChunks++;
     chunks.push({ chunkX, chunkY, chunkZ, blocks: blocks ?? new Uint8Array(CELLS_PER_CHUNK).fill(uniformBlock) });
   }
+  endWorkerSection();
   const surroundingChunks: LitSurroundingChunk[] = [];
+  startWorkerSection("rebuildSurroundings");
   for (let position = 0; position < slabs.length; position++) {
     surroundingChunks.push(rebuildSurroundingChunk(slabs[position]!));
   }
+  endWorkerSection();
+  recordSlabInputCounters(regionChunks.length, uniformRegionChunks, slabs);
   return lightChunkRegion(
     chunks,
     surroundingChunks.length > 0 ? createSurroundingsSource(surroundingChunks) : undefined,
   );
+}
+
+function recordSlabInputCounters(
+  regionChunkCount: number,
+  uniformRegionChunkCount: number,
+  slabs: ArrayLike<SurroundingSlab>,
+) {
+  let wholeChunkSlabs = 0;
+  let uniformBlockSlabs = 0;
+  let uniformLightSlabs = 0;
+  let blockBytesReceived = 0;
+  let lightBytesReceived = 0;
+  let cellsUnpacked = 0;
+  for (let position = 0; position < slabs.length; position++) {
+    const slab = slabs[position]!;
+    if (slab.layerCount === CHUNK_SIZE) wholeChunkSlabs++;
+    if (!slab.blocks) uniformBlockSlabs++;
+    if (!slab.light) uniformLightSlabs++;
+    blockBytesReceived += slab.blocks?.byteLength ?? 0;
+    lightBytesReceived += slab.light?.byteLength ?? 0;
+    cellsUnpacked += slabCellCount(slab);
+  }
+  addWorkerCounter("regionInputChunks", regionChunkCount);
+  addWorkerCounter("regionInputUniformChunks", uniformRegionChunkCount);
+  addWorkerCounter("regionInputFilledBytes", uniformRegionChunkCount * CELLS_PER_CHUNK);
+  addWorkerCounter("slabsReceived", slabs.length);
+  addWorkerCounter("slabsWholeChunk", wholeChunkSlabs);
+  addWorkerCounter("slabsPartial", slabs.length - wholeChunkSlabs);
+  addWorkerCounter("slabsUniformBlocks", uniformBlockSlabs);
+  addWorkerCounter("slabsUniformLight", uniformLightSlabs);
+  addWorkerCounter("slabBlockBytesReceived", blockBytesReceived);
+  addWorkerCounter("slabLightBytesReceived", lightBytesReceived);
+  addWorkerCounter("slabCellsUnpacked", cellsUnpacked);
+  addWorkerCounter("slabRebuiltChunkBytes", slabs.length * CELLS_PER_CHUNK * 2);
 }
