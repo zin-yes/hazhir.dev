@@ -1,6 +1,5 @@
 import {
   type BulkEditPhase,
-  type BulkEditStats,
   relightAfterSingleBlockWritten,
 } from "./edits/apply-block-edits";
 import type { ChunkCoordinate, LightChunkSource } from "./edits/chunk-cluster";
@@ -73,20 +72,6 @@ export function trackLightPhaseInProfiler(phase: BulkEditPhase, hasStarted: bool
   } else {
     profiler.end(openProfilerToken);
   }
-}
-
-/**
- * Counters for the work one bulk edit did, on top of the cell counters the
- * caller records. Call with the stats of a finished applyBlockEdits.
- */
-export function recordBulkEditStats(stats: BulkEditStats) {
-  if (!profiler.enabled) return;
-  profiler.addCounter("game.light.editsRequested", stats.editsRequested);
-  profiler.addCounter("game.light.blocksChanged", stats.blocksChanged);
-  profiler.addCounter("game.light.editsInUnloadedChunks", stats.editsInUnloadedChunks);
-  profiler.addCounter("game.light.editsSkippedByReplaceRule", stats.editsSkippedByReplaceRule);
-  profiler.addCounter("game.light.chunksTouched", stats.chunksTouched);
-  profiler.sampleGauge("game.light.cellsVisitedPerEdit", stats.cellsVisited, "cells");
 }
 
 /**

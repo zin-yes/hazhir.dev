@@ -129,7 +129,7 @@ import {
   getSpawnPointFromSeed,
   getSurfaceHeightFromSeed,
 } from "./utils";
-import { updateWater } from "./water-physics";
+import { recordWaterTick, updateWater } from "./water-physics";
 import {
   estimateTransferBytes,
   profiler,
@@ -1743,6 +1743,7 @@ export default function Game() {
       if (!isSimulationActive()) return;
       if (pendingWaterUpdates.current.size === 0) return;
 
+      recordWaterTick(pendingWaterUpdates.current.size);
       const waterToken = profiler.begin("main.interval.water");
       const collectToken = profiler.begin("main.interval.water.collect");
       const updates = Array.from(pendingWaterUpdates.current);
@@ -2500,7 +2501,6 @@ export default function Game() {
     profiler.sampleGauge("game.light.pendingEdits", pendingLightEditsRef.current);
     profiler.sampleGauge("game.scene.children", scene.children.length);
     profiler.sampleGauge("game.brush.pendingStrokes", pendingBrushStrokesRef.current.length);
-    profiler.sampleGauge("game.network.connectedPeers", networkManager.current.connectedPeerCount);
     profiler.end(frameGaugesToken);
 
     // Update FPS counter
