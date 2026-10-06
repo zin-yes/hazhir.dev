@@ -22,3 +22,7 @@ export function gaugeLast(name: string): number | undefined {
 export function timerCalls(name: string): number {
   return profiler.snapshot().timers.find((timer) => timer.name === name)?.count ?? 0;
 }
+
+export function byteTotal(name: string): number {
+  return profiler.snapshot().bytes.find((meter) => meter.name === name)?.total ?? 0;
+}

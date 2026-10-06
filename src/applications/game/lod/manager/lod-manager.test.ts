@@ -1,9 +1,10 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import * as THREE from "three";
 import { BlockType } from "../../blocks";
 import { topColorOfBlock } from "../colors/block-color-table";
 import { cellSizeOfLevel, tileSizeOfLevel } from "../core/lod-constants";
 import { decodeLodVertex, LodFace } from "../meshing/lod-vertex-format";
+import { byteTotal, counterTotal, gaugeLast, startLodProfiling, stopLodProfiling, timerCalls } from "../testing/profiler-readout.test-helper";
 import { createSyntheticChunk, isSyntheticTreeColumn } from "../testing/synthetic-chunks.test-helper";
 import { syntheticBlocksAt, syntheticHeightAt } from "../testing/synthetic-terrain.test-helper";
 import { createLodManager, type LodManager } from "./lod-manager";
@@ -240,5 +241,47 @@ describe("LOD manager", () => {
     expect(stats.evictedTiles).toBeGreaterThan(0);
     expect(stats.cacheBytes).toBeLessThanOrEqual(budget);
     manager.dispose();
+  });
+});
+
+describe("LOD manager profiling", () => {
+  beforeEach(startLodProfiling);
+  afterEach(stopLodProfiling);
+
+  test("the profiler's build, cache and display numbers agree with the manager's own stats once settled", async () => {
+    const harness = createHarness();
+    await harness.settle();
+    const { manager } = harness;
+    const stats = manager.getStats();
+    const levels = Object.keys(stats.buildsByLevel).map(Number);
+
+    expect(stats.builtTiles).toBeGreaterThan(20);
+    expect(counterTotal("game.lod.tilesBuilt")).toBe(stats.builtTiles);
+    expect(levels.reduce((sum, level) => sum + counterTotal(`game.lod.tilesBuilt.L${level}`), 0)).toBe(stats.builtTiles);
+    for (const level of levels) {
+      expect(counterTotal(`game.lod.build.vertices.L${level}`)).toBe(stats.buildsByLevel[level]!.totalVertices);
+      expect(byteTotal(`bytes.lod.tileGeometry.L${level}`)).toBe(stats.buildsByLevel[level]!.totalGeometryBytes);
+      expect(byteTotal(`bytes.lod.packedSurface.L${level}`)).toBe(stats.buildsByLevel[level]!.totalPackedSurfaceBytes);
+    }
+    expect(counterTotal("game.lod.build.triangles")).toBe(counterTotal("game.lod.build.vertices") / 2);
+
+    expect(counterTotal("game.lod.build.requests")).toBe(stats.builtTiles);
+    expect(counterTotal("game.lod.queue.dispatched")).toBe(stats.builtTiles);
+    expect(timerCalls("latency.lod.buildQueueWait")).toBe(stats.builtTiles);
+    expect(timerCalls("latency.lod.buildRoundTrip")).toBe(stats.builtTiles);
+    expect(counterTotal("game.lod.build.cold") + counterTotal("game.lod.build.withHint") + counterTotal("game.lod.build.withChildren")).toBe(stats.builtTiles);
+    expect(counterTotal("game.lod.build.withHint")).toBeGreaterThan(0);
+
+    expect(counterTotal("game.lod.cache.inserts")).toBe(stats.builtTiles);
+    expect(gaugeLast("game.lod.cache.entries")).toBe(stats.cachedTiles);
+    expect(gaugeLast("memory.lod.tileCache")).toBe(stats.cacheBytes);
+    expect(gaugeLast("game.lod.display.tiles")).toBe(stats.drawnTiles);
+    expect(counterTotal("game.lod.display.added")).toBeGreaterThanOrEqual(stats.drawnTiles);
+    expect(counterTotal("game.lod.plan.rebuilt")).toBeGreaterThan(1);
+    expect(counterTotal("game.lod.plan.reason.stateChanged")).toBeGreaterThan(0);
+    expect(counterTotal("game.lod.stateVersion.tileBuilt")).toBe(stats.builtTiles);
+    expect(timerCalls("main.lod.plan")).toBe(counterTotal("game.lod.plan.rebuilt"));
+    manager.dispose();
+    expect(counterTotal("game.lod.tileMesh.disposed")).toBe(stats.cachedTiles);
   });
 });

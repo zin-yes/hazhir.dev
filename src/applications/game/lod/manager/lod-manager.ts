@@ -5,16 +5,18 @@
 
 import * as THREE from "three";
 import { profiler } from "../../profiler";
+import { DIMENSIONS } from "../../profiler/dimensions";
 import { BuildQueue, BuildUrgency, type BuildCandidate } from "../cache/build-queue";
 import { LodTileCache } from "../cache/tile-cache";
 import { BLOCK_RENDER_OFFSET, CHUNK_SIZE_BLOCKS, MAX_LOD_LEVEL, tileSizeOfLevel } from "../core/lod-constants";
+import { lodLevelKey, metricNameOfLevel, perLevelMetricNames } from "../core/lod-level-keys";
 import { ancestorAddressAt, childAddressesOf, tileBoundsOf, tileKeyOf, type TileAddress } from "../core/tile-address";
 import { writeCoverageTexels } from "../coverage/real-chunk-coverage";
 import { packedHeightRange } from "../data/packed-tile-surface";
 import type { HeightRange } from "../data/tile-surface";
 import { createLodMaterials, srgbHexToVector, type LodMaterials } from "../rendering/lod-materials";
 import { LodRenderPass } from "../rendering/lod-render-pass";
-import { createLodTileMesh, type LodTileMesh } from "../rendering/lod-tile-mesh";
+import { createLodTileMesh, liveLodTileMeshCount, takeTileFadeUniformUpdateCount, type LodTileMesh } from "../rendering/lod-tile-mesh";
 import {
   distanceToTile,
   horizontalDistanceToBounds,
@@ -131,8 +133,67 @@ const PLAN_MAXIMUM_AGE_MILLISECONDS = 1000;
 const MINIMUM_FOG_START_BLOCKS = 512;
 const DISSOLVE_START_FRACTION = 0.85;
 
+const TILES_BUILT_PER_LEVEL = perLevelMetricNames("game.lod.tilesBuilt.");
+const BUILT_VERTICES_PER_LEVEL = perLevelMetricNames("game.lod.build.vertices.");
+const BUILT_TRIANGLES_PER_LEVEL = perLevelMetricNames("game.lod.build.triangles.");
+const GEOMETRY_BYTES_PER_LEVEL = perLevelMetricNames("bytes.lod.tileGeometry.");
+const PACKED_BYTES_PER_LEVEL = perLevelMetricNames("bytes.lod.packedSurface.");
+const BUILD_FAILED_PER_LEVEL = perLevelMetricNames("game.lod.build.failed.");
+/** Indexes of the plan key parts, grouped by what changed (see `update`). */
+const REPLAN_REASON_COUNTERS = [
+  { firstPart: 0, lastPart: 2, counterName: "game.lod.plan.reason.cameraMoved" },
+  { firstPart: 3, lastPart: 5, counterName: "game.lod.plan.reason.cameraTurned" },
+  { firstPart: 6, lastPart: 8, counterName: "game.lod.plan.reason.viewportChanged" },
+  { firstPart: 9, lastPart: 9, counterName: "game.lod.plan.reason.stateChanged" },
+  { firstPart: 10, lastPart: 10, counterName: "game.lod.plan.reason.coverageChanged" },
+  { firstPart: 11, lastPart: 11, counterName: "game.lod.plan.reason.timeElapsed" },
+];
+
+/** Why the plan was invalidated: one counter per place that bumps the state version. */
+const enum StateChange {
+  TileEvicted = "game.lod.stateVersion.tileEvicted",
+  RadiusChanged = "game.lod.stateVersion.radiusChanged",
+  RealDataChanged = "game.lod.stateVersion.realDataChanged",
+  TileBuilt = "game.lod.stateVersion.tileBuilt",
+  BuildFailed = "game.lod.stateVersion.buildFailed",
+  BudgetEvicted = "game.lod.stateVersion.budgetEvicted",
+}
+
+/** Work counted inside one plan or update, flushed to the profiler once per frame. */
+interface PlanActivity {
+  heightRangeLookups: number;
+  heightRangeLevelsWalked: number;
+  heightRangeUnresolved: number;
+  standInChecks: number;
+  standInFound: number;
+  frustumTests: number;
+  frustumRejected: number;
+}
+
+function createPlanActivity(): PlanActivity {
+  return {
+    heightRangeLookups: 0,
+    heightRangeLevelsWalked: 0,
+    heightRangeUnresolved: 0,
+    standInChecks: 0,
+    standInFound: 0,
+    frustumTests: 0,
+    frustumRejected: 0,
+  };
+}
+
+function clearPlanActivity(activity: PlanActivity): void {
+  activity.heightRangeLookups = 0;
+  activity.heightRangeLevelsWalked = 0;
+  activity.heightRangeUnresolved = 0;
+  activity.standInChecks = 0;
+  activity.standInFound = 0;
+  activity.frustumTests = 0;
+  activity.frustumRejected = 0;
+}
+
 export function createLodManager(options: LodManagerOptions): LodManager {
-  return new LodManagerImplementation(options);
+  return profiler.measure("main.lod.create", () => new LodManagerImplementation(options));
 }
 
 function clampRenderDistanceChunks(renderDistanceChunks: number): number {
@@ -171,7 +232,9 @@ class LodManagerImplementation implements LodManager {
   /** Bumped when the cache or the real data changes, which invalidates the current plan. */
   private stateVersion = 0;
   private lastPlanKey = "";
+  private lastPlanKeyParts: readonly number[] = [];
   private lastPlan: FramePlan | undefined;
+  private readonly planActivity = createPlanActivity();
 
   constructor(private readonly options: LodManagerOptions) {
     this.now = options.now ?? (() => performance.now());
@@ -192,9 +255,14 @@ class LodManagerImplementation implements LodManager {
     this.applyRadiusUniforms();
     this.display = new TileDisplay(this.pass.tiles, options.fadeMilliseconds ?? DEFAULT_FADE_MILLISECONDS);
     this.cache = new LodTileCache<CachedTilePayload>(options.memoryBudgetBytes ?? DEFAULT_MEMORY_BUDGET_BYTES, (tile) => {
-      this.stateVersion++;
+      this.invalidatePlan(StateChange.TileEvicted);
       this.display.remove(tile.address, tile.payload.tileMesh);
-      tile.payload.tileMesh.dispose();
+      const token = profiler.begin("main.lod.tileMesh.dispose", DIMENSIONS.lodLevel, lodLevelKey(tile.address.level));
+      try {
+        tile.payload.tileMesh.dispose();
+      } finally {
+        profiler.end(token);
+      }
     });
     this.realData = new RealDataTracker(
       options.realDataBudgetBytes ?? DEFAULT_REAL_DATA_BUDGET_BYTES,
@@ -236,7 +304,13 @@ class LodManagerImplementation implements LodManager {
     return this.cameraUnderground;
   }
 
+  private invalidatePlan(change: StateChange): void {
+    this.stateVersion++;
+    profiler.addCounter(change);
+  }
+
   private applyRadiusUniforms(): void {
+    profiler.addCounter("game.lod.uniforms.radiusUpdates");
     const sceneUniforms = this.materials.sceneUniforms;
     sceneUniforms.hazeStart.value = Math.max(MINIMUM_FOG_START_BLOCKS, this.radiusBlocks * FOG_START_FRACTION);
     sceneUniforms.hazeEnd.value = this.radiusBlocks;
@@ -251,11 +325,13 @@ class LodManagerImplementation implements LodManager {
     this.maximumLevel = maximumLevelForRadius(radiusBlocks);
     this.previouslySplit = new Set();
     this.applyRadiusUniforms();
-    this.stateVersion++;
+    profiler.addCounter("game.lod.config.radiusChanges");
+    this.invalidatePlan(StateChange.RadiusChanged);
   }
 
   captureBackgroundHaze(renderer: THREE.WebGLRenderer): void {
     const hazeCube = this.pass.captureBackground(renderer);
+    profiler.addCounter("game.lod.uniforms.hazeCubeUpdates");
     const sceneUniforms = this.materials.sceneUniforms;
     sceneUniforms.hazeCube.value = hazeCube;
     sceneUniforms.useHazeCube.value = hazeCube === null ? 0 : 1;
@@ -280,35 +356,44 @@ class LodManagerImplementation implements LodManager {
   }
 
   setFogColor(srgbHex: number): void {
+    profiler.addCounter("game.lod.uniforms.fogColorUpdates");
     this.materials.sceneUniforms.hazeColor.value.copy(srgbHexToVector(srgbHex));
   }
 
   onRealChunkLoaded(chunkX: number, chunkY: number, chunkZ: number, blocks: Uint8Array): void {
+    profiler.addCounter("game.lod.real.chunkLoaded");
     this.realData.recordChunkBlocks(chunkX, chunkY, chunkZ, blocks);
   }
 
   onBlocksEdited(chunkX: number, chunkY: number, chunkZ: number, blocks: Uint8Array): void {
+    profiler.addCounter("game.lod.real.chunkEdited");
     this.realData.recordChunkBlocks(chunkX, chunkY, chunkZ, blocks);
   }
 
   onRealChunkMeshed(chunkX: number, chunkY: number, chunkZ: number): void {
+    profiler.addCounter("game.lod.real.chunkMeshed");
     this.realData.coverage.markMeshed(chunkX, chunkY, chunkZ);
   }
 
   onRealChunkUnmeshed(chunkX: number, chunkY: number, chunkZ: number): void {
+    profiler.addCounter("game.lod.real.chunkUnmeshed");
     this.realData.coverage.markUnloaded(chunkX, chunkY, chunkZ);
   }
 
   onRealChunkUnloaded(chunkX: number, chunkY: number, chunkZ: number): void {
+    profiler.addCounter("game.lod.real.chunkUnloaded");
     this.realData.coverage.markUnloaded(chunkX, chunkY, chunkZ);
     this.realData.forgetChunk(chunkX, chunkY, chunkZ);
   }
 
   private heightRangeFor(address: TileAddress): HeightRange | undefined {
+    this.planActivity.heightRangeLookups++;
     for (let level = address.level; level <= this.maximumLevel; level++) {
+      this.planActivity.heightRangeLevelsWalked++;
       const tile = this.cache.get(level === address.level ? address : ancestorAddressAt(address, level));
       if (tile !== undefined) return tile.heightRange;
     }
+    this.planActivity.heightRangeUnresolved++;
     return undefined;
   }
 
@@ -321,8 +406,11 @@ class LodManagerImplementation implements LodManager {
   }
 
   private hasStandIn(address: TileAddress): boolean {
-    if (this.nearestCachedAncestor(address) !== undefined) return true;
-    return address.level > 0 && childAddressesOf(address).every((child) => this.cache.has(child));
+    this.planActivity.standInChecks++;
+    const hasStandIn =
+      this.nearestCachedAncestor(address) !== undefined || (address.level > 0 && childAddressesOf(address).every((child) => this.cache.has(child)));
+    if (hasStandIn) this.planActivity.standInFound++;
+    return hasStandIn;
   }
 
   private isInFrustum(address: TileAddress): boolean {
@@ -330,7 +418,10 @@ class LodManagerImplementation implements LodManager {
     const range = this.heightRangeFor(address) ?? { minHeight: 0, maxHeight: 256 };
     this.tileBox.min.set(bounds.minX, range.minHeight, bounds.minZ).subScalar(BLOCK_RENDER_OFFSET);
     this.tileBox.max.set(bounds.maxX, range.maxHeight, bounds.maxZ).subScalar(BLOCK_RENDER_OFFSET);
-    return this.frustum.intersectsBox(this.tileBox);
+    this.planActivity.frustumTests++;
+    const isInFrustum = this.frustum.intersectsBox(this.tileBox);
+    if (!isInFrustum) this.planActivity.frustumRejected++;
+    return isInFrustum;
   }
 
   update(camera: THREE.PerspectiveCamera, viewportHeightPixels: number): void {
@@ -342,12 +433,12 @@ class LodManagerImplementation implements LodManager {
       this.lastUpdateMilliseconds = nowMilliseconds;
 
       const changedRealAddresses = this.realData.applyPendingColumns(this.options.realColumnsPerUpdate ?? DEFAULT_REAL_COLUMNS_PER_UPDATE);
-      if (changedRealAddresses.length > 0) this.stateVersion++;
+      if (changedRealAddresses.length > 0) this.invalidatePlan(StateChange.RealDataChanged);
 
       camera.updateMatrixWorld();
       const cameraBlockPosition = new THREE.Vector3().setFromMatrixPosition(camera.matrixWorld).addScalar(BLOCK_RENDER_OFFSET);
       const viewDirection = camera.getWorldDirection(new THREE.Vector3());
-      const planKey = [
+      const planKeyParts = [
         Math.round(cameraBlockPosition.x),
         Math.round(cameraBlockPosition.y),
         Math.round(cameraBlockPosition.z),
@@ -360,16 +451,23 @@ class LodManagerImplementation implements LodManager {
         this.stateVersion,
         this.realData.coverage.version,
         Math.floor(nowMilliseconds / PLAN_MAXIMUM_AGE_MILLISECONDS),
-      ].join(",");
+      ];
+      const planKey = planKeyParts.join(",");
       if (planKey !== this.lastPlanKey || this.lastPlan === undefined) {
+        if (profiler.enabled) this.countReplanReasons(planKeyParts);
         this.lastPlanKey = planKey;
+        this.lastPlanKeyParts = planKeyParts;
         this.lastPlan = this.plan(camera, cameraBlockPosition, viewportHeightPixels, nowMilliseconds);
+        profiler.addCounter("game.lod.plan.rebuilt");
       } else {
+        profiler.addCounter("game.lod.plan.reused");
         this.dispatchBuilds();
       }
       const plan = this.lastPlan;
 
+      const wasUnderground = this.cameraUnderground;
       this.cameraUnderground = this.isBelowLodSurface(cameraBlockPosition);
+      if (this.cameraUnderground !== wasUnderground) profiler.addCounter("game.lod.underground.transitions");
       this.display.advance(elapsedMilliseconds);
       this.display.reconcile(plan.drawn, (address) => this.cache.get(address)!.payload.tileMesh, (this.options.fadeMilliseconds ?? DEFAULT_FADE_MILLISECONDS) <= 0);
       this.updateCoverageTexture(cameraBlockPosition);
@@ -382,9 +480,45 @@ class LodManagerImplementation implements LodManager {
         this.stats.fullDetailMilliseconds = sinceCreation;
       }
       this.refreshStats(plan.selectedLeafCount, plan.drawn.length, plan.missingLeafCount);
+      this.reportFrameActivity();
     } finally {
       profiler.end(updateToken);
     }
+  }
+
+  /** Counts which parts of the plan key changed since the plan before, so the report shows what forces replans. */
+  private countReplanReasons(planKeyParts: readonly number[]): void {
+    const previousParts = this.lastPlanKeyParts;
+    if (previousParts.length === 0) {
+      profiler.addCounter("game.lod.plan.reason.firstPlan");
+      return;
+    }
+    for (const reason of REPLAN_REASON_COUNTERS) {
+      for (let part = reason.firstPart; part <= reason.lastPart; part++) {
+        if (planKeyParts[part] !== previousParts[part]) {
+          profiler.addCounter(reason.counterName);
+          break;
+        }
+      }
+    }
+  }
+
+  /** Flushes the per-frame operation counts of the cache, real data, display and plan helpers. */
+  private reportFrameActivity(): void {
+    this.cache.reportToProfiler();
+    this.realData.reportToProfiler();
+    this.display.reportDrawnToProfiler();
+    const activity = this.planActivity;
+    if (profiler.enabled) {
+      profiler.addCounter("game.lod.heightRange.lookups", activity.heightRangeLookups);
+      profiler.addCounter("game.lod.heightRange.levelsWalked", activity.heightRangeLevelsWalked);
+      profiler.addCounter("game.lod.heightRange.unresolved", activity.heightRangeUnresolved);
+      profiler.addCounter("game.lod.standIn.checks", activity.standInChecks);
+      profiler.addCounter("game.lod.standIn.found", activity.standInFound);
+      profiler.addCounter("game.lod.frustum.tests", activity.frustumTests);
+      profiler.addCounter("game.lod.frustum.rejected", activity.frustumRejected);
+    }
+    clearPlanActivity(activity);
   }
 
   /**
@@ -392,6 +526,15 @@ class LodManagerImplementation implements LodManager {
    * moved a block, turned, or the cache or the real data changed.
    */
   private plan(camera: THREE.PerspectiveCamera, cameraBlockPosition: THREE.Vector3, viewportHeightPixels: number, nowMilliseconds: number): FramePlan {
+    const planToken = profiler.begin("main.lod.plan");
+    try {
+      return this.buildPlan(camera, cameraBlockPosition, viewportHeightPixels, nowMilliseconds);
+    } finally {
+      profiler.end(planToken);
+    }
+  }
+
+  private buildPlan(camera: THREE.PerspectiveCamera, cameraBlockPosition: THREE.Vector3, viewportHeightPixels: number, nowMilliseconds: number): FramePlan {
     this.projectionView.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
     this.frustum.setFromProjectionMatrix(this.projectionView);
 
@@ -409,39 +552,95 @@ class LodManagerImplementation implements LodManager {
       heightRangeOf: (address) => this.heightRangeFor(address),
       previouslySplit: this.previouslySplit,
     };
-    const selection = selectTiles(parameters);
-    this.previouslySplit = selection.split;
-    const coverage = this.realData.coverage;
-    const visibleLeaves = selection.leaves.filter((leaf) => !coverage.isTileFullyCovered(leaf));
-    const renderSet = computeRenderSet({ leaves: visibleLeaves, split: selection.split }, parameters, (address) => this.cache.has(address));
-    profiler.end(selectionToken);
+    let selection: ReturnType<typeof selectTiles>;
+    let visibleLeaves: TileAddress[];
+    let renderSet: ReturnType<typeof computeRenderSet>;
+    try {
+      selection = selectTiles(parameters);
+      this.previouslySplit = selection.split;
+      const coverage = this.realData.coverage;
+      const cullToken = profiler.begin("main.lod.select.coverageCull");
+      try {
+        visibleLeaves = selection.leaves.filter((leaf) => !coverage.isTileFullyCovered(leaf));
+      } finally {
+        profiler.end(cullToken);
+      }
+      profiler.addCounter("game.lod.select.leavesHiddenByRealChunks", selection.leaves.length - visibleLeaves.length);
+      const renderSetToken = profiler.begin("main.lod.select.renderSet");
+      try {
+        renderSet = computeRenderSet({ leaves: visibleLeaves, split: selection.split }, parameters, (address) => this.cache.has(address));
+      } finally {
+        profiler.end(renderSetToken);
+      }
+    } finally {
+      profiler.end(selectionToken);
+    }
+    profiler.sampleGauge("game.lod.select.selectedLeaves", selection.leaves.length);
 
+    const candidatesToken = profiler.begin("main.lod.plan.candidates");
     const candidates: BuildCandidate[] = [];
     let hasUncoveredArea = false;
-    for (const leaf of renderSet.missingLeaves) {
-      const root = ancestorAddressAt(leaf, this.maximumLevel);
-      if (this.hasStandIn(leaf) || this.queue.isInFlight(root)) {
-        candidates.push({ address: leaf, urgency: BuildUrgency.Refine, inFrustum: this.isInFrustum(leaf), distance: distanceToTile(leaf, parameters) });
-      } else {
-        hasUncoveredArea = true;
-        candidates.push({ address: root, urgency: BuildUrgency.Uncovered, inFrustum: this.isInFrustum(root), distance: distanceToTile(root, parameters) });
+    let refineCandidates = 0;
+    let uncoveredCandidates = 0;
+    let refreshCandidates = 0;
+    let refreshSkippedAsRecent = 0;
+    try {
+      for (const leaf of renderSet.missingLeaves) {
+        const root = ancestorAddressAt(leaf, this.maximumLevel);
+        if (this.hasStandIn(leaf) || this.queue.isInFlight(root)) {
+          candidates.push({ address: leaf, urgency: BuildUrgency.Refine, inFrustum: this.isInFrustum(leaf), distance: distanceToTile(leaf, parameters) });
+          refineCandidates++;
+        } else {
+          hasUncoveredArea = true;
+          candidates.push({ address: root, urgency: BuildUrgency.Uncovered, inFrustum: this.isInFrustum(root), distance: distanceToTile(root, parameters) });
+          uncoveredCandidates++;
+        }
       }
+      const refreshInterval = this.options.refreshIntervalMilliseconds ?? DEFAULT_REFRESH_INTERVAL_MILLISECONDS;
+      for (const address of renderSet.drawn) {
+        const tile = this.cache.get(address)!;
+        this.cache.touch(address);
+        if (tile.realDataVersion === this.realData.realDataVersionOf(address)) continue;
+        if (nowMilliseconds - tile.payload.builtAtMilliseconds < refreshInterval) {
+          refreshSkippedAsRecent++;
+          continue;
+        }
+        candidates.push({ address, urgency: BuildUrgency.Refresh, inFrustum: this.isInFrustum(address), distance: distanceToTile(address, parameters) });
+        refreshCandidates++;
+      }
+    } finally {
+      profiler.end(candidatesToken);
     }
-    const refreshInterval = this.options.refreshIntervalMilliseconds ?? DEFAULT_REFRESH_INTERVAL_MILLISECONDS;
-    for (const address of renderSet.drawn) {
-      const tile = this.cache.get(address)!;
-      this.cache.touch(address);
-      if (tile.realDataVersion === this.realData.realDataVersionOf(address)) continue;
-      if (nowMilliseconds - tile.payload.builtAtMilliseconds < refreshInterval) continue;
-      candidates.push({ address, urgency: BuildUrgency.Refresh, inFrustum: this.isInFrustum(address), distance: distanceToTile(address, parameters) });
+    if (profiler.enabled) {
+      profiler.addCounter("game.lod.plan.candidates.refine", refineCandidates);
+      profiler.addCounter("game.lod.plan.candidates.uncovered", uncoveredCandidates);
+      profiler.addCounter("game.lod.plan.candidates.refresh", refreshCandidates);
+      profiler.addCounter("game.lod.plan.refreshSkippedAsRecent", refreshSkippedAsRecent);
+      profiler.addCounter("game.lod.plan.drawnTilesTouched", renderSet.drawn.length);
     }
-    this.queue.replaceCandidates(candidates);
+    const queueToken = profiler.begin("main.lod.plan.queueReplace");
+    try {
+      this.queue.replaceCandidates(candidates);
+    } finally {
+      profiler.end(queueToken);
+    }
     this.dispatchBuilds();
 
-    const pinned = new Set<number>(this.display.keys);
-    for (const address of renderSet.drawn) pinned.add(tileKeyOf(address.level, address.tileX, address.tileZ));
-    if (this.cache.enforceBudget(pinned) > 0) this.stateVersion++;
-    this.updateClipPlanes(cameraBlockPosition, renderSet.drawn);
+    const evictToken = profiler.begin("main.lod.plan.pinAndEvict");
+    try {
+      const pinned = new Set<number>(this.display.keys);
+      for (const address of renderSet.drawn) pinned.add(tileKeyOf(address.level, address.tileX, address.tileZ));
+      profiler.sampleGauge("game.lod.cache.pinned", pinned.size);
+      if (this.cache.enforceBudget(pinned) > 0) this.invalidatePlan(StateChange.BudgetEvicted);
+    } finally {
+      profiler.end(evictToken);
+    }
+    const clipToken = profiler.begin("main.lod.plan.clipPlanes");
+    try {
+      this.updateClipPlanes(cameraBlockPosition, renderSet.drawn);
+    } finally {
+      profiler.end(clipToken);
+    }
     return {
       drawn: renderSet.drawn,
       missingLeafCount: renderSet.missingLeaves.length,
@@ -451,23 +650,39 @@ class LodManagerImplementation implements LodManager {
   }
 
   private dispatchBuilds(): void {
-    while (this.queue.inFlightCount < this.maximumBuildsInFlight) {
-      const candidate = this.queue.takeNext();
-      if (candidate === undefined) break;
-      const address = candidate.address;
-      const overlay = this.realData.overlayFor(address);
-      const request: LodTileBuildRequest = { seed: this.options.seed, address };
-      const transfer: Transferable[] = [];
-      if (overlay !== undefined) {
-        request.overlay = { surface: overlay.surface, coveredCells: overlay.coveredCells };
-        transfer.push(
-          overlay.surface.heights.buffer,
-          overlay.surface.topBlocks.buffer,
-          overlay.surface.sideBlocks.buffer,
-          overlay.surface.waterLevels.buffer,
-          overlay.coveredCells.buffer,
-        );
+    const token = profiler.begin("main.lod.dispatchBuilds");
+    try {
+      while (this.queue.inFlightCount < this.maximumBuildsInFlight) {
+        const candidate = this.queue.takeNext();
+        if (candidate === undefined) break;
+        this.dispatchBuild(candidate);
       }
+      if (this.queue.inFlightCount >= this.maximumBuildsInFlight && this.queue.waitingCount > 0) {
+        profiler.addCounter("game.lod.queue.dispatchSaturated");
+      }
+    } finally {
+      profiler.end(token);
+    }
+  }
+
+  private dispatchBuild(candidate: BuildCandidate): void {
+    const address = candidate.address;
+    const levelKey = lodLevelKey(address.level);
+    const overlay = this.realData.overlayFor(address);
+    const request: LodTileBuildRequest = { seed: this.options.seed, address };
+    const transfer: Transferable[] = [];
+    if (overlay !== undefined) {
+      request.overlay = { surface: overlay.surface, coveredCells: overlay.coveredCells };
+      transfer.push(
+        overlay.surface.heights.buffer,
+        overlay.surface.topBlocks.buffer,
+        overlay.surface.sideBlocks.buffer,
+        overlay.surface.waterLevels.buffer,
+        overlay.coveredCells.buffer,
+      );
+    }
+    const sourcesToken = profiler.begin("main.lod.dispatch.sources", DIMENSIONS.lodLevel, levelKey);
+    try {
       if (address.level > 0) {
         const children = childAddressesOf(address).map((child) => this.cache.get(child)?.packedSurface ?? null);
         if (children.every((child) => child !== null)) request.children = children;
@@ -476,27 +691,70 @@ class LodManagerImplementation implements LodManager {
         const hintAddress = this.nearestCachedAncestor(address);
         if (hintAddress !== undefined) request.hint = { address: hintAddress, packedSurface: this.cache.get(hintAddress)!.packedSurface };
       }
-      const realDataVersion = overlay?.version ?? this.realData.realDataVersionOf(address);
+    } finally {
+      profiler.end(sourcesToken);
+    }
+    if (profiler.enabled) this.countBuildRequest(request);
+    const realDataVersion = overlay?.version ?? this.realData.realDataVersionOf(address);
+    const executeToken = profiler.begin("main.lod.dispatch.execute", DIMENSIONS.lodLevel, levelKey);
+    try {
       this.executor
         .build(request, transfer)
         .then((result) => this.onTileBuilt(result, realDataVersion))
         .catch((error) => {
           this.queue.markFinished(address);
-          this.stateVersion++;
+          this.invalidatePlan(StateChange.BuildFailed);
           this.stats.failedBuilds++;
+          profiler.addCounter("game.lod.build.failed");
+          profiler.addCounter(metricNameOfLevel(BUILD_FAILED_PER_LEVEL, address.level));
           if (!this.isDisposed) console.error("LOD tile build failed", address, error);
         });
+    } finally {
+      profiler.end(executeToken);
+    }
+  }
+
+  /** What each build request carries: real data overlay, the four finer tiles to downsample, a coarser hint, or nothing. */
+  private countBuildRequest(request: LodTileBuildRequest): void {
+    profiler.addCounter("game.lod.build.requests");
+    if (request.overlay !== undefined) {
+      profiler.addCounter("game.lod.build.withOverlay");
+      const { surface, coveredCells } = request.overlay;
+      profiler.recordBytes(
+        "bytes.lod.build.overlayRequest",
+        surface.heights.byteLength + surface.topBlocks.byteLength + surface.sideBlocks.byteLength + surface.waterLevels.byteLength + coveredCells.byteLength,
+      );
+    }
+    if (request.children !== undefined) {
+      profiler.addCounter("game.lod.build.withChildren");
+      let childrenBytes = 0;
+      for (const child of request.children) childrenBytes += child!.byteLength;
+      profiler.recordBytes("bytes.lod.build.childrenRequest", childrenBytes);
+    } else if (request.hint !== undefined) {
+      profiler.addCounter("game.lod.build.withHint");
+      profiler.recordBytes("bytes.lod.build.hintRequest", request.hint.packedSurface.byteLength);
+    } else {
+      profiler.addCounter("game.lod.build.cold");
     }
   }
 
   private onTileBuilt(result: LodTileBuildResult, realDataVersion: number): void {
     this.queue.markFinished(result.address);
-    if (this.isDisposed) return;
-    this.stateVersion++;
-    const token = profiler.begin("main.lod.createTileMesh");
+    if (this.isDisposed) {
+      profiler.addCounter("game.lod.build.completedAfterDispose");
+      return;
+    }
+    this.invalidatePlan(StateChange.TileBuilt);
+    const levelKey = lodLevelKey(result.address.level);
+    const token = profiler.begin("main.lod.createTileMesh", DIMENSIONS.lodLevel, levelKey);
     try {
+      const geometryToken = profiler.begin("main.lod.createTileMesh.geometry");
       const tileMesh = createLodTileMesh(result.address, result, this.materials);
+      profiler.end(geometryToken);
+      const displayToken = profiler.begin("main.lod.createTileMesh.display");
       this.display.replaceMesh(result.address, tileMesh);
+      profiler.end(displayToken);
+      const cacheToken = profiler.begin("main.lod.createTileMesh.cache");
       this.cache.set({
         address: result.address,
         packedSurface: result.packedSurface,
@@ -505,6 +763,7 @@ class LodManagerImplementation implements LodManager {
         payload: { tileMesh, builtAtMilliseconds: this.now() },
         realDataVersion,
       });
+      profiler.end(cacheToken);
       const levelStatistics = (this.stats.buildsByLevel[result.address.level] ??= createEmptyLevelStatistics());
       levelStatistics.tiles++;
       levelStatistics.totalSampleMilliseconds += result.sampleMilliseconds;
@@ -515,9 +774,27 @@ class LodManagerImplementation implements LodManager {
       this.stats.builtTiles++;
       profiler.addCounter("game.lod.tilesBuilt");
       profiler.recordBytes("bytes.lod.tileGeometry", tileMesh.geometryBytes);
+      if (profiler.enabled) this.countBuiltTile(result, tileMesh);
     } finally {
       profiler.end(token);
     }
+  }
+
+  private countBuiltTile(result: LodTileBuildResult, tileMesh: LodTileMesh): void {
+    const level = result.address.level;
+    const vertexCount = result.vertices.length / 2;
+    const triangleCount = (result.terrainQuadCount + result.waterQuadCount) * 2;
+    profiler.addCounter(metricNameOfLevel(TILES_BUILT_PER_LEVEL, level));
+    profiler.addCounter(result.source === "children" ? "game.lod.build.source.children" : "game.lod.build.source.worldgen");
+    profiler.addCounter("game.lod.build.vertices", vertexCount);
+    profiler.addCounter(metricNameOfLevel(BUILT_VERTICES_PER_LEVEL, level), vertexCount);
+    profiler.addCounter("game.lod.build.triangles", triangleCount);
+    profiler.addCounter(metricNameOfLevel(BUILT_TRIANGLES_PER_LEVEL, level), triangleCount);
+    profiler.addCounter("game.lod.build.terrainQuads", result.terrainQuadCount);
+    profiler.addCounter("game.lod.build.waterQuads", result.waterQuadCount);
+    profiler.recordBytes(metricNameOfLevel(GEOMETRY_BYTES_PER_LEVEL, level), tileMesh.geometryBytes);
+    profiler.recordBytes("bytes.lod.packedSurface", result.packedSurface.byteLength);
+    profiler.recordBytes(metricNameOfLevel(PACKED_BYTES_PER_LEVEL, level), result.packedSurface.byteLength);
   }
 
   private updateCoverageTexture(cameraBlockPosition: THREE.Vector3): void {
@@ -529,14 +806,24 @@ class LodManagerImplementation implements LodManager {
       centerChunkX === this.lastCoverageCenter.chunkX &&
       centerChunkZ === this.lastCoverageCenter.chunkZ
     ) {
+      profiler.addCounter("game.lod.coverage.textureUpdatesSkipped");
       return;
     }
     this.lastCoverageVersion = coverage.version;
     this.lastCoverageCenter = { chunkX: centerChunkX, chunkZ: centerChunkZ };
-    const uniforms = this.materials.sceneUniforms;
-    writeCoverageTexels(coverage, centerChunkX, centerChunkZ, uniforms.coverageSize.value, this.materials.coverageTexels);
-    uniforms.coverageTexture.value.needsUpdate = true;
-    uniforms.coverageCenterChunk.value.set(centerChunkX, centerChunkZ);
+    const token = profiler.begin("main.lod.coverageTexture");
+    try {
+      const uniforms = this.materials.sceneUniforms;
+      const texelsWritten = writeCoverageTexels(coverage, centerChunkX, centerChunkZ, uniforms.coverageSize.value, this.materials.coverageTexels);
+      uniforms.coverageTexture.value.needsUpdate = true;
+      uniforms.coverageCenterChunk.value.set(centerChunkX, centerChunkZ);
+      profiler.addCounter("game.lod.coverage.textureUpdates");
+      profiler.addCounter("game.lod.coverage.texelsWritten", texelsWritten);
+      profiler.addCounter("game.lod.coverage.columnsVisitedForTexture", coverage.coveredColumnCount);
+      profiler.recordBytes("bytes.lod.coverageTexture", this.materials.coverageTexels.byteLength);
+    } finally {
+      profiler.end(token);
+    }
   }
 
   /**
@@ -546,19 +833,25 @@ class LodManagerImplementation implements LodManager {
   private updateClipPlanes(cameraBlockPosition: THREE.Vector3, drawn: readonly TileAddress[]): void {
     const coverage = this.realData.coverage;
     let nearestDistance = Infinity;
+    let tilesScanned = 0;
+    let tilesSearchedByColumn = 0;
+    let columnsChecked = 0;
     for (const address of drawn) {
       const bounds = tileBoundsOf(address);
       const distance = horizontalDistanceToBounds(bounds, cameraBlockPosition.x, cameraBlockPosition.z);
+      tilesScanned++;
       if (distance >= nearestDistance) continue;
       const chunksPerSide = (bounds.maxX - bounds.minX) / CHUNK_SIZE_BLOCKS;
       if (distance > NEAR_TILE_SEARCH_DISTANCE || chunksPerSide > 8 || !coverage.isTilePartiallyCovered(address)) {
         nearestDistance = distance;
         continue;
       }
+      tilesSearchedByColumn++;
       for (let offsetZ = 0; offsetZ < chunksPerSide; offsetZ++) {
         for (let offsetX = 0; offsetX < chunksPerSide; offsetX++) {
           const chunkX = bounds.minX / CHUNK_SIZE_BLOCKS + offsetX;
           const chunkZ = bounds.minZ / CHUNK_SIZE_BLOCKS + offsetZ;
+          columnsChecked++;
           if (coverage.isColumnCovered(chunkX, chunkZ)) continue;
           const columnBounds = { minX: chunkX * CHUNK_SIZE_BLOCKS, minZ: chunkZ * CHUNK_SIZE_BLOCKS, maxX: (chunkX + 1) * CHUNK_SIZE_BLOCKS, maxZ: (chunkZ + 1) * CHUNK_SIZE_BLOCKS };
           nearestDistance = Math.min(nearestDistance, horizontalDistanceToBounds(columnBounds, cameraBlockPosition.x, cameraBlockPosition.z));
@@ -567,6 +860,11 @@ class LodManagerImplementation implements LodManager {
     }
     this.nearPlane = Math.max(MINIMUM_NEAR_PLANE, Math.min(MAXIMUM_NEAR_PLANE, nearestDistance * NEAR_PLANE_DEPTH_FACTOR));
     this.farPlane = this.radiusBlocks * 1.25 + Math.abs(cameraBlockPosition.y);
+    if (profiler.enabled) {
+      profiler.addCounter("game.lod.clipPlanes.tilesScanned", tilesScanned);
+      profiler.addCounter("game.lod.clipPlanes.tilesSearchedByColumn", tilesSearchedByColumn);
+      profiler.addCounter("game.lod.clipPlanes.columnsChecked", columnsChecked);
+    }
   }
 
   private refreshStats(selectedTiles: number, drawnTiles: number, missingTiles: number): void {
@@ -590,6 +888,13 @@ class LodManagerImplementation implements LodManager {
     profiler.sampleGauge("queue.lod.waitingBuilds", stats.queuedBuilds);
     profiler.sampleGauge("memory.lod.tileCache", stats.cacheBytes, "bytes");
     profiler.sampleGauge("memory.lod.realData", stats.realDataBytes, "bytes");
+    profiler.sampleGauge("queue.lod.inFlight", stats.buildsInFlight);
+    profiler.sampleGauge("game.lod.selectedTiles", selectedTiles);
+    profiler.sampleGauge("game.lod.cachedTiles", stats.cachedTiles);
+    profiler.sampleGauge("game.lod.coveredColumns", stats.coveredColumns);
+    profiler.sampleGauge("game.lod.nearPlane", stats.nearPlane, "blocks");
+    profiler.sampleGauge("game.lod.farPlane", stats.farPlane, "blocks");
+    profiler.sampleGauge("game.lod.underground", this.cameraUnderground ? 1 : 0);
   }
 
   render(renderer: THREE.WebGLRenderer, camera: THREE.PerspectiveCamera): void {
@@ -597,7 +902,10 @@ class LodManagerImplementation implements LodManager {
     const token = profiler.begin("main.lod.render");
     try {
       this.pass.tiles.visible = !this.cameraUnderground;
+      if (this.cameraUnderground) profiler.addCounter("game.lod.render.skippedUnderground");
       this.pass.render(renderer, camera, this.nearPlane, this.farPlane);
+      profiler.addCounter("game.lod.render.tileFadeUniformUpdates", takeTileFadeUniformUpdateCount());
+      profiler.sampleGauge("game.lod.render.liveTileMeshes", liveLodTileMeshCount());
     } finally {
       profiler.end(token);
     }
@@ -610,11 +918,17 @@ class LodManagerImplementation implements LodManager {
   dispose(): void {
     if (this.isDisposed) return;
     this.isDisposed = true;
-    this.executor.terminate();
-    this.display.clear();
-    this.cache.clear();
-    this.pass.releaseBackground();
-    this.pass.dispose();
-    this.materials.dispose();
+    const token = profiler.begin("main.lod.dispose");
+    try {
+      this.executor.terminate();
+      this.display.clear();
+      this.cache.clear();
+      this.pass.releaseBackground();
+      this.pass.dispose();
+      this.materials.dispose();
+      profiler.addCounter("game.lod.managersDisposed");
+    } finally {
+      profiler.end(token);
+    }
   }
 }
