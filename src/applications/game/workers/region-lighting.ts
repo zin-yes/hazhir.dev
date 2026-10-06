@@ -1,5 +1,5 @@
 import { CELLS_PER_CHUNK, type LightChunkSource } from "../edits/chunk-cluster";
-import { mergeLightUpdatesInPlace } from "../edits/merge-light";
+import { drainLightMergeStats, mergeLightUpdatesInPlace } from "../edits/merge-light";
 import {
   addWorkerCounter,
   endWorkerSection,
@@ -226,6 +226,13 @@ export function lightChunkRegion(
   addWorkerCounter("regionUpdatesRoutedToSurroundings", updatesRoutedToSurroundings);
   addWorkerCounter("regionLightUpdatesMerged", lightUpdatesMerged);
   addWorkerCounter("regionLightCloneBytes", chunks.length * CELLS_PER_CHUNK);
+  const mergeStats = drainLightMergeStats();
+  addWorkerCounter("regionMergeInPlace", mergeStats.inPlaceMerges);
+  addWorkerCounter("regionMergeReporting", mergeStats.reportingMerges);
+  addWorkerCounter("regionMergeWordsCompared", mergeStats.wordsCompared);
+  addWorkerCounter("regionMergeWordsDiffering", mergeStats.wordsDiffering);
+  addWorkerCounter("regionMergeCellsBrightened", mergeStats.cellsBrightened);
+  addWorkerCounter("regionMergeUnaligned", mergeStats.unalignedMerges);
   return { chunkLights, surroundingUpdates };
 }
 

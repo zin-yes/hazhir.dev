@@ -559,8 +559,23 @@ export function propagateChunkLight(
   }
   const neighborBordersUpdated = Object.keys(neighborUpdates).length;
   endWorkerSection();
+  const clusterStats = cluster.stats;
+  addWorkerCounter("clusterSlotLookups", clusterStats.slotLookups);
+  addWorkerCounter("clusterHashProbeSteps", clusterStats.hashProbeSteps);
+  addWorkerCounter("clusterSlotsCreated", clusterStats.slotsCreated);
+  addWorkerCounter("clusterNeighborResolutions", clusterStats.neighborResolutions);
+  addWorkerCounter("clusterNeighborResolutionsNotLit", clusterStats.neighborResolutionsNotLit);
+  addWorkerCounter("clusterLightArraysDetached", clusterStats.lightArraysDetached);
   cluster.reset(NO_CHUNKS_SOURCE);
 
+  addWorkerCounter("floodSpreadCalls", propagationStats.spreadCalls);
+  addWorkerCounter("floodCellsQueuedBySpread", propagationStats.cellsQueuedBySpread);
+  addWorkerCounter("floodNeighborsExamined", propagationStats.neighborsExamined);
+  addWorkerCounter("floodNeighborsOutsideLitChunks", propagationStats.neighborsOutsideLitChunks);
+  addWorkerCounter("floodNeighborsOpaque", propagationStats.neighborsOpaque);
+  addWorkerCounter("floodNeighborsAlreadyBrightEnough", propagationStats.neighborsAlreadyBrightEnough);
+  addWorkerCounter("floodChunkBoundaryCrossings", propagationStats.chunkBoundaryCrossings);
+  addWorkerCounter("floodLightArraysDetached", propagationStats.lightArraysDetached);
   const { cellsVisited, cellsLit, deadCellsSkipped } = propagationStats;
   addWorkerCounter("bfsNodesVisited", cellsVisited);
   addWorkerCounter("bfsNodesQueuedBySeeding", cellsQueuedBeforeFlood);
