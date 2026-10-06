@@ -2,6 +2,8 @@
 // Foliage lets sunlight through, emissive textures give off their own light, glass mirrors the sky strongly and glossy
 // ones (ice, obsidian, amethyst) mirror it softly. Plants are foliage by being drawn with the plant material.
 
+import { profiler } from "../profiler";
+
 const BITS_PER_WORD = 30;
 export const TEXTURE_FLAG_WORD_COUNT = 12;
 
@@ -38,9 +40,15 @@ export function textureFlagUniformName(flag: TextureFlag): string {
 
 /** The uniforms for every flag, keyed as the shader declares them. */
 export function buildTextureFlagUniforms(textureNames: readonly string[]): Record<string, { value: Int32Array }> {
-  return Object.fromEntries(
-    TEXTURE_FLAGS.map((flag) => [textureFlagUniformName(flag), { value: buildTextureFlagBits(textureNames, flag) }]),
-  );
+  const scopeToken = profiler.begin("main.sky.textureFlags.build");
+  try {
+    profiler.addCounter("game.sky.textureFlags.texturesScanned", textureNames.length);
+    return Object.fromEntries(
+      TEXTURE_FLAGS.map((flag) => [textureFlagUniformName(flag), { value: buildTextureFlagBits(textureNames, flag) }]),
+    );
+  } finally {
+    profiler.end(scopeToken);
+  }
 }
 
 export const TEXTURE_FLAG_LOOKUP_GLSL = TEXTURE_FLAGS.map(
