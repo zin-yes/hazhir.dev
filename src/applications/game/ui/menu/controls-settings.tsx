@@ -3,6 +3,8 @@ import {
   LOOK_SENSITIVITY_MINIMUM,
   type GameSettings,
 } from "../../settings/game-settings";
+import { uiEventProps } from "../ui-profiling";
+import { useProfiledRender } from "../use-profiled-render";
 import { ControlsList } from "./controls-list";
 import { SettingsHeading, SettingsHint, SliderSetting } from "./setting-rows";
 
@@ -13,8 +15,9 @@ interface ControlsSettingsProps {
 }
 
 export function ControlsSettings({ lookSensitivity, onLookSensitivityChange, isMobile }: ControlsSettingsProps) {
+  useProfiledRender("controlsSettings");
   return (
-    <div className="flex flex-col gap-5">
+    <div className="flex flex-col gap-5" {...uiEventProps("controlsSettings")}>
       <SliderSetting
         label="Look sensitivity"
         valueText={`${lookSensitivity.toFixed(2)}x`}

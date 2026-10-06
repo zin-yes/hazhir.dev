@@ -1,5 +1,7 @@
 import { useState } from "react";
 import { PixelButton, PixelInput } from "../pixel/pixel-ui";
+import { profiler } from "../../profiler";
+import { profileUiHandler, uiEventProps } from "../ui-profiling";
 import { useProfiledRender } from "../use-profiled-render";
 import { SettingsHeading, SettingsHint } from "./setting-rows";
 
@@ -31,9 +33,10 @@ export function MultiplayerPanel({
   const startHosting = async () => {
     setHostRequest("pending");
     try {
-      await onHost?.();
+      await profiler.measureAsync("latency.ui.multiplayerPanel.host", async () => onHost?.());
       setHostRequest("idle");
     } catch {
+      profiler.addCounter("game.ui.multiplayerPanel.hostFailures");
       setHostRequest("failed");
     }
   };
@@ -42,9 +45,10 @@ export function MultiplayerPanel({
     if (!hostIdToJoin || joinRequest === "pending") return;
     setJoinRequest("pending");
     try {
-      await onJoin?.(hostIdToJoin);
+      await profiler.measureAsync("latency.ui.multiplayerPanel.join", async () => onJoin?.(hostIdToJoin));
       setJoinRequest("idle");
     } catch {
+      profiler.addCounter("game.ui.multiplayerPanel.joinFailures");
       setJoinRequest("failed");
     }
   };
@@ -52,6 +56,7 @@ export function MultiplayerPanel({
   const copyPeerId = async () => {
     if (!peerId) return;
     try {
+      profiler.addCounter("game.ui.multiplayerPanel.peerIdCopies");
       await navigator.clipboard.writeText(peerId);
       setHasCopiedId(true);
       setTimeout(() => setHasCopiedId(false), 1500);
@@ -62,7 +67,7 @@ export function MultiplayerPanel({
 
   if (isConnectedToHost) {
     return (
-      <div className="flex flex-col gap-3 text-xs">
+      <div className="flex flex-col gap-3 text-xs" {...uiEventProps("multiplayerPanel")}>
         <SettingsHeading>Connected</SettingsHeading>
         <p className="text-[#d8d2f0]">You are playing in a friend&apos;s world.</p>
         <SettingsHint>To go back to your own worlds, pick Save and switch world on the Game tab.</SettingsHint>
@@ -71,7 +76,7 @@ export function MultiplayerPanel({
   }
 
   return (
-    <div className="flex flex-col gap-6 text-xs">
+    <div className="flex flex-col gap-6 text-xs" {...uiEventProps("multiplayerPanel")}>
       <section className="flex flex-col gap-3">
         <SettingsHeading>Host a room</SettingsHeading>
         {peerId ? (
@@ -89,7 +94,11 @@ export function MultiplayerPanel({
           </>
         ) : (
           <>
-            <PixelButton tone="primary" disabled={hostRequest === "pending"} onClick={startHosting}>
+            <PixelButton
+              tone="primary"
+              disabled={hostRequest === "pending"}
+              onClick={() => profileUiHandler("multiplayerPanel", "startHosting", () => void startHosting())}
+            >
               {hostRequest === "pending" ? "Opening room..." : "Start hosting"}
             </PixelButton>
             {hostRequest === "failed" && (
@@ -105,7 +114,7 @@ export function MultiplayerPanel({
           className="flex gap-2"
           onSubmit={(event) => {
             event.preventDefault();
-            void joinHost();
+            profileUiHandler("multiplayerPanel", "joinHost", () => void joinHost());
           }}
         >
           <PixelInput

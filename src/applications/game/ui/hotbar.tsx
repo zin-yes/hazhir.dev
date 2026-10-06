@@ -1,4 +1,6 @@
 import { BLOCK_ITEM_TEXTURES, BlockType } from "../blocks";
+import { profiler } from "../profiler";
+import { profileUiHandler, uiEventProps } from "./ui-profiling";
 import { useProfiledRender } from "./use-profiled-render";
 
 interface HotbarProps {
@@ -11,8 +13,12 @@ interface HotbarProps {
 
 export function Hotbar({ selectedSlot, slots, onSelectSlot, brushRadius }: HotbarProps) {
   useProfiledRender("hotbar");
+  profiler.addCounter("game.ui.hotbar.slotsRendered", slots.length);
   return (
-    <div className="absolute bottom-4 left-1/2 flex max-w-[calc(100vw-1rem)] -translate-x-1/2 gap-1 border-4 border-[#0d0b14] bg-[#171327]/90 p-1 sm:gap-1.5 sm:p-1.5">
+    <div
+      className="absolute bottom-4 left-1/2 flex max-w-[calc(100vw-1rem)] -translate-x-1/2 gap-1 border-4 border-[#0d0b14] bg-[#171327]/90 p-1 sm:gap-1.5 sm:p-1.5"
+      {...uiEventProps("hotbar")}
+    >
       {brushRadius !== undefined && (
         <div className="pointer-events-none absolute bottom-full left-1/2 mb-2 -translate-x-1/2 whitespace-nowrap border-4 border-[#0d0b14] bg-[#171327]/90 px-2 py-1 text-[10px] text-[#b6f24a] sm:text-xs">
           BRUSH R{brushRadius} <span className="text-[#6e6590]">[ ] radius / LMB erase / RMB paint</span>
@@ -24,7 +30,9 @@ export function Hotbar({ selectedSlot, slots, onSelectSlot, brushRadius }: Hotba
           <div
             key={index}
             data-mobile-ui
-            onClick={() => onSelectSlot?.(index)}
+            onClick={() =>
+              profileUiHandler("hotbar", "selectSlot", () => onSelectSlot?.(index))
+            }
             className={`relative flex h-9 w-9 shrink-0 items-center justify-center border-4 sm:h-12 sm:w-12 ${
               isSelected
                 ? "-translate-y-1 border-[#b6f24a] bg-[#2b2447]"

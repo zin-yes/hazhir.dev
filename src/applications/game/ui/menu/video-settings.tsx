@@ -11,6 +11,8 @@ import {
   type GameSettings,
   type ShadowQuality,
 } from "../../settings/game-settings";
+import { uiEventProps } from "../ui-profiling";
+import { useProfiledRender } from "../use-profiled-render";
 import { ChoiceSetting, SettingsHeading, SettingsHint, SliderSetting } from "./setting-rows";
 
 /** The far terrain choices: 0 is off, the rest double. */
@@ -78,11 +80,12 @@ export function VideoSettings({
   waterReflections,
   onWaterReflectionsChange,
 }: VideoSettingsProps) {
+  useProfiledRender("videoSettings");
   const farTerrainStep = nearestFarTerrainStep(values.farTerrainChunks);
   const farTerrainChunks = FAR_TERRAIN_STEPS[farTerrainStep];
 
   return (
-    <div className="flex flex-col gap-5">
+    <div className="flex flex-col gap-5" {...uiEventProps("videoSettings")}>
       <SliderSetting
         label="Field of view"
         valueText={`${fieldOfViewDegrees}°`}

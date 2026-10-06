@@ -1,4 +1,6 @@
 import { PixelButton, PixelSlider, PixelToggle } from "../pixel/pixel-ui";
+import { profileSettingChange } from "../ui-profiling";
+import { useProfiledRender } from "../use-profiled-render";
 
 export function SettingsHint({ children }: { children: string }) {
   return <p className="text-center text-[0.65rem] leading-relaxed text-[#6e6590]">{children}</p>;
@@ -18,14 +20,19 @@ interface SliderSettingProps {
   onChange: (value: number) => void;
 }
 
-export function SliderSetting({ label, valueText, ...sliderProps }: SliderSettingProps) {
+export function SliderSetting({ label, valueText, onChange, ...sliderProps }: SliderSettingProps) {
+  useProfiledRender("sliderSetting");
   return (
     <div className="flex flex-col gap-1">
       <div className="flex justify-between text-sm text-[#d8d2f0]">
         <span>{label}</span>
         <span className="text-[#b6f24a]">{valueText}</span>
       </div>
-      <PixelSlider label={label} {...sliderProps} />
+      <PixelSlider
+        label={label}
+        {...sliderProps}
+        onChange={(value) => profileSettingChange(label, () => onChange(value))}
+      />
     </div>
   );
 }
@@ -38,13 +45,18 @@ interface ToggleSettingProps {
 }
 
 export function ToggleSetting({ label, description, checked, onChange }: ToggleSettingProps) {
+  useProfiledRender("toggleSetting");
   return (
     <div className="flex items-center justify-between gap-4">
       <div className="flex flex-col gap-1 text-sm text-[#d8d2f0]">
         <span>{label}</span>
         {description && <span className="text-[0.65rem] leading-relaxed text-[#6e6590]">{description}</span>}
       </div>
-      <PixelToggle label={label} checked={checked} onChange={onChange} />
+      <PixelToggle
+        label={label}
+        checked={checked}
+        onChange={(nextChecked) => profileSettingChange(label, () => onChange(nextChecked))}
+      />
     </div>
   );
 }
@@ -57,6 +69,7 @@ interface ChoiceSettingProps<Choice extends string> {
 }
 
 export function ChoiceSetting<Choice extends string>({ label, choices, value, onChange }: ChoiceSettingProps<Choice>) {
+  useProfiledRender("choiceSetting");
   return (
     <div className="flex flex-col gap-2">
       <span className="text-sm text-[#d8d2f0]">{label}</span>
@@ -66,7 +79,7 @@ export function ChoiceSetting<Choice extends string>({ label, choices, value, on
             key={choice.value}
             tone={choice.value === value ? "tabActive" : "tab"}
             aria-pressed={choice.value === value}
-            onClick={() => onChange(choice.value)}
+            onClick={() => profileSettingChange(label, () => onChange(choice.value))}
           >
             {choice.label}
           </PixelButton>

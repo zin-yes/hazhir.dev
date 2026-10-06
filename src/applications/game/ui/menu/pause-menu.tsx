@@ -6,6 +6,7 @@ import { MenuBackdrop } from "./menu-primitives";
 import { MultiplayerPanel } from "./multiplayer-panel";
 import { SettingsHint } from "./setting-rows";
 import { TouchSettings } from "./touch-settings";
+import { profileUiHandler } from "../ui-profiling";
 import { useProfiledRender } from "../use-profiled-render";
 import { VideoSettings, type VideoSettingsValues } from "./video-settings";
 
@@ -59,7 +60,11 @@ export function PauseMenu({
   const visibleTabs = (Object.keys(TAB_LABELS) as PauseMenuTab[]).filter((tab) => tab !== "touch" || isMobile);
 
   return (
-    <MenuBackdrop withVeil onBackdropClick={isMobile ? undefined : onResume}>
+    <MenuBackdrop
+      withVeil
+      surfaceName="pauseMenu"
+      onBackdropClick={isMobile ? undefined : onResume}
+    >
       <PixelFrame className="w-full max-w-lg" innerClassName="p-5 sm:p-6">
         <header className="mb-5 text-center">
           <p className="text-[0.65rem] uppercase tracking-[0.3em] text-[#6e6590]">
@@ -76,7 +81,9 @@ export function PauseMenu({
               key={tab}
               className="min-w-[5.5rem] flex-1"
               tone={activeTab === tab ? "tabActive" : "tab"}
-              onClick={() => setActiveTab(tab)}
+              onClick={() =>
+                profileUiHandler("pauseMenu", "switchTab", () => setActiveTab(tab))
+              }
             >
               {TAB_LABELS[tab]}
             </PixelButton>
@@ -85,13 +92,25 @@ export function PauseMenu({
 
         {activeTab === "game" && (
           <div className="flex flex-col gap-3">
-            <PixelButton tone="primary" className="w-full" onClick={onResume}>
+            <PixelButton
+              tone="primary"
+              className="w-full"
+              onClick={() => profileUiHandler("pauseMenu", "resume", onResume)}
+            >
               {isMobile ? "Tap to resume" : "Click to resume"}
             </PixelButton>
-            <PixelButton className="w-full" onClick={onSaveNow}>
+            <PixelButton
+              className="w-full"
+              onClick={() => profileUiHandler("pauseMenu", "saveNow", onSaveNow)}
+            >
               Save now
             </PixelButton>
-            <PixelButton className="w-full" onClick={onExitToWorlds}>
+            <PixelButton
+              className="w-full"
+              onClick={() =>
+                profileUiHandler("pauseMenu", "exitToWorlds", onExitToWorlds)
+              }
+            >
               Save and switch world
             </PixelButton>
             <SettingsHint>

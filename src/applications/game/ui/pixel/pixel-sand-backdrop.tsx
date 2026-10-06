@@ -15,6 +15,14 @@ const FILLED_ENOUGH_TO_DISSOLVE = 0.88;
 const SWEEP_WEIGHT = 0.45;
 
 const BACKDROP_SURFACE = "pixelSandBackdrop";
+const BYTES_PER_PIXEL = 4;
+
+const STAGE_FRAME_COUNTERS: { [stage in BackdropStage]: string } = {
+  intro: "game.ui.pixelBackdrop.frames.intro",
+  live: "game.ui.pixelBackdrop.frames.live",
+  dissolving: "game.ui.pixelBackdrop.frames.dissolving",
+  done: "game.ui.pixelBackdrop.frames.done",
+};
 
 const BACKGROUND_TOP = packColor(13, 11, 20);
 const BACKGROUND_BOTTOM = packColor(40, 31, 74);
@@ -79,6 +87,7 @@ export function PixelSandBackdrop({
     let palette: Awaited<ReturnType<typeof loadGrainPalette>> | null = null;
 
     let redrawNow: (() => void) | null = null;
+    let previousFrameStartedAt = 0;
 
     const rebuildGrid = () => {
       const rebuildToken = profiler.begin("main.ui.pixelBackdrop.rebuildGrid");
@@ -100,14 +109,25 @@ export function PixelSandBackdrop({
       );
       canvas.width = columns;
       canvas.height = rows;
+      profiler.addCounter("game.ui.pixelBackdrop.gridRebuilds");
+      profiler.sampleGauge("game.ui.pixelBackdrop.canvasPixels", columns * rows, "pixels");
+      profiler.recordBytes("bytes.ui.pixelBackdrop.imageBuffer", columns * rows * BYTES_PER_PIXEL);
+      const allocateImageToken = profiler.begin("main.ui.pixelBackdrop.rebuildGrid.allocateImage");
       image = context.createImageData(columns, rows);
       pixels = new Uint32Array(image.data.buffer);
+      profiler.end(allocateImageToken);
+      const resizeGrainsToken = profiler.begin("main.ui.pixelBackdrop.rebuildGrid.resizeGrains");
       if (!palette) {
         grid = null;
       } else if (grid) {
         grid = SandGrid.resized(grid, columns, rows, palette);
       } else {
         grid = new SandGrid(columns, rows, palette);
+      }
+      profiler.end(resizeGrainsToken);
+      if (grid) {
+        profiler.recordBytes("bytes.ui.pixelBackdrop.grainCells", grid.cells.byteLength);
+        profiler.sampleGauge("game.ui.pixelBackdrop.grains", grid.grainCount, "grains");
       }
       // Resizing a canvas clears it, so repaint before the browser does.
       redrawNow?.();
@@ -173,19 +193,32 @@ export function PixelSandBackdrop({
       const wantedGrains = Math.floor(effectiveTarget * grid.capacity * 0.97);
       const deficit = wantedGrains - grid.grainCount;
       if (deficit > 0) {
-        grid.spawnGrains(Math.min(deficit, Math.ceil(grid.columns / 4)));
+        const grainsRequested = Math.min(deficit, Math.ceil(grid.columns / 4));
+        const spawnedGrains = grid.spawnGrains(grainsRequested);
+        profiler.addCounter("game.ui.pixelBackdrop.grainsRequested", grainsRequested);
+        profiler.addCounter("game.ui.pixelBackdrop.grainsSpawned", spawnedGrains);
       }
       if (isAmbient && !prefersReducedMotion && frameCounter % 3 === 0) {
-        grid.drainBottomGrain();
+        if (grid.drainBottomGrain()) {
+          profiler.addCounter("game.ui.pixelBackdrop.grainsDrained");
+        }
       }
       const stepToken = profiler.begin(
         "main.ui.pixelBackdrop.sandStep",
         DIMENSIONS.uiSurface,
         BACKDROP_SURFACE,
       );
-      for (let step = 0; step < SIMULATION_STEPS_PER_FRAME; step++) grid.step();
+      for (let step = 0; step < SIMULATION_STEPS_PER_FRAME; step++) {
+        grid.step();
+        if (profiler.enabled) {
+          profiler.addCounter("game.ui.pixelBackdrop.grainFalls", grid.fallsInLastStep);
+          profiler.addCounter("game.ui.pixelBackdrop.grainSlides", grid.slidesInLastStep);
+        }
+      }
       profiler.end(stepToken);
+      profiler.addCounter("game.ui.pixelBackdrop.cellsScanned", SIMULATION_STEPS_PER_FRAME * grid.capacity);
       profiler.addCounter("game.ui.sandGrains", grid.grainCount);
+      profiler.sampleGauge("game.ui.pixelBackdrop.grains", grid.grainCount, "grains");
     };
 
     const draw = (now: number) => {
@@ -193,6 +226,9 @@ export function PixelSandBackdrop({
       const columns = image.width;
       const rows = image.height;
       const cells = grid?.cells;
+      const isProfiling = profiler.enabled;
+      let hiddenPixels = 0;
+      let grainPixels = 0;
       const paintToken = profiler.begin(
         "main.ui.pixelBackdrop.paintPixels",
         DIMENSIONS.uiSurface,
@@ -204,10 +240,12 @@ export function PixelSandBackdrop({
           const index = row * columns + column;
           if (!isPixelVisible(column, row, columns, rows, now)) {
             pixels[index] = 0;
+            if (isProfiling) hiddenPixels++;
             continue;
           }
           const grain = cells ? cells[index] : 0;
           if (grain !== 0) {
+            if (isProfiling) grainPixels++;
             const isSurface = row > 0 && cells![index - columns] === 0;
             pixels[index] = isSurface ? brighten(grain, 28) : grain;
           } else {
@@ -220,6 +258,14 @@ export function PixelSandBackdrop({
       }
       profiler.end(paintToken);
       profiler.addCounter("game.ui.backdropPixelsPainted", columns * rows);
+      if (isProfiling) {
+        profiler.addCounter("game.ui.pixelBackdrop.pixelsHidden", hiddenPixels);
+        profiler.addCounter("game.ui.pixelBackdrop.pixelsGrain", grainPixels);
+        profiler.addCounter(
+          "game.ui.pixelBackdrop.pixelsBackground",
+          columns * rows - hiddenPixels - grainPixels,
+        );
+      }
       const uploadToken = profiler.begin(
         "main.ui.pixelBackdrop.putImageData",
         DIMENSIONS.uiSurface,
@@ -227,6 +273,7 @@ export function PixelSandBackdrop({
       );
       context.putImageData(image, 0, 0);
       profiler.end(uploadToken);
+      profiler.recordBytes("bytes.ui.pixelBackdrop.putImageData", columns * rows * BYTES_PER_PIXEL);
     };
 
     redrawNow = () => draw(performance.now());
@@ -235,6 +282,15 @@ export function PixelSandBackdrop({
       if (isDisposed) return;
       const frameToken = profiler.begin("main.ui.pixelBackdrop.frame");
       frameCounter++;
+      if (previousFrameStartedAt > 0) {
+        profiler.recordTimer(
+          "latency.ui.pixelBackdrop.frameInterval",
+          now - previousFrameStartedAt,
+          "latency",
+        );
+      }
+      previousFrameStartedAt = now;
+      profiler.addCounter(STAGE_FRAME_COUNTERS[stage]);
       advanceStage(now);
       if (stage === "done") {
         profiler.end(frameToken);

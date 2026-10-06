@@ -6,6 +6,8 @@ import {
   type TouchHandedness,
   type TouchJoystickMode,
 } from "../../settings/game-settings";
+import { uiEventProps } from "../ui-profiling";
+import { useProfiledRender } from "../use-profiled-render";
 import { ChoiceSetting, SettingsHint, SliderSetting } from "./setting-rows";
 
 const SIZE_CHOICES: readonly { value: TouchControlSize; label: string }[] = [
@@ -30,8 +32,9 @@ interface TouchSettingsProps {
 }
 
 export function TouchSettings({ settings, onChange }: TouchSettingsProps) {
+  useProfiledRender("touchSettings");
   return (
-    <div className="flex flex-col gap-5">
+    <div className="flex flex-col gap-5" {...uiEventProps("touchSettings")}>
       <ChoiceSetting
         label="Button size"
         choices={SIZE_CHOICES}

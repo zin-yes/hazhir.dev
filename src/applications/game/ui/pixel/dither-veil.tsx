@@ -8,6 +8,7 @@ import { useProfiledRender } from "../use-profiled-render";
 const VEIL_CELL_SIZE_PIXELS = 4;
 const VEIL_FADE_IN_MILLISECONDS = 260;
 const VEIL_COLOR = packColor(10, 8, 18);
+const BYTES_PER_PIXEL = 4;
 
 interface DitherVeilProps {
   /** Final share of pixels that are covered, 0 to 1. */
@@ -43,6 +44,8 @@ export function DitherVeil({ coverage = 0.5 }: DitherVeilProps) {
       if (canvas.width !== columns || canvas.height !== rows) {
         canvas.width = columns;
         canvas.height = rows;
+        profiler.addCounter("game.ui.ditherVeil.canvasResizes");
+        profiler.sampleGauge("game.ui.ditherVeil.canvasPixels", columns * rows, "pixels");
       }
       const progress = Math.min(1, (now - startedAt) / fadeDuration);
       const currentCoverage = coverage * (1 - Math.pow(1 - progress, 3));
@@ -51,23 +54,36 @@ export function DitherVeil({ coverage = 0.5 }: DitherVeilProps) {
         DIMENSIONS.uiSurface,
         "ditherVeil",
       );
+      const allocateToken = profiler.begin("main.ui.ditherVeil.paint.allocateImage");
       const image = context.createImageData(columns, rows);
       const pixels = new Uint32Array(image.data.buffer);
+      profiler.end(allocateToken);
+      const fillToken = profiler.begin("main.ui.ditherVeil.paint.fillPixels");
+      let coveredPixels = 0;
+      const isProfiling = profiler.enabled;
       for (let row = 0; row < rows; row++) {
         for (let column = 0; column < columns; column++) {
           if (bayerThreshold(column, row) < currentCoverage) {
             pixels[row * columns + column] = VEIL_COLOR;
+            if (isProfiling) coveredPixels++;
           }
         }
       }
+      profiler.end(fillToken);
+      const uploadToken = profiler.begin("main.ui.ditherVeil.paint.putImageData");
       context.putImageData(image, 0, 0);
+      profiler.end(uploadToken);
       profiler.end(paintToken);
       profiler.addCounter("game.ui.veilPixelsPainted", columns * rows);
+      profiler.addCounter("game.ui.ditherVeil.pixelsCovered", coveredPixels);
+      profiler.addCounter("game.ui.ditherVeil.paints");
+      profiler.recordBytes("bytes.ui.ditherVeil.putImageData", columns * rows * BYTES_PER_PIXEL);
       if (progress < 1) animationFrameId = requestAnimationFrame(render);
     };
     animationFrameId = requestAnimationFrame(render);
 
     const resizeObserver = new ResizeObserver(() => {
+      profiler.addCounter("game.ui.ditherVeil.resizeRepaints");
       cancelAnimationFrame(animationFrameId);
       render(performance.now());
     });

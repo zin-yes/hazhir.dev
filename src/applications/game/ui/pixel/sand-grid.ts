@@ -8,6 +8,10 @@ const STRATUM_CHANGE_FRAMES = 140;
 export class SandGrid {
   readonly cells: Uint32Array;
   grainCount = 0;
+  /** Grains that dropped straight down during the latest step(). */
+  fallsInLastStep = 0;
+  /** Grains that slid diagonally during the latest step(). */
+  slidesInLastStep = 0;
   private frame = 0;
 
   constructor(
@@ -60,27 +64,35 @@ export class SandGrid {
     return pixels[Math.floor(Math.random() * pixels.length)];
   }
 
-  spawnGrains(grainCount: number) {
+  /** Returns how many of the requested grains found a free spot in the top row. */
+  spawnGrains(grainCount: number): number {
+    let placedGrains = 0;
     for (let spawned = 0; spawned < grainCount; spawned++) {
       const column = Math.floor(Math.random() * this.columns);
       if (this.cells[column] !== EMPTY_CELL) continue;
       this.cells[column] = this.pickGrainColor(column);
       this.grainCount++;
+      placedGrains++;
     }
+    return placedGrains;
   }
 
-  drainBottomGrain() {
+  /** Returns whether a grain was removed. */
+  drainBottomGrain(): boolean {
     const column = Math.floor(Math.random() * this.columns);
     const bottomIndex = (this.rows - 1) * this.columns + column;
-    if (this.cells[bottomIndex] === EMPTY_CELL) return;
+    if (this.cells[bottomIndex] === EMPTY_CELL) return false;
     this.cells[bottomIndex] = EMPTY_CELL;
     this.grainCount--;
+    return true;
   }
 
   step() {
     this.frame++;
     const { columns, rows, cells } = this;
     const sweepLeftToRight = this.frame % 2 === 0;
+    let falls = 0;
+    let slides = 0;
     for (let row = rows - 2; row >= 0; row--) {
       for (let offset = 0; offset < columns; offset++) {
         const column = sweepLeftToRight ? offset : columns - 1 - offset;
@@ -92,6 +104,7 @@ export class SandGrid {
         if (cells[below] === EMPTY_CELL) {
           cells[below] = color;
           cells[index] = EMPTY_CELL;
+          falls++;
           continue;
         }
 
@@ -104,10 +117,13 @@ export class SandGrid {
           if (cells[slideIndex] === EMPTY_CELL) {
             cells[slideIndex] = color;
             cells[index] = EMPTY_CELL;
+            slides++;
             break;
           }
         }
       }
     }
+    this.fallsInLastStep = falls;
+    this.slidesInLastStep = slides;
   }
 }

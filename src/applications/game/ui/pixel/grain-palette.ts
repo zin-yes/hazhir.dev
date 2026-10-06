@@ -1,4 +1,5 @@
 import { LOADING_SCREEN_TEXTURES } from "../../blocks";
+import { profiler } from "../../profiler";
 
 /** Packs RGBA into the little-endian Uint32 layout canvas ImageData uses. */
 export function packColor(red: number, green: number, blue: number): number {
@@ -18,6 +19,22 @@ const FALLBACK_COLORS = [
 ];
 
 function readOpaquePixels(image: HTMLImageElement): Uint32Array {
+  const readToken = profiler.begin("main.ui.pixelBackdrop.loadPalette.readPixels");
+  try {
+    const opaquePixels = readOpaquePixelsUnprofiled(image);
+    profiler.addCounter("game.ui.pixelBackdrop.paletteTexturesRead");
+    profiler.addCounter("game.ui.pixelBackdrop.paletteColors", opaquePixels.length);
+    profiler.recordBytes(
+      "bytes.ui.pixelBackdrop.paletteTextureRead",
+      image.naturalWidth * image.naturalHeight * 4,
+    );
+    return opaquePixels;
+  } finally {
+    profiler.end(readToken);
+  }
+}
+
+function readOpaquePixelsUnprofiled(image: HTMLImageElement): Uint32Array {
   const canvas = document.createElement("canvas");
   canvas.width = image.naturalWidth;
   canvas.height = image.naturalHeight;
@@ -54,18 +71,23 @@ let cachedPalette: Promise<GrainPalette> | null = null;
  * the menus is made of the same pixels as the world.
  */
 export function loadGrainPalette(): Promise<GrainPalette> {
-  cachedPalette ??= Promise.all(
-    LOADING_SCREEN_TEXTURES.map((name) => loadImage(`/game/${name}`)),
-  ).then((images) => {
-    const texturePixels = images
-      .filter((image): image is HTMLImageElement => image !== null)
-      .map(readOpaquePixels);
-    return {
-      texturePixels:
-        texturePixels.length > 0
-          ? texturePixels
-          : [new Uint32Array(FALLBACK_COLORS)],
-    };
-  });
+  profiler.addCounter(
+    cachedPalette ? "game.ui.pixelBackdrop.paletteCacheHits" : "game.ui.pixelBackdrop.paletteLoads",
+  );
+  cachedPalette ??= profiler.measureAsync("latency.ui.pixelBackdrop.loadPalette", () =>
+    Promise.all(LOADING_SCREEN_TEXTURES.map((name) => loadImage(`/game/${name}`))).then(
+      (images) => {
+        const texturePixels = images
+          .filter((image): image is HTMLImageElement => image !== null)
+          .map(readOpaquePixels);
+        return {
+          texturePixels:
+            texturePixels.length > 0
+              ? texturePixels
+              : [new Uint32Array(FALLBACK_COLORS)],
+        };
+      },
+    ),
+  );
   return cachedPalette;
 }

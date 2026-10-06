@@ -13,6 +13,7 @@ import { PixelSandBackdrop } from "./pixel/pixel-sand-backdrop";
 import { PixelButton } from "./pixel/pixel-ui";
 import { PauseMenu } from "./menu/pause-menu";
 import { TitleMenu } from "./menu/title-menu";
+import { profileUiHandler, uiEventProps } from "./ui-profiling";
 import { useProfiledRender } from "./use-profiled-render";
 
 const DEFAULT_UI_FONT = Silkscreen({
@@ -114,6 +115,7 @@ export default function UILayer({
         "absolute top-0 bottom-0 left-0 right-0 flex flex-col " +
         DEFAULT_UI_FONT.className
       }
+      {...uiEventProps("uiLayer")}
     >
       {phase === "playing" && !isInventoryOpen && (
         <div
@@ -147,7 +149,9 @@ export default function UILayer({
 
       {isMobile && phase === "playing" && (
         <PixelButton
-          onClick={onOpenPauseMenu}
+          onClick={() =>
+            profileUiHandler("uiLayer", "openPauseMenu", onOpenPauseMenu)
+          }
           className="absolute right-3 top-3 z-30"
         >
           Menu

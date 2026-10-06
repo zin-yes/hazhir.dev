@@ -4,6 +4,8 @@ import {
   PixelSegmentBar,
   PixelStageMarker,
 } from "../pixel/pixel-ui";
+import { profiler } from "../../profiler";
+import { uiEventProps } from "../ui-profiling";
 import { useProfiledRender } from "../use-profiled-render";
 
 interface LoadingHudProps {
@@ -21,11 +23,14 @@ export function LoadingHud({
 }: LoadingHudProps) {
   useProfiledRender("loadingHud");
   const activeStageIndex = stages.findIndex((stage) => stage.fraction < 1);
+  profiler.addCounter("game.ui.loadingHud.stageRowsRendered", stages.length);
+  profiler.sampleGauge("game.ui.loadingHud.progressPercent", progress * 100, "%");
 
   return (
     <div
       data-mobile-ui
       className="absolute inset-0 z-50 flex items-center justify-center p-4"
+      {...uiEventProps("loadingHud")}
     >
       <PixelFrame className="w-full max-w-sm" innerClassName="p-5">
         <p className="text-[0.65rem] uppercase tracking-[0.3em] text-[#6e6590]">

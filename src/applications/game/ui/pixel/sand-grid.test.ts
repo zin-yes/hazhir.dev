@@ -104,4 +104,36 @@ describe("SandGrid.resized", () => {
     expect(resized.grainCount).toBeGreaterThan(0);
     expect(resized.grainCount).toBeLessThan(grid.grainCount);
   });
+
+  test("a lone grain falls one row per step and reports each fall", () => {
+    const grid = new SandGrid(5, 10, palette);
+    expect(grid.spawnGrains(1)).toBe(1);
+    let totalFalls = 0;
+    let totalSlides = 0;
+    for (let step = 0; step < 20; step++) {
+      grid.step();
+      totalFalls += grid.fallsInLastStep;
+      totalSlides += grid.slidesInLastStep;
+    }
+    expect(totalFalls).toBe(grid.rows - 1);
+    expect(totalSlides).toBe(0);
+  });
+
+  test("a grain on top of a column slides sideways and reports the slide", () => {
+    const grid = new SandGrid(3, 3, palette);
+    const bottomMiddle = 2 * 3 + 1;
+    const aboveBottomMiddle = 1 * 3 + 1;
+    grid.cells[bottomMiddle] = 0xff0000ff;
+    grid.cells[aboveBottomMiddle] = 0xff00ff00;
+    grid.grainCount = 2;
+    grid.step();
+    expect(grid.slidesInLastStep).toBe(1);
+    expect(grid.fallsInLastStep).toBe(0);
+  });
+
+  test("spawning into an occupied top row only places grains that fit", () => {
+    const grid = new SandGrid(1, 8, palette);
+    expect(grid.spawnGrains(5)).toBe(1);
+    expect(grid.grainCount).toBe(1);
+  });
 });

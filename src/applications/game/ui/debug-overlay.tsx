@@ -1,4 +1,5 @@
 import { Silkscreen } from "next/font/google";
+import { profiler } from "../profiler";
 import { useProfiledRender } from "./use-profiled-render";
 
 const DEBUG_FONT = Silkscreen({
@@ -23,7 +24,10 @@ interface DebugOverlayProps {
 
 export function DebugOverlay({ isVisible, debugInfo }: DebugOverlayProps) {
   useProfiledRender("debugOverlay");
-  if (!isVisible) return null;
+  if (!isVisible) {
+    profiler.addCounter("game.ui.debugOverlay.hiddenRenders");
+    return null;
+  }
 
   const {
     fps,

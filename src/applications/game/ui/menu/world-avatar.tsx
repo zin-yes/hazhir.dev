@@ -1,3 +1,6 @@
+import { profiler } from "../../profiler";
+import { useProfiledRender } from "../use-profiled-render";
+
 const AVATAR_COLUMNS = 12;
 const AVATAR_ROWS = 8;
 
@@ -11,6 +14,7 @@ function hashSeed(seed: number, salt: number): number {
 
 /** Tiny terrain silhouette derived from the seed, so every world looks distinct. */
 export function WorldAvatar({ seed }: { seed: number }) {
+  useProfiledRender("worldAvatar");
   const surfaceTint = SURFACE_TINTS[hashSeed(seed, 1) % SURFACE_TINTS.length];
   const cells: { x: number; y: number; color: string }[] = [];
   let height = 3 + (hashSeed(seed, 2) % 3);
@@ -27,6 +31,7 @@ export function WorldAvatar({ seed }: { seed: number }) {
     }
   }
 
+  profiler.addCounter("game.ui.worldAvatar.cellsBuilt", cells.length);
   return (
     <svg
       viewBox={`0 0 ${AVATAR_COLUMNS} ${AVATAR_ROWS}`}

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { profiler } from "../../profiler";
 import type { StoredWorld } from "../../worlds/world-store";
 import {
   PixelButton,
@@ -8,6 +9,7 @@ import {
 } from "../pixel/pixel-ui";
 import { MenuBackdrop } from "./menu-primitives";
 import { WorldAvatar } from "./world-avatar";
+import { profileUiHandler } from "../ui-profiling";
 import { useProfiledRender } from "../use-profiled-render";
 
 interface TitleMenuProps {
@@ -29,6 +31,11 @@ function formatLastPlayed(timestamp: number): string {
 }
 
 function countEditedBlocks(world: StoredWorld): number {
+  profiler.addCounter("game.ui.titleMenu.worldRowsSummarized");
+  profiler.addCounter(
+    "game.ui.titleMenu.modifiedChunksScanned",
+    world.modifiedChunks.length,
+  );
   return world.modifiedChunks.reduce(
     (total, [, edits]) => total + edits.length,
     0,
@@ -56,19 +63,25 @@ export function TitleMenu({
   >(null);
 
   const submitNewWorld = () => {
-    onCreateWorld(newWorldName, newWorldSeed);
+    profileUiHandler("titleMenu", "createWorld", () =>
+      onCreateWorld(newWorldName, newWorldSeed),
+    );
     setIsCreating(false);
     setNewWorldName("");
     setNewWorldSeed("");
   };
 
   const submitRename = (worldId: string) => {
-    if (renameInput.trim()) onRenameWorld(worldId, renameInput.trim());
+    if (renameInput.trim()) {
+      profileUiHandler("titleMenu", "renameWorld", () =>
+        onRenameWorld(worldId, renameInput.trim()),
+      );
+    }
     setRenamingWorldId(null);
   };
 
   return (
-    <MenuBackdrop>
+    <MenuBackdrop surfaceName="titleMenu">
       <div className="mt-2 text-center">
         <PixelLogo>VOXEL</PixelLogo>
         <p className="mt-5 text-xs text-[#9a91bd]">
@@ -168,7 +181,11 @@ export function TitleMenu({
                 <div className="flex shrink-0 gap-2">
                   <PixelButton
                     tone="primary"
-                    onClick={() => onPlayWorld(world.id)}
+                    onClick={() =>
+                      profileUiHandler("titleMenu", "playWorld", () =>
+                        onPlayWorld(world.id),
+                      )
+                    }
                   >
                     Play
                   </PixelButton>
@@ -186,7 +203,9 @@ export function TitleMenu({
                       autoFocus
                       onClick={() => {
                         setWorldIdPendingDelete(null);
-                        onDeleteWorld(world.id);
+                        profileUiHandler("titleMenu", "deleteWorld", () =>
+                          onDeleteWorld(world.id),
+                        );
                       }}
                       onBlur={() => setWorldIdPendingDelete(null)}
                     >
@@ -218,7 +237,11 @@ export function TitleMenu({
           className="flex gap-2"
           onSubmit={(event) => {
             event.preventDefault();
-            if (hostIdInput.trim()) onJoinHostedWorld(hostIdInput.trim());
+            if (hostIdInput.trim()) {
+              profileUiHandler("titleMenu", "joinHostedWorld", () =>
+                onJoinHostedWorld(hostIdInput.trim()),
+              );
+            }
           }}
         >
           <PixelInput

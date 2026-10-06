@@ -1,4 +1,5 @@
 import { PixelKey } from "../pixel/pixel-ui";
+import { useProfiledRender } from "../use-profiled-render";
 
 const CONTROL_BINDINGS: { action: string; keys: string[] }[] = [
   { action: "Move", keys: ["W", "A", "S", "D"] },
@@ -17,6 +18,7 @@ const CONTROL_BINDINGS: { action: string; keys: string[] }[] = [
 ];
 
 export function ControlsList() {
+  useProfiledRender("controlsList");
   return (
     <ul className="grid grid-cols-1 gap-x-8 gap-y-3 text-xs sm:grid-cols-2">
       {CONTROL_BINDINGS.map(({ action, keys }) => (
