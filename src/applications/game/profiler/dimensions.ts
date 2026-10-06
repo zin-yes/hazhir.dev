@@ -66,6 +66,8 @@ export const DIMENSIONS = {
   lightFloodWave: "lightFlood.wave",
   /** Block edit work per brush mode (fill, erase, fillAirOnly, replaceNonAirOnly). Units = edited cells. */
   editMode: "edit.mode",
+  /** Blocks written by edits per new block type name. Units = changed blocks. */
+  editBlock: "edit.block",
   /** Edit side effects per kind (savedEdit, savedEditOutsideLoaded, waterWake). Time and units. */
   editSideEffect: "edit.sideEffect",
   /** Voxel ray casts per outcome (hit, miss, startedInside). Units = steps walked. */

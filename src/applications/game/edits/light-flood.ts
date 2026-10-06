@@ -15,17 +15,59 @@ import {
 } from "./chunk-cluster";
 import { EMISSION, IS_TRANSPARENT, MAX_LIGHT } from "./light-tables";
 
+/**
+ * What the flood fills did, as plain integers the caller reports (the main thread through the profiler, a worker
+ * through its recorder). The first four fields are the original summary; the rest say where the work went.
+ */
 export class FloodStats {
   cellsLit = 0;
   cellsVisited = 0;
   cellsRemoved = 0;
   deadCellsSkipped = 0;
+  /** Calls of spreadLight and removeLight since the last clear. */
+  spreadCalls = 0;
+  removeCalls = 0;
+  /** Cells pushed onto the queues by the floods themselves (seeds pushed by the caller are not counted). */
+  cellsQueuedBySpread = 0;
+  cellsQueuedByRemoval = 0;
+  /** The most cells any flood queue held at once. */
+  peakQueueLength = 0;
+  /** Neighbor steps examined, and how each ended. */
+  neighborsExamined = 0;
+  neighborsOutsideLitChunks = 0;
+  neighborsOpaque = 0;
+  neighborsAlreadyBrightEnough = 0;
+  chunkBoundaryCrossings = 0;
+  /** Chunks whose shared light array had to be copied before the first write. */
+  lightArraysDetached = 0;
+  /** Removal waves: cells zeroed per channel, neighbors left lit by something else, glowing blocks restored. */
+  skyCellsRemoved = 0;
+  blockCellsRemoved = 0;
+  neighborsKeptForRefill = 0;
+  neighborsAlreadyDark = 0;
+  emittersRestored = 0;
 
   clear() {
     this.cellsLit = 0;
     this.cellsVisited = 0;
     this.cellsRemoved = 0;
     this.deadCellsSkipped = 0;
+    this.spreadCalls = 0;
+    this.removeCalls = 0;
+    this.cellsQueuedBySpread = 0;
+    this.cellsQueuedByRemoval = 0;
+    this.peakQueueLength = 0;
+    this.neighborsExamined = 0;
+    this.neighborsOutsideLitChunks = 0;
+    this.neighborsOpaque = 0;
+    this.neighborsAlreadyBrightEnough = 0;
+    this.chunkBoundaryCrossings = 0;
+    this.lightArraysDetached = 0;
+    this.skyCellsRemoved = 0;
+    this.blockCellsRemoved = 0;
+    this.neighborsKeptForRefill = 0;
+    this.neighborsAlreadyDark = 0;
+    this.emittersRestored = 0;
   }
 }
 
@@ -81,6 +123,8 @@ export function spreadLight(
 ) {
   const blocksBySlot = cluster.blocksBySlot;
   const lightBySlot = cluster.lightBySlot;
+  const pushedBeforeFlood = queue.pushedCount;
+  stats.spreadCalls++;
 
   while (queue.length > 0) {
     const cell = queue.shift();
@@ -96,10 +140,16 @@ export function spreadLight(
     const block = value & 0xf;
 
     for (let direction = 0; direction < DIRECTION_COUNT; direction++) {
+      stats.neighborsExamined++;
       const neighborIndex = stepAcrossFaces(cluster, slot, index, direction);
-      if (neighborIndex < 0) continue;
+      if (neighborIndex < 0) {
+        stats.neighborsOutsideLitChunks++;
+        continue;
+      }
       const neighborSlot = stepTarget.slot;
+      if (neighborSlot !== slot) stats.chunkBoundaryCrossings++;
       if (IS_TRANSPARENT[blocksBySlot[neighborSlot][neighborIndex]] === 0) {
+        stats.neighborsOpaque++;
         continue;
       }
 
@@ -110,7 +160,10 @@ export function spreadLight(
       const reachedSky =
         direction === NEGATIVE_Y && sky === MAX_LIGHT ? MAX_LIGHT : sky - 1;
       const reachedBlock = block - 1;
-      if (reachedSky <= neighborSky && reachedBlock <= neighborBlock) continue;
+      if (reachedSky <= neighborSky && reachedBlock <= neighborBlock) {
+        stats.neighborsAlreadyBrightEnough++;
+        continue;
+      }
 
       const updatedSky = reachedSky > neighborSky ? reachedSky : neighborSky;
       const updatedBlock =
@@ -118,6 +171,7 @@ export function spreadLight(
       if (cluster.copyLightOnWrite[neighborSlot] !== 0) {
         cluster.detachLight(neighborSlot);
         neighborLight = lightBySlot[neighborSlot];
+        stats.lightArraysDetached++;
       }
       neighborLight[neighborIndex] = (updatedSky << 4) | updatedBlock;
       cluster.contentChanged[neighborSlot] = 1;
@@ -129,6 +183,8 @@ export function spreadLight(
       }
     }
   }
+  stats.cellsQueuedBySpread += queue.pushedCount - pushedBeforeFlood;
+  if (queue.peakLength > stats.peakQueueLength) stats.peakQueueLength = queue.peakLength;
 }
 
 /**
@@ -147,6 +203,8 @@ export function removeLight(
 ) {
   const blocksBySlot = cluster.blocksBySlot;
   const lightBySlot = cluster.lightBySlot;
+  const pushedBeforeFlood = queue.pushedCount;
+  stats.removeCalls++;
 
   while (queue.length > 0) {
     const cell = queue.shift();
@@ -156,15 +214,23 @@ export function removeLight(
     stats.cellsVisited++;
 
     for (let direction = 0; direction < DIRECTION_COUNT; direction++) {
+      stats.neighborsExamined++;
       const neighborIndex = stepAcrossFaces(cluster, slot, index, direction);
-      if (neighborIndex < 0) continue;
+      if (neighborIndex < 0) {
+        stats.neighborsOutsideLitChunks++;
+        continue;
+      }
       const neighborSlot = stepTarget.slot;
+      if (neighborSlot !== slot) stats.chunkBoundaryCrossings++;
       const neighborLight = lightBySlot[neighborSlot];
       const neighborValue = neighborLight[neighborIndex];
       const neighborChannelValue = isSkyChannel
         ? neighborValue >> 4
         : neighborValue & 0xf;
-      if (neighborChannelValue === 0) continue;
+      if (neighborChannelValue === 0) {
+        stats.neighborsAlreadyDark++;
+        continue;
+      }
 
       const neighborCell = (neighborSlot << CELL_INDEX_BITS) | neighborIndex;
       const isFedByRemovedCell =
@@ -174,6 +240,7 @@ export function removeLight(
           removedValue === MAX_LIGHT &&
           neighborChannelValue === MAX_LIGHT);
       if (!isFedByRemovedCell) {
+        stats.neighborsKeptForRefill++;
         refillQueue.push(neighborCell);
         continue;
       }
@@ -184,13 +251,18 @@ export function removeLight(
       cluster.contentChanged[neighborSlot] = 1;
       cluster.faceChanged[neighborSlot] |= BOUNDARY_FACES[neighborIndex];
       stats.cellsRemoved++;
+      if (isSkyChannel) stats.skyCellsRemoved++;
+      else stats.blockCellsRemoved++;
       queue.push(neighborCell, neighborChannelValue);
       if (
         !isSkyChannel &&
         EMISSION[blocksBySlot[neighborSlot][neighborIndex]] > 0
       ) {
+        stats.emittersRestored++;
         restoredEmitters.push(neighborCell);
       }
     }
   }
+  stats.cellsQueuedByRemoval += queue.pushedCount - pushedBeforeFlood;
+  if (queue.peakLength > stats.peakQueueLength) stats.peakQueueLength = queue.peakLength;
 }
