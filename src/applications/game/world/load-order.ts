@@ -1,6 +1,8 @@
 // Precomputed chunk offsets of a desired volume around the player, sorted nearest-first. Built once per
 // configuration and cached, so streaming never re-derives or re-sorts the volume while the player walks.
 
+import { profiler } from "../profiler";
+
 export type LoadVolumeShape = "ellipsoid" | "cylinder";
 
 export interface LoadVolumeConfig {
@@ -31,6 +33,21 @@ export interface LoadOrder {
 
 const RADIUS_EDGE_MARGIN = 0.5;
 const loadOrderCache = new Map<string, LoadOrder>();
+
+/** Membership test traffic, kept as plain integers because contains() runs thousands of times a second. */
+const membershipStats = { tests: 0, inside: 0 };
+
+/** Returns the membership tests since the last call and resets them; the pipeline publishes them once a second. */
+export function drainLoadOrderMembershipStats(): { tests: number; inside: number } {
+  const drained = { tests: membershipStats.tests, inside: membershipStats.inside };
+  membershipStats.tests = 0;
+  membershipStats.inside = 0;
+  return drained;
+}
+
+export function loadOrderCacheEntryCount(): number {
+  return loadOrderCache.size;
+}
 
 function assertValidRadius(name: string, value: number): void {
   if (!Number.isFinite(value) || value < 0) {
@@ -73,6 +90,7 @@ function compareNearestFirst(
 }
 
 function buildLoadOrderUncached(config: Required<LoadVolumeConfig>): LoadOrder {
+  const enumerateToken = profiler.begin("main.streaming.loadOrder.enumerate");
   const horizontalExtent = Math.ceil(config.horizontalRadius);
   const horizontalWidth = 2 * horizontalExtent + 1;
   const verticalHeight = config.verticalUp + config.verticalDown + 1;
@@ -98,9 +116,14 @@ function buildLoadOrderUncached(config: Required<LoadVolumeConfig>): LoadOrder {
     }
   }
 
+  profiler.end(enumerateToken);
+
+  const sortToken = profiler.begin("main.streaming.loadOrder.sort");
   volumeEntries.sort(compareNearestFirst);
   columnEntries.sort(compareNearestFirst);
+  profiler.end(sortToken);
 
+  const packToken = profiler.begin("main.streaming.loadOrder.pack");
   const offsetX = new Int16Array(volumeEntries.length);
   const offsetY = new Int16Array(volumeEntries.length);
   const offsetZ = new Int16Array(volumeEntries.length);
@@ -120,6 +143,19 @@ function buildLoadOrderUncached(config: Required<LoadVolumeConfig>): LoadOrder {
     columnOffsetZ[entryIndex] = entryZ;
     columnDistanceSquared[entryIndex] = distanceSquared;
   });
+  profiler.end(packToken);
+
+  if (profiler.enabled) {
+    profiler.addCounter("game.streaming.loadOrder.offsetsBuilt", volumeEntries.length);
+    profiler.addCounter("game.streaming.loadOrder.columnsBuilt", columnEntries.length);
+    profiler.sampleGauge("game.streaming.loadOrder.volumeOffsets", volumeEntries.length);
+    profiler.sampleGauge("game.streaming.loadOrder.volumeColumns", columnEntries.length);
+    profiler.recordBytes(
+      "bytes.streaming.loadOrder",
+      offsetX.byteLength * 3 + offsetDistanceSquared.byteLength + columnOffsetX.byteLength * 2 +
+        columnDistanceSquared.byteLength + membershipGrid.byteLength,
+    );
+  }
 
   return {
     config,
@@ -133,12 +169,15 @@ function buildLoadOrderUncached(config: Required<LoadVolumeConfig>): LoadOrder {
     columnOffsetZ,
     columnDistanceSquared,
     contains(queryX, queryY, queryZ) {
+      membershipStats.tests++;
       const gridX = queryX + horizontalExtent;
       const gridY = queryY + config.verticalDown;
       const gridZ = queryZ + horizontalExtent;
       if (gridX < 0 || gridX >= horizontalWidth || gridZ < 0 || gridZ >= horizontalWidth) return false;
       if (gridY < 0 || gridY >= verticalHeight) return false;
-      return membershipGrid[(gridX * verticalHeight + gridY) * horizontalWidth + gridZ] === 1;
+      const isInside = membershipGrid[(gridX * verticalHeight + gridY) * horizontalWidth + gridZ] === 1;
+      if (isInside) membershipStats.inside++;
+      return isInside;
     },
   };
 }
@@ -156,9 +195,18 @@ export function buildLoadOrder(config: LoadVolumeConfig): LoadOrder {
   };
   const cacheKey = `${resolvedConfig.shape}:${resolvedConfig.horizontalRadius}:${resolvedConfig.verticalUp}:${resolvedConfig.verticalDown}`;
   let loadOrder = loadOrderCache.get(cacheKey);
-  if (!loadOrder) {
-    loadOrder = buildLoadOrderUncached(resolvedConfig);
-    loadOrderCache.set(cacheKey, loadOrder);
+  if (loadOrder) {
+    profiler.addCounter("game.streaming.loadOrder.cacheHits");
+    return loadOrder;
   }
+  profiler.addCounter("game.streaming.loadOrder.cacheMisses");
+  const buildToken = profiler.begin("main.streaming.loadOrder.build");
+  try {
+    loadOrder = buildLoadOrderUncached(resolvedConfig);
+  } finally {
+    profiler.end(buildToken);
+  }
+  loadOrderCache.set(cacheKey, loadOrder);
+  profiler.sampleGauge("game.streaming.loadOrder.cacheEntries", loadOrderCache.size);
   return loadOrder;
 }

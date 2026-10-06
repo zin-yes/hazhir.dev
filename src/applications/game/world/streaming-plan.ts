@@ -18,6 +18,8 @@ import {
   packChunkKey,
   type ChunkCoordinates,
 } from "./chunk-key";
+import { profiler } from "../profiler";
+import { DIMENSIONS } from "../profiler/dimensions";
 import { buildLoadOrder, type LoadOrder, type LoadVolumeShape } from "./load-order";
 
 export { buildLoadOrder, type LoadOrder, type LoadVolumeConfig, type LoadVolumeShape } from "./load-order";
@@ -76,6 +78,43 @@ const DEFAULT_SURFACE_BAND_WEIGHT = 0.5;
 const MAX_INCREMENTAL_DELTA = 3;
 const NEVER_SKIPPED_NEIGHBORHOOD = 1;
 
+/** Why a candidate or known chunk ended up where it did, counted per update and published once per update. */
+class StreamingDecisionCounts {
+  candidatesConsidered = 0;
+  alreadyKnown = 0;
+  rejectedBelowWorld = 0;
+  rejectedAboveWorld = 0;
+  skippedAboveSurface = 0;
+  skippedBelowSurface = 0;
+  requested = 0;
+  unloadExamined = 0;
+  unloadKept = 0;
+  unloaded = 0;
+  shellCacheHits = 0;
+  shellCacheMisses = 0;
+
+  clear() {
+    this.candidatesConsidered = 0;
+    this.alreadyKnown = 0;
+    this.rejectedBelowWorld = 0;
+    this.rejectedAboveWorld = 0;
+    this.skippedAboveSurface = 0;
+    this.skippedBelowSurface = 0;
+    this.requested = 0;
+    this.unloadExamined = 0;
+    this.unloadKept = 0;
+    this.unloaded = 0;
+    this.shellCacheHits = 0;
+    this.shellCacheMisses = 0;
+  }
+}
+
+function recordDecision(reason: string, chunkCount: number) {
+  if (chunkCount === 0) return;
+  profiler.addCounter(`game.streaming.decision.${reason}`, chunkCount);
+  profiler.recordBreakdown(DIMENSIONS.streamingDecision, reason, { units: chunkCount, calls: 1 });
+}
+
 export class ChunkStreamPlanner {
   private config!: ChunkStreamConfig;
   private loadOrder!: LoadOrder;
@@ -97,6 +136,7 @@ export class ChunkStreamPlanner {
   private readonly candidatePriorities: number[] = [];
   private readonly sortedCandidateIndices: number[] = [];
 
+  private readonly decisions = new StreamingDecisionCounts();
   private operationCountOfLastUpdate = 0;
   private totalOperationCount = 0;
   private lastUpdateWasFullRecompute = false;
@@ -106,6 +146,15 @@ export class ChunkStreamPlanner {
   }
 
   setConfig(config: ChunkStreamConfig): void {
+    const configToken = profiler.begin("main.streaming.plan.setConfig");
+    try {
+      this.applyConfig(config);
+    } finally {
+      profiler.end(configToken);
+    }
+  }
+
+  private applyConfig(config: ChunkStreamConfig): void {
     this.config = config;
     const { horizontalRadius, verticalUp, verticalDown, shape } = config;
     const horizontalUnloadRadius = config.horizontalUnloadRadius ?? horizontalRadius + DEFAULT_UNLOAD_HORIZONTAL_MARGIN;
@@ -123,11 +172,15 @@ export class ChunkStreamPlanner {
     this.loadShellByDelta.clear();
     this.unloadShellByDelta.clear();
     this.needsFullRecompute = true;
+    profiler.addCounter("game.streaming.configChanges");
+    profiler.sampleGauge("game.streaming.loadVolumeChunks", this.loadOrder.offsetCount);
+    profiler.sampleGauge("game.streaming.unloadVolumeChunks", this.unloadOrder.offsetCount);
   }
 
   /** Forces the next update to recompute from scratch, for example after a failed load or a new surface hint. */
   invalidate(): void {
     this.needsFullRecompute = true;
+    profiler.addCounter("game.streaming.invalidations");
   }
 
   /** Candidate checks performed by the most recent update; scales with the shell, not the volume. */
@@ -149,6 +202,7 @@ export class ChunkStreamPlanner {
 
   /** Priority of an arbitrary chunk relative to the last known player position and heading (lower is more urgent). */
   priorityOfChunk(chunkX: number, chunkY: number, chunkZ: number): number {
+    profiler.addCounter("game.streaming.priorityLookups");
     return this.computePriority(chunkX, chunkY, chunkZ, chunkX - this.playerChunkX, chunkY - this.playerChunkY, chunkZ - this.playerChunkZ);
   }
 
@@ -164,13 +218,18 @@ export class ChunkStreamPlanner {
     plan.toUnload.length = 0;
     this.operationCountOfLastUpdate = 0;
     this.lastUpdateWasFullRecompute = false;
+    this.decisions.clear();
 
     const deltaX = playerChunk.chunkX - this.playerChunkX;
     const deltaY = playerChunk.chunkY - this.playerChunkY;
     const deltaZ = playerChunk.chunkZ - this.playerChunkZ;
     const playerMoved = !this.hasPlayerPosition || deltaX !== 0 || deltaY !== 0 || deltaZ !== 0;
     plan.playerChunkChanged = playerMoved || this.needsFullRecompute;
-    if (!plan.playerChunkChanged) return plan;
+    if (!plan.playerChunkChanged) {
+      profiler.addCounter("game.streaming.updatesWithoutMove");
+      return plan;
+    }
+    const updateToken = profiler.begin("main.streaming.plan.recompute");
 
     const previousChunkX = this.playerChunkX;
     const previousChunkY = this.playerChunkY;
@@ -186,17 +245,53 @@ export class ChunkStreamPlanner {
 
     this.candidateKeys.length = 0;
     this.candidatePriorities.length = 0;
-    if (canUseShells) {
-      this.collectShellPlan(deltaX, deltaY, deltaZ, previousChunkX, previousChunkY, previousChunkZ, known);
-    } else {
-      this.lastUpdateWasFullRecompute = true;
-      this.collectFullPlan(known);
+    try {
+      if (canUseShells) {
+        this.collectShellPlan(deltaX, deltaY, deltaZ, previousChunkX, previousChunkY, previousChunkZ, known);
+      } else {
+        this.lastUpdateWasFullRecompute = true;
+        this.collectFullPlan(known);
+      }
+      this.hasPlayerPosition = true;
+      this.needsFullRecompute = false;
+      this.totalOperationCount += this.operationCountOfLastUpdate;
+      this.writeSortedLoadList();
+    } finally {
+      profiler.end(updateToken);
     }
-    this.hasPlayerPosition = true;
-    this.needsFullRecompute = false;
-    this.totalOperationCount += this.operationCountOfLastUpdate;
-    this.writeSortedLoadList();
+    if (profiler.enabled) {
+      this.publishUpdateMetrics(plan, known, Math.max(Math.abs(deltaX), Math.abs(deltaY), Math.abs(deltaZ)));
+    }
     return plan;
+  }
+
+  private publishUpdateMetrics(plan: ChunkStreamPlan, known: KnownChunkKeys, playerStepChunks: number): void {
+    const decisions = this.decisions;
+    profiler.addCounter(
+      this.lastUpdateWasFullRecompute ? "game.streaming.fullRecomputes" : "game.streaming.incrementalUpdates",
+    );
+    profiler.addCounter("game.streaming.candidatesConsidered", decisions.candidatesConsidered);
+    profiler.addCounter("game.streaming.updateOperations", this.operationCountOfLastUpdate);
+    recordDecision("alreadyKnown", decisions.alreadyKnown);
+    recordDecision("rejectedBelowWorld", decisions.rejectedBelowWorld);
+    recordDecision("rejectedAboveWorld", decisions.rejectedAboveWorld);
+    recordDecision("skippedAboveSurface", decisions.skippedAboveSurface);
+    recordDecision("skippedBelowSurface", decisions.skippedBelowSurface);
+    recordDecision("requested", decisions.requested);
+    recordDecision("unloadKept", decisions.unloadKept);
+    recordDecision("unloaded", decisions.unloaded);
+    profiler.addCounter("game.streaming.unloadExamined", decisions.unloadExamined);
+    profiler.addCounter("game.streaming.shellCacheHits", decisions.shellCacheHits);
+    profiler.addCounter("game.streaming.shellCacheMisses", decisions.shellCacheMisses);
+    profiler.sampleGauge("game.streaming.toLoadPerUpdate", plan.toLoad.length);
+    profiler.sampleGauge("game.streaming.toUnloadPerUpdate", plan.toUnload.length);
+    profiler.sampleGauge("game.streaming.knownChunks", knownChunkCount(known));
+    profiler.sampleGauge("game.streaming.playerStepChunks", playerStepChunks);
+    profiler.sampleGauge("game.streaming.shellCacheEntries", this.loadShellByDelta.size + this.unloadShellByDelta.size);
+    if (plan.toLoad.length > 0) {
+      profiler.sampleGauge("game.streaming.nearestRequestedPriority", plan.toLoadPriorities[0]!);
+      profiler.sampleGauge("game.streaming.farthestRequestedPriority", plan.toLoadPriorities[plan.toLoad.length - 1]!);
+    }
   }
 
   private storeForward(forward: PlannerForwardVector): void {
@@ -213,19 +308,30 @@ export class ChunkStreamPlanner {
   }
 
   private collectFullPlan(known: KnownChunkKeys): void {
+    const enumerateToken = profiler.begin("main.streaming.plan.enumerateCandidates.full");
     const loadOrder = this.loadOrder;
     const playerKey = packChunkKey(this.playerChunkX, this.playerChunkY, this.playerChunkZ);
     for (let index = 0; index < loadOrder.offsetCount; index++) {
       this.considerLoadCandidate(playerKey, loadOrder.offsetX[index]!, loadOrder.offsetY[index]!, loadOrder.offsetZ[index]!, known);
     }
+    profiler.end(enumerateToken);
+    const diffToken = profiler.begin("main.streaming.plan.diffKnown.full");
     const unloadOrder = this.unloadOrder;
+    const decisions = this.decisions;
     for (const knownKey of known.keys()) {
       this.operationCountOfLastUpdate++;
+      decisions.unloadExamined++;
       const offsetX = chunkKeyX(knownKey) - this.playerChunkX;
       const offsetY = chunkKeyY(knownKey) - this.playerChunkY;
       const offsetZ = chunkKeyZ(knownKey) - this.playerChunkZ;
-      if (!unloadOrder.contains(offsetX, offsetY, offsetZ)) this.plan.toUnload.push(knownKey);
+      if (unloadOrder.contains(offsetX, offsetY, offsetZ)) {
+        decisions.unloadKept++;
+      } else {
+        decisions.unloaded++;
+        this.plan.toUnload.push(knownKey);
+      }
     }
+    profiler.end(diffToken);
   }
 
   private collectShellPlan(
@@ -237,6 +343,7 @@ export class ChunkStreamPlanner {
     previousChunkZ: number,
     known: KnownChunkKeys,
   ): void {
+    const enumerateToken = profiler.begin("main.streaming.plan.enumerateCandidates.shell");
     const loadOrder = this.loadOrder;
     const loadShell = this.getLoadShell(deltaX, deltaY, deltaZ);
     const playerKey = packChunkKey(this.playerChunkX, this.playerChunkY, this.playerChunkZ);
@@ -244,16 +351,30 @@ export class ChunkStreamPlanner {
       const index = loadShell[shellIndex]!;
       this.considerLoadCandidate(playerKey, loadOrder.offsetX[index]!, loadOrder.offsetY[index]!, loadOrder.offsetZ[index]!, known);
     }
-    if (this.hasSkippingRules()) this.considerNeighborhoodLeftOutOfShell(playerKey, deltaX, deltaY, deltaZ, known);
+    profiler.end(enumerateToken);
+    if (this.hasSkippingRules()) {
+      const recheckToken = profiler.begin("main.streaming.plan.recheckNeverSkipped");
+      this.considerNeighborhoodLeftOutOfShell(playerKey, deltaX, deltaY, deltaZ, known);
+      profiler.end(recheckToken);
+    }
+    const diffToken = profiler.begin("main.streaming.plan.diffKnown.shell");
     const unloadOrder = this.unloadOrder;
+    const decisions = this.decisions;
     const unloadShell = this.getUnloadShell(deltaX, deltaY, deltaZ);
     const previousKey = packChunkKey(previousChunkX, previousChunkY, previousChunkZ);
     for (let shellIndex = 0; shellIndex < unloadShell.length; shellIndex++) {
       const index = unloadShell[shellIndex]!;
       this.operationCountOfLastUpdate++;
+      decisions.unloadExamined++;
       const candidateKey = offsetChunkKey(previousKey, unloadOrder.offsetX[index]!, unloadOrder.offsetY[index]!, unloadOrder.offsetZ[index]!);
-      if (known.has(candidateKey)) this.plan.toUnload.push(candidateKey);
+      if (known.has(candidateKey)) {
+        decisions.unloaded++;
+        this.plan.toUnload.push(candidateKey);
+      } else {
+        decisions.unloadKept++;
+      }
     }
+    profiler.end(diffToken);
   }
 
   private hasSkippingRules(): boolean {
@@ -294,21 +415,39 @@ export class ChunkStreamPlanner {
     known: KnownChunkKeys,
   ): void {
     this.operationCountOfLastUpdate++;
+    const decisions = this.decisions;
+    decisions.candidatesConsidered++;
     const chunkKey = offsetChunkKey(playerKey, offsetX, offsetY, offsetZ);
-    if (known.has(chunkKey)) return;
+    if (known.has(chunkKey)) {
+      decisions.alreadyKnown++;
+      return;
+    }
     const chunkX = this.playerChunkX + offsetX;
     const chunkY = this.playerChunkY + offsetY;
     const chunkZ = this.playerChunkZ + offsetZ;
-    if (this.config.minChunkY !== undefined && chunkY < this.config.minChunkY) return;
-    if (this.config.maxChunkY !== undefined && chunkY > this.config.maxChunkY) return;
+    if (this.config.minChunkY !== undefined && chunkY < this.config.minChunkY) {
+      decisions.rejectedBelowWorld++;
+      return;
+    }
+    if (this.config.maxChunkY !== undefined && chunkY > this.config.maxChunkY) {
+      decisions.rejectedAboveWorld++;
+      return;
+    }
 
     const surfaceChunkY = this.config.surfaceChunkY?.(chunkX, chunkZ);
     if (surfaceChunkY !== undefined && !this.isInsideNeverSkippedNeighborhood(offsetX, offsetY, offsetZ)) {
       const skipAbove = this.config.skipAboveSurfaceMargin;
       const skipBelow = this.config.skipBelowSurfaceMargin;
-      if (skipAbove !== undefined && chunkY > surfaceChunkY + skipAbove) return;
-      if (skipBelow !== undefined && chunkY < surfaceChunkY - skipBelow) return;
+      if (skipAbove !== undefined && chunkY > surfaceChunkY + skipAbove) {
+        decisions.skippedAboveSurface++;
+        return;
+      }
+      if (skipBelow !== undefined && chunkY < surfaceChunkY - skipBelow) {
+        decisions.skippedBelowSurface++;
+        return;
+      }
     }
+    decisions.requested++;
     this.candidateKeys.push(chunkKey);
     this.candidatePriorities.push(this.priorityFromParts(offsetX, offsetY, offsetZ, chunkY, surfaceChunkY));
   }
@@ -353,6 +492,15 @@ export class ChunkStreamPlanner {
   }
 
   private writeSortedLoadList(): void {
+    const sortToken = profiler.begin("main.streaming.plan.sortCandidates");
+    try {
+      this.sortCandidatesIntoPlan();
+    } finally {
+      profiler.end(sortToken);
+    }
+  }
+
+  private sortCandidatesIntoPlan(): void {
     const count = this.candidateKeys.length;
     const sortedIndices = this.sortedCandidateIndices;
     sortedIndices.length = count;
@@ -369,22 +517,39 @@ export class ChunkStreamPlanner {
   private getLoadShell(deltaX: number, deltaY: number, deltaZ: number): Int32Array {
     const cacheKey = shellCacheKey(deltaX, deltaY, deltaZ);
     let shell = this.loadShellByDelta.get(cacheKey);
-    if (!shell) {
-      shell = buildEnteringShell(this.loadOrder, deltaX, deltaY, deltaZ);
-      this.loadShellByDelta.set(cacheKey, shell);
+    if (shell) {
+      this.decisions.shellCacheHits++;
+      return shell;
     }
+    this.decisions.shellCacheMisses++;
+    const buildToken = profiler.begin("main.streaming.plan.buildShell.load");
+    shell = buildEnteringShell(this.loadOrder, deltaX, deltaY, deltaZ);
+    profiler.end(buildToken);
+    profiler.recordBytes("bytes.streaming.shell", shell.byteLength);
+    this.loadShellByDelta.set(cacheKey, shell);
     return shell;
   }
 
   private getUnloadShell(deltaX: number, deltaY: number, deltaZ: number): Int32Array {
     const cacheKey = shellCacheKey(deltaX, deltaY, deltaZ);
     let shell = this.unloadShellByDelta.get(cacheKey);
-    if (!shell) {
-      shell = buildLeavingShell(this.unloadOrder, deltaX, deltaY, deltaZ);
-      this.unloadShellByDelta.set(cacheKey, shell);
+    if (shell) {
+      this.decisions.shellCacheHits++;
+      return shell;
     }
+    this.decisions.shellCacheMisses++;
+    const buildToken = profiler.begin("main.streaming.plan.buildShell.unload");
+    shell = buildLeavingShell(this.unloadOrder, deltaX, deltaY, deltaZ);
+    profiler.end(buildToken);
+    profiler.recordBytes("bytes.streaming.shell", shell.byteLength);
+    this.unloadShellByDelta.set(cacheKey, shell);
     return shell;
   }
+}
+
+function knownChunkCount(known: KnownChunkKeys): number {
+  const sized = known as { size?: number };
+  return typeof sized.size === "number" ? sized.size : 0;
 }
 
 function shellCacheKey(deltaX: number, deltaY: number, deltaZ: number): number {

@@ -7,6 +7,8 @@ import {
   packChunkKey,
   type ChunkCoordinates,
 } from "./chunk-key";
+import { DIMENSIONS } from "../profiler/dimensions";
+import { breakdownUnits, counterTotal, withEnabledProfiler } from "./profiler-readings.test-helper";
 import { ChunkStreamPlanner, buildLoadOrder, type ChunkStreamConfig, type ChunkStreamPlan } from "./streaming-plan";
 
 const FORWARD_NORTH = { x: 0, y: 0, z: -1 };
@@ -396,5 +398,42 @@ describe("ChunkStreamPlanner cost scaling", () => {
     const sorted = [...milliseconds].sort((left, right) => left - right);
     const median = sorted[Math.floor(sorted.length / 2)]!;
     expect(median).toBeLessThan(2);
+  });
+});
+
+describe("ChunkStreamPlanner profiling", () => {
+  test("decision counters add up to the candidates considered and match the plan", () => {
+    const config: ChunkStreamConfig = {
+      horizontalRadius: 8,
+      verticalUp: 6,
+      verticalDown: 6,
+      surfaceChunkY: stableSurfaceHint,
+      skipAboveSurfaceMargin: 1,
+      skipBelowSurfaceMargin: 2,
+      minChunkY: -2,
+      maxChunkY: 10,
+    };
+    const known = new Set<number>();
+    withEnabledProfiler(() => {
+      const planner = new ChunkStreamPlanner(config);
+      const firstPlan = planner.update(playerAt(0, 4, 0), FORWARD_NORTH, known);
+      const requestedByFirstUpdate = firstPlan.toLoad.length;
+      applyPlan(known, firstPlan);
+      expect(counterTotal("game.streaming.candidatesConsidered")).toBe(planner.loadVolumeSize);
+      expect(breakdownUnits(DIMENSIONS.streamingDecision, "requested")).toBe(requestedByFirstUpdate);
+      const skippedOrRejected =
+        breakdownUnits(DIMENSIONS.streamingDecision, "skippedAboveSurface") +
+        breakdownUnits(DIMENSIONS.streamingDecision, "skippedBelowSurface") +
+        breakdownUnits(DIMENSIONS.streamingDecision, "rejectedBelowWorld") +
+        breakdownUnits(DIMENSIONS.streamingDecision, "rejectedAboveWorld");
+      expect(skippedOrRejected).toBeGreaterThan(50);
+      expect(requestedByFirstUpdate + skippedOrRejected).toBe(planner.loadVolumeSize);
+
+      const secondPlan = planner.update(playerAt(1, 4, 0), FORWARD_NORTH, known);
+      expect(counterTotal("game.streaming.incrementalUpdates")).toBe(1);
+      expect(counterTotal("game.streaming.fullRecomputes")).toBe(1);
+      expect(breakdownUnits(DIMENSIONS.streamingDecision, "unloaded")).toBe(secondPlan.toUnload.length);
+      expect(counterTotal("game.streaming.shellCacheMisses")).toBeGreaterThanOrEqual(2);
+    });
   });
 });
