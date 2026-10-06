@@ -9,6 +9,8 @@
 // A compressed chunk never aliases the source array or any array passed to decompressInto.
 
 import { CHUNK_HEIGHT, CHUNK_LENGTH, CHUNK_WIDTH } from "@/applications/game/config";
+import { profiler } from "../profiler";
+import { DIMENSIONS } from "../profiler/dimensions";
 
 export const CHUNK_CELL_COUNT = CHUNK_WIDTH * CHUNK_HEIGHT * CHUNK_LENGTH;
 
@@ -65,7 +67,65 @@ function bitsPerCellForPaletteSize(paletteSize: number): 1 | 2 | 4 | undefined {
   return undefined;
 }
 
+const COMPRESSED_KINDS: readonly CompressedChunk["kind"][] = ["uniform", "palette", "runs", "raw"];
+
+/** Metric names per representation, built once so recording never builds strings. */
+const KIND_METRIC_NAMES = Object.fromEntries(
+  COMPRESSED_KINDS.map((kind) => [
+    kind,
+    {
+      calls: `game.chunkCompression.kind.${kind}`,
+      bytesOut: `bytes.chunkCompression.out.${kind}`,
+      decompressBreakdownKey: `decompress.${kind}`,
+    },
+  ]),
+) as Record<CompressedChunk["kind"], { calls: string; bytesOut: string; decompressBreakdownKey: string }>;
+
+/** Hot-path traffic kept as plain integers; published by publishChunkCompressionProfilerStats. */
+const readStats = { cellReads: 0, runBinarySearchSteps: 0 };
+
+/** Publishes random access reads since the last call. Call about once a second from the pipeline sampler. */
+export function publishChunkCompressionProfilerStats(): void {
+  if (profiler.enabled) {
+    profiler.addCounter("game.chunkCompression.cellReads", readStats.cellReads);
+    profiler.addCounter("game.chunkCompression.runBinarySearchSteps", readStats.runBinarySearchSteps);
+  }
+  readStats.cellReads = 0;
+  readStats.runBinarySearchSteps = 0;
+}
+
 export function compress(cells: Uint8Array): CompressedChunk {
+  if (!profiler.enabled) return compressCells(cells);
+  const startedAtMs = profiler.now();
+  const scopeToken = profiler.begin("main.chunk.compress");
+  let compressed: CompressedChunk;
+  try {
+    compressed = compressCells(cells);
+  } finally {
+    profiler.end(scopeToken);
+  }
+  recordCompression(compressed, cells.byteLength, profiler.now() - startedAtMs);
+  return compressed;
+}
+
+function recordCompression(compressed: CompressedChunk, bytesIn: number, elapsedMs: number): void {
+  const bytesOut = byteSize(compressed);
+  profiler.addCounter("game.chunkCompression.calls");
+  const names = KIND_METRIC_NAMES[compressed.kind];
+  profiler.addCounter(names.calls);
+  profiler.recordBytes("bytes.chunkCompression.in", bytesIn);
+  profiler.recordBytes("bytes.chunkCompression.out", bytesOut);
+  profiler.recordBytes(names.bytesOut, bytesOut);
+  profiler.sampleGauge("game.chunkCompression.sizeFraction", bytesOut / bytesIn, "ratio");
+  profiler.recordBreakdown(DIMENSIONS.compressionKind, compressed.kind, {
+    calls: 1,
+    units: bytesIn,
+    selfMs: elapsedMs,
+    totalMs: elapsedMs,
+  });
+}
+
+function compressCells(cells: Uint8Array): CompressedChunk {
   assertChunkLength(cells);
   const paletteValues: number[] = [];
   let runCount = 0;
@@ -83,6 +143,10 @@ export function compress(cells: Uint8Array): CompressedChunk {
     }
   }
   const paletteSize = paletteValues.length;
+  if (profiler.enabled) {
+    profiler.sampleGauge("game.chunkCompression.distinctValues", paletteSize);
+    profiler.sampleGauge("game.chunkCompression.runs", runCount);
+  }
 
   try {
     if (paletteSize === 1) return uniformChunkByValue[paletteValues[0]!]!;
@@ -132,6 +196,26 @@ function buildRunLengthChunk(cells: Uint8Array, runCount: number): RunLengthChun
 }
 
 export function decompressInto(compressed: CompressedChunk, target: Uint8Array): Uint8Array {
+  if (!profiler.enabled) return decompressCells(compressed, target);
+  const startedAtMs = profiler.now();
+  const scopeToken = profiler.begin("main.chunk.decompress");
+  try {
+    return decompressCells(compressed, target);
+  } finally {
+    profiler.end(scopeToken);
+    const elapsedMs = profiler.now() - startedAtMs;
+    profiler.addCounter("game.chunkCompression.decompressions");
+    profiler.recordBytes("bytes.chunkCompression.decompressed", target.byteLength);
+    profiler.recordBreakdown(DIMENSIONS.compressionKind, KIND_METRIC_NAMES[compressed.kind].decompressBreakdownKey, {
+      calls: 1,
+      units: byteSize(compressed),
+      selfMs: elapsedMs,
+      totalMs: elapsedMs,
+    });
+  }
+}
+
+function decompressCells(compressed: CompressedChunk, target: Uint8Array): Uint8Array {
   assertChunkLength(target);
   switch (compressed.kind) {
     case "uniform":
@@ -170,6 +254,7 @@ function unpackPaletteInto(compressed: PaletteChunk, target: Uint8Array): void {
 
 /** Value of one cell without decompressing the chunk. */
 export function readCell(compressed: CompressedChunk, index: number): number {
+  readStats.cellReads++;
   switch (compressed.kind) {
     case "uniform":
       return compressed.value;
@@ -185,6 +270,7 @@ export function readCell(compressed: CompressedChunk, index: number): number {
       let low = 0;
       let high = runStarts.length - 1;
       while (low < high) {
+        readStats.runBinarySearchSteps++;
         const middle = (low + high + 1) >> 1;
         if (runStarts[middle]! <= index) low = middle;
         else high = middle - 1;

@@ -10,6 +10,8 @@ import {
   uniformValue,
   type CompressedChunk,
 } from "./chunk-compression";
+import { DIMENSIONS } from "../profiler/dimensions";
+import { breakdownUnits, byteTotal, counterTotal, withEnabledProfiler } from "./profiler-readings.test-helper";
 import { loadRealisticChunks, type RealisticChunk } from "./realistic-chunk-fixture";
 
 const REALISTIC_COLUMNS_PER_SIDE = 3;
@@ -284,5 +286,31 @@ describe("aliasing and validation", () => {
   test("wrong sized arrays are rejected", () => {
     expect(() => compress(new Uint8Array(100))).toThrow();
     expect(() => decompressInto(compress(new Uint8Array(CHUNK_CELL_COUNT)), new Uint8Array(100))).toThrow();
+  });
+});
+
+describe("chunk compression profiling", () => {
+  test("records bytes in and out per representation and counts each kind", () => {
+    const layered = new Uint8Array(CHUNK_CELL_COUNT);
+    for (let index = 0; index < CHUNK_CELL_COUNT; index++) layered[index] = index % 32 < 12 ? 1 : index % 32 < 20 ? 3 : 0;
+    const noisy = new Uint8Array(CHUNK_CELL_COUNT);
+    const random = createSeededRandom(7);
+    for (let index = 0; index < CHUNK_CELL_COUNT; index++) noisy[index] = Math.floor(random() * 200);
+    const uniform = new Uint8Array(CHUNK_CELL_COUNT).fill(9);
+
+    withEnabledProfiler(() => {
+      const compressedChunks = [layered, noisy, uniform, layered].map((cells) => compress(cells));
+      const expectedBytesOut = compressedChunks.reduce((total, chunk) => total + byteSize(chunk), 0);
+      expect(counterTotal("game.chunkCompression.calls")).toBe(4);
+      expect(counterTotal("game.chunkCompression.kind.uniform")).toBe(1);
+      expect(counterTotal("game.chunkCompression.kind.raw")).toBe(1);
+      expect(counterTotal("game.chunkCompression.kind.palette") + counterTotal("game.chunkCompression.kind.runs")).toBe(2);
+      expect(byteTotal("bytes.chunkCompression.in")).toBe(4 * CHUNK_CELL_COUNT);
+      expect(byteTotal("bytes.chunkCompression.out")).toBe(expectedBytesOut);
+      expect(breakdownUnits(DIMENSIONS.compressionKind, "uniform")).toBe(CHUNK_CELL_COUNT);
+
+      decompressInto(compressedChunks[0]!, new Uint8Array(CHUNK_CELL_COUNT));
+      expect(counterTotal("game.chunkCompression.decompressions")).toBe(1);
+    });
   });
 });

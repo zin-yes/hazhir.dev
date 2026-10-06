@@ -1,6 +1,7 @@
 // What the pipeline knows about one desired chunk and one column, plus the shared arrays of uniform chunks.
 
 import { BlockType } from "../blocks";
+import { profiler } from "../profiler";
 import { CELLS_PER_CHUNK } from "../edits/chunk-cluster";
 import { EMISSION, IS_TRANSPARENT } from "../edits/light-tables";
 import { BLOCK_ROW_FLAGS, ROW_FLAG_CUBE_OCCLUDER } from "../workers/mesh-tables";
@@ -67,6 +68,10 @@ export class ChunkRecord {
     if (!this.ownsBlocks && this.blocks) {
       this.blocks = this.blocks.slice();
       this.ownsBlocks = true;
+      profiler.addCounter("game.chunkRecord.blockCopiesOnWrite");
+      profiler.recordBytes("bytes.chunkRecord.blockCopyOnWrite", this.blocks.byteLength);
+    } else if (this.blocks) {
+      profiler.addCounter("game.chunkRecord.blockCopiesAvoided");
     }
     return this.blocks as Uint8Array;
   }
@@ -75,6 +80,10 @@ export class ChunkRecord {
     if (!this.ownsLight && this.light) {
       this.light = this.light.slice();
       this.ownsLight = true;
+      profiler.addCounter("game.chunkRecord.lightCopiesOnWrite");
+      profiler.recordBytes("bytes.chunkRecord.lightCopyOnWrite", this.light.byteLength);
+    } else if (this.light) {
+      profiler.addCounter("game.chunkRecord.lightCopiesAvoided");
     }
     return this.light;
   }
@@ -86,13 +95,16 @@ export class ChunkRecord {
       if (waiter.version <= upToVersion) waiter.resolve();
       else stillWaiting.push(waiter);
     }
+    profiler.addCounter("game.chunkRecord.meshWaitersResolved", this.meshWaiters.length - stillWaiting.length);
     this.meshWaiters = stillWaiting;
   }
 
   resolveAllMeshWaiters(): void {
     const waiters = this.meshWaiters;
     this.meshWaiters = [];
+    if (waiters.length === 0) return;
     for (const waiter of waiters) waiter.resolve();
+    profiler.addCounter("game.chunkRecord.meshWaitersResolved", waiters.length);
   }
 }
 
@@ -118,10 +130,15 @@ export const SHARED_DARK_LIGHT = new Uint8Array(CELLS_PER_CHUNK);
 /** One read-only array per block id for uniform chunks. Write through ChunkRecord.ensureOwnBlocks only. */
 export function sharedUniformBlocks(block: number): Uint8Array {
   let blocks = uniformBlocksById.get(block);
-  if (!blocks) {
-    blocks = new Uint8Array(CELLS_PER_CHUNK).fill(block);
-    uniformBlocksById.set(block, blocks);
+  if (blocks) {
+    profiler.addCounter("game.chunkRecord.sharedUniformHits");
+    return blocks;
   }
+  blocks = new Uint8Array(CELLS_PER_CHUNK).fill(block);
+  uniformBlocksById.set(block, blocks);
+  profiler.addCounter("game.chunkRecord.sharedUniformCreated");
+  profiler.recordBytes("bytes.chunkRecord.sharedUniformArray", blocks.byteLength);
+  profiler.sampleGauge("game.chunkRecord.sharedUniformArrays", uniformBlocksById.size);
   return blocks;
 }
 
