@@ -1,3 +1,10 @@
+import { DIMENSIONS } from "../profiler/dimensions";
+import {
+  addWorkerKeyedUnits,
+  endWorkerSection,
+  startWorkerSampledSection,
+  startWorkerSection,
+} from "../profiler/worker-recorder";
 import { CHUNK_UV_UNITS_PER_BLOCK, POSITION_UNITS_PER_BLOCK, packPositionWord } from "../vertex-format";
 import {
   cornerAmbientOcclusion,
@@ -41,6 +48,35 @@ const CELLS_PER_ROW = 32;
 const ROWS_PER_SLICE = 32;
 const SLICES_PER_FACE = 32;
 const CELLS_PER_SLICE = CELLS_PER_ROW * ROWS_PER_SLICE;
+
+/** Order matches the face indices: up, down, front, back, left, right. */
+export const FACE_DIRECTION_NAMES = ["up", "down", "front", "back", "left", "right"] as const;
+const MERGED_QUAD_SAMPLE_INTERVAL = 64;
+
+/** Units of merge work since the last reset, flushed to the profiler once per task. */
+export const greedyMergeStats = {
+  slicesVisited: 0,
+  rowsVisited: 0,
+  runsStarted: 0,
+  cellsAbsorbedAlongCells: 0,
+  rowsAbsorbedAlongRows: 0,
+  facesConsumed: 0,
+  translucentQuads: 0,
+  recordedFacesByDirection: new Int32Array(FACE_COUNT),
+  quadsByDirection: new Int32Array(FACE_COUNT),
+};
+
+export function resetGreedyMergeStats() {
+  greedyMergeStats.slicesVisited = 0;
+  greedyMergeStats.rowsVisited = 0;
+  greedyMergeStats.runsStarted = 0;
+  greedyMergeStats.cellsAbsorbedAlongCells = 0;
+  greedyMergeStats.rowsAbsorbedAlongRows = 0;
+  greedyMergeStats.facesConsumed = 0;
+  greedyMergeStats.translucentQuads = 0;
+  greedyMergeStats.recordedFacesByDirection.fill(0);
+  greedyMergeStats.quadsByDirection.fill(0);
+}
 
 /** Keys are only meaningful where the row mask has a bit; the grid is never cleared, merging consumes the masks. */
 const firstKeys = new Int32Array(FACE_COUNT * SLICES_PER_FACE * CELLS_PER_SLICE);
@@ -92,6 +128,7 @@ export function recordMergeableFace(
     (cornerLightSteps[1] << LIGHT_STEP_BITS) |
     (cornerLightSteps[2] << (LIGHT_STEP_BITS * 2)) |
     (cornerLightSteps[3] << (LIGHT_STEP_BITS * 3));
+  greedyMergeStats.recordedFacesByDirection[face]++;
   rowCellMasks[sliceIndex * ROWS_PER_SLICE + row] |= 1 << cell;
   sliceRowMasks[sliceIndex] |= 1 << row;
   faceSliceMasks[face] |= 1 << slice;
@@ -161,9 +198,13 @@ export function mergeRecordedFaces(opaque: VertexStream, transparent: VertexStre
   for (let face = 0; face < FACE_COUNT; face++) {
     let pendingSlices = faceSliceMasks[face];
     faceSliceMasks[face] = 0;
+    if (pendingSlices === 0) continue;
+    const quadsBeforeDirection = quadsEmitted;
+    startWorkerSection("mergeDirection", DIMENSIONS.meshFaceDirection, FACE_DIRECTION_NAMES[face]);
     while (pendingSlices !== 0) {
       const slice = lowestSetBitIndex(pendingSlices);
       pendingSlices &= pendingSlices - 1;
+      greedyMergeStats.slicesVisited++;
       const sliceIndex = face * SLICES_PER_FACE + slice;
       const rowMaskBase = sliceIndex * ROWS_PER_SLICE;
       const keyBase = sliceIndex * CELLS_PER_SLICE;
@@ -172,6 +213,7 @@ export function mergeRecordedFaces(opaque: VertexStream, transparent: VertexStre
       while (pendingRows !== 0) {
         const row = lowestSetBitIndex(pendingRows);
         pendingRows &= pendingRows - 1;
+        greedyMergeStats.rowsVisited++;
 
         let cellMask = rowCellMasks[rowMaskBase + row];
         while (cellMask !== 0) {
@@ -219,6 +261,12 @@ export function mergeRecordedFaces(opaque: VertexStream, transparent: VertexStre
           cellMask = rowCellMasks[rowMaskBase + row];
 
           const isTranslucent = ((firstKey >> KEY_TRANSLUCENT_SHIFT) & 1) === 1;
+          greedyMergeStats.runsStarted++;
+          greedyMergeStats.cellsAbsorbedAlongCells += cellCount - 1;
+          greedyMergeStats.rowsAbsorbedAlongRows += rowCount - 1;
+          greedyMergeStats.facesConsumed += cellCount * rowCount;
+          if (isTranslucent) greedyMergeStats.translucentQuads++;
+          startWorkerSampledSection("emitMergedQuad", MERGED_QUAD_SAMPLE_INTERVAL);
           emitMergedQuad(
             isTranslucent ? transparent : opaque,
             face,
@@ -230,10 +278,15 @@ export function mergeRecordedFaces(opaque: VertexStream, transparent: VertexStre
             firstKey,
             secondKey
           );
+          endWorkerSection();
           quadsEmitted++;
         }
       }
     }
+    const quadsInDirection = quadsEmitted - quadsBeforeDirection;
+    greedyMergeStats.quadsByDirection[face] = quadsInDirection;
+    addWorkerKeyedUnits(DIMENSIONS.meshFaceDirection, FACE_DIRECTION_NAMES[face], quadsInDirection);
+    endWorkerSection();
   }
   return quadsEmitted;
 }

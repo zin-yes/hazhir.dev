@@ -196,6 +196,42 @@ describe("generateMesh profiling", () => {
     expect(nodePaths(profile)).toContain("listTransferables");
   });
 
+  test("merge counters account for every recorded face and every merged quad", () => {
+    const { profile } = recordTask(() => generateMesh(...meshInputs()));
+    const { counters } = profile;
+    const recordedByDirection = ["up", "down", "front", "back", "left", "right"].map(
+      (direction) => counters[`mergeableFaces.${direction}`] ?? 0,
+    );
+    const mergedQuadsByDirection = unitsOf(profile, DIMENSIONS.meshFaceDirection);
+
+    expect(sum(recordedByDirection)).toBe(counters.mergeableFaces);
+    expect(counters.mergeFacesConsumed).toBe(counters.mergeableFaces);
+    expect(sum(Object.values(mergedQuadsByDirection))).toBe(counters.mergedQuads);
+    expect(counters.mergedQuads).toBeLessThan(counters.mergeFacesConsumed);
+    expect(counters.mergeCellsAbsorbed + counters.mergeRowsAbsorbed).toBeGreaterThan(0);
+    expect(callsAt(profile, "faceGeneration>greedyMerge>mergeDirection")).toBe(
+      Object.keys(mergedQuadsByDirection).length,
+    );
+    expect(counters.directFacesEmitted + counters.mergeableFaces).toBe(
+      counters.opaqueBulkFaces + counters.generalPathFaces,
+    );
+  });
+
+  test("vertex attribute bytes and packed quads match the returned buffers", () => {
+    const { result, profile } = recordTask(() => generateMesh(...meshInputs()));
+    const { counters } = profile;
+    const vertexCount = (result.opaque.byteLength + result.transparent.byteLength) / 8;
+    const attributeBytes = unitsOf(profile, DIMENSIONS.meshVertexAttribute);
+
+    expect(attributeBytes.position).toBe(vertexCount * 4);
+    expect(attributeBytes.surface).toBe(vertexCount * 4);
+    expect(counters.quadsPacked + counters.stairQuadsEmitted).toBe(counters.quadsEmitted);
+    expect(counters.aoEdgeCellSamples + counters.aoInteriorSamples).toBeGreaterThanOrEqual(
+      counters.facesEmitted - counters.stairQuadsEmitted,
+    );
+    expect(counters.aoUniformFastPathSamples).toBeLessThanOrEqual(counters.aoInteriorSamples);
+  });
+
   test("profiling does not change the mesh bytes", () => {
     const unprofiled = generateMesh(...meshInputs());
     const { result: profiled } = recordTask(() => generateMesh(...meshInputs()));

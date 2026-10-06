@@ -40,6 +40,29 @@ const FACE_FLAG_VALUES = 64;
 export const cornerAmbientOcclusion = new Int32Array(4);
 export const cornerLightSteps = new Int32Array(4);
 
+/** Units of work done by sampleFaceSurface and emitFaceQuad since the last reset, flushed to the profiler once per task. */
+export const faceSurfaceStats = {
+  edgeCellSamples: 0,
+  interiorSamples: 0,
+  uniformFastPathSamples: 0,
+  occludedFaceSamples: 0,
+  darkenedCorners: 0,
+  mergeableSurfaces: 0,
+  quadsPacked: 0,
+  flippedDiagonals: 0,
+};
+
+export function resetFaceSurfaceStats() {
+  faceSurfaceStats.edgeCellSamples = 0;
+  faceSurfaceStats.interiorSamples = 0;
+  faceSurfaceStats.uniformFastPathSamples = 0;
+  faceSurfaceStats.occludedFaceSamples = 0;
+  faceSurfaceStats.darkenedCorners = 0;
+  faceSurfaceStats.mergeableSurfaces = 0;
+  faceSurfaceStats.quadsPacked = 0;
+  faceSurfaceStats.flippedDiagonals = 0;
+}
+
 const ringLightLevels = new Int32Array(RING_CELL_COUNT);
 const quadPositionWords = new Int32Array(4);
 const quadSurfaceWords = new Int32Array(4);
@@ -98,6 +121,7 @@ export function sampleFaceSurface(
   let excludedMask = 0;
 
   if (isEdgeCell) {
+    faceSurfaceStats.edgeCellSamples++;
     const blocks = paddedBlockGrid.cells;
     for (let ring = 0; ring < RING_CELL_COUNT; ring++) {
       const sampleIndex = cellIndex + ringDeltas[ringStart + ring];
@@ -110,6 +134,7 @@ export function sampleFaceSurface(
     }
   } else {
     // Away from the chunk edge every ring cell is inside, so occlusion is a bit test on the occupancy rows.
+    faceSurfaceStats.interiorSamples++;
     for (let ring = 0; ring < RING_CELL_COUNT; ring++) {
       const rowBits = rows[rowIndex + ringRowDeltas[ringStart + ring]];
       blockedMask |= ((rowBits >>> (z + ringZOffsets[ringStart + ring])) & 1) << ring;
@@ -130,10 +155,13 @@ export function sampleFaceSurface(
           cornerAmbientOcclusion[corner] = FULLY_LIT_AMBIENT_OCCLUSION;
           cornerLightSteps[corner] = uniformSteps;
         }
+        faceSurfaceStats.uniformFastPathSamples++;
+        faceSurfaceStats.mergeableSurfaces++;
         return MERGE_ALONG_CELLS | MERGE_ALONG_ROWS;
       }
     }
   }
+  if (blockedMask !== 0) faceSurfaceStats.occludedFaceSamples++;
 
   for (let ring = 0; ring < RING_CELL_COUNT; ring++) {
     ringLevels[ring] =
@@ -157,13 +185,15 @@ export function sampleFaceSurface(
       ringLevels[cornerRingIndices[base + 2]];
     const cellCount = ((extraCellBits >> (corner * 2)) & 3) + 1;
     occlusions[corner] = (occlusionBits >> (corner * 2)) & 3;
+    if (occlusions[corner] < FULLY_LIT_AMBIENT_OCCLUSION) faceSurfaceStats.darkenedCorners++;
     cornerSteps[corner] = lightSteps[cellCount * VERTEX_LIGHT_SUM_STRIDE + lightSum];
   }
 
-  return (
+  const mergeDirections =
     (isConstantAcrossPairs(CELL_AXIS_CORNER_PAIRS, face) ? MERGE_ALONG_CELLS : 0) |
-    (isConstantAcrossPairs(ROW_AXIS_CORNER_PAIRS, face) ? MERGE_ALONG_ROWS : 0)
-  );
+    (isConstantAcrossPairs(ROW_AXIS_CORNER_PAIRS, face) ? MERGE_ALONG_ROWS : 0);
+  if (mergeDirections !== 0) faceSurfaceStats.mergeableSurfaces++;
+  return mergeDirections;
 }
 
 function isConstantAcrossPairs(pairs: Uint8Array, face: number): boolean {
@@ -211,10 +241,10 @@ export function emitFaceQuad(
       (cornerLightSteps[corner] << SURFACE_LIGHT_SHIFT);
   }
   // Split along the brighter diagonal so a dark corner does not streak.
-  target.pushQuadFromCorners(
-    positionWords,
-    surfaceWords,
+  const flipDiagonal =
     cornerAmbientOcclusion[0] + cornerAmbientOcclusion[3] >
-      cornerAmbientOcclusion[1] + cornerAmbientOcclusion[2]
-  );
+    cornerAmbientOcclusion[1] + cornerAmbientOcclusion[2];
+  faceSurfaceStats.quadsPacked++;
+  if (flipDiagonal) faceSurfaceStats.flippedDiagonals++;
+  target.pushQuadFromCorners(positionWords, surfaceWords, flipDiagonal);
 }

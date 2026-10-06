@@ -18,6 +18,11 @@ export class VertexStream {
     return this.wordCount / WORDS_PER_VERTEX;
   }
 
+  /** Bytes held by the backing array, which stays allocated across tasks. */
+  get capacityBytes(): number {
+    return this.words.byteLength;
+  }
+
   /** Empties the stream but keeps its capacity, so a long-lived stream stops growing after warmup. */
   reset() {
     this.wordCount = 0;

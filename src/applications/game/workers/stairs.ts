@@ -33,6 +33,25 @@ const faceAmbientOcclusion = new Int32Array(FACE_COUNT * FACE_CORNER_COUNT);
 const faceLightSteps = new Int32Array(FACE_COUNT * FACE_CORNER_COUNT);
 const isFaceSampled = new Uint8Array(FACE_COUNT);
 
+/** Units of stair work since the last reset, flushed to the profiler once per task. */
+export const stairStats = {
+  surfaceSamples: 0,
+  facesCulled: 0,
+  quadsPushed: 0,
+};
+
+export function resetStairStats() {
+  stairStats.surfaceSamples = 0;
+  stairStats.facesCulled = 0;
+  stairStats.quadsPushed = 0;
+}
+
+function isStairFaceCulled(block: number, neighbor: number, faceKind: number): boolean {
+  const isCulled = isFaceCulledMemoized(block, neighbor, faceKind);
+  if (isCulled) stairStats.facesCulled++;
+  return isCulled;
+}
+
 /** The face a step's vertical riser looks toward, which is the side the lower tread extends to. */
 const RISER_FACE_BY_DIRECTION: Record<string, number> = {
   NORTH: FACE_FRONT,
@@ -59,6 +78,7 @@ export function emitStairs(
   const sampleFace = (face: number) => {
     if (isFaceSampled[face] === 1) return;
     isFaceSampled[face] = 1;
+    stairStats.surfaceSamples++;
     sampleFaceSurface(
       face,
       paddedBase,
@@ -134,6 +154,7 @@ export function emitStairs(
         interpolateFaceValues(face, corner, faceLightSteps)
       )
     );
+    stairStats.quadsPushed++;
     target.pushQuad(
       positionWords[0],
       surfaceWords[0],
@@ -152,7 +173,7 @@ export function emitStairs(
     faceTexture ?? textureIndexSides ?? textureIndexDefault;
 
   // Bottom Face (y=0)
-  if (!isFaceCulledMemoized(block, blockBelow, FACE_KIND_DOWN)) {
+  if (!isStairFaceCulled(block, blockBelow, FACE_KIND_DOWN)) {
     pushQuad(FACE_DOWN,
       [x + 1, y, z + 1],
       [x, y, z + 1],
@@ -201,7 +222,7 @@ export function emitStairs(
   else if (direction === "EAST") topMinX = 0.5;
   else if (direction === "WEST") topMaxX = 0.5;
 
-  if (!isFaceCulledMemoized(block, blockAbove, FACE_KIND_UP)) {
+  if (!isStairFaceCulled(block, blockAbove, FACE_KIND_UP)) {
     pushQuad(FACE_UP,
       [x + topMinX, y + 1, z + topMaxZ],
       [x + topMaxX, y + 1, z + topMaxZ],
@@ -236,7 +257,7 @@ export function emitStairs(
   const lowerHalfUv = [1, 0, 0, 0, 1, 0.5, 0, 0.5];
 
   // Front (z=1)
-  if (!isFaceCulledMemoized(block, blockInfront, FACE_KIND_SIDE)) {
+  if (!isStairFaceCulled(block, blockInfront, FACE_KIND_SIDE)) {
     const texture = sideTexture(textureIndexFront);
     pushQuad(FACE_FRONT, [x, y, z + 1], [x + 1, y, z + 1], [x, y + 0.5, z + 1], [x + 1, y + 0.5, z + 1], lowerHalfUv, texture);
     if (direction === "SOUTH") {
@@ -249,7 +270,7 @@ export function emitStairs(
   }
 
   // Back (z=0)
-  if (!isFaceCulledMemoized(block, blockBehind, FACE_KIND_SIDE)) {
+  if (!isStairFaceCulled(block, blockBehind, FACE_KIND_SIDE)) {
     const texture = sideTexture(textureIndexBack);
     pushQuad(FACE_BACK, [x + 1, y, z], [x, y, z], [x + 1, y + 0.5, z], [x, y + 0.5, z], lowerHalfUv, texture);
     if (direction === "NORTH") {
@@ -262,7 +283,7 @@ export function emitStairs(
   }
 
   // Left (x=0)
-  if (!isFaceCulledMemoized(block, blockToTheLeft, FACE_KIND_SIDE)) {
+  if (!isStairFaceCulled(block, blockToTheLeft, FACE_KIND_SIDE)) {
     const texture = sideTexture(textureIndexLeft);
     pushQuad(FACE_LEFT, [x, y, z], [x, y, z + 1], [x, y + 0.5, z], [x, y + 0.5, z + 1], lowerHalfUv, texture);
     if (direction === "WEST") {
@@ -275,7 +296,7 @@ export function emitStairs(
   }
 
   // Right (x=1)
-  if (!isFaceCulledMemoized(block, blockToTheRight, FACE_KIND_SIDE)) {
+  if (!isStairFaceCulled(block, blockToTheRight, FACE_KIND_SIDE)) {
     const texture = sideTexture(textureIndexRight);
     pushQuad(FACE_RIGHT, [x + 1, y, z + 1], [x + 1, y, z], [x + 1, y + 0.5, z + 1], [x + 1, y + 0.5, z], lowerHalfUv, texture);
     if (direction === "EAST") {

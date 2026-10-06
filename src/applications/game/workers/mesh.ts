@@ -7,6 +7,7 @@ import {
   addWorkerKeyedUnits,
   endWorkerSection,
   isWorkerProfiling,
+  startWorkerSampledSection,
   startWorkerSection,
 } from "../profiler/worker-recorder";
 import {
@@ -21,11 +22,19 @@ import {
 import {
   emitFaceQuad,
   faceLightLevel,
+  faceSurfaceStats,
   lightKnownByOutsideFlags,
+  resetFaceSurfaceStats,
   sampleFaceSurface,
   updateLightKnownFlags,
 } from "./face-surface";
-import { mergeRecordedFaces, recordMergeableFace } from "./greedy-grid";
+import {
+  FACE_DIRECTION_NAMES,
+  greedyMergeStats,
+  mergeRecordedFaces,
+  recordMergeableFace,
+  resetGreedyMergeStats,
+} from "./greedy-grid";
 import {
   BLOCK_ID_COUNT,
   BLOCK_KIND,
@@ -54,9 +63,9 @@ import {
 } from "./mesh-tables";
 import type { ChunkFaceBuffers, ChunkMeshResult, PlantInstanceBatch } from "./mesh-types";
 import { fillPaddedGrid, paddedBlockGrid, paddedLightGrid } from "./padded-grid";
-import { paddedDelta, paddedIndex } from "./padded-layout";
+import { PADDED_VOLUME, paddedDelta, paddedIndex } from "./padded-layout";
 import { buildRowOccupancy, countSetBits, exposedCubeFaceCells, prepareRow, rowIndexOf } from "./row-occupancy";
-import { emitStairs } from "./stairs";
+import { emitStairs, resetStairStats, stairStats } from "./stairs";
 import { VertexStream } from "./vertex-stream";
 
 const MESH_PART_OPAQUE = "opaque";
@@ -66,6 +75,12 @@ const MESH_PART_STAIRS = "stairs";
 const CELLS_PER_CHUNK = CHUNK_WIDTH * CHUNK_HEIGHT * CHUNK_LENGTH;
 const FULL_BLOCK_HEIGHT = POSITION_UNITS_PER_BLOCK;
 const WATER_LEVELS_PER_BLOCK = 9;
+const BYTES_PER_WORD = 4;
+const VERTEX_ATTRIBUTE_POSITION = "position";
+const VERTEX_ATTRIBUTE_SURFACE = "surface";
+const ROW_SAMPLE_INTERVAL = 32;
+const STAIR_SAMPLE_INTERVAL = 8;
+const MERGEABLE_FACE_COUNTER_NAMES = FACE_DIRECTION_NAMES.map((name) => `mergeableFaces.${name}`);
 
 const PLANT_NEIGHBOR_DELTAS = PLANT_NEIGHBOR_DIRECTIONS.map(([deltaX, deltaY, deltaZ]) =>
   paddedDelta(deltaX, deltaY, deltaZ)
@@ -87,6 +102,13 @@ const stats = {
   cubeFacesEmitted: 0,
   mergeableFaces: 0,
   stairQuads: 0,
+  rowsScanned: 0,
+  emptyRows: 0,
+  opaqueBulkFaces: 0,
+  facesCulledByNeighbor: 0,
+  translucentFaces: 0,
+  slabCells: 0,
+  waterCells: 0,
 };
 
 function resetStats() {
@@ -97,7 +119,17 @@ function resetStats() {
   stats.cubeFacesEmitted = 0;
   stats.mergeableFaces = 0;
   stats.stairQuads = 0;
+  stats.rowsScanned = 0;
+  stats.emptyRows = 0;
+  stats.opaqueBulkFaces = 0;
+  stats.facesCulledByNeighbor = 0;
+  stats.translucentFaces = 0;
+  stats.slabCells = 0;
+  stats.waterCells = 0;
   facesByBlockId.fill(0);
+  resetFaceSurfaceStats();
+  resetGreedyMergeStats();
+  resetStairStats();
 }
 
 const EMPTY_RESULT = (): ChunkMeshResult => ({
@@ -119,6 +151,12 @@ const FACE_BORDER_NAMES: Array<keyof ChunkFaceBuffers> = ["top", "bottom", "fron
 
 function countSlabs(borders: ChunkFaceBuffers): number {
   return FACE_BORDER_NAMES.filter((face) => Boolean(borders[face])).length;
+}
+
+function countSlabCells(borders: ChunkFaceBuffers): number {
+  let cells = 0;
+  for (const face of FACE_BORDER_NAMES) cells += borders[face]?.byteLength ?? 0;
+  return cells;
 }
 
 /** The block id when every cell of the chunk is the same block, else -1. */
@@ -194,6 +232,8 @@ function emitCubeFaces(
   const isTranslucent = IS_TRANSLUCENT[block] === 1;
   const target = isTranslucent ? transparentStream : opaqueStream;
   if (isTranslucent) stats.translucentCells++;
+  if (kind === BLOCK_KIND_SLAB) stats.slabCells++;
+  else if (kind === BLOCK_KIND_WATER) stats.waterCells++;
 
   // Slabs and the water surface are not full blocks: they keep their own height,
   // and only the faces that stay on a single plane may merge with their neighbors.
@@ -220,6 +260,7 @@ function emitCubeFaces(
   for (let face = 0; face < FACE_COUNT; face++) {
     const neighborIndex = cellIndex + FACE_NEIGHBOR_DELTAS[face];
     if (isFaceCulledMemoized(block, blocks[neighborIndex], FACE_KINDS[face])) {
+      stats.facesCulledByNeighbor++;
       continue;
     }
 
@@ -234,6 +275,7 @@ function emitCubeFaces(
       z
     );
     stats.cubeFacesEmitted++;
+    if (isTranslucent) stats.translucentFaces++;
     facesByBlockId[block]++;
     const textureIndex = FACE_TEXTURES[face][block];
 
@@ -294,6 +336,7 @@ function emitOpaqueCubeFace(
   const block = paddedBlockGrid.cells[cellIndex];
   const textureIndex = FACE_TEXTURES[face][block];
   stats.cubeFacesEmitted++;
+  stats.opaqueBulkFaces++;
   facesByBlockId[block]++;
   if (mergeDirections !== 0) {
     stats.mergeableFaces++;
@@ -338,6 +381,7 @@ export function generateMesh(
   if (isAir || isBuried) {
     endWorkerSection();
     addWorkerCounter("blocksScanned", CELLS_PER_CHUNK);
+    if (uniformBlock >= 0) addWorkerCounter("uniformChunksSeen", 1);
     addWorkerCounter(isAir ? "emptyChunksSkipped" : "buriedChunksSkipped", 1);
     return EMPTY_RESULT();
   }
@@ -354,6 +398,12 @@ export function generateMesh(
   endWorkerSection();
   endWorkerSection();
   addWorkerCounter("borderSlabsCopied", countSlabs(borders) + countSlabs(borderLights));
+  if (uniformBlock >= 0) addWorkerCounter("uniformChunksSeen", 1);
+  if (isWorkerProfiling()) {
+    addWorkerCounter("paddedGridBytes", PADDED_VOLUME * 2);
+    addWorkerCounter("chunkCellsCopied", CELLS_PER_CHUNK * 2);
+    addWorkerCounter("borderCellsCopied", countSlabCells(borders) + countSlabCells(borderLights));
+  }
 
   resetStats();
   opaqueStream.reset();
@@ -364,8 +414,9 @@ export function generateMesh(
   startWorkerSection("faceGeneration");
   for (let x = 0; x < CHUNK_WIDTH; x++) {
     for (let y = 0; y < CHUNK_HEIGHT; y++) {
+      startWorkerSampledSection("scanRow", ROW_SAMPLE_INTERVAL);
       let visibleCells = prepareRow(x, y);
-      stats.cellsVisited += countSetBits(
+      const rowCellsVisited = countSetBits(
         visibleCells |
           exposedCubeFaceCells[0] |
           exposedCubeFaceCells[1] |
@@ -374,8 +425,16 @@ export function generateMesh(
           exposedCubeFaceCells[4] |
           exposedCubeFaceCells[5]
       );
+      endWorkerSection();
+      stats.cellsVisited += rowCellsVisited;
+      stats.rowsScanned++;
+      if (rowCellsVisited === 0) {
+        stats.emptyRows++;
+        continue;
+      }
       const firstCell = paddedIndex(x, y, 0);
       const isEdgeRow = x === 0 || x === CHUNK_WIDTH - 1 || y === 0 || y === CHUNK_HEIGHT - 1;
+      startWorkerSampledSection("opaqueCubeFaces", ROW_SAMPLE_INTERVAL);
       for (let face = 0; face < FACE_COUNT; face++) {
         let faceCells = exposedCubeFaceCells[face];
         while (faceCells !== 0) {
@@ -392,6 +451,8 @@ export function generateMesh(
           );
         }
       }
+      endWorkerSection();
+      startWorkerSampledSection("generalCells", ROW_SAMPLE_INTERVAL);
       while (visibleCells !== 0) {
         const z = 31 - Math.clz32(visibleCells & -visibleCells);
         visibleCells &= visibleCells - 1;
@@ -403,6 +464,7 @@ export function generateMesh(
           recordPlant(block, x, y, z, cellIndex);
         } else if (kind === BLOCK_KIND_STAIRS) {
           const verticesBefore = opaqueStream.vertexCount;
+          startWorkerSampledSection("stairs", STAIR_SAMPLE_INTERVAL);
           emitStairs(
             opaqueStream,
             block,
@@ -413,6 +475,7 @@ export function generateMesh(
             isEdgeRow || z === 0 || z === CHUNK_LENGTH - 1,
             rowIndexOf(x, y)
           );
+          endWorkerSection();
           const quads = (opaqueStream.vertexCount - verticesBefore) / VERTICES_PER_QUAD;
           stats.stairCells++;
           stats.stairQuads += quads;
@@ -430,6 +493,7 @@ export function generateMesh(
           );
         }
       }
+      endWorkerSection();
     }
   }
   startWorkerSection("greedyMerge");
@@ -471,7 +535,42 @@ export function generateMesh(
   addWorkerCounter("opaqueVertices", opaqueStream.vertexCount);
   addWorkerCounter("transparentVertices", transparentStream.vertexCount);
   addWorkerCounter("plantInstancesEmitted", stats.plantCells);
+  addWorkerCounter("rowsScanned", stats.rowsScanned);
+  addWorkerCounter("emptyRowsSkipped", stats.emptyRows);
+  addWorkerCounter("opaqueBulkFaces", stats.opaqueBulkFaces);
+  addWorkerCounter("generalPathFaces", stats.cubeFacesEmitted - stats.opaqueBulkFaces);
+  addWorkerCounter("facesCulledByNeighbor", stats.facesCulledByNeighbor);
+  addWorkerCounter("directFacesEmitted", stats.cubeFacesEmitted - stats.mergeableFaces);
+  addWorkerCounter("translucentFacesEmitted", stats.translucentFaces);
+  addWorkerCounter("slabBlocksVisited", stats.slabCells);
+  addWorkerCounter("waterBlocksVisited", stats.waterCells);
+  addWorkerCounter("stairSurfaceSamples", stairStats.surfaceSamples);
+  addWorkerCounter("stairFacesCulled", stairStats.facesCulled);
+  addWorkerCounter("aoEdgeCellSamples", faceSurfaceStats.edgeCellSamples);
+  addWorkerCounter("aoInteriorSamples", faceSurfaceStats.interiorSamples);
+  addWorkerCounter("aoUniformFastPathSamples", faceSurfaceStats.uniformFastPathSamples);
+  addWorkerCounter("aoOccludedFaceSamples", faceSurfaceStats.occludedFaceSamples);
+  addWorkerCounter("aoDarkenedCorners", faceSurfaceStats.darkenedCorners);
+  addWorkerCounter("mergeableSurfaces", faceSurfaceStats.mergeableSurfaces);
+  addWorkerCounter("quadsPacked", faceSurfaceStats.quadsPacked);
+  addWorkerCounter("flippedDiagonals", faceSurfaceStats.flippedDiagonals);
+  addWorkerCounter("mergeSlicesVisited", greedyMergeStats.slicesVisited);
+  addWorkerCounter("mergeRowsVisited", greedyMergeStats.rowsVisited);
+  addWorkerCounter("mergeCellsAbsorbed", greedyMergeStats.cellsAbsorbedAlongCells);
+  addWorkerCounter("mergeRowsAbsorbed", greedyMergeStats.rowsAbsorbedAlongRows);
+  addWorkerCounter("mergeFacesConsumed", greedyMergeStats.facesConsumed);
+  addWorkerCounter("mergedTranslucentQuads", greedyMergeStats.translucentQuads);
   if (isWorkerProfiling()) {
+    for (let face = 0; face < FACE_COUNT; face++) {
+      addWorkerCounter(MERGEABLE_FACE_COUNTER_NAMES[face], greedyMergeStats.recordedFacesByDirection[face]);
+    }
+    const totalVertices = opaqueStream.vertexCount + transparentStream.vertexCount;
+    addWorkerKeyedUnits(DIMENSIONS.meshVertexAttribute, VERTEX_ATTRIBUTE_POSITION, totalVertices * BYTES_PER_WORD);
+    addWorkerKeyedUnits(DIMENSIONS.meshVertexAttribute, VERTEX_ATTRIBUTE_SURFACE, totalVertices * BYTES_PER_WORD);
+    addWorkerCounter("positionWordBytes", totalVertices * BYTES_PER_WORD);
+    addWorkerCounter("surfaceWordBytes", totalVertices * BYTES_PER_WORD);
+    addWorkerCounter("opaqueStreamCapacityBytes", opaqueStream.capacityBytes);
+    addWorkerCounter("transparentStreamCapacityBytes", transparentStream.capacityBytes);
     addWorkerCounter("opaqueBytes", opaqueBuffer.byteLength);
     addWorkerCounter("transparentBytes", transparentBuffer.byteLength);
     addWorkerCounter(
