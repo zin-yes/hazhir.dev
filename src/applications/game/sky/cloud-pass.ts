@@ -6,8 +6,15 @@
 // If the blit is not supported the pass turns itself off and the sky dome traces the clouds instead (behind the world).
 
 import * as THREE from "three";
+import { DEPTH_BYTES_PER_PIXEL, HALF_FLOAT_RGBA_BYTES_PER_PIXEL, estimateTargetBytes } from "../post/render-target-memory";
+import { profiler } from "../profiler";
+import { measureGpuPass } from "../profiler/gpu-pass-registry";
 import { CLOUD_GLSL } from "./cloud-glsl";
 import { CLOUD_RENDER_SCALE } from "./sky-constants";
+
+const DEPTH_CAPTURE_PASS_LABEL = "cloudDepthCapture";
+const MARCH_PASS_LABEL = "cloudMarch";
+const COMPOSITE_PASS_LABEL = "cloudComposite";
 
 const FULLSCREEN_VERTEX_SHADER = `
 varying vec2 vUv;
@@ -81,22 +88,42 @@ class DepthCopy {
   private framebuffer: WebGLFramebuffer | null = null;
   private width = 0;
   private height = 0;
+  private readonly blitCounterName: string;
+  private readonly layoutFallbackCounterName: string;
+  private readonly reallocationCounterName: string;
+  private readonly allocatedBytesName: string;
 
+  /** `profilerName` tells the two copies apart in the profiler (`worldDepth`, `farTerrainDepth`). */
   constructor(
     private readonly renderer: THREE.WebGLRenderer,
     private readonly gl: WebGL2RenderingContext,
-  ) {}
+    profilerName: string,
+  ) {
+    this.blitCounterName = `game.sky.cloud.${profilerName}.blits`;
+    this.layoutFallbackCounterName = `game.sky.cloud.${profilerName}.layoutFallbacks`;
+    this.reallocationCounterName = `game.sky.cloud.${profilerName}.reallocations`;
+    this.allocatedBytesName = `bytes.sky.${profilerName}CopyAllocated`;
+  }
 
   get texture(): THREE.DepthTexture | null {
     return this.depthTexture;
   }
 
+  /** Estimated GPU bytes of the depth copy (every layout is 4 bytes a pixel). */
+  get byteSize(): number {
+    return this.depthTexture ? estimateTargetBytes(this.width, this.height, DEPTH_BYTES_PER_PIXEL) : 0;
+  }
+
   /** Copies the canvas depth buffer; returns false when the copy is not possible. */
   capture(width: number, height: number): boolean {
     while (this.layoutIndex < DEPTH_LAYOUTS.length) {
-      if (this.blitInto(width, height)) return true;
+      if (this.blitInto(width, height)) {
+        profiler.addCounter(this.blitCounterName);
+        return true;
+      }
       this.dispose();
       this.layoutIndex++;
+      profiler.addCounter(this.layoutFallbackCounterName);
     }
     return false;
   }
@@ -130,6 +157,16 @@ class DepthCopy {
 
   private ensureSize(width: number, height: number): boolean {
     if (this.depthTexture !== null && this.width === width && this.height === height) return true;
+    const scopeToken = profiler.begin("main.sky.cloud.depthCopyAllocate");
+    try {
+      return this.allocate(width, height);
+    } finally {
+      profiler.end(scopeToken);
+    }
+  }
+
+  private allocate(width: number, height: number): boolean {
+    profiler.addCounter(this.reallocationCounterName);
     this.dispose();
     const layout = DEPTH_LAYOUTS[this.layoutIndex]!;
     const depthTexture = new THREE.DepthTexture(width, height, layout.type);
@@ -160,6 +197,7 @@ class DepthCopy {
     this.framebuffer = framebuffer;
     this.width = width;
     this.height = height;
+    profiler.recordBytes(this.allocatedBytesName, this.byteSize);
     return true;
   }
 }
@@ -195,8 +233,8 @@ export class CloudPass {
     skyUniforms: Record<string, THREE.IUniform>,
   ) {
     this.gl = renderer.getContext() as WebGL2RenderingContext;
-    this.worldDepthCopy = new DepthCopy(renderer, this.gl);
-    this.farTerrainDepthCopy = new DepthCopy(renderer, this.gl);
+    this.worldDepthCopy = new DepthCopy(renderer, this.gl, "worldDepth");
+    this.farTerrainDepthCopy = new DepthCopy(renderer, this.gl, "farTerrainDepth");
     this.cloudTarget = new THREE.WebGLRenderTarget(1, 1, {
       type: THREE.HalfFloatType,
       format: THREE.RGBAFormat,
@@ -246,39 +284,59 @@ export class CloudPass {
     return this.isUsable;
   }
 
-  /** Call right after the far terrain was drawn and before its depth is cleared. */
+  /**
+   * Call right after the far terrain was drawn and before its depth is cleared. It runs inside the scene render, so its
+   * GPU time is part of the scene pass and only its CPU time is measured here.
+   */
   captureFarTerrainDepth(farTerrainCamera: THREE.PerspectiveCamera): void {
     if (!this.isUsable) return;
-    this.renderer.getDrawingBufferSize(this.size);
-    if (!this.farTerrainDepthCopy.capture(this.size.x, this.size.y)) {
-      this.disable();
-      return;
+    const scopeToken = profiler.begin("main.sky.cloud.captureFarTerrainDepth");
+    try {
+      this.renderer.getDrawingBufferSize(this.size);
+      if (!this.farTerrainDepthCopy.capture(this.size.x, this.size.y)) {
+        this.disable();
+        return;
+      }
+      this.marchMaterial.uniforms.farTerrainProjectionInverse!.value.copy(farTerrainCamera.projectionMatrixInverse);
+      this.farTerrainCapturedThisFrame = true;
+    } finally {
+      profiler.end(scopeToken);
     }
-    this.marchMaterial.uniforms.farTerrainProjectionInverse!.value.copy(farTerrainCamera.projectionMatrixInverse);
-    this.farTerrainCapturedThisFrame = true;
   }
 
   /** Call after the whole world is drawn: copies the real chunks' depth, marches the clouds and draws them over the canvas. */
   render(camera: THREE.PerspectiveCamera): void {
-    if (!this.isUsable) return;
+    if (!this.isUsable) {
+      profiler.addCounter("game.sky.cloud.frames.skippedUnusable");
+      return;
+    }
     this.renderer.getDrawingBufferSize(this.size);
-    if (!this.worldDepthCopy.capture(this.size.x, this.size.y)) {
+    const width = this.size.x;
+    const height = this.size.y;
+    const didCopyDepth = profiler.enabled
+      ? measureGpuPass(DEPTH_CAPTURE_PASS_LABEL, () => this.worldDepthCopy.capture(width, height))
+      : this.worldDepthCopy.capture(width, height);
+    if (!didCopyDepth) {
+      profiler.addCounter("game.sky.cloud.frames.depthCopyFailed");
       this.disable();
       return;
     }
-    camera.updateMatrixWorld();
-    const uniforms = this.marchMaterial.uniforms;
-    uniforms.worldDepth!.value = this.worldDepthCopy.texture;
-    uniforms.farTerrainDepth!.value = this.farTerrainDepthCopy.texture;
-    uniforms.farTerrainDepthValid!.value = this.farTerrainCapturedThisFrame ? 1 : 0;
-    uniforms.worldProjectionInverse!.value.copy(camera.projectionMatrixInverse);
-    uniforms.cameraWorldMatrix!.value.copy(camera.matrixWorld);
-    this.farTerrainCapturedThisFrame = false;
+    this.updateMarchUniforms(camera);
 
-    const targetWidth = Math.max(1, Math.round(this.size.x * CLOUD_RENDER_SCALE));
-    const targetHeight = Math.max(1, Math.round(this.size.y * CLOUD_RENDER_SCALE));
+    const targetWidth = Math.max(1, Math.round(width * CLOUD_RENDER_SCALE));
+    const targetHeight = Math.max(1, Math.round(height * CLOUD_RENDER_SCALE));
     if (this.cloudTarget.width !== targetWidth || this.cloudTarget.height !== targetHeight) {
-      this.cloudTarget.setSize(targetWidth, targetHeight);
+      const resizeToken = profiler.begin("main.sky.cloud.resizeTarget");
+      try {
+        this.cloudTarget.setSize(targetWidth, targetHeight);
+        profiler.addCounter("game.sky.cloud.targetResizes");
+        profiler.recordBytes(
+          "bytes.sky.cloudTargetAllocated",
+          estimateTargetBytes(targetWidth, targetHeight, HALF_FLOAT_RGBA_BYTES_PER_PIXEL),
+        );
+      } finally {
+        profiler.end(resizeToken);
+      }
     }
 
     const previousAutoClear = this.renderer.autoClear;
@@ -286,13 +344,47 @@ export class CloudPass {
     this.renderer.autoClear = false;
     try {
       this.renderer.setRenderTarget(this.cloudTarget);
-      this.renderer.render(this.marchScene, this.camera);
+      if (profiler.enabled) measureGpuPass(MARCH_PASS_LABEL, () => this.renderer.render(this.marchScene, this.camera));
+      else this.renderer.render(this.marchScene, this.camera);
       this.renderer.setRenderTarget(previousTarget);
-      this.renderer.render(this.compositeScene, this.camera);
+      if (profiler.enabled) measureGpuPass(COMPOSITE_PASS_LABEL, () => this.renderer.render(this.compositeScene, this.camera));
+      else this.renderer.render(this.compositeScene, this.camera);
     } finally {
       this.renderer.setRenderTarget(previousTarget);
       this.renderer.autoClear = previousAutoClear;
     }
+    if (profiler.enabled) this.sampleFrameMetrics(width, height, targetWidth, targetHeight);
+  }
+
+  private updateMarchUniforms(camera: THREE.PerspectiveCamera): void {
+    const scopeToken = profiler.begin("main.sky.cloud.updateUniforms");
+    try {
+      camera.updateMatrixWorld();
+      const uniforms = this.marchMaterial.uniforms;
+      uniforms.worldDepth!.value = this.worldDepthCopy.texture;
+      uniforms.farTerrainDepth!.value = this.farTerrainDepthCopy.texture;
+      uniforms.farTerrainDepthValid!.value = this.farTerrainCapturedThisFrame ? 1 : 0;
+      uniforms.worldProjectionInverse!.value.copy(camera.projectionMatrixInverse);
+      uniforms.cameraWorldMatrix!.value.copy(camera.matrixWorld);
+      profiler.addCounter(
+        this.farTerrainCapturedThisFrame ? "game.sky.cloud.frames.withFarTerrainDepth" : "game.sky.cloud.frames.withoutFarTerrainDepth",
+      );
+      this.farTerrainCapturedThisFrame = false;
+    } finally {
+      profiler.end(scopeToken);
+    }
+  }
+
+  private sampleFrameMetrics(screenWidth: number, screenHeight: number, targetWidth: number, targetHeight: number): void {
+    profiler.addCounter("game.sky.cloud.frames.rendered");
+    profiler.addCounter("game.sky.cloud.marchedPixels", targetWidth * targetHeight, "pixels");
+    profiler.sampleGauge("game.sky.cloud.renderScale", CLOUD_RENDER_SCALE);
+    profiler.sampleGauge("game.sky.cloud.screenPixels", screenWidth * screenHeight, "pixels");
+    const targetBytes = estimateTargetBytes(this.cloudTarget.width, this.cloudTarget.height, HALF_FLOAT_RGBA_BYTES_PER_PIXEL);
+    const depthCopyBytes = this.worldDepthCopy.byteSize + this.farTerrainDepthCopy.byteSize;
+    profiler.sampleGauge("memory.sky.cloudTargetBytes", targetBytes, "bytes");
+    profiler.sampleGauge("memory.sky.cloudDepthCopyBytes", depthCopyBytes, "bytes");
+    profiler.sampleGauge("memory.sky.cloudTotalBytes", targetBytes + depthCopyBytes, "bytes");
   }
 
   onDisabled?: () => void;
@@ -311,6 +403,7 @@ export class CloudPass {
   }
 
   private disable(): void {
+    profiler.addCounter("game.sky.cloud.passDisabled");
     this.isUsable = false;
     console.warn("Cloud pass disabled: the depth copy is not supported here, clouds fall back to the sky dome");
     this.onDisabled?.();
