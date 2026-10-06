@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { AffinityQueues } from "./affinity-queues";
+import { counterTotal, timerCallCount, withEnabledProfiler } from "./profiler-readings.test-helper";
 
 describe("AffinityQueues", () => {
   const preferredWorker = (key: number) => Math.floor(key / 100);
@@ -56,5 +57,27 @@ describe("AffinityQueues", () => {
     expect(queues.takeFor(0)).toBe(21);
     expect(queues.takeFor(1)).toBe(22);
     expect(queues.size).toBe(0);
+  });
+});
+
+describe("AffinityQueues profiling", () => {
+  test("counts own takes, single key steals, whole tile steals and the keys that moved", () => {
+    const tileOf = (key: number) => Math.floor(key / 10);
+    withEnabledProfiler(() => {
+      const queues = new AffinityQueues(2, () => 0, 2, tileOf, "testLane");
+      for (const key of [10, 11, 12, 20, 21, 22]) queues.schedule(key, key / 10);
+      [0, 1, 1, 1, 0, 1].forEach((workerIndex) => queues.takeFor(workerIndex));
+      expect(counterTotal("game.affinity.testLane.enqueued")).toBe(6);
+      expect(counterTotal("game.affinity.testLane.takenFromOwnQueue")).toBe(2);
+      expect(counterTotal("game.affinity.testLane.stolenSingleKey")).toBe(3);
+      expect(counterTotal("game.affinity.testLane.stolenWholeGroup")).toBe(1);
+      expect(counterTotal("game.affinity.testLane.stolenGroupKeysMoved")).toBe(3);
+      expect(counterTotal("game.affinity.testLane.worker1.stolenByIt")).toBe(3);
+      expect(counterTotal("game.affinity.testLane.worker0.stolenFromIt")).toBe(3);
+      expect(counterTotal("game.scheduler.testLane.dequeued")).toBe(6);
+      expect(timerCallCount("latency.scheduler.testLane.wait")).toBe(6);
+      expect(queues.takeFor(0)).toBeUndefined();
+      expect(counterTotal("game.affinity.testLane.starved")).toBe(1);
+    });
   });
 });

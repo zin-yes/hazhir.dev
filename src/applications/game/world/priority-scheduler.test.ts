@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { PriorityScheduler } from "./priority-scheduler";
+import { counterTotal, gaugeLast, timerCallCount, withEnabledProfiler } from "./profiler-readings.test-helper";
 
 function createSeededRandom(seed: number): () => number {
   let state = seed >>> 0;
@@ -176,5 +177,42 @@ describe("PriorityScheduler in-flight accounting", () => {
     scheduler.schedule(1, 1, 1);
     scheduler.pop();
     expect(scheduler.inFlightCount).toBe(0);
+  });
+});
+
+describe("PriorityScheduler profiling", () => {
+  test("records lane traffic: enqueues, replacements, cancelled drops, in-flight blocks and one wait per dequeue", () => {
+    const cancelledKeys = new Set([3, 4]);
+    withEnabledProfiler(() => {
+      const scheduler = new PriorityScheduler<number>({
+        maxInFlight: 2,
+        isCancelled: (key) => cancelledKeys.has(key),
+        profilerLane: "testLane",
+      });
+      for (let key = 0; key < 6; key++) scheduler.schedule(key, key, key);
+      scheduler.schedule(5, 5, 0.5);
+      scheduler.reprioritize(2, 10);
+      scheduler.reprioritize(99, 1);
+      expect(scheduler.takeBatch(5)).toEqual([0, 5]);
+      expect(scheduler.dispatchNext()).toBeUndefined();
+      scheduler.completeDispatch();
+      expect(scheduler.dispatchNext()).toBe(1);
+      scheduler.completeDispatch();
+      scheduler.completeDispatch();
+      expect([scheduler.pop(), scheduler.pop(), scheduler.pop()]).toEqual([2, undefined, undefined]);
+
+      expect(counterTotal("game.scheduler.testLane.enqueued")).toBe(6);
+      expect(counterTotal("game.scheduler.testLane.replaced")).toBe(1);
+      expect(counterTotal("game.scheduler.testLane.reprioritized")).toBe(1);
+      expect(counterTotal("game.scheduler.testLane.reprioritizeMissed")).toBe(1);
+      expect(counterTotal("game.scheduler.testLane.dispatched")).toBe(3);
+      expect(counterTotal("game.scheduler.testLane.blockedByInFlight")).toBe(1);
+      expect(counterTotal("game.scheduler.testLane.cancelledDropped")).toBe(2);
+      expect(counterTotal("game.scheduler.testLane.dequeued")).toBe(4);
+      expect(timerCallCount("latency.scheduler.testLane.wait")).toBe(4);
+      expect(counterTotal("game.scheduler.testLane.starved")).toBe(2);
+      scheduler.publishProfilerGauges();
+      expect(gaugeLast("queue.scheduler.testLane.depth")).toBe(0);
+    });
   });
 });
