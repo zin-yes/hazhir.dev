@@ -1,3 +1,4 @@
+import { useProfiledRender } from "../use-profiled-render";
 import styles from "./touch.module.css";
 
 interface TouchJoystickProps {
@@ -9,6 +10,7 @@ interface TouchJoystickProps {
 }
 
 export function TouchJoystick({ radius, stickSize, stickOffset, position }: TouchJoystickProps) {
+  useProfiledRender("touchJoystick");
   return (
     <div className={styles.joystickBase} style={{ width: radius * 2, height: radius * 2, ...position }}>
       <div

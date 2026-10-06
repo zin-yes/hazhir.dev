@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { profiler } from "../profiler";
+import { finishInputEvent, startInputEvent, type InputKind } from "../input-profiling";
 import { DIMENSIONS } from "../profiler/dimensions";
 import type { GameSettings } from "../settings/game-settings";
 import { TouchButton } from "./touch/touch-button";
@@ -12,6 +13,7 @@ import {
   isJoystickSide,
   touchLayoutFor,
 } from "./touch/touch-layout";
+import { uiEventProps } from "./ui-profiling";
 import { useProfiledRender } from "./use-profiled-render";
 
 type TouchSettings = Pick<
@@ -104,6 +106,7 @@ export function MobileControls({
       const maxDistance = refs.current.layout.joystickRadius;
       const dx = clientX - joystickOrigin.current.x;
       const dy = clientY - joystickOrigin.current.y;
+      profiler.addCounter("game.input.touch.joystickUpdates");
       const dist = Math.sqrt(dx * dx + dy * dy);
       const clamped = Math.min(dist, maxDistance);
       const angle = Math.atan2(dy, dx);
@@ -126,7 +129,10 @@ export function MobileControls({
       if (!refs.current.enabled) return;
       for (let i = 0; i < e.changedTouches.length; i++) {
         const touch = e.changedTouches[i];
-        if (isUI(touch.target)) continue;
+        if (isUI(touch.target)) {
+          profiler.addCounter("game.input.touch.uiTouchesIgnored");
+          continue;
+        }
 
         e.preventDefault();
 
@@ -154,6 +160,7 @@ export function MobileControls({
         }
 
         if (startsJoystick) {
+          profiler.addCounter("game.input.touch.joystickGrabs");
           joystickTouchId.current = touch.identifier;
           joystickOrigin.current = joystickOriginPoint;
           if (isFixedJoystick) {
@@ -165,6 +172,7 @@ export function MobileControls({
             });
           }
         } else if (cameraTouchId.current === null) {
+          profiler.addCounter("game.input.touch.cameraGrabs");
           cameraTouchId.current = touch.identifier;
           lastCameraPos.current = { x: touch.clientX, y: touch.clientY };
         }
@@ -186,6 +194,7 @@ export function MobileControls({
           const dx = touch.clientX - lastCameraPos.current.x;
           const dy = touch.clientY - lastCameraPos.current.y;
           lastCameraPos.current = { x: touch.clientX, y: touch.clientY };
+          profiler.addCounter("game.input.touch.cameraDrags");
           refs.current.onCameraRotate(dx, dy);
         }
       }
@@ -209,8 +218,16 @@ export function MobileControls({
     };
 
     const withTouchScope =
-      (scopeName: string, handler: (event: TouchEvent) => void) =>
+      (
+        scopeName: string,
+        inputKind: InputKind,
+        handler: (event: TouchEvent) => void,
+      ) =>
       (event: TouchEvent) => {
+        const startedAtMs = startInputEvent();
+        if (startedAtMs >= 0) {
+          profiler.addCounter("game.input.touch.points", event.changedTouches.length);
+        }
         const scopeToken = profiler.begin(
           scopeName,
           DIMENSIONS.simulationSystem,
@@ -220,22 +237,24 @@ export function MobileControls({
           handler(event);
         } finally {
           profiler.end(scopeToken);
+          finishInputEvent(inputKind, startedAtMs);
         }
       };
-    const onTouchStart = withTouchScope("main.input.touchStart", handleTouchStart);
-    const onTouchMove = withTouchScope("main.input.touchMove", handleTouchMove);
-    const onTouchEnd = withTouchScope("main.input.touchEnd", handleTouchEnd);
+    const onTouchStart = withTouchScope("main.input.touchStart", "touchStart", handleTouchStart);
+    const onTouchMove = withTouchScope("main.input.touchMove", "touchMove", handleTouchMove);
+    const onTouchEnd = withTouchScope("main.input.touchEnd", "touchEnd", handleTouchEnd);
+    const onTouchCancel = withTouchScope("main.input.touchCancel", "touchCancel", handleTouchEnd);
 
     el.addEventListener("touchstart", onTouchStart, { passive: false });
     el.addEventListener("touchmove", onTouchMove, { passive: false });
     el.addEventListener("touchend", onTouchEnd);
-    el.addEventListener("touchcancel", onTouchEnd);
+    el.addEventListener("touchcancel", onTouchCancel);
 
     return () => {
       el.removeEventListener("touchstart", onTouchStart);
       el.removeEventListener("touchmove", onTouchMove);
       el.removeEventListener("touchend", onTouchEnd);
-      el.removeEventListener("touchcancel", onTouchEnd);
+      el.removeEventListener("touchcancel", onTouchCancel);
       refs.current.onMovement(false, false, false, false);
     };
   }, [containerRef]);
@@ -260,6 +279,7 @@ export function MobileControls({
     <div
       className="absolute inset-0 pointer-events-none z-30 select-none"
       style={{ opacity: settings.touchOpacity }}
+      {...uiEventProps("mobileControls")}
     >
       {joystickPosition && (
         <TouchJoystick
