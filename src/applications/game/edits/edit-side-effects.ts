@@ -5,6 +5,8 @@
 
 import { BlockType, isWater } from "../blocks";
 import { CHUNK_HEIGHT, CHUNK_LENGTH, CHUNK_WIDTH } from "../config";
+import { profiler } from "../profiler";
+import { DIMENSIONS } from "../profiler/dimensions";
 import { calculateOffset } from "../utils";
 import type { BlockChangeLog } from "./apply-block-edits";
 import type { BlockEditBatch } from "./block-edit-batch";
@@ -30,6 +32,26 @@ export function recordSavedEdits(
   blocks: ArrayLike<number>,
   shouldRecord: (position: number, chunkX: number, chunkY: number, chunkZ: number) => boolean = () => true,
 ): void {
+  const scopeToken = profiler.begin("main.edit.recordSavedEdits", DIMENSIONS.editSideEffect, "savedEdit");
+  try {
+    writeSavedEdits(target, count, xs, ys, zs, blocks, shouldRecord);
+  } finally {
+    profiler.end(scopeToken);
+  }
+}
+
+function writeSavedEdits(
+  target: SavedEditTarget,
+  count: number,
+  xs: ArrayLike<number>,
+  ys: ArrayLike<number>,
+  zs: ArrayLike<number>,
+  blocks: ArrayLike<number>,
+  shouldRecord: (position: number, chunkX: number, chunkY: number, chunkZ: number) => boolean,
+): void {
+  let recorded = 0;
+  let skipped = 0;
+  let chunkLookups = 0;
   let cachedChunkX = Number.NaN;
   let cachedChunkY = Number.NaN;
   let cachedChunkZ = Number.NaN;
@@ -41,9 +63,13 @@ export function recordSavedEdits(
     const chunkX = Math.floor(x / CHUNK_WIDTH);
     const chunkY = Math.floor(y / CHUNK_HEIGHT);
     const chunkZ = Math.floor(z / CHUNK_LENGTH);
-    if (!shouldRecord(position, chunkX, chunkY, chunkZ)) continue;
+    if (!shouldRecord(position, chunkX, chunkY, chunkZ)) {
+      skipped++;
+      continue;
+    }
     if (cachedEdits === null || chunkX !== cachedChunkX || chunkY !== cachedChunkY || chunkZ !== cachedChunkZ) {
       cachedEdits = target.editsOfChunk(chunkX, chunkY, chunkZ);
+      chunkLookups++;
       cachedChunkX = chunkX;
       cachedChunkY = chunkY;
       cachedChunkZ = chunkZ;
@@ -52,7 +78,13 @@ export function recordSavedEdits(
       calculateOffset(x - chunkX * CHUNK_WIDTH, y - chunkY * CHUNK_HEIGHT, z - chunkZ * CHUNK_LENGTH),
       blocks[position],
     );
+    recorded++;
   }
+  if (!profiler.enabled) return;
+  profiler.addCounter("game.edit.sideEffect.savedEditsRecorded", recorded);
+  profiler.addCounter("game.edit.sideEffect.savedEditsSkipped", skipped);
+  profiler.addCounter("game.edit.sideEffect.savedEditChunkLookups", chunkLookups);
+  profiler.recordBreakdown(DIMENSIONS.editSideEffect, "savedEdit", { units: recorded, calls: 1 });
 }
 
 /** Saves the edits of a batch that land in chunks without blocks, so they apply when the chunk loads. */
@@ -61,16 +93,28 @@ export function recordEditsOutsideLoadedChunks(
   batch: BlockEditBatch,
   hasChunkBlocks: (chunkX: number, chunkY: number, chunkZ: number) => boolean,
 ): void {
+  const scopeToken = profiler.begin("main.edit.recordOutsideLoaded", DIMENSIONS.editSideEffect, "savedEditOutsideLoaded");
   let cachedKey = "";
   let cachedHasBlocks = false;
-  recordSavedEdits(target, batch.length, batch.xs, batch.ys, batch.zs, batch.blocks, (_position, chunkX, chunkY, chunkZ) => {
-    const key = `${chunkX},${chunkY},${chunkZ}`;
-    if (key !== cachedKey) {
-      cachedKey = key;
-      cachedHasBlocks = hasChunkBlocks(chunkX, chunkY, chunkZ);
-    }
-    return !cachedHasBlocks;
-  });
+  let loadedChunkChecks = 0;
+  let positionsInUnloadedChunks = 0;
+  try {
+    recordSavedEdits(target, batch.length, batch.xs, batch.ys, batch.zs, batch.blocks, (_position, chunkX, chunkY, chunkZ) => {
+      const key = `${chunkX},${chunkY},${chunkZ}`;
+      if (key !== cachedKey) {
+        cachedKey = key;
+        cachedHasBlocks = hasChunkBlocks(chunkX, chunkY, chunkZ);
+        loadedChunkChecks++;
+      }
+      if (!cachedHasBlocks) positionsInUnloadedChunks++;
+      return !cachedHasBlocks;
+    });
+  } finally {
+    profiler.end(scopeToken);
+  }
+  profiler.addCounter("game.edit.sideEffect.outsideLoadedPositionsChecked", batch.length);
+  profiler.addCounter("game.edit.sideEffect.outsideLoadedChunkChecks", loadedChunkChecks);
+  profiler.addCounter("game.edit.sideEffect.outsideLoadedPositionsSaved", positionsInUnloadedChunks);
 }
 
 const NEIGHBOR_OFFSETS: ReadonlyArray<readonly [number, number, number]> = [
@@ -92,7 +136,28 @@ export function wakeWaterAroundChanges(
   chunkBlocks: (chunkX: number, chunkY: number, chunkZ: number) => Uint8Array | null | undefined,
   scheduleWaterUpdate: (x: number, y: number, z: number) => void,
 ): void {
+  const scopeToken = profiler.begin("main.edit.wakeWater", DIMENSIONS.editSideEffect, "waterWake");
+  try {
+    wakeWater(changes, chunkBlocks, scheduleWaterUpdate);
+  } finally {
+    profiler.end(scopeToken);
+  }
+}
+
+function wakeWater(
+  changes: BlockChangeLog,
+  chunkBlocks: (chunkX: number, chunkY: number, chunkZ: number) => Uint8Array | null | undefined,
+  scheduleWaterUpdate: (x: number, y: number, z: number) => void,
+): void {
   const waterByChunk = new Map<string, Uint8Array | null>();
+  let chunksScanned = 0;
+  let chunksWithWater = 0;
+  let chunksNotLoaded = 0;
+  let cellsScanned = 0;
+  let chunkCacheHits = 0;
+  let neighborProbes = 0;
+  let changesTouchingWater = 0;
+  let waterUpdatesScheduled = 0;
   const waterCellsOf = (chunkX: number, chunkY: number, chunkZ: number) => {
     const key = `${chunkX},${chunkY},${chunkZ}`;
     let blocks = waterByChunk.get(key);
@@ -100,14 +165,21 @@ export function wakeWaterAroundChanges(
       const candidate = chunkBlocks(chunkX, chunkY, chunkZ);
       blocks = null;
       if (candidate) {
+        chunksScanned++;
         for (let index = 0; index < candidate.length; index++) {
+          cellsScanned++;
           if (IS_WATER_BLOCK[candidate[index]] === 1) {
             blocks = candidate;
+            chunksWithWater++;
             break;
           }
         }
+      } else {
+        chunksNotLoaded++;
       }
       waterByChunk.set(key, blocks);
+    } else {
+      chunkCacheHits++;
     }
     return blocks;
   };
@@ -116,6 +188,7 @@ export function wakeWaterAroundChanges(
   let lastChunkZ = Number.NaN;
   let lastBlocks: Uint8Array | null = null;
   const isWaterAt = (x: number, y: number, z: number) => {
+    neighborProbes++;
     const chunkX = Math.floor(x / CHUNK_WIDTH);
     const chunkY = Math.floor(y / CHUNK_HEIGHT);
     const chunkZ = Math.floor(z / CHUNK_LENGTH);
@@ -144,6 +217,21 @@ export function wakeWaterAroundChanges(
       touchesWater = isWaterAt(x + offsetX, y + offsetY, z + offsetZ);
     }
     if (!touchesWater) continue;
-    for (const [offsetX, offsetY, offsetZ] of NEIGHBOR_OFFSETS) scheduleWaterUpdate(x + offsetX, y + offsetY, z + offsetZ);
+    changesTouchingWater++;
+    for (const [offsetX, offsetY, offsetZ] of NEIGHBOR_OFFSETS) {
+      scheduleWaterUpdate(x + offsetX, y + offsetY, z + offsetZ);
+      waterUpdatesScheduled++;
+    }
   }
+  if (!profiler.enabled) return;
+  profiler.addCounter("game.edit.sideEffect.waterChangesExamined", changes.count);
+  profiler.addCounter("game.edit.sideEffect.waterChangesTouchingWater", changesTouchingWater);
+  profiler.addCounter("game.edit.sideEffect.waterUpdatesScheduled", waterUpdatesScheduled);
+  profiler.addCounter("game.edit.sideEffect.waterChunksScanned", chunksScanned);
+  profiler.addCounter("game.edit.sideEffect.waterChunksWithWater", chunksWithWater);
+  profiler.addCounter("game.edit.sideEffect.waterChunksNotLoaded", chunksNotLoaded);
+  profiler.addCounter("game.edit.sideEffect.waterCellsScanned", cellsScanned);
+  profiler.addCounter("game.edit.sideEffect.waterChunkCacheHits", chunkCacheHits);
+  profiler.addCounter("game.edit.sideEffect.waterNeighborProbes", neighborProbes);
+  profiler.recordBreakdown(DIMENSIONS.editSideEffect, "waterWake", { units: waterUpdatesScheduled, calls: 1 });
 }

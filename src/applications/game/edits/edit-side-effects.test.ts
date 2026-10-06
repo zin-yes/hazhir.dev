@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { BlockType } from "../blocks";
 import { calculateOffset } from "../utils";
+import { counterTotal, withEnabledProfiler } from "../world/profiler-readings.test-helper";
 import type { BlockChangeLog } from "./apply-block-edits";
 import { sphereEdits } from "./block-edit-batch";
 import { recordEditsOutsideLoadedChunks, recordSavedEdits, wakeWaterAroundChanges, type SavedEditTarget } from "./edit-side-effects";
@@ -71,5 +72,37 @@ describe("edit side effects", () => {
     expect(woken.has("40,5,10")).toBe(false);
     expect(woken.has("31,5,10")).toBe(false);
     expect(woken.size).toBe(14);
+  });
+
+  test("profiling counts saved edits per chunk lookup, skipped positions and the water scan work", () => {
+    const wetChunk = new Uint8Array(32768);
+    wetChunk[calculateOffset(10, 5, 10)] = BlockType.WATER;
+    const dryChunk = new Uint8Array(32768).fill(BlockType.STONE);
+    const changes = changeLogOf([
+      [11, 5, 10, BlockType.STONE, BlockType.AIR],
+      [40, 5, 10, BlockType.STONE, BlockType.AIR],
+      [31, 5, 10, BlockType.STONE, BlockType.AIR],
+      [50, 6, 10, BlockType.WATER, BlockType.AIR],
+    ]);
+    const { target } = createTarget();
+    const sphere = sphereEdits({ x: 0, y: 16, z: 16 }, 3, BlockType.DIRT, "fill");
+    withEnabledProfiler(() => {
+      wakeWaterAroundChanges(changes, (chunkX) => (chunkX === 0 ? wetChunk : dryChunk), () => {});
+      expect(counterTotal("game.edit.sideEffect.waterChangesExamined")).toBe(4);
+      expect(counterTotal("game.edit.sideEffect.waterChangesTouchingWater")).toBe(2);
+      expect(counterTotal("game.edit.sideEffect.waterUpdatesScheduled")).toBe(14);
+      expect(counterTotal("game.edit.sideEffect.waterChunksScanned")).toBe(2);
+      expect(counterTotal("game.edit.sideEffect.waterChunksWithWater")).toBe(1);
+      const scanned = counterTotal("game.edit.sideEffect.waterCellsScanned");
+      expect(scanned).toBeGreaterThan(32768);
+      expect(scanned).toBeLessThan(2 * 32768);
+
+      recordEditsOutsideLoadedChunks(target, sphere, (chunkX) => chunkX === 0);
+      const savedOutside = counterTotal("game.edit.sideEffect.outsideLoadedPositionsSaved");
+      expect(savedOutside).toBeGreaterThan(0);
+      expect(savedOutside).toBeLessThan(sphere.length);
+      expect(counterTotal("game.edit.sideEffect.savedEditsRecorded")).toBe(savedOutside);
+      expect(counterTotal("game.edit.sideEffect.savedEditsSkipped")).toBe(sphere.length - savedOutside);
+    });
   });
 });
