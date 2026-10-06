@@ -16,6 +16,8 @@ import {
 import { BoundedLruCache, packChunkColumnKey } from "./engine/pipeline/bounded-lru-cache";
 import { toGameBlockOrAir } from "./engine/blocks/lenient-block-map";
 import { blockNameOf, CHUNK_COLUMN_SIZE, type ChunkBlocks } from "./engine/chunk";
+import { beginColdStart, defineColdStartLabel, endColdStart } from "./engine/profiling/cold-start-ledger";
+import { beginHotCounting, endHotCounting } from "./engine/profiling/hot-counters";
 import { GAME_Y_OFFSET } from "./constants";
 import { getFullWorld, type FullWorld } from "./overworld-world";
 
@@ -27,6 +29,10 @@ const MINECRAFT_COLUMNS_PER_GAME_CHUNK_Z = CHUNK_LENGTH / CHUNK_COLUMN_SIZE;
 const MAX_CACHED_GAME_COLUMNS = 64;
 const MAX_CACHED_SEEDS = 2;
 const UNMAPPED_GAME_BLOCK_KEY = "unmapped";
+const FIRST_CHUNK_LABEL = defineColdStartLabel("firstChunkGeneration");
+const DISTINCT_BLOCK_TYPE_LIMIT = 256;
+const FILL_BUCKET_SPARSE_LIMIT = GAME_CHUNK_VOLUME / 4;
+const FILL_BUCKET_DENSE_LIMIT = (GAME_CHUNK_VOLUME * 3) / 4;
 
 /** All vertical chunks of one game column; a missing chunk y is entirely air. */
 type GameColumn = Map<number, Uint8Array>;
@@ -68,6 +74,7 @@ class SeedChunkSource {
     const unitsByBlockName = new Map<string, number>();
     const unitsByGameBlock = new Map<string, number>();
     let distinctPaletteIds = 0;
+    let blocksMappedToAir = 0;
     for (let paletteId = 1; paletteId < idCounts.length; paletteId++) {
       const count = idCounts[paletteId]!;
       if (count === 0) continue;
@@ -75,6 +82,7 @@ class SeedChunkSource {
       const blockName = blockNameOf(column.palette.stateOf(paletteId));
       unitsByBlockName.set(blockName, (unitsByBlockName.get(blockName) ?? 0) + count);
       const gameBlock = this.gameBlockOf(column, paletteId);
+      if (gameBlock === BlockType.AIR && !this.unknownByPaletteId[paletteId]) blocksMappedToAir += count;
       if (gameBlock !== BlockType.AIR || this.unknownByPaletteId[paletteId]) {
         const gameBlockName = this.unknownByPaletteId[paletteId] ? UNMAPPED_GAME_BLOCK_KEY : BlockType[gameBlock]!;
         unitsByGameBlock.set(gameBlockName, (unitsByGameBlock.get(gameBlockName) ?? 0) + count);
@@ -83,12 +91,69 @@ class SeedChunkSource {
     for (const [blockName, units] of unitsByBlockName) addWorkerKeyedUnits(DIMENSIONS.worldgenBlock, blockName, units);
     for (const [gameBlockName, units] of unitsByGameBlock) addWorkerKeyedUnits(DIMENSIONS.gameBlock, gameBlockName, units);
     addWorkerCounter("distinctPaletteIdsPerColumn", distinctPaletteIds);
+    addWorkerCounter("convert.paletteSizeTotal", column.palette.size);
+    addWorkerCounter("convert.blocksPaletteZero", idCounts[0] ?? 0);
+    addWorkerCounter("convert.blocksMappedToAir", blocksMappedToAir);
+  }
+
+  /**
+   * Shape of the finished vertical chunks of one game column: how full they are, how many are a single block type
+   * and how many distinct block types they hold. These decide how well the data packs and meshes later. Runs only
+   * while profiling.
+   */
+  private recordVerticalChunkStatistics(gameColumn: GameColumn): void {
+    const blockTypesSeen = new Uint8Array(DISTINCT_BLOCK_TYPE_LIMIT);
+    let uniformChunks = 0;
+    let distinctBlockTypes = 0;
+    let emptyChunks = 0;
+    let sparseChunks = 0;
+    let partialChunks = 0;
+    let denseChunks = 0;
+    let fullChunks = 0;
+    for (const chunkBlocks of gameColumn.values()) {
+      blockTypesSeen.fill(0);
+      let solidBlocks = 0;
+      let chunkDistinctTypes = 0;
+      const firstBlock = chunkBlocks[0]!;
+      let isUniform = true;
+      for (let index = 0; index < chunkBlocks.length; index++) {
+        const blockType = chunkBlocks[index]!;
+        if (blockType !== 0) solidBlocks++;
+        if (blockType !== firstBlock) isUniform = false;
+        if (blockTypesSeen[blockType] === 0) {
+          blockTypesSeen[blockType] = 1;
+          chunkDistinctTypes++;
+        }
+      }
+      if (isUniform) uniformChunks++;
+      distinctBlockTypes += chunkDistinctTypes;
+      if (solidBlocks === 0) emptyChunks++;
+      else if (solidBlocks < FILL_BUCKET_SPARSE_LIMIT) sparseChunks++;
+      else if (solidBlocks < FILL_BUCKET_DENSE_LIMIT) partialChunks++;
+      else if (solidBlocks < GAME_CHUNK_VOLUME) denseChunks++;
+      else fullChunks++;
+    }
+    addWorkerCounter("gameColumn.verticalChunksBuilt", gameColumn.size);
+    addWorkerCounter("gameColumn.bytesBuilt", gameColumn.size * GAME_CHUNK_VOLUME);
+    addWorkerCounter("gameColumn.uniformVerticalChunks", uniformChunks);
+    addWorkerCounter("gameColumn.distinctBlockTypesTotal", distinctBlockTypes);
+    addWorkerCounter("gameColumn.fillEmpty", emptyChunks);
+    addWorkerCounter("gameColumn.fillUnderQuarter", sparseChunks);
+    addWorkerCounter("gameColumn.fillQuarterToThreeQuarters", partialChunks);
+    addWorkerCounter("gameColumn.fillOverThreeQuarters", denseChunks);
+    addWorkerCounter("gameColumn.fillFull", fullChunks);
   }
 
   private buildGameColumn(chunkX: number, chunkZ: number): GameColumn {
     startWorkerSection("convert.buildGameColumn");
     try {
-      return this.convertDecoratedColumns(chunkX, chunkZ);
+      const gameColumn = this.convertDecoratedColumns(chunkX, chunkZ);
+      if (isWorkerProfiling()) {
+        startWorkerSection("convert.chunkStatistics");
+        this.recordVerticalChunkStatistics(gameColumn);
+        endWorkerSection();
+      }
+      return gameColumn;
     } finally {
       endWorkerSection();
     }
@@ -183,6 +248,7 @@ function sourceForSeed(seed: number): SeedChunkSource {
   if (source === undefined) {
     if (sourcesBySeed.size >= MAX_CACHED_SEEDS) sourcesBySeed.delete(sourcesBySeed.keys().next().value as number);
     source = new SeedChunkSource(seed);
+    addWorkerCounter("seedChunkSourcesCreated", 1);
   } else {
     sourcesBySeed.delete(seed);
   }
@@ -190,13 +256,21 @@ function sourceForSeed(seed: number): SeedChunkSource {
   return source;
 }
 
+let hasGeneratedFirstChunk = false;
+
 export function generateChunkBlocks(seed: number, chunkX: number, chunkY: number, chunkZ: number): Uint8Array {
+  const isFirstChunk = !hasGeneratedFirstChunk;
+  hasGeneratedFirstChunk = true;
+  const firstChunkToken = isFirstChunk ? beginColdStart(FIRST_CHUNK_LABEL) : 0;
+  const isCountingHot = beginHotCounting();
   startWorkerSection("terrainNoise");
   let blocks: Uint8Array;
   try {
     blocks = sourceForSeed(seed).chunkBlocks(chunkX, chunkY, chunkZ);
   } finally {
     endWorkerSection();
+    endHotCounting(isCountingHot);
+    if (isFirstChunk) endColdStart(FIRST_CHUNK_LABEL, firstChunkToken);
   }
   addWorkerCounter("blocksGenerated", blocks.length);
   addWorkerCounter("verticalChunksGenerated", 1);
