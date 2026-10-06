@@ -871,6 +871,23 @@ export default function Game() {
           getTextureArrayBytes: () => textureArrayBytesRef.current,
         }),
       );
+      const drawingBufferSize = new THREE.Vector2();
+      const removeLiveSettingsSampler = profiler.addSampler(() => {
+        const settings = gameSettingsRef.current;
+        const renderSettings = renderSettingsRef.current;
+        profiler.setSessionInfo({
+          game: {
+            shadowQuality: settings.shadowQuality,
+            bloomEnabled: settings.bloomEnabled ? 1 : 0,
+            waterReflections: settings.waterReflections ? 1 : 0,
+            fieldOfViewDegrees: settings.fieldOfViewDegrees,
+            farTerrainChunks: renderSettings.lodRenderDistanceChunks,
+            loadVolumeShape: renderSettings.shape,
+          },
+        });
+        renderer.getDrawingBufferSize(drawingBufferSize);
+        profiler.sampleGauge("gpu.drawingBufferPixels", drawingBufferSize.x * drawingBufferSize.y, "pixels");
+      });
 
       const physics = new PhysicsEngine(getBlock);
       playerControlsRef.current = new PlayerControls(
@@ -1239,6 +1256,7 @@ export default function Game() {
         profiledRenderRef.current?.dispose();
         profiledRenderRef.current = null;
         removeSceneMemorySampler();
+        removeLiveSettingsSampler();
         stopCalibrationListener();
         uninstallBrowserObservers();
         uninstallVoxelWorldApi();
