@@ -6,6 +6,7 @@
 // i32 start x, i32 start y, i32 start z, u16 length, u8 block.
 
 import { BlockEditBatch } from "../edits/block-edit-batch";
+import { profiler } from "../profiler";
 
 const HEADER_BYTES = 8;
 const BYTES_PER_RUN = 4 * 3 + 2 + 1;
@@ -21,6 +22,23 @@ export function encodeBlockRuns(
   blocks: ArrayLike<number>,
   runAxis: RunAxis,
 ): ArrayBuffer {
+  const encodeToken = profiler.begin("main.network.blockBatch.encode");
+  try {
+    return encodeBlockRunsUnprofiled(count, xs, ys, zs, blocks, runAxis);
+  } finally {
+    profiler.end(encodeToken);
+  }
+}
+
+function encodeBlockRunsUnprofiled(
+  count: number,
+  xs: ArrayLike<number>,
+  ys: ArrayLike<number>,
+  zs: ArrayLike<number>,
+  blocks: ArrayLike<number>,
+  runAxis: RunAxis,
+): ArrayBuffer {
+  const collapseToken = profiler.begin("main.network.blockBatch.encode.collapseRuns");
   const startXs = new Int32Array(count);
   const startYs = new Int32Array(count);
   const startZs = new Int32Array(count);
@@ -54,6 +72,8 @@ export function encodeBlockRuns(
     runCount++;
   }
 
+  profiler.end(collapseToken);
+  const packToken = profiler.begin("main.network.blockBatch.encode.pack");
   const buffer = new ArrayBuffer(HEADER_BYTES + runCount * BYTES_PER_RUN);
   const header = new DataView(buffer);
   header.setUint32(0, runCount, true);
@@ -67,11 +87,49 @@ export function encodeBlockRuns(
   new Uint16Array(buffer, offset, runCount).set(lengths.subarray(0, runCount));
   offset += runCount * 2;
   new Uint8Array(buffer, offset, runCount).set(runBlocks.subarray(0, runCount));
+  profiler.end(packToken);
+  if (profiler.enabled) recordBatchShape("encoded", count, runCount, buffer.byteLength);
   return buffer;
+}
+
+function recordBatchShape(direction: "encoded" | "decoded", editCount: number, runCount: number, byteCount: number) {
+  const metricNames = BATCH_METRIC_NAMES[direction];
+  profiler.addCounter(metricNames.batches);
+  profiler.addCounter(metricNames.edits, editCount);
+  profiler.addCounter(metricNames.runs, runCount);
+  profiler.recordBytes(metricNames.bytes, byteCount);
+  if (runCount > 0) profiler.sampleGauge(metricNames.editsPerRun, editCount / runCount);
+  if (editCount > 0) profiler.sampleGauge(metricNames.bytesPerEdit, byteCount / editCount, "bytes");
+}
+
+const BATCH_METRIC_NAMES = {
+  encoded: batchMetricNames("encoded"),
+  decoded: batchMetricNames("decoded"),
+};
+
+function batchMetricNames(direction: string) {
+  return {
+    batches: `game.network.blockBatch.${direction}`,
+    edits: `game.network.blockBatch.${direction}Edits`,
+    runs: `game.network.blockBatch.${direction}Runs`,
+    bytes: `bytes.network.blockBatch.${direction}`,
+    editsPerRun: `game.network.blockBatch.${direction}EditsPerRun`,
+    bytesPerEdit: `game.network.blockBatch.${direction}BytesPerEdit`,
+  };
 }
 
 /** Expands a packet back into edits, in the order they were encoded. */
 export function decodeBlockRuns(buffer: ArrayBuffer): BlockEditBatch {
+  const decodeToken = profiler.begin("main.network.blockBatch.decode");
+  try {
+    return decodeBlockRunsUnprofiled(buffer);
+  } finally {
+    profiler.end(decodeToken);
+  }
+}
+
+function decodeBlockRunsUnprofiled(buffer: ArrayBuffer): BlockEditBatch {
+  const readToken = profiler.begin("main.network.blockBatch.decode.readFields");
   const header = new DataView(buffer);
   const runCount = header.getUint32(0, true);
   const runAxis = header.getUint8(4);
@@ -88,6 +146,8 @@ export function decodeBlockRuns(buffer: ArrayBuffer): BlockEditBatch {
 
   let editCount = 0;
   for (let run = 0; run < runCount; run++) editCount += lengths[run];
+  profiler.end(readToken);
+  const expandToken = profiler.begin("main.network.blockBatch.decode.expandEdits");
   const batch = new BlockEditBatch("any", Math.max(editCount, 1));
   for (let run = 0; run < runCount; run++) {
     for (let step = 0; step < lengths[run]; step++) {
@@ -99,5 +159,7 @@ export function decodeBlockRuns(buffer: ArrayBuffer): BlockEditBatch {
       );
     }
   }
+  profiler.end(expandToken);
+  if (profiler.enabled) recordBatchShape("decoded", editCount, runCount, buffer.byteLength);
   return batch;
 }

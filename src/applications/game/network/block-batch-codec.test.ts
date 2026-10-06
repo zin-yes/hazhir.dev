@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { sphereEdits } from "../edits/block-edit-batch";
+import { profiler } from "../profiler";
 import { decodeBlockRuns, encodeBlockRuns } from "./block-batch-codec";
 
 function editKeys(xs: ArrayLike<number>, ys: ArrayLike<number>, zs: ArrayLike<number>, blocks: ArrayLike<number>, count: number) {
@@ -44,5 +45,31 @@ describe("block batch codec", () => {
     expect(decoded.length).toBe(count);
     expect(decoded.zs[count - 1]).toBe(count - 501);
     expect(decoded.zs[65_535]).toBe(65_035);
+  });
+
+  test("profiling records the real edit, run and byte counts of both directions", () => {
+    profiler.reset("codec-test");
+    profiler.setEnabled(true);
+    try {
+      const xs = [5, 5, 5, -33, -33, 7, 7, 7];
+      const ys = [10, 11, 12, -1, 0, 64, 65, 67];
+      const zs = [3, 3, 3, -2, -2, 9, 9, 9];
+      const blocks = [1, 1, 2, 16, 16, 54, 54, 54];
+      const encoded = encodeBlockRuns(xs.length, xs, ys, zs, blocks, 1);
+      decodeBlockRuns(encoded);
+
+      const snapshot = profiler.snapshot();
+      const counterTotal = (name: string) => snapshot.counters.find((counter) => counter.name === name)?.total;
+      expect(counterTotal("game.network.blockBatch.encodedEdits")).toBe(8);
+      expect(counterTotal("game.network.blockBatch.encodedRuns")).toBe(5);
+      expect(counterTotal("game.network.blockBatch.decodedEdits")).toBe(8);
+      expect(counterTotal("game.network.blockBatch.decodedRuns")).toBe(5);
+      const encodedBytes = snapshot.bytes.find((meter) => meter.name === "bytes.network.blockBatch.encoded");
+      expect(encodedBytes?.total).toBe(encoded.byteLength);
+      const editsPerRun = snapshot.gauges.find((gauge) => gauge.name === "game.network.blockBatch.encodedEditsPerRun");
+      expect(editsPerRun?.last).toBeCloseTo(8 / 5, 5);
+    } finally {
+      profiler.setEnabled(false);
+    }
   });
 });

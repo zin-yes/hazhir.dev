@@ -1,6 +1,8 @@
 import * as THREE from "three";
 import { profiler } from "../profiler";
 
+let liveRemotePlayerCount = 0;
+
 export class RemotePlayer {
   public id: string;
   public mesh: THREE.Mesh;
@@ -24,12 +26,16 @@ export class RemotePlayer {
 
     scene.add(this.mesh);
     profiler.end(createToken);
+    liveRemotePlayerCount++;
+    profiler.addCounter("game.remotePlayers.created");
+    profiler.sampleGauge("game.remotePlayers.live", liveRemotePlayerCount);
   }
 
   public updatePosition(
     position: { x: number; y: number; z: number },
     rotation: { x: number; y: number; z: number }
   ) {
+    profiler.addCounter("game.remotePlayers.positionUpdatesReceived");
     this.targetPosition.set(position.x, position.y, position.z);
     // Assuming rotation is Euler for now, or direction vector.
     // Let's assume the packet sends Euler angles or direction.
@@ -53,6 +59,14 @@ export class RemotePlayer {
 
     const renderPos = this.targetPosition.clone();
     renderPos.y -= 1.0;
+    if (profiler.enabled) {
+      profiler.addCounter("game.remotePlayers.vectorAllocations");
+      profiler.sampleGauge(
+        "game.remotePlayers.interpolationLagBlocks",
+        this.mesh.position.distanceTo(renderPos),
+        "blocks",
+      );
+    }
 
     this.mesh.position.lerp(renderPos, 10 * delta);
   }
@@ -63,5 +77,8 @@ export class RemotePlayer {
     this.mesh.geometry.dispose();
     (this.mesh.material as THREE.Material).dispose();
     profiler.end(disposeToken);
+    liveRemotePlayerCount--;
+    profiler.addCounter("game.remotePlayers.disposed");
+    profiler.sampleGauge("game.remotePlayers.live", liveRemotePlayerCount);
   }
 }
