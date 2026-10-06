@@ -127,6 +127,11 @@ export class PriorityScheduler<T> {
     return this.entryByKey.has(key);
   }
 
+  /** The queued item of a key, or undefined when it is not queued. */
+  itemOf(key: number): T | undefined {
+    return this.entryByKey.get(key)?.item;
+  }
+
   /**
    * Adds the key, or replaces its item and priority while keeping its original arrival order.
    */

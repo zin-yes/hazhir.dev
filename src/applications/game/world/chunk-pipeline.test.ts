@@ -5,6 +5,14 @@ import { createColumnCoordinates, packChunkKey, packColumnKey, unpackColumnKey }
 import type { ChunkRecord } from "./chunk-record";
 import { EDIT_MESH_PRIORITY } from "./mesh-coordinator";
 import {
+  byteTotal,
+  counterTotal,
+  gaugeLast,
+  gaugeMax,
+  timerCallCount,
+  withEnabledProfilerAsync,
+} from "./profiler-readings.test-helper";
+import {
   FakeGeneration,
   FakeLighting,
   FakeMeshing,
@@ -401,5 +409,50 @@ describe("ChunkPipeline render distance changes", () => {
     await settle(generation, lighting, meshing);
     expect(farthestShown()).toBe(3);
     console.log(`render distance change test: ${(performance.now() - startedAt).toFixed(0)} ms`);
+  });
+});
+
+describe("ChunkPipeline profiling", () => {
+  test("stage counters agree with the pipeline's own counters across a full load and an edit", async () => {
+    const { pipeline, generation, lighting, meshing } = createPipeline();
+    await withEnabledProfilerAsync(async () => {
+      pipeline.update(GROUND_POSITION, FACING_POSITIVE_X);
+      await settle(generation, lighting, meshing);
+      const edit = pipeline.applyBlockEdits([{ x: 16, y: GROUND_LEVEL, z: 16, block: BlockType.GLOWSTONE }]);
+      await settle(generation, lighting, meshing);
+      const counters = pipeline.counters;
+
+      expect(counters.chunksRequested).toBeGreaterThan(100);
+      expect(counterTotal("game.chunks.requested")).toBe(counters.chunksRequested);
+      expect(counterTotal("game.generation.dispatched")).toBe(counters.columnGenerations);
+      expect(timerCallCount("latency.scheduler.generation.wait")).toBe(counters.columnGenerations);
+      expect(counterTotal("game.lighting.dispatched")).toBe(counters.regionLightings);
+      expect(counterTotal("game.chunks.generatedUniform") + counterTotal("game.chunks.generatedMixed")).toBe(
+        counters.chunksGenerated,
+      );
+      expect(byteTotal("bytes.light.surroundingSlabs")).toBe(counters.slabBytesSent);
+      expect(counterTotal("game.mesh.builds")).toBe(meshing.calls.history.length);
+      expect(counterTotal("game.mesh.buildsFirst") + counterTotal("game.mesh.buildsRebuild")).toBe(
+        meshing.calls.history.length,
+      );
+      expect(counterTotal("game.edit.batches")).toBe(1);
+      expect(counterTotal("game.edit.chunksQueuedForRemesh")).toBe(edit.meshesApplied.length);
+      expect(edit.meshesApplied.length).toBeGreaterThan(0);
+      expect(counterTotal("game.mesh.firstMeshesApplied")).toBeGreaterThan(50);
+      expect(timerCallCount("latency.mesh.queueWait.edit")).toBeGreaterThan(0);
+      expect(gaugeMax("game.edit.batchSize")).toBe(1);
+
+      expect(pipeline.getBlock(16, GROUND_LEVEL - 1, 16)).toBe(BlockType.STONE);
+      expect(pipeline.getBlock(100000, 0, 100000)).toBeNull();
+      (pipeline as unknown as { publishProfilerGauges(): void }).publishProfilerGauges();
+      const stats = pipeline.stats();
+      expect(stats.litChunks).toBeGreaterThan(100);
+      expect(gaugeLast("game.chunks.stage.lit")).toBe(stats.litChunks);
+      expect(gaugeLast("game.chunkStore.size")).toBe(stats.loadedChunks);
+      expect(gaugeLast("game.chunks.withMesh")).toBe(stats.meshedChunks);
+      expect(counterTotal("game.pipeline.getBlock.calls")).toBe(2);
+      expect(counterTotal("game.pipeline.getBlock.loaded")).toBe(1);
+      expect(counterTotal("game.pipeline.getBlock.unknown")).toBe(1);
+    });
   });
 });

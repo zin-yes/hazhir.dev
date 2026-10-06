@@ -13,6 +13,17 @@ export function withEnabledProfiler<Result>(run: () => Result): Result {
   }
 }
 
+/** Same as withEnabledProfiler for work that awaits. */
+export async function withEnabledProfilerAsync(run: () => Promise<void>): Promise<void> {
+  profiler.setEnabled(true);
+  profiler.reset("test");
+  try {
+    await run();
+  } finally {
+    profiler.setEnabled(false);
+  }
+}
+
 export function counterTotal(name: string): number {
   return profiler.snapshot().counters.find((counter) => counter.name === name)?.total ?? 0;
 }

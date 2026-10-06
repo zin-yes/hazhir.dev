@@ -11,13 +11,14 @@
 import { CHUNK_HEIGHT, CHUNK_LENGTH, CHUNK_WIDTH } from "../config";
 import { BlockType } from "../blocks";
 import { profiler } from "../profiler";
+import { DIMENSIONS } from "../profiler/dimensions";
 import {
   applyBlockEdits as applyBlockEditsToChunks,
   type BulkEditOptions,
   type BulkEditResult,
 } from "../edits/apply-block-edits";
 import { BlockEditBatch, type BlockEdit } from "../edits/block-edit-batch";
-import type { LightChunkSource } from "../edits/chunk-cluster";
+import { CELLS_PER_CHUNK, type LightChunkSource } from "../edits/chunk-cluster";
 import { mergeLightReportingFaces } from "../edits/merge-light";
 import { AFFINITY_TILE_SIZE_IN_CHUNKS, chunkColumnAffinityKey } from "../worker-pool";
 import { collectSurroundingSlabs, type LitChunkView } from "../workers/region-surroundings";
@@ -32,14 +33,16 @@ import {
   createColumnCoordinates,
 } from "./chunk-key";
 import {
+  type ChunkStage,
   ChunkRecord,
   ColumnRecord,
   SHARED_DARK_LIGHT,
   isSealedUniformBlock,
   sharedUniformBlocks,
 } from "./chunk-record";
+import { publishChunkCompressionProfilerStats } from "./chunk-compression";
 import { ChunkStore } from "./chunk-store";
-import type { LoadOrder } from "./load-order";
+import { drainLoadOrderMembershipStats, type LoadOrder } from "./load-order";
 import { MeshCoordinator } from "./mesh-coordinator";
 import type {
   ChunkPipelineEvents,
@@ -78,6 +81,15 @@ const START_AREA_GENERATION_AFFINITY_GAP = 0.75;
 const STREAMING_GENERATION_AFFINITY_GAP = 2;
 const NO_FORWARD: PlannerForwardVector = { x: 0, y: 0, z: 0 };
 
+const CHUNK_STAGES: readonly ChunkStage[] = ["pending", "generating", "generated", "lighting", "lit"];
+const STAGE_COUNT_GAUGES = Object.fromEntries(CHUNK_STAGES.map((stage) => [stage, `game.chunks.stage.${stage}`])) as Record<
+  ChunkStage,
+  string
+>;
+const UNLOADED_WHILE_COUNTERS = Object.fromEntries(
+  CHUNK_STAGES.map((stage) => [stage, `game.chunks.unloadedWhile.${stage}`]),
+) as Record<ChunkStage, string>;
+
 /**
  * Generation order once the start area is on screen: every column of an affinity tile shares the priority of the
  * tile's center and they run in a serpentine through the tile, so a worker generates neighbors back to back and the
@@ -101,6 +113,14 @@ export function tileCoherentPriority(
   const tieBreaker =
     (((tileX * 7919 + tileZ * 104729) % TILE_TIE_BREAKER_BUCKETS) + TILE_TIE_BREAKER_BUCKETS) % TILE_TIE_BREAKER_BUCKETS;
   return tilePriority + tieBreaker * TILE_TIE_BREAKER_STEP + serpentineIndex * TILE_ORDER_STEP;
+}
+
+function countSetFaceBits(changedFaces: number): number {
+  let count = 0;
+  for (let faceBit = 0; faceBit < FACE_NEIGHBOR_KEY_DELTAS.length; faceBit++) {
+    if ((changedFaces & (1 << faceBit)) !== 0) count++;
+  }
+  return count;
 }
 
 /** The affinity tile a column belongs to, as one number. */
@@ -163,10 +183,18 @@ export class ChunkPipeline {
     slabBytesSent: 0,
   };
   readonly lightSource: LightChunkSource = {
-    getBlocks: (chunkX, chunkY, chunkZ) => this.store.get(chunkX, chunkY, chunkZ)?.blocks ?? undefined,
+    getBlocks: (chunkX, chunkY, chunkZ) => {
+      const blocks = this.store.get(chunkX, chunkY, chunkZ)?.blocks ?? undefined;
+      this.lookupStats.sourceBlockLookups++;
+      if (blocks === undefined) this.lookupStats.sourceBlockMisses++;
+      return blocks;
+    },
     getLight: (chunkX, chunkY, chunkZ) => {
       const record = this.store.get(chunkX, chunkY, chunkZ);
-      return record?.isLit ? (record.light ?? undefined) : undefined;
+      const light = record?.isLit ? (record.light ?? undefined) : undefined;
+      this.lookupStats.sourceLightLookups++;
+      if (light === undefined) this.lookupStats.sourceLightMisses++;
+      return light;
     },
   };
 
@@ -178,7 +206,7 @@ export class ChunkPipeline {
   private readonly generationAttemptsByColumn = new Map<number, number>();
   private readonly generationQueues: AffinityQueues;
   private readonly generationWorkerBusy: boolean[];
-  private readonly lightingQueue = new PriorityScheduler<number>();
+  private readonly lightingQueue = new PriorityScheduler<number>({ profilerLane: "lighting" });
   private readonly columnsBeingLit = new Set<number>();
   private readonly meshes: MeshCoordinator;
   private readonly playerChunk = createChunkCoordinates();
@@ -186,6 +214,25 @@ export class ChunkPipeline {
   private readonly columnScratch = createColumnCoordinates();
   private startArea: StartAreaProgress | null = null;
   private isDisposed = false;
+  private readonly removeProfilerSampler: () => void;
+  private readonly generationWorkerBusyGauges: string[];
+  private readonly generationWorkerDispatchCounters: string[];
+  /** Hot lookups counted as plain integers and published once a second by publishProfilerGauges. */
+  private readonly lookupStats = {
+    blockLookups: 0,
+    blockLookupsLoaded: 0,
+    blockLookupsAssumedAir: 0,
+    blockLookupsUnknown: 0,
+    lightLookups: 0,
+    lightLookupsUnknown: 0,
+    sourceBlockLookups: 0,
+    sourceBlockMisses: 0,
+    sourceLightLookups: 0,
+    sourceLightMisses: 0,
+    readyToShowChecks: 0,
+    readyToShowBlockedByNeighbor: 0,
+    columnPriorityComputations: 0,
+  };
 
   constructor(private readonly options: ChunkPipelineOptions) {
     this.renderSettings = normalizeRenderSettings(options.renderSettings ?? {});
@@ -203,15 +250,21 @@ export class ChunkPipeline {
         const column = unpackColumnKey(columnKey, this.columnScratch);
         return affinityTileKeyOf(column.chunkX, column.chunkZ);
       },
+      "generation",
     );
     this.generationQueues.transfersWholeGroups = false;
     this.generationWorkerBusy = new Array(options.generation.workerCount).fill(false);
+    this.generationWorkerBusyGauges = this.generationWorkerBusy.map((_, workerIndex) => `game.generation.worker${workerIndex}.busy`);
+    this.generationWorkerDispatchCounters = this.generationWorkerBusy.map(
+      (_, workerIndex) => `game.generation.worker${workerIndex}.dispatched`,
+    );
     this.meshes = new MeshCoordinator(this.store, options.meshing, {
       priorityOf: (key) => this.planner.priorityOfKey(key),
       isInDrawnVolume: (record) => this.isInDrawnVolume(record),
       onMeshReady: (record, mesh, isFirstMesh) => this.onMeshReady(record, mesh, isFirstMesh),
       isOpenSkyAbove: (record) => this.isOpenSkyAbove(record),
     });
+    this.removeProfilerSampler = profiler.addSampler(() => this.publishProfilerGauges());
   }
 
   get settings(): Readonly<RenderSettings> {
@@ -225,6 +278,7 @@ export class ChunkPipeline {
   /** Streams around the camera. Cheap when the player stays in the same chunk; call it often. */
   update(position: Position3, cameraForward: PlannerForwardVector): void {
     if (this.isDisposed) return;
+    profiler.addCounter("game.pipeline.updates");
     // Until the start area is on screen it loads as a disc around the player, not a cone ahead of the camera.
     const forward = this.startArea?.isReady ? cameraForward : NO_FORWARD;
     const playerChunk = {
@@ -241,12 +295,18 @@ export class ChunkPipeline {
       this.playerChunk.chunkY = playerChunk.chunkY;
       this.playerChunk.chunkZ = playerChunk.chunkZ;
       if (!this.startArea) this.startArea = this.createStartArea();
+      const unloadToken = profiler.begin("main.chunk.applyPlan.unload");
       for (const key of plan.toUnload) this.removeChunk(key);
+      profiler.end(unloadToken);
+      const loadToken = profiler.begin("main.chunk.applyPlan.load");
       for (let index = 0; index < plan.toLoad.length; index++) this.addChunk(plan.toLoad[index]!);
-      this.rankQueuedWork(forward);
+      profiler.end(loadToken);
+      this.rankQueuedWork(forward, "playerMoved");
+      const revisitToken = profiler.begin("main.chunk.revisitWaitingMeshes");
       this.meshes.revisitWaiting();
+      profiler.end(revisitToken);
     } else if (this.hasTurnedFar(forward)) {
-      this.rankQueuedWork(forward);
+      this.rankQueuedWork(forward, "cameraTurned");
     }
     this.pump();
   }
@@ -257,6 +317,16 @@ export class ChunkPipeline {
    * screen.
    */
   setRenderSettings(settings: Partial<RenderSettings>): void {
+    const settingsToken = profiler.begin("main.chunk.setRenderSettings");
+    try {
+      this.applyRenderSettings(settings);
+    } finally {
+      profiler.end(settingsToken);
+    }
+  }
+
+  private applyRenderSettings(settings: Partial<RenderSettings>): void {
+    profiler.addCounter("game.pipeline.renderSettingsChanges");
     this.renderSettings = normalizeRenderSettings({ ...this.renderSettings, ...settings });
     this.drawnVolume = renderVolumeOf(this.renderSettings);
     this.planner.setConfig(streamConfigFor(this.renderSettings, this.surfaceChunkYFor));
@@ -273,6 +343,8 @@ export class ChunkPipeline {
     });
     for (const key of keysToUnload) this.removeChunk(key);
     for (const record of recordsLeavingView) this.meshes.dropMesh(record);
+    profiler.addCounter("game.pipeline.settingsUnloadedChunks", keysToUnload.length);
+    profiler.addCounter("game.pipeline.settingsDroppedMeshes", recordsLeavingView.length);
     if (keysToUnload.length > 0) this.planner.invalidate();
   }
 
@@ -281,14 +353,24 @@ export class ChunkPipeline {
     const chunkY = Math.floor(y / CHUNK_HEIGHT);
     const chunkZ = Math.floor(z / CHUNK_LENGTH);
     const record = this.store.get(chunkX, chunkY, chunkZ);
+    this.lookupStats.blockLookups++;
     if (record?.blocks) {
+      this.lookupStats.blockLookupsLoaded++;
       return record.blocks[
         ((x - chunkX * CHUNK_WIDTH) << 10) | ((y - chunkY * CHUNK_HEIGHT) << 5) | (z - chunkZ * CHUNK_LENGTH)
       ]!;
     }
-    if (record) return null;
+    if (record) {
+      this.lookupStats.blockLookupsUnknown++;
+      return null;
+    }
     const surfaceChunkY = this.surfaceChunkYFor(chunkX, chunkZ);
-    return surfaceChunkY !== undefined && chunkY > surfaceChunkY ? BlockType.AIR : null;
+    if (surfaceChunkY !== undefined && chunkY > surfaceChunkY) {
+      this.lookupStats.blockLookupsAssumedAir++;
+      return BlockType.AIR;
+    }
+    this.lookupStats.blockLookupsUnknown++;
+    return null;
   }
 
   getLight(x: number, y: number, z: number): number | null {
@@ -296,7 +378,11 @@ export class ChunkPipeline {
     const chunkY = Math.floor(y / CHUNK_HEIGHT);
     const chunkZ = Math.floor(z / CHUNK_LENGTH);
     const record = this.store.get(chunkX, chunkY, chunkZ);
-    if (!record?.isLit || !record.light) return null;
+    this.lookupStats.lightLookups++;
+    if (!record?.isLit || !record.light) {
+      this.lookupStats.lightLookupsUnknown++;
+      return null;
+    }
     return record.light[
       ((x - chunkX * CHUNK_WIDTH) << 10) | ((y - chunkY * CHUNK_HEIGHT) << 5) | (z - chunkZ * CHUNK_LENGTH)
     ]!;
@@ -311,23 +397,39 @@ export class ChunkPipeline {
    * streaming. Edits in chunks without blocks are skipped (counted in stats.editsInUnloadedChunks).
    */
   applyBlockEdits(edits: BlockEditBatch | ArrayLike<BlockEdit>, options: BulkEditOptions = {}): PipelineEditResult {
-    const batch = edits instanceof BlockEditBatch ? edits : BlockEditBatch.fromEdits(edits);
-    this.takeOwnershipOfEditedChunks(batch);
-    const result = applyBlockEditsToChunks(this.lightSource, batch, options);
-    for (const chunk of result.changedChunks) {
-      const record = this.store.get(chunk.x, chunk.y, chunk.z);
-      if (record) record.editVersion++;
+    const editToken = profiler.begin("main.edit.pipelineApply");
+    try {
+      const batch = edits instanceof BlockEditBatch ? edits : BlockEditBatch.fromEdits(edits);
+      profiler.addCounter("game.edit.batches");
+      profiler.sampleGauge("game.edit.batchSize", batch.length);
+      this.takeOwnershipOfEditedChunks(batch);
+      const result = applyBlockEditsToChunks(this.lightSource, batch, options);
+      const versionToken = profiler.begin("main.edit.bumpEditVersions");
+      for (const chunk of result.changedChunks) {
+        const record = this.store.get(chunk.x, chunk.y, chunk.z);
+        if (record) record.editVersion++;
+      }
+      profiler.end(versionToken);
+      this.markEditedChunksMixed(result);
+      const remeshToken = profiler.begin("main.edit.queueRemeshes");
+      const meshesApplied: Promise<void>[] = [];
+      for (const chunk of result.chunksToRemesh) {
+        const record = this.store.get(chunk.x, chunk.y, chunk.z);
+        if (!record) {
+          profiler.addCounter("game.edit.remeshTargetsMissing");
+          continue;
+        }
+        this.meshes.markInputsChanged(record, true);
+        meshesApplied.push(this.meshes.waitForMesh(record));
+      }
+      profiler.end(remeshToken);
+      profiler.addCounter("game.edit.chunksQueuedForRemesh", meshesApplied.length);
+      profiler.addCounter("game.edit.chunksVersionBumped", result.changedChunks.length);
+      this.pump();
+      return { ...result, meshesApplied };
+    } finally {
+      profiler.end(editToken);
     }
-    this.markEditedChunksMixed(result);
-    const meshesApplied: Promise<void>[] = [];
-    for (const chunk of result.chunksToRemesh) {
-      const record = this.store.get(chunk.x, chunk.y, chunk.z);
-      if (!record) continue;
-      this.meshes.markInputsChanged(record, true);
-      meshesApplied.push(this.meshes.waitForMesh(record));
-    }
-    this.pump();
-    return { ...result, meshesApplied };
   }
 
   /**
@@ -336,11 +438,15 @@ export class ChunkPipeline {
    * neighbor's missing surface, unlit and black.
    */
   isReadyToShow(record: ChunkRecord): boolean {
+    this.lookupStats.readyToShowChecks++;
     if (record.appliedMeshVersion < 0) return false;
     if (this.isNextToPlayer(record)) return true;
     for (const delta of FACE_NEIGHBOR_KEY_DELTAS) {
       const neighbor = this.store.getByKey(record.key + delta);
-      if (neighbor && neighbor.appliedMeshVersion < 0 && this.isInDrawnVolume(neighbor)) return false;
+      if (neighbor && neighbor.appliedMeshVersion < 0 && this.isInDrawnVolume(neighbor)) {
+        this.lookupStats.readyToShowBlockedByNeighbor++;
+        return false;
+      }
     }
     return true;
   }
@@ -371,6 +477,15 @@ export class ChunkPipeline {
 
   /** Counts and memory; walks every loaded chunk, so not for every frame. */
   stats() {
+    const statsToken = profiler.begin("main.chunk.stats");
+    try {
+      return this.collectStats();
+    } finally {
+      profiler.end(statsToken);
+    }
+  }
+
+  private collectStats() {
     let generatedChunks = 0;
     let litChunks = 0;
     let meshedChunks = 0;
@@ -396,6 +511,90 @@ export class ChunkPipeline {
     };
   }
 
+  /**
+   * Once a second while profiling: chunks per stage, owned and shared chunk memory, queue and worker levels, and
+   * the lookup and cache traffic that is too hot to record call by call.
+   */
+  private publishProfilerGauges(): void {
+    const scopeToken = profiler.begin("main.chunk.publishProfilerGauges");
+    try {
+      this.publishChunkInventory();
+      this.store.publishProfilerStats();
+      this.generationQueues.publishProfilerGauges();
+      this.lightingQueue.publishProfilerGauges();
+      this.meshes.publishProfilerGauges();
+      this.publishLookupTraffic();
+      publishChunkCompressionProfilerStats();
+      profiler.sampleGauge("game.pipeline.columns", this.columns.size);
+      profiler.sampleGauge("game.pipeline.columnsBeingLit", this.columnsBeingLit.size);
+      profiler.sampleGauge("game.pipeline.surfaceHints", this.surfaceChunkYByColumn.size);
+      profiler.sampleGauge("game.pipeline.generationRetriesTracked", this.generationAttemptsByColumn.size);
+      profiler.sampleGauge("game.pipeline.busyGenerationWorkers", this.countBusyGenerationWorkers());
+      for (let workerIndex = 0; workerIndex < this.generationWorkerBusy.length; workerIndex++) {
+        profiler.sampleGauge(this.generationWorkerBusyGauges[workerIndex]!, this.generationWorkerBusy[workerIndex] ? 1 : 0);
+      }
+    } finally {
+      profiler.end(scopeToken);
+    }
+  }
+
+  private publishChunkInventory(): void {
+    const chunkCountByStage: Record<ChunkStage, number> = { pending: 0, generating: 0, generated: 0, lighting: 0, lit: 0 };
+    let chunksWithMesh = 0;
+    let uniformChunks = 0;
+    let airChunks = 0;
+    let ownedBlockBytes = 0;
+    let ownedLightBytes = 0;
+    let sharedBlockChunks = 0;
+    let sharedLightChunks = 0;
+    this.store.forEach((record) => {
+      chunkCountByStage[record.stage]++;
+      if (record.appliedMeshVersion >= 0) chunksWithMesh++;
+      if (record.uniformBlock >= 0) uniformChunks++;
+      if (record.uniformBlock === BlockType.AIR) airChunks++;
+      if (record.blocks) {
+        if (record.ownsBlocks) ownedBlockBytes += record.blocks.byteLength;
+        else sharedBlockChunks++;
+      }
+      if (record.light) {
+        if (record.ownsLight) ownedLightBytes += record.light.byteLength;
+        else sharedLightChunks++;
+      }
+    });
+    for (const stage of CHUNK_STAGES) {
+      profiler.sampleGauge(STAGE_COUNT_GAUGES[stage], chunkCountByStage[stage]);
+      profiler.recordBreakdown(DIMENSIONS.chunkStage, stage, { units: chunkCountByStage[stage], calls: 1 });
+    }
+    profiler.sampleGauge("game.chunks.withMesh", chunksWithMesh);
+    profiler.sampleGauge("game.chunks.uniform", uniformChunks);
+    profiler.sampleGauge("game.chunks.air", airChunks);
+    profiler.sampleGauge("memory.chunkRecords.ownedBlockBytes", ownedBlockBytes, "bytes");
+    profiler.sampleGauge("memory.chunkRecords.ownedLightBytes", ownedLightBytes, "bytes");
+    profiler.sampleGauge("game.chunks.sharedBlockArrays", sharedBlockChunks);
+    profiler.sampleGauge("game.chunks.sharedLightArrays", sharedLightChunks);
+  }
+
+  private publishLookupTraffic(): void {
+    const stats = this.lookupStats;
+    profiler.addCounter("game.pipeline.getBlock.calls", stats.blockLookups);
+    profiler.addCounter("game.pipeline.getBlock.loaded", stats.blockLookupsLoaded);
+    profiler.addCounter("game.pipeline.getBlock.assumedAir", stats.blockLookupsAssumedAir);
+    profiler.addCounter("game.pipeline.getBlock.unknown", stats.blockLookupsUnknown);
+    profiler.addCounter("game.pipeline.getLight.calls", stats.lightLookups);
+    profiler.addCounter("game.pipeline.getLight.unknown", stats.lightLookupsUnknown);
+    profiler.addCounter("game.pipeline.lightSource.blockLookups", stats.sourceBlockLookups);
+    profiler.addCounter("game.pipeline.lightSource.blockMisses", stats.sourceBlockMisses);
+    profiler.addCounter("game.pipeline.lightSource.lightLookups", stats.sourceLightLookups);
+    profiler.addCounter("game.pipeline.lightSource.lightMisses", stats.sourceLightMisses);
+    profiler.addCounter("game.pipeline.readyToShow.checks", stats.readyToShowChecks);
+    profiler.addCounter("game.pipeline.readyToShow.blockedByNeighbor", stats.readyToShowBlockedByNeighbor);
+    profiler.addCounter("game.pipeline.columnPriorityComputations", stats.columnPriorityComputations);
+    const membership = drainLoadOrderMembershipStats();
+    profiler.addCounter("game.streaming.membershipTests", membership.tests);
+    profiler.addCounter("game.streaming.membershipInside", membership.inside);
+    for (const name of Object.keys(stats) as (keyof typeof stats)[]) stats[name] = 0;
+  }
+
   private countBusyGenerationWorkers(): number {
     let busyWorkers = 0;
     for (const isBusy of this.generationWorkerBusy) if (isBusy) busyWorkers++;
@@ -406,6 +605,7 @@ export class ChunkPipeline {
   dispose(): void {
     if (this.isDisposed) return;
     this.isDisposed = true;
+    this.removeProfilerSampler();
     this.meshes.dispose();
     this.generationQueues.clear();
     this.lightingQueue.clear();
@@ -425,6 +625,15 @@ export class ChunkPipeline {
   };
 
   private createStartArea(): StartAreaProgress {
+    const startAreaToken = profiler.begin("main.chunk.createStartArea");
+    try {
+      return this.buildStartArea();
+    } finally {
+      profiler.end(startAreaToken);
+    }
+  }
+
+  private buildStartArea(): StartAreaProgress {
     const radius = Math.min(this.options.startAreaRadius ?? DEFAULT_START_AREA_RADIUS, this.renderSettings.horizontalRadius);
     const targetKeys: number[] = [];
     const volume = this.drawnVolume;
@@ -459,7 +668,9 @@ export class ChunkPipeline {
     return cosine < REPRIORITIZE_TURN_COSINE;
   }
 
-  private rankQueuedWork(forward: PlannerForwardVector): void {
+  private rankQueuedWork(forward: PlannerForwardVector, reason: "playerMoved" | "cameraTurned"): void {
+    const rankToken = profiler.begin("main.chunk.rankQueuedWork");
+    profiler.addCounter(reason === "playerMoved" ? "game.pipeline.reranksAfterMove" : "game.pipeline.reranksAfterTurn");
     const length = Math.hypot(forward.x, forward.y, forward.z) || 1;
     this.lastRankedForward.x = forward.x / length;
     this.lastRankedForward.y = forward.y / length;
@@ -467,9 +678,11 @@ export class ChunkPipeline {
     this.generationQueues.reprioritizeAll((columnKey) => this.columnPriority(columnKey));
     this.lightingQueue.reprioritizeAll((columnKey) => this.columnPriority(columnKey));
     this.meshes.reprioritizeAll();
+    profiler.end(rankToken);
   }
 
   private columnPriority(columnKey: number): number {
+    this.lookupStats.columnPriorityComputations++;
     const column = unpackColumnKey(columnKey, this.columnScratch);
     if (!this.startArea?.isReady) return this.planner.priorityOfChunk(column.chunkX, this.playerChunk.chunkY, column.chunkZ);
     return tileCoherentPriority(column.chunkX, column.chunkZ, (chunkX, chunkZ) =>
@@ -504,10 +717,12 @@ export class ChunkPipeline {
     const record = new ChunkRecord(key, profiler.now());
     this.store.setByKey(key, record);
     this.counters.chunksRequested++;
+    profiler.addCounter("game.chunks.requested");
     let column = this.columns.get(record.columnKey);
     if (!column) {
       column = new ColumnRecord(record.columnKey, record.chunkX, record.chunkZ);
       this.columns.set(column.key, column);
+      profiler.addCounter("game.columns.created");
     }
     column.chunkKeys.add(key);
     column.pendingChunkKeys.add(key);
@@ -520,6 +735,9 @@ export class ChunkPipeline {
     this.store.deleteByKey(key);
     this.counters.chunksUnloaded++;
     profiler.addCounter("game.chunks.unloaded");
+    profiler.addCounter(UNLOADED_WHILE_COUNTERS[record.stage]);
+    if (record.stage === "generating" || record.stage === "lighting") profiler.addCounter("game.chunks.unloadedWhileInFlight");
+    if (record.appliedMeshVersion >= 0) profiler.addCounter("game.chunks.unloadedWithMesh");
     this.meshes.forget(record);
     this.options.events.onChunkUnloaded(record);
     this.startArea?.markRemoved(key);
@@ -531,6 +749,7 @@ export class ChunkPipeline {
         this.columns.delete(column.key);
         this.generationQueues.remove(column.key);
         this.lightingQueue.remove(column.key);
+        profiler.addCounter("game.columns.removed");
       } else {
         this.scheduleLighting(column);
       }
@@ -540,24 +759,45 @@ export class ChunkPipeline {
 
   private pump(): void {
     if (this.isDisposed) return;
-    this.pumpGeneration();
-    this.pumpLighting();
-    this.meshes.pump();
+    profiler.addCounter("game.pipeline.pumps");
+    const pumpToken = profiler.begin("main.chunk.pump");
+    try {
+      this.pumpGeneration();
+      this.pumpLighting();
+      const meshPumpToken = profiler.begin("main.chunk.pump.meshes");
+      this.meshes.pump();
+      profiler.end(meshPumpToken);
+    } finally {
+      profiler.end(pumpToken);
+    }
   }
 
   private pumpGeneration(): void {
+    const generationToken = profiler.begin("main.chunk.pump.generation");
+    try {
+      this.takeGenerationWork();
+    } finally {
+      profiler.end(generationToken);
+    }
+  }
+
+  private takeGenerationWork(): void {
     for (let workerIndex = 0; workerIndex < this.generationWorkerBusy.length; workerIndex++) {
       while (!this.generationWorkerBusy[workerIndex]) {
         const columnKey = this.generationQueues.takeFor(workerIndex);
         if (columnKey === undefined) break;
         const column = this.columns.get(columnKey);
-        if (!column || column.isGenerating || column.pendingChunkKeys.size === 0) continue;
+        if (!column || column.isGenerating || column.pendingChunkKeys.size === 0) {
+          profiler.addCounter("game.generation.staleColumnsSkipped");
+          continue;
+        }
         this.dispatchGeneration(column, workerIndex);
       }
     }
   }
 
   private dispatchGeneration(column: ColumnRecord, workerIndex: number): void {
+    const dispatchToken = profiler.begin("main.chunk.dispatchGeneration");
     const records: ChunkRecord[] = [];
     for (const key of column.pendingChunkKeys) {
       const record = this.store.getByKey(key);
@@ -569,6 +809,10 @@ export class ChunkPipeline {
     column.isGenerating = true;
     this.generationWorkerBusy[workerIndex] = true;
     this.counters.columnGenerations++;
+    profiler.addCounter("game.generation.dispatched");
+    profiler.addCounter(this.generationWorkerDispatchCounters[workerIndex]!);
+    profiler.sampleGauge("game.generation.chunksPerDispatch", records.length);
+    profiler.end(dispatchToken);
     this.options.generation
       .generateColumn({
         chunkX: column.chunkX,
@@ -584,6 +828,7 @@ export class ChunkPipeline {
         (error) => {
           this.generationWorkerBusy[workerIndex] = false;
           console.error(error);
+          profiler.addCounter("game.generation.failures");
           if (!this.isDisposed) this.retryGeneration(column, records);
         },
       )
@@ -600,12 +845,27 @@ export class ChunkPipeline {
       column.pendingChunkKeys.add(record.key);
     }
     if (attempts < MAX_GENERATION_ATTEMPTS && this.columns.get(column.key) === column) {
+      profiler.addCounter("game.generation.retries");
       this.generationQueues.schedule(column.key, this.columnPriority(column.key));
+    } else {
+      profiler.addCounter("game.generation.gaveUp");
     }
   }
 
   private acceptGeneratedColumn(column: ColumnRecord, records: ChunkRecord[], generated: GeneratedColumn): void {
+    const acceptToken = profiler.begin("main.chunk.acceptGeneratedColumn");
+    try {
+      this.storeGeneratedColumn(column, records, generated);
+    } finally {
+      profiler.end(acceptToken);
+    }
+  }
+
+  private storeGeneratedColumn(column: ColumnRecord, records: ChunkRecord[], generated: GeneratedColumn): void {
     column.isGenerating = false;
+    profiler.addCounter("game.generation.columnsReturned");
+    profiler.sampleGauge("game.generation.chunksReturnedPerColumn", generated.chunks.length);
+    if (generated.surfaceChunkY === null) profiler.addCounter("game.generation.columnsWithoutSurface");
     if (generated.surfaceChunkY !== null) {
       column.surfaceChunkY = generated.surfaceChunkY;
       this.surfaceChunkYByColumn.set(column.key, generated.surfaceChunkY);
@@ -615,7 +875,10 @@ export class ChunkPipeline {
     const nowMs = profiler.now();
     for (const record of records) {
       const chunk = generatedByChunkY.get(record.chunkY);
-      if (!chunk || this.store.getByKey(record.key) !== record) continue;
+      if (!chunk || this.store.getByKey(record.key) !== record) {
+        profiler.addCounter(chunk ? "game.generation.resultsForUnloadedChunks" : "game.generation.chunksMissingFromResult");
+        continue;
+      }
       this.storeGeneratedBlocks(record, chunk);
       record.stage = "generated";
       this.counters.chunksGenerated++;
@@ -624,7 +887,10 @@ export class ChunkPipeline {
       this.options.events.onChunkGenerated?.(record);
       this.startArea?.markReached(record.key, START_STAGE_GENERATED);
     }
-    if (this.columns.get(column.key) !== column) return;
+    if (this.columns.get(column.key) !== column) {
+      profiler.addCounter("game.generation.columnsUnloadedWhileGenerating");
+      return;
+    }
     this.dropChunksAboveSurface(column);
     if (this.columns.get(column.key) !== column) return;
     if (column.pendingChunkKeys.size > 0) {
@@ -639,10 +905,13 @@ export class ChunkPipeline {
       record.blocks = new Uint8Array(chunk.blocks);
       record.ownsBlocks = true;
       record.uniformBlock = -1;
+      profiler.addCounter("game.chunks.generatedMixed");
+      profiler.recordBytes("bytes.chunks.generatedBlocks", record.blocks.byteLength);
     } else {
       record.blocks = sharedUniformBlocks(chunk.uniformBlock);
       record.ownsBlocks = false;
       record.uniformBlock = chunk.uniformBlock;
+      profiler.addCounter("game.chunks.generatedUniform");
     }
     const savedEdits = this.options.events.savedEditsFor?.(record.chunkX, record.chunkY, record.chunkZ);
     if (!savedEdits || savedEdits.size === 0) return;
@@ -651,8 +920,12 @@ export class ChunkPipeline {
     savedEdits.forEach((block, index) => {
       blocks[index] = block;
     });
+    const uniformToken = profiler.begin("main.chunk.applySavedEdits.uniformScan");
     record.uniformBlock = uniformByteValue(blocks);
+    profiler.end(uniformToken);
     profiler.addCounter("game.chunks.savedEditsApplied", savedEdits.size);
+    profiler.addCounter("game.chunks.withSavedEdits");
+    profiler.sampleGauge("game.chunks.savedEditsPerChunk", savedEdits.size);
     profiler.end(applyToken);
   }
 
@@ -660,19 +933,32 @@ export class ChunkPipeline {
   private dropChunksAboveSurface(column: ColumnRecord): void {
     const surfaceChunkY = this.surfaceChunkYFor(column.chunkX, column.chunkZ);
     if (surfaceChunkY === undefined) return;
+    const dropToken = profiler.begin("main.chunk.dropAboveSurface");
     const highestKeptChunkY = surfaceChunkY + SKIP_ABOVE_SURFACE_MARGIN;
     for (const key of Array.from(column.chunkKeys)) {
       const record = this.store.getByKey(key);
-      if (!record || record.chunkY <= highestKeptChunkY || this.isNextToPlayer(record)) continue;
+      if (!record || record.chunkY <= highestKeptChunkY) continue;
+      if (this.isNextToPlayer(record)) {
+        profiler.addCounter("game.chunks.keptAboveSurfaceNearPlayer");
+        continue;
+      }
       this.counters.chunksSkippedAboveSurface++;
       profiler.addCounter("game.chunks.skippedAboveSurface");
       this.removeChunk(key);
     }
+    profiler.end(dropToken);
   }
 
   private scheduleLighting(column: ColumnRecord): void {
-    if (column.isGenerating || column.isLighting || column.pendingChunkKeys.size > 0) return;
-    if (!this.hasChunkWaitingForLight(column)) return;
+    if (column.isGenerating || column.isLighting || column.pendingChunkKeys.size > 0) {
+      profiler.addCounter("game.lighting.scheduleSkippedColumnBusy");
+      return;
+    }
+    if (!this.hasChunkWaitingForLight(column)) {
+      profiler.addCounter("game.lighting.scheduleSkippedNothingWaiting");
+      return;
+    }
+    profiler.addCounter("game.lighting.scheduled");
     this.lightingQueue.schedule(column.key, column.key, this.columnPriority(column.key));
   }
 
@@ -684,6 +970,15 @@ export class ChunkPipeline {
   }
 
   private pumpLighting(): void {
+    const lightingToken = profiler.begin("main.chunk.pump.lighting");
+    try {
+      this.takeLightingWork();
+    } finally {
+      profiler.end(lightingToken);
+    }
+  }
+
+  private takeLightingWork(): void {
     const deferredColumnKeys: number[] = [];
     let candidatesExamined = 0;
     while (
@@ -694,13 +989,19 @@ export class ChunkPipeline {
       if (columnKey === undefined) break;
       candidatesExamined++;
       const column = this.columns.get(columnKey);
-      if (!column || column.isLighting || column.isGenerating || column.pendingChunkKeys.size > 0) continue;
+      if (!column || column.isLighting || column.isGenerating || column.pendingChunkKeys.size > 0) {
+        profiler.addCounter("game.lighting.staleColumnsSkipped");
+        continue;
+      }
       if (this.touchesColumnBeingLit(column)) {
         deferredColumnKeys.push(columnKey);
         continue;
       }
       this.dispatchLighting(column);
     }
+    profiler.addCounter("game.lighting.candidatesExamined", candidatesExamined);
+    profiler.addCounter("game.lighting.deferredByNeighborColumn", deferredColumnKeys.length);
+    if (candidatesExamined >= MAX_LIGHTING_CANDIDATES_PER_DISPATCH) profiler.addCounter("game.lighting.candidateLimitHit");
     for (const columnKey of deferredColumnKeys) {
       this.lightingQueue.schedule(columnKey, columnKey, this.columnPriority(columnKey));
     }
@@ -730,27 +1031,49 @@ export class ChunkPipeline {
     }
     if (region.length === 0) return;
     const collectToken = profiler.begin("main.light.collectRegionInputs");
+    const slabToken = profiler.begin("main.light.collectRegionInputs.surroundingSlabs");
     const slabs = collectSurroundingSlabs(region, this.getLitChunkView);
+    profiler.end(slabToken);
     const involved: { record: ChunkRecord; editVersion: number }[] = region.map((record) => ({
       record,
       editVersion: record.editVersion,
     }));
     let slabBytes = 0;
+    let slabsWithBlocks = 0;
+    let slabsWithLight = 0;
     for (const slab of slabs) {
       const surrounding = this.store.get(slab.chunkX, slab.chunkY, slab.chunkZ);
       if (surrounding) involved.push({ record: surrounding, editVersion: surrounding.editVersion });
       slabBytes += (slab.blocks?.byteLength ?? 0) + (slab.light?.byteLength ?? 0);
+      if (slab.blocks) slabsWithBlocks++;
+      if (slab.light) slabsWithLight++;
     }
-    const regionChunks = region.map((record) => ({
-      chunkX: record.chunkX,
-      chunkY: record.chunkY,
-      chunkZ: record.chunkZ,
-      blocks: record.uniformBlock >= 0 ? null : (record.blocks as Uint8Array).slice(),
-      uniformBlock: record.uniformBlock,
-    }));
+    const copyToken = profiler.begin("main.light.collectRegionInputs.copyRegionBlocks");
+    let regionBlockBytesCopied = 0;
+    let regionUniformChunks = 0;
+    const regionChunks = region.map((record) => {
+      if (record.uniformBlock >= 0) regionUniformChunks++;
+      else regionBlockBytesCopied += CELLS_PER_CHUNK;
+      return {
+        chunkX: record.chunkX,
+        chunkY: record.chunkY,
+        chunkZ: record.chunkZ,
+        blocks: record.uniformBlock >= 0 ? null : (record.blocks as Uint8Array).slice(),
+        uniformBlock: record.uniformBlock,
+      };
+    });
+    profiler.end(copyToken);
     profiler.end(collectToken);
     this.counters.slabBytesSent += slabBytes;
     profiler.recordBytes("bytes.light.surroundingSlabs", slabBytes);
+    profiler.recordBytes("bytes.light.regionBlocksCopied", regionBlockBytesCopied);
+    profiler.addCounter("game.lighting.dispatched");
+    profiler.addCounter("game.lighting.regionUniformChunks", regionUniformChunks);
+    profiler.addCounter("game.lighting.slabsSent", slabs.length);
+    profiler.addCounter("game.lighting.slabsWithBlocks", slabsWithBlocks);
+    profiler.addCounter("game.lighting.slabsWithLight", slabsWithLight);
+    profiler.sampleGauge("game.lighting.regionChunks", region.length);
+    profiler.sampleGauge("game.lighting.involvedRecords", involved.length);
     for (const record of region) record.stage = "lighting";
     column.isLighting = true;
     this.columnsBeingLit.add(column.key);
@@ -769,6 +1092,7 @@ export class ChunkPipeline {
         (error) => {
           finishLighting();
           console.error(error);
+          profiler.addCounter("game.lighting.failures");
           if (!this.isDisposed) this.returnRegionToGenerated(region);
         },
       )
@@ -787,9 +1111,12 @@ export class ChunkPipeline {
     involved: { record: ChunkRecord; editVersion: number }[],
     result: RegionLightResult,
   ): void {
+    const staleCheckToken = profiler.begin("main.light.checkStaleRegion");
     const isStale = involved.some(
       ({ record, editVersion }) => this.store.getByKey(record.key) === record && record.editVersion !== editVersion,
     );
+    profiler.end(staleCheckToken);
+    profiler.addCounter("game.light.regionResultsReturned");
     if (isStale) {
       this.counters.regionLightingRetries++;
       profiler.addCounter("game.light.regionRetries");
@@ -798,6 +1125,7 @@ export class ChunkPipeline {
       return;
     }
     const mergeToken = profiler.begin("main.light.mergeRegion");
+    const assignToken = profiler.begin("main.light.mergeRegion.assignLight");
     const regionByKey = new Map<number, ChunkRecord>();
     for (const record of region) regionByKey.set(record.key, record);
     const newlyLit: ChunkRecord[] = [];
@@ -814,22 +1142,48 @@ export class ChunkPipeline {
       this.counters.chunksLit++;
       profiler.addCounter("game.chunks.lit");
       profiler.recordTimer("chunk.pipeline.light", nowMs - record.requestedAtMs, "latency");
+      if (isSealed) profiler.addCounter("game.light.sealedChunksSharedDark");
+      else profiler.recordBytes("bytes.light.regionLightReceived", chunkLight.light.byteLength);
       this.startArea?.markReached(key, START_STAGE_LIT);
     }
+    profiler.end(assignToken);
+    profiler.addCounter("game.light.regionChunksLitFromResult", newlyLit.length);
+    const surroundingToken = profiler.begin("main.light.mergeRegion.surroundings");
+    let mergesChangedLight = 0;
+    let mergesSkippedNotLit = 0;
+    let faceBitsChanged = 0;
     for (const update of result.surroundingUpdates) {
       const surrounding = this.store.get(update.chunkX, update.chunkY, update.chunkZ);
-      if (!surrounding?.isLit) continue;
+      if (!surrounding?.isLit) {
+        mergesSkippedNotLit++;
+        continue;
+      }
       const changedFaces = mergeLightReportingFaces(surrounding.ensureOwnLight() as Uint8Array, update.light);
-      if (changedFaces !== 0) this.meshes.markLightChanged(surrounding, changedFaces);
+      if (changedFaces !== 0) {
+        mergesChangedLight++;
+        faceBitsChanged += countSetFaceBits(changedFaces);
+        this.meshes.markLightChanged(surrounding, changedFaces);
+      }
     }
+    profiler.end(surroundingToken);
     profiler.end(mergeToken);
+    profiler.addCounter("game.light.surroundingUpdates", result.surroundingUpdates.length);
+    profiler.addCounter("game.light.surroundingMergesChanged", mergesChangedLight);
+    profiler.addCounter("game.light.surroundingMergesUnchanged", result.surroundingUpdates.length - mergesChangedLight - mergesSkippedNotLit);
+    profiler.addCounter("game.light.surroundingMergesSkippedNotLit", mergesSkippedNotLit);
+    profiler.addCounter("game.light.mergeFacesChanged", faceBitsChanged);
+    profiler.recordBytes("bytes.light.surroundingMergeBytes", (result.surroundingUpdates.length - mergesSkippedNotLit) * CELLS_PER_CHUNK);
+    const neighborRemeshToken = profiler.begin("main.light.markNeighborMeshes");
     for (const record of newlyLit) {
       for (const delta of FACE_NEIGHBOR_KEY_DELTAS) {
         const neighbor = this.store.getByKey(record.key + delta);
         if (neighbor?.hasMeshActivity) this.meshes.markInputsChanged(neighbor, false);
       }
     }
+    profiler.end(neighborRemeshToken);
+    const considerToken = profiler.begin("main.light.considerNeighborhoods");
     for (const record of newlyLit) this.meshes.considerNeighborhood(record.key);
+    profiler.end(considerToken);
   }
 
   private onMeshReady(
@@ -838,26 +1192,49 @@ export class ChunkPipeline {
     isFirstMesh: boolean,
   ): void {
     if (isFirstMesh) {
+      profiler.addCounter("game.mesh.firstMeshesApplied");
       profiler.recordTimer("chunk.pipeline.total", profiler.now() - record.requestedAtMs, "latency");
+    } else {
+      profiler.addCounter(mesh ? "game.mesh.rebuildsApplied" : "game.mesh.removalsApplied");
     }
+    if (!mesh) profiler.addCounter("game.mesh.appliedEmpty");
     this.startArea?.markReached(record.key, START_STAGE_MESHED);
     this.options.events.onMeshReady(record, mesh);
   }
 
   private takeOwnershipOfEditedChunks(batch: BlockEditBatch): void {
+    const ownershipToken = profiler.begin("main.edit.takeOwnership");
     let lastChunkKey = Number.NaN;
+    let chunkRunsVisited = 0;
+    let chunksWithoutBlocks = 0;
     for (let position = 0; position < batch.length; position++) {
       const key = packChunkKey(batch.xs[position]! >> 5, batch.ys[position]! >> 5, batch.zs[position]! >> 5);
       if (key === lastChunkKey) continue;
       lastChunkKey = key;
+      chunkRunsVisited++;
       const record = this.store.getByKey(key);
-      if (!record?.blocks) continue;
+      if (!record?.blocks) {
+        chunksWithoutBlocks++;
+        continue;
+      }
       record.ensureOwnBlocks();
       if (record.isLit) record.ensureOwnLight();
     }
+    profiler.end(ownershipToken);
+    profiler.addCounter("game.edit.chunkRunsVisited", chunkRunsVisited);
+    profiler.addCounter("game.edit.chunkRunsWithoutBlocks", chunksWithoutBlocks);
   }
 
   private markEditedChunksMixed(result: BulkEditResult): void {
+    const mixedToken = profiler.begin("main.edit.markChunksMixed");
+    try {
+      this.markChunksNoLongerUniform(result);
+    } finally {
+      profiler.end(mixedToken);
+    }
+  }
+
+  private markChunksNoLongerUniform(result: BulkEditResult): void {
     const { changes } = result;
     if (changes.count === 0 && result.changedChunks.length > 0) {
       for (const chunk of result.changedChunks) {
