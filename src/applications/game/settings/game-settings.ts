@@ -1,6 +1,8 @@
 // Player preferences that are not about world streaming: camera, look speed and the phone control layout. Kept apart
 // from the render settings because they never reach the chunk pipeline.
 
+import { profiler } from "../profiler";
+
 export type TouchControlSize = "small" | "medium" | "large";
 export type TouchHandedness = "right" | "left";
 export type TouchJoystickMode = "floating" | "fixed";
@@ -91,6 +93,16 @@ function allowedOption<Option extends string>(value: unknown, options: readonly 
 
 /** Fills gaps with defaults and clamps everything into its menu range, so stored junk can never reach the game. */
 export function normalizeGameSettings(settings: Partial<Record<keyof GameSettings, unknown>>): GameSettings {
+  profiler.addCounter("game.settings.normalizations");
+  const normalizeToken = profiler.begin("main.settings.normalize");
+  try {
+    return normalizeGameSettingsUnprofiled(settings);
+  } finally {
+    profiler.end(normalizeToken);
+  }
+}
+
+function normalizeGameSettingsUnprofiled(settings: Partial<Record<keyof GameSettings, unknown>>): GameSettings {
   return {
     fieldOfViewDegrees: Math.round(
       clampedNumber(
