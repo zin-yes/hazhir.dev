@@ -4,6 +4,7 @@ import {
   installGlInstrumentation,
   type GlInstrumentation,
 } from "./gl-instrumentation";
+import { setGpuPassHost } from "./gpu-pass-registry";
 import { GpuTimer, type GpuTimerContext } from "./gpu-timer";
 import { profiler as defaultProfiler } from "./index";
 import type { Profiler } from "./profiler";
@@ -14,7 +15,7 @@ export { classifyRenderObject } from "./render-passes";
 export interface ProfiledRender {
   /**
    * Renders the scene; `beforeScene` draws a pass first (the LOD). Its draws count in the renderer stats and its GPU
-   * time is part of gpu.frame, or gpu.pass.lod with the pass breakdown on.
+   * time is part of gpu.pass.scene, or gpu.pass.lod with the pass breakdown on.
    */
   render(beforeScene?: () => void): void;
   dispose(): void;
@@ -44,6 +45,7 @@ export function createProfiledRender(
   const teardown = () => {
     if (!instrumentation) return;
     instrumentation.glInstrumentation.uninstall();
+    setGpuPassHost(null);
     instrumentation.gpuTimer.dispose();
     instrumentation = null;
   };
@@ -63,6 +65,7 @@ export function createProfiledRender(
       gpuRenderer: rendererInfo.renderer,
       gpuVendor: rendererInfo.vendor,
     });
+    setGpuPassHost({ gpuTimer, renderer });
     return { gl, glInstrumentation, gpuTimer, reportedBreakdown: !activeProfiler.settings.gpuPassBreakdown };
   };
 
@@ -99,31 +102,36 @@ export function createProfiledRender(
     renderer.info.reset();
     const token = activeProfiler.begin("main.frame.render");
     try {
+      let startedPassTimer = false;
       if (activeProfiler.settings.gpuPassBreakdown) {
         if (beforeScene) {
-          active.gpuTimer.begin("lod", frameId);
+          const startedLodTimer = active.gpuTimer.begin("lod", frameId);
           beforeScene();
-          active.gpuTimer.end();
+          if (startedLodTimer) active.gpuTimer.end();
         }
         renderScenePasses(
           renderer as unknown as PassRenderTarget,
           scene as unknown as { children: PassRenderable[] },
           camera,
-          (pass) => active.gpuTimer.begin(pass, frameId),
-          () => active.gpuTimer.end(),
+          (pass) => {
+            startedPassTimer = active.gpuTimer.begin(pass, frameId);
+          },
+          () => {
+            if (startedPassTimer) active.gpuTimer.end();
+          },
         );
       } else {
-        active.gpuTimer.begin("frame", frameId);
+        const startedSceneTimer = active.gpuTimer.begin("scene", frameId);
         beforeScene?.();
         renderer.render(scene, camera);
-        active.gpuTimer.end();
+        if (startedSceneTimer) active.gpuTimer.end();
       }
     } finally {
       activeProfiler.end(token);
       renderer.info.autoReset = previousAutoReset;
     }
 
-    active.gpuTimer.poll();
+    active.gpuTimer.poll(frameId);
     active.glInstrumentation.flushFrame();
     sampleRendererInfo();
   };

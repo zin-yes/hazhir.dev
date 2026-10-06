@@ -3,7 +3,6 @@ import type { Profiler } from "./profiler";
 const DISJOINT_TIMER_EXTENSION = "EXT_disjoint_timer_query_webgl2";
 const DEFAULT_MAX_IN_FLIGHT_QUERIES = 8;
 const NANOSECONDS_PER_MILLISECOND = 1_000_000;
-const FRAME_LABEL = "frame";
 const MAX_TRACKED_INCOMPLETE_FRAMES = 64;
 
 export type GpuTimerMode = "disjoint-timer-query" | "finish-sync-estimate" | "none";
@@ -53,9 +52,10 @@ export interface GpuTimerOptions {
  * across a GPU disjoint event are discarded. When the pool is exhausted new
  * measurements are dropped rather than queued.
  *
- * Labels other than "frame" are parts of a frame (render passes): each is
- * recorded as gpu.pass.<label> and the parts of one frame are summed into the
- * frame's GPU time once every part has resolved.
+ * Every label is one part of a frame (the scene, its render passes, shadow
+ * cascades, bloom, clouds, ...): each is recorded as gpu.pass.<label> and the
+ * parts of one frame are summed into gpu.frame once every part has resolved
+ * and the frame is over.
  */
 export class GpuTimer {
   readonly supported: boolean;
@@ -93,28 +93,29 @@ export class GpuTimer {
     return this.pendingQueries.length + (this.active?.query ? 1 : 0);
   }
 
-  begin(label: string, frameId: number) {
+  /** Starts timing a part of the frame. Returns false when nothing started, so the caller must not call end(). */
+  begin(label: string, frameId: number): boolean {
     if (this.active) {
       this.profiler.addCounter("gpu.timer.nestedBeginIgnored");
-      return;
+      return false;
     }
     const startedAtMs = performance.now();
 
     if (!this.extension) {
-      if (this.syncEstimateRequested) {
-        this.active = { query: null, label, frameId, startedAtMs };
-      }
-      return;
+      if (!this.syncEstimateRequested) return false;
+      this.active = { query: null, label, frameId, startedAtMs };
+      return true;
     }
     if (this.inFlightCount >= this.maxInFlightQueries) {
       this.profiler.addCounter("gpu.timer.dropped");
       this.incompleteFrames.add(frameId);
-      return;
+      return false;
     }
     const query = this.freeQueries.pop() ?? this.gl.createQuery();
-    if (!query) return;
+    if (!query) return false;
     this.gl.beginQuery(this.extension.TIME_ELAPSED_EXT, query);
     this.active = { query, label, frameId, startedAtMs };
+    return true;
   }
 
   end() {
@@ -134,16 +135,20 @@ export class GpuTimer {
     }
     this.gl.finish();
     const elapsedMs = performance.now() - active.startedAtMs;
-    this.profiler.recordTimer(
-      active.label === FRAME_LABEL ? "gpu.frame.syncEstimate" : `gpu.pass.${active.label}.syncEstimate`,
-      elapsedMs,
-      "gpu",
-    );
+    this.profiler.recordTimer(`gpu.pass.${active.label}.syncEstimate`, elapsedMs, "gpu");
   }
 
-  /** Collects every finished query, oldest first. Call once per frame. */
-  poll() {
-    if (!this.extension || this.pendingQueries.length === 0) return;
+  /**
+   * Collects every finished query, oldest first. Call once per frame. A frame's
+   * total is only final once the frame is over, so frames at or after
+   * `currentFrameId` can still gain parts and are not totalled yet.
+   */
+  poll(currentFrameId = Number.POSITIVE_INFINITY) {
+    if (!this.extension) return;
+    if (this.pendingQueries.length === 0) {
+      this.attachCompletedFrames(currentFrameId);
+      return;
+    }
 
     if (this.gl.getParameter(this.extension.GPU_DISJOINT_EXT)) {
       this.pendingQueries.forEach((pending) => (pending.isTainted = true));
@@ -164,7 +169,7 @@ export class GpuTimer {
       }
       this.freeQueries.push(pending.query);
     }
-    this.attachCompletedFrames();
+    this.attachCompletedFrames(currentFrameId);
   }
 
   dispose() {
@@ -179,11 +184,6 @@ export class GpuTimer {
   }
 
   private routeResult(label: string, frameId: number, milliseconds: number) {
-    if (label === FRAME_LABEL) {
-      this.profiler.attachGpuFrameTime(frameId, milliseconds);
-      this.profiler.recordTimer("gpu.frame", milliseconds, "gpu");
-      return;
-    }
     this.profiler.recordTimer(`gpu.pass.${label}`, milliseconds, "gpu");
     this.partialFrameTotals.set(
       frameId,
@@ -191,10 +191,11 @@ export class GpuTimer {
     );
   }
 
-  /** A frame's pass total is final once none of its queries are still pending. */
-  private attachCompletedFrames() {
+  /** A frame's total is final once the frame is over and none of its queries are still pending. */
+  private attachCompletedFrames(currentFrameId: number) {
     if (this.incompleteFrames.size > MAX_TRACKED_INCOMPLETE_FRAMES) this.incompleteFrames.clear();
     for (const [frameId, totalMilliseconds] of this.partialFrameTotals) {
+      if (frameId >= currentFrameId) continue;
       const hasPendingParts = this.pendingQueries.some((pending) => pending.frameId === frameId);
       if (hasPendingParts || this.active?.frameId === frameId) continue;
       this.partialFrameTotals.delete(frameId);
