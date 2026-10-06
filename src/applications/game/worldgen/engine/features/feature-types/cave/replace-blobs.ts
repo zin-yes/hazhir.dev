@@ -6,7 +6,7 @@ import { defineFeatureType } from "../../feature/feature-type";
 import type { WorldGenLevel } from "../../level/world-gen-level";
 import { asObject } from "../../providers/json-fields";
 import type { IntProvider } from "../../providers/value-providers";
-import { addFeatureCounter, endFeatureStep, startFeatureStep } from "../../profiling/feature-profiling";
+import { addFeatureCounter, endFeatureStep, noteFeatureRejection, startFeatureStep } from "../../profiling/feature-profiling";
 import { withinManhattan } from "./block-iteration";
 import { parseBlockStateIgnoringUnknownProperties } from "./config-fields";
 
@@ -42,7 +42,10 @@ export const replaceBlobsFeature = defineFeatureType<ReplaceBlobsConfig>({
     startFeatureStep("feature.replace_blobs.find");
     const targetY = findTarget(level, origin.x, clampedY, origin.z, config.targetBlockName);
     endFeatureStep("feature.replace_blobs.find");
-    if (targetY === undefined) return false;
+    if (targetY === undefined) {
+      noteFeatureRejection("noTargetBlock");
+      return false;
+    }
     const target = { x: origin.x, y: targetY, z: origin.z };
     const radiusX = config.radius.sample(random);
     const radiusY = config.radius.sample(random);

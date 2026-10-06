@@ -7,6 +7,11 @@ import type { ImprovedNoise } from "./improved-noise";
 import { buildGeneratedFunction } from "../generated-function";
 import { InlineNoiseSource, NOISE_IO, NOISE_IO_RESULT, NOISE_IO_X, NOISE_IO_Y, NOISE_IO_Z, noiseNumberLiteral } from "./inline-noise-source";
 import { PerlinNoise, wrapNoiseCoordinate } from "./perlin-noise";
+import { beginColdStart, defineColdStartLabel, endColdStart } from "../profiling/cold-start-ledger";
+import { defineHotCounter, noteHot } from "../profiling/hot-counters";
+
+const BLENDED_NOISE_SAMPLES = defineHotCounter("noise.blendedNoiseDirectSamples");
+const COMPILE_BLENDED_LABEL = defineColdStartLabel("codegen.blendedNoise");
 
 const BASE_SCALE = 684.412;
 const LIMIT_OCTAVES = [-15, -14, -13, -12, -11, -10, -9, -8, -7, -6, -5, -4, -3, -2, -1, 0];
@@ -63,6 +68,7 @@ export class BlendedNoise {
 
   /** Java `compute(FunctionContext)` at integer block coordinates. */
   compute(blockX: number, blockY: number, blockZ: number): number {
+    noteHot(BLENDED_NOISE_SAMPLES);
     const sampler = this.compiledSampler();
     if (sampler === undefined) return this.computeInterpreted(blockX, blockY, blockZ);
     NOISE_IO[NOISE_IO_X] = blockX;
@@ -79,7 +85,11 @@ export class BlendedNoise {
    * small enough for the optimizing compiler) that hand their running totals over in a Float64Array.
    */
   compiledSampler(): (() => void) | undefined {
-    if (this.compiled === undefined) this.compiled = this.compileSampler() ?? null;
+    if (this.compiled === undefined) {
+      const coldStartToken = beginColdStart(COMPILE_BLENDED_LABEL);
+      this.compiled = this.compileSampler() ?? null;
+      endColdStart(COMPILE_BLENDED_LABEL, coldStartToken);
+    }
     return this.compiled ?? undefined;
   }
 

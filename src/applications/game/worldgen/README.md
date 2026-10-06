@@ -12,4 +12,12 @@ The game generates chunks from a TypeScript port of Minecraft 1.20.6 world gener
 
 Output is byte-identical for a seed: `chunk-generator.golden.test.ts` hashes every game chunk, the decorated engine columns and the height sampler for a fixed set of columns and seeds (`fixtures/golden-chunks.json`; `GOLDEN_FULL=1` runs the larger set, `GOLDEN_UPDATE=1` rewrites it and is only for a known-correct commit). Every speedup is an exact rewrite of vanilla's evaluation: pure density subtrees are compiled to straight-line code and their y-independent parts computed once per column (`engine/density/column-memoization.ts`, `density-codegen.ts`), cell corners are sampled directly and shared between neighbouring chunks, the final density of a cell and the surface rules are generated code, aquifer cells whose 12 candidate centres share one fluid status skip the nearest-centre search, and caches (base heightmaps, biome grids, palette classification) are shared across regions. The quirks those caches could expose (y-dependent `flat_cache`/`cache_2d`, nested interpolators) are checked per router; when present the generic paths are used. `bun scripts/benchmark-worldgen.ts` reports steady-state ms per chunk over a 9x9 column area (cold and warm) and the height sampler cost.
 
+## Profiling
+
+`bun run profile:worldgen` writes `.profiles/worldgen-latest.md` (gitignored); its "Worldgen detail" section shows cold start costs, cache hit rates, modifier pass rates, feature outcomes with rejection reasons and every counter per game column. Instrumentation lives next to the code it measures and costs a null check while no worker profile records:
+
+- `engine/profiling/hot-counters.ts`: `defineHotCounter` at module load, `noteHot(slot)` in hot loops. Entry points open a window with `beginHotCounting`/`endHotCounting` (`generateChunkBlocks`, the surface height sampler); totals reach the profile once per window.
+- `engine/profiling/cold-start-ledger.ts`: one-off setup (code generation, data decoding, world construction) is always timed and flushed into the next profiled task as `coldStart.<label>.deferred.*` counters, or recorded as a `coldStart.<label>` section when a profile is already recording. Never use it per column or per block.
+- Feature types name why they gave up with `noteFeatureRejection("reason")` (dimension `worldgen.featureOutcome`).
+
 Block textures for biome blocks are Minecraft placeholders in `public/game`, to be replaced with original art.

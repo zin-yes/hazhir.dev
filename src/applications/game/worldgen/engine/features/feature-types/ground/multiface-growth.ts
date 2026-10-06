@@ -5,7 +5,7 @@ import type { RandomSource } from "../../../random";
 import { Direction } from "../../core/direction";
 import { defineFeatureType } from "../../feature/feature-type";
 import type { WorldGenLevel } from "../../level/world-gen-level";
-import { addFeatureCounter, endFeatureStep, startFeatureStep } from "../../profiling/feature-profiling";
+import { addFeatureCounter, endFeatureStep, noteFeatureRejection, startFeatureStep } from "../../profiling/feature-profiling";
 import type { BlockSet } from "../../providers/block-predicates";
 import { asObject, optionalBoolean, optionalNumber, type JsonValue } from "../../providers/json-fields";
 import {
@@ -94,12 +94,16 @@ export const multifaceGrowthFeature = defineFeatureType<MultifaceGrowthConfig>({
   },
   place({ config, level, random, origin }) {
     const { x, y, z } = origin;
-    if (!isAirOrWater(level, x, y, z)) return false;
+    if (!isAirOrWater(level, x, y, z)) {
+      noteFeatureRejection("originNotAirOrWater");
+      return false;
+    }
     const directions = shuffledCopy(config.validDirections, random);
     if (placeGrowthIfPossible(level, x, y, z, level.getBlockState(x, y, z), config, random, directions)) return true;
     const searchMark = startFeatureStep("feature.multiface_growth.search", level);
     const found = searchForGrowth(level, config, random, directions, x, y, z);
     endFeatureStep("feature.multiface_growth.search", level, searchMark);
+    if (!found) noteFeatureRejection("noSupportingFace");
     return found;
   },
 });

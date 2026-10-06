@@ -9,7 +9,7 @@ import { defineFeatureType, type FeatureChunkGenerator, type FeatureType } from 
 import type { FeatureParser } from "../../feature/feature-parser";
 import type { PlacedFeature } from "../../feature/placed-feature";
 import type { WorldGenLevel } from "../../level/world-gen-level";
-import { endFeatureStep, startFeatureStep } from "../../profiling/feature-profiling";
+import { endFeatureStep, noteFeatureRejection, startFeatureStep } from "../../profiling/feature-profiling";
 import { BlockPos } from "../../core/block-pos";
 import type { BlockStateProvider } from "../../providers/block-state-providers";
 import { asObject, type JsonValue, requireNumber, requireString } from "../../providers/json-fields";
@@ -126,6 +126,7 @@ function defineVegetationPatchType(
         else placeVegetation(level, config, generator, random, x, y, z);
       }
       endFeatureStep("feature.vegetation_patch.vegetation", level, vegetationMark);
+      if (patchPositions.size === 0) noteFeatureRejection("emptyGroundPatch");
       return patchPositions.size > 0;
     },
   });

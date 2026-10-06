@@ -25,6 +25,7 @@ export const NESTED_SAMPLE_EVERY = 32;
 
 export const featureProfileState = {
   openSectionDepth: 0,
+  activeTypeId: "",
   activeFeatureKey: "",
   placementDepth: 0,
   activePairKey: "",
@@ -32,6 +33,41 @@ export const featureProfileState = {
 };
 
 const UNATTRIBUTED_PAIR_KEY = "unattributed|unattributed";
+const UNATTRIBUTED_TYPE_ID = "unattributed";
+
+const outcomeKeysByType = new Map<string, Map<string, string>>();
+
+/** `${typeId}|${outcome}` built once per pair (outcome is a short fixed word or `reason:<why>`). */
+export function featureOutcomeKey(typeId: string, outcome: string): string {
+  let byOutcome = outcomeKeysByType.get(typeId);
+  if (byOutcome === undefined) {
+    byOutcome = new Map();
+    outcomeKeysByType.set(typeId, byOutcome);
+  }
+  let key = byOutcome.get(outcome);
+  if (key === undefined) {
+    key = `${typeId}|${outcome}`;
+    byOutcome.set(outcome, key);
+  }
+  return key;
+}
+
+const reasonOutcomeNames = new Map<string, string>();
+
+/**
+ * A feature type gave up for a named reason (no valid ground, not enough room, nothing to replace, ...). Counted per
+ * type and reason in the featureOutcome dimension. Reason strings are fixed literals at the call site.
+ */
+export function noteFeatureRejection(reason: string): void {
+  if (!isWorkerProfiling()) return;
+  const typeId = featureProfileState.activeTypeId || UNATTRIBUTED_TYPE_ID;
+  let outcome = reasonOutcomeNames.get(reason);
+  if (outcome === undefined) {
+    outcome = `reason:${reason}`;
+    reasonOutcomeNames.set(reason, outcome);
+  }
+  addWorkerKeyedUnits(DIMENSIONS.worldgenFeatureOutcome, featureOutcomeKey(typeId, outcome), 1);
+}
 
 export function pairKeyForSections(): string {
   return featureProfileState.activePairKey || UNATTRIBUTED_PAIR_KEY;
@@ -186,8 +222,72 @@ export function flushPlacementUnits(): void {
   biomePlacementUnits.clear();
 }
 
+const treePartKeysByType = new Map<string, Map<string, string[]>>();
+
+function treePartKeys(part: string, typeId: string): string[] {
+  let byType = treePartKeysByType.get(part);
+  if (byType === undefined) {
+    byType = new Map();
+    treePartKeysByType.set(part, byType);
+  }
+  let keys = byType.get(typeId);
+  if (keys === undefined) {
+    keys = [`${part}:${typeId}|placements`, `${part}:${typeId}|blocks`];
+    byType.set(typeId, keys);
+  }
+  return keys;
+}
+
+/** Blocks the level had written when a tree part started (0 when not profiling); pass it to endTreePart. */
+export function startTreePart(level: WorldGenLevel): number {
+  return isWorkerProfiling() ? blockWritesOf(level) : 0;
+}
+
+/** Credits one placement and the blocks written since startTreePart to the part's placer type. */
+export function endTreePart(part: string, typeId: string, level: WorldGenLevel, writesAtStart: number): void {
+  if (!isWorkerProfiling()) return;
+  const [placementsKey, blocksKey] = treePartKeys(part, typeId) as [string, string];
+  addWorkerKeyedUnits(DIMENSIONS.worldgenTreePart, placementsKey, 1);
+  addWorkerKeyedUnits(DIMENSIONS.worldgenTreePart, blocksKey, blockWritesOf(level) - writesAtStart);
+}
+
+export interface ChainTally {
+  readonly inKey: string;
+  readonly outKey: string;
+  positionsIn: number;
+  positionsOut: number;
+}
+
+const chainTallies = new Map<string, ChainTally>();
+const chainTallyBases = new Map<string, Map<string, string>>();
+
+/** Positions entering and leaving one modifier of one placed feature's chain; flushed once per origin. */
+export function chainTallyOf(featureKey: string, modifierType: string): ChainTally {
+  let byModifier = chainTallyBases.get(featureKey);
+  if (byModifier === undefined) {
+    byModifier = new Map();
+    chainTallyBases.set(featureKey, byModifier);
+  }
+  let base = byModifier.get(modifierType);
+  if (base === undefined) {
+    base = `${featureKey}|${modifierType.slice(modifierType.indexOf(":") + 1)}`;
+    byModifier.set(modifierType, base);
+  }
+  let tally = chainTallies.get(base);
+  if (tally === undefined) {
+    tally = { inKey: `${base}|in`, outKey: `${base}|out`, positionsIn: 0, positionsOut: 0 };
+    chainTallies.set(base, tally);
+  }
+  return tally;
+}
+
 /** Flushed once per decorated origin: modifier pass rates, placement outcomes and region traffic. */
 export function flushOriginCounters(level: WorldGenLevel): void {
+  for (const tally of chainTallies.values()) {
+    addWorkerKeyedUnits(DIMENSIONS.worldgenPlacementChain, tally.inKey, tally.positionsIn);
+    addWorkerKeyedUnits(DIMENSIONS.worldgenPlacementChain, tally.outKey, tally.positionsOut);
+  }
+  chainTallies.clear();
   for (const tally of modifierTallies.values()) {
     if (tally.calls === 0) continue;
     addWorkerCounter(`${tally.counterPrefix}.calls`, tally.calls);
@@ -209,6 +309,8 @@ export function flushOriginCounters(level: WorldGenLevel): void {
 /** Drops state left behind by an aborted task so the next one starts clean. */
 export function resetFeatureProfileState(): void {
   featureProfileState.blocksClaimedByTypes = 0;
+  featureProfileState.activeTypeId = "";
+  chainTallies.clear();
   featureProfileState.activeFeatureKey = "";
   featureProfileState.placementDepth = 0;
   featureProfileState.activePairKey = "";

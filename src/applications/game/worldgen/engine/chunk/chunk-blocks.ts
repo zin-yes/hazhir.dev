@@ -1,7 +1,11 @@
 // Block storage for one 16x16 column over the full world height, shared by every generation stage.
 // Layout: index = (y - minY) * 256 + localZ * 16 + localX, values are BlockPalette ids.
 
+import { defineHotCounter, noteHot, noteHotAmount } from "../profiling/hot-counters";
 import { BlockPalette } from "./block-palette";
+
+const COLUMNS_ALLOCATED = defineHotCounter("chunkBlocks.columnsAllocated");
+const COLUMN_BYTES_ALLOCATED = defineHotCounter("chunkBlocks.bytesAllocated");
 
 export const CHUNK_COLUMN_SIZE = 16;
 const LAYER_SIZE = CHUNK_COLUMN_SIZE * CHUNK_COLUMN_SIZE;
@@ -17,6 +21,8 @@ export class ChunkBlocks {
     readonly palette: BlockPalette,
   ) {
     this.blocks = new Uint16Array(LAYER_SIZE * height);
+    noteHot(COLUMNS_ALLOCATED);
+    noteHotAmount(COLUMN_BYTES_ALLOCATED, this.blocks.byteLength);
   }
 
   get maxY(): number {

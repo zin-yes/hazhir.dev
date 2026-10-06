@@ -14,6 +14,9 @@ export interface TrunkPlacementContext {
 }
 
 export abstract class TrunkPlacer {
+  /** The datapack type id (minecraft:straight_trunk_placer), set by the parser; names the placer in profiles. */
+  typeId = "unknown";
+
   constructor(
     protected readonly baseHeight: number,
     protected readonly heightRandomA: number,

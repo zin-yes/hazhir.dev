@@ -3,7 +3,7 @@
 
 import { MutableBlockPos } from "../core/block-pos";
 import { defineFeatureType, type FeatureType } from "../feature/feature-type";
-import { addFeatureCounter } from "../profiling/feature-profiling";
+import { addFeatureCounter, noteFeatureRejection } from "../profiling/feature-profiling";
 import type { PlacedFeature } from "../feature/placed-feature";
 import { asObject, optionalNumber } from "../providers/json-fields";
 
@@ -41,6 +41,7 @@ function defineRandomPatchType(id: string): FeatureType<RandomPatchConfig> {
       }
       addFeatureCounter("feature.randomPatch.tries", config.tries);
       addFeatureCounter("feature.randomPatch.placed", placedCount);
+      if (placedCount === 0) noteFeatureRejection("noAttemptPlaced");
       return placedCount > 0;
     },
   });

@@ -5,6 +5,10 @@
 import { LegacyRandomSource } from "../random/legacy-random-source";
 import type { RandomSource } from "../random/random-source";
 import { SimplexNoise } from "./simplex-noise";
+import { defineHotCounter, noteHot, noteHotAmount } from "../profiling/hot-counters";
+
+const SIMPLEX_SAMPLES = defineHotCounter("noise.perlinSimplexSamples");
+const SIMPLEX_OCTAVES = defineHotCounter("noise.simplexOctaveEvaluations");
 
 const LONG_MAX = BigInt("9223372036854775807");
 const LONG_MIN = BigInt("-9223372036854775808");
@@ -21,6 +25,7 @@ export class PerlinSimplexNoise {
   private readonly noiseLevels: (SimplexNoise | null)[];
   private readonly highestFreqValueFactor: number;
   private readonly highestFreqInputFactor: number;
+  private readonly activeOctaveCount: number;
 
   constructor(random: RandomSource, octaves: number[]) {
     if (octaves.length === 0) throw new Error("Need some octaves!");
@@ -49,11 +54,14 @@ export class PerlinSimplexNoise {
         else derivedRandom.skip(262);
       }
     }
+    this.activeOctaveCount = this.noiseLevels.filter((level) => level !== null).length;
     this.highestFreqInputFactor = Math.pow(2.0, lastOctave);
     this.highestFreqValueFactor = 1.0 / (Math.pow(2.0, octaveCount) - 1.0);
   }
 
   getValue(x: number, y: number, useNoiseOffsets: boolean): number {
+    noteHot(SIMPLEX_SAMPLES);
+    noteHotAmount(SIMPLEX_OCTAVES, this.activeOctaveCount);
     let total = 0.0;
     let inputFactor = this.highestFreqInputFactor;
     let valueFactor = this.highestFreqValueFactor;

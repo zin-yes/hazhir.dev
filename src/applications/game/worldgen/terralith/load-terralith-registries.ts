@@ -15,6 +15,15 @@ import noiseSettingsOverworldJson from "./data/noise-settings-overworld.json";
 import noisesJson from "./data/noises.json";
 import placedFeaturesJson from "./data/placed-features.json";
 import { OVERWORLD_NOISE_SETTINGS_ID } from "./constants";
+import { beginColdStart, defineColdStartLabel, endColdStart, recordColdStartUnits } from "../engine/profiling/cold-start-ledger";
+
+const DECODE_LABEL = defineColdStartLabel("terralith.decodeRegistries");
+const ENTRIES_LABEL = defineColdStartLabel("terralith.decodeRegistries.entries");
+const BIOME_ENTRIES_LABEL = defineColdStartLabel("terralith.decodeRegistries.biomes");
+const FEATURE_ENTRIES_LABEL = defineColdStartLabel("terralith.decodeRegistries.configuredFeatures");
+const PLACED_FEATURE_ENTRIES_LABEL = defineColdStartLabel("terralith.decodeRegistries.placedFeatures");
+const DENSITY_FUNCTION_ENTRIES_LABEL = defineColdStartLabel("terralith.decodeRegistries.densityFunctions");
+const NOISE_ENTRIES_LABEL = defineColdStartLabel("terralith.decodeRegistries.noises");
 
 export type TerralithRegistries = Omit<DatapackLoadResult, "overworldDimension"> & { overworldDimension: JsonObject };
 
@@ -27,6 +36,7 @@ function asRegistry(json: unknown): Record<string, JsonObject> {
 /** Decoded once per thread; the result is shared, treat it as read-only. */
 export function loadTerralithRegistries(): TerralithRegistries {
   if (loadedRegistries !== undefined) return loadedRegistries;
+  const coldStartToken = beginColdStart(DECODE_LABEL);
   const registries: WorldgenRegistries = {
     biome: decodeBiomes(biomesJson as unknown as CompactBiomeTable),
     configured_carver: asRegistry(configuredCarversJson),
@@ -46,5 +56,16 @@ export function loadTerralithRegistries(): TerralithRegistries {
     blockTags: blockTagsJson as Record<string, string[]>,
     biomeTags: biomeTagsJson as Record<string, string[]>,
   };
+  endColdStart(DECODE_LABEL, coldStartToken);
+  const entryCountOf = (registry: Record<string, unknown>) => Object.keys(registry).length;
+  recordColdStartUnits(BIOME_ENTRIES_LABEL, entryCountOf(registries.biome));
+  recordColdStartUnits(FEATURE_ENTRIES_LABEL, entryCountOf(registries.configured_feature));
+  recordColdStartUnits(PLACED_FEATURE_ENTRIES_LABEL, entryCountOf(registries.placed_feature));
+  recordColdStartUnits(DENSITY_FUNCTION_ENTRIES_LABEL, entryCountOf(registries.density_function));
+  recordColdStartUnits(NOISE_ENTRIES_LABEL, entryCountOf(registries.noise));
+  recordColdStartUnits(
+    ENTRIES_LABEL,
+    entryCountOf(registries.biome) + entryCountOf(registries.configured_feature) + entryCountOf(registries.placed_feature) + entryCountOf(registries.density_function) + entryCountOf(registries.noise),
+  );
   return loadedRegistries;
 }

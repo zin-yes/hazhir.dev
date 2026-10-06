@@ -5,7 +5,7 @@ import type { RandomSource } from "../../../random";
 import { BlockPos } from "../../core/block-pos";
 import { defineFeatureType, type FeaturePlaceContext } from "../../feature/feature-type";
 import type { WorldGenLevel } from "../../level/world-gen-level";
-import { endFeatureStep, startFeatureStep } from "../../profiling/feature-profiling";
+import { addFeatureCounter, endFeatureStep, endTreePart, noteFeatureRejection, startFeatureStep, startTreePart } from "../../profiling/feature-profiling";
 import { JavaHashPositionSet } from "./java-hash-position-set";
 import { parseTreeConfig } from "./tree-config";
 import { TreeDecoratorContext } from "./tree-decorators";
@@ -55,27 +55,41 @@ function doPlace(level: WorldGenLevel, random: RandomSource, origin: BlockPos, s
   const trunkOrigin = config.rootPlacer ? config.rootPlacer.getTrunkOrigin(origin, random) : origin;
   const lowestY = Math.min(origin.y, trunkOrigin.y);
   const highestY = Math.max(origin.y, trunkOrigin.y) + treeHeight + 1;
-  if (lowestY < level.minY + 1 || highestY > level.minY + level.height) return false;
+  if (lowestY < level.minY + 1 || highestY > level.minY + level.height) {
+    noteFeatureRejection("outsideBuildHeight");
+    return false;
+  }
   const minClippedHeight = config.minimumSize.minClippedHeight;
   startFeatureStep("feature.tree.freeSpaceCheck");
   const freeTreeHeight = getMaxFreeTreeHeight(level, treeHeight, trunkOrigin, config);
   endFeatureStep("feature.tree.freeSpaceCheck");
-  if (freeTreeHeight < treeHeight && (minClippedHeight === undefined || freeTreeHeight < minClippedHeight)) return false;
+  if (freeTreeHeight < treeHeight && (minClippedHeight === undefined || freeTreeHeight < minClippedHeight)) {
+    noteFeatureRejection("notEnoughFreeSpace");
+    return false;
+  }
   const setRootBlock = createRecordingSetter(level, sets.roots);
   const setTrunkBlock = createRecordingSetter(level, sets.logs);
   if (config.rootPlacer) {
     const rootsMark = startFeatureStep("feature.tree.roots", level);
     const rootsPlaced = config.rootPlacer.placeRoots({ level, random, config, setRootBlock }, origin, trunkOrigin);
     endFeatureStep("feature.tree.roots", level, rootsMark);
-    if (!rootsPlaced) return false;
+    if (!rootsPlaced) {
+      noteFeatureRejection("rootsBlocked");
+      return false;
+    }
   }
   const trunkMark = startFeatureStep("feature.tree.trunk", level);
+  const trunkPartMark = startTreePart(level);
   const attachments = config.trunkPlacer.placeTrunk({ level, random, config, setTrunkBlock }, freeTreeHeight, trunkOrigin);
+  endTreePart("trunk", config.trunkPlacer.typeId, level, trunkPartMark);
   endFeatureStep("feature.tree.trunk", level, trunkMark);
   const foliageMark = startFeatureStep("feature.tree.foliage", level);
+  const foliagePartMark = startTreePart(level);
   for (const attachment of attachments) {
     config.foliagePlacer.createFoliage({ level, random, config, foliageSetter }, freeTreeHeight, attachment, foliageHeight, foliageRadius);
   }
+  endTreePart("foliage", config.foliagePlacer.typeId, level, foliagePartMark);
+  addFeatureCounter("feature.tree.foliageAttachments", attachments.length);
   endFeatureStep("feature.tree.foliage", level, foliageMark);
   return true;
 }
@@ -109,7 +123,11 @@ function placeTree({ level, random, origin, config }: FeaturePlaceContext<TreeCo
   };
   const originPosition = BlockPos.of(origin);
   const placed = doPlace(level, random, originPosition, sets, foliageSetter, config);
-  if (!placed || (sets.logs.isEmpty() && sets.leaves.isEmpty())) return false;
+  if (!placed) return false;
+  if (sets.logs.isEmpty() && sets.leaves.isEmpty()) {
+    noteFeatureRejection("nothingWritten");
+    return false;
+  }
   if (config.decorators.length > 0) {
     const decoratorMark = startFeatureStep("feature.tree.decorators", level);
     const decoratorContext = new TreeDecoratorContext(level, createRecordingSetter(level, sets.decorations), random, originPosition, sets.logs, sets.leaves, sets.roots);
@@ -119,7 +137,14 @@ function placeTree({ level, random, origin, config }: FeaturePlaceContext<TreeCo
   startFeatureStep("feature.tree.boundingBox");
   const box = boundingBoxOf(sets);
   endFeatureStep("feature.tree.boundingBox");
-  if (!box) return false;
+  if (!box) {
+    noteFeatureRejection("emptyBoundingBox");
+    return false;
+  }
+  addFeatureCounter("feature.tree.logsPlaced", sets.logs.size);
+  addFeatureCounter("feature.tree.leavesPlaced", sets.leaves.size);
+  addFeatureCounter("feature.tree.rootsPlaced", sets.roots.size);
+  addFeatureCounter("feature.tree.decorationBlocksPlaced", sets.decorations.size);
   const leavesMark = startFeatureStep("feature.tree.updateLeaves", level);
   const shape = updateLeaves(level, box, sets.logs, sets.decorations, sets.roots);
   endFeatureStep("feature.tree.updateLeaves", level, leavesMark);

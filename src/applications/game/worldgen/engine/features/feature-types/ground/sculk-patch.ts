@@ -5,7 +5,7 @@ import { Direction } from "../../core/direction";
 import { defineFeatureType } from "../../feature/feature-type";
 import type { WorldGenLevel } from "../../level/world-gen-level";
 import { asObject, requireNumber } from "../../providers/json-fields";
-import { addFeatureCounter, endFeatureStep, startFeatureStep } from "../../profiling/feature-profiling";
+import { addFeatureCounter, endFeatureStep, noteFeatureRejection, startFeatureStep } from "../../profiling/feature-profiling";
 import type { IntProvider } from "../../providers/value-providers";
 import { SculkSpreader } from "./sculk-spreader";
 import { isCollisionShapeFullBlock, isFaceSturdy } from "./support/block-faces";
@@ -46,7 +46,10 @@ export const sculkPatchFeature = defineFeatureType<SculkPatchConfig>({
     };
   },
   place({ config, level, random, origin }) {
-    if (!canSpreadFrom(level, origin.x, origin.y, origin.z)) return false;
+    if (!canSpreadFrom(level, origin.x, origin.y, origin.z)) {
+      noteFeatureRejection("cannotSpreadFromOrigin");
+      return false;
+    }
     const spreader = new SculkSpreader();
     const rounds = config.spreadRounds + config.growthRounds;
     const spreadMark = startFeatureStep("feature.sculk_patch.spread", level);

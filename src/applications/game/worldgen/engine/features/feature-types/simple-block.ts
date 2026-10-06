@@ -6,6 +6,7 @@ import type { BlockStateProvider } from "../providers/block-state-providers";
 import { defineFeatureType } from "../feature/feature-type";
 import type { WorldGenLevel } from "../level/world-gen-level";
 import { asObject } from "../providers/json-fields";
+import { noteFeatureRejection } from "../profiling/feature-profiling";
 
 export interface SimpleBlockConfig {
   readonly toPlace: BlockStateProvider;
@@ -34,9 +35,15 @@ export const simpleBlockFeature = defineFeatureType<SimpleBlockConfig>({
   },
   place({ config, level, random, origin }) {
     const state = config.toPlace.getState(random, origin.x, origin.y, origin.z);
-    if (!level.survival.canSurvive(state, level, origin.x, origin.y, origin.z)) return false;
+    if (!level.survival.canSurvive(state, level, origin.x, origin.y, origin.z)) {
+      noteFeatureRejection("cannotSurvive");
+      return false;
+    }
     if (level.blockStates.info(state).isDoublePlant) {
-      if (!level.isEmptyBlock(origin.x, origin.y + 1, origin.z)) return false;
+      if (!level.isEmptyBlock(origin.x, origin.y + 1, origin.z)) {
+        noteFeatureRejection("upperHalfBlocked");
+        return false;
+      }
       placeDoublePlant(level, state, origin.x, origin.y, origin.z, 2);
       return true;
     }

@@ -8,7 +8,7 @@ import { defineFeatureType } from "../../feature/feature-type";
 import type { WorldGenLevel } from "../../level/world-gen-level";
 import { asArray, asObject, requireNumber } from "../../providers/json-fields";
 import { Direction } from "../../core/direction";
-import { addFeatureCounter, endFeatureStep, startFeatureStep } from "../../profiling/feature-profiling";
+import { addFeatureCounter, endFeatureStep, noteFeatureRejection, startFeatureStep } from "../../profiling/feature-profiling";
 import { fround, FLOAT_PI, javaRoundFloat, mthCeil, mthFloor, mthLerp, mthSin } from "./java-math";
 import { parseBlockStateIgnoringUnknownProperties, requireInt } from "./config-fields";
 import { parseRuleTest, type RuleTest } from "./rule-test";
@@ -152,6 +152,7 @@ function placeOreBlobs(
   endFeatureStep("feature.ore.scan", level, scanMark);
   addFeatureCounter("feature.ore.veins", 1);
   addFeatureCounter("feature.ore.candidateCells", candidateCellCount);
+  if (placedCount === 0) noteFeatureRejection("noTargetBlockReplaced");
   return placedCount > 0;
 }
 
@@ -179,6 +180,7 @@ export const oreFeature = defineFeatureType<OreConfig>({
         return placeOreBlobs(level, random, config, startX, endX, startZ, endZ, startY, endY, minBlockX, minBlockY, minBlockZ, widthX, heightY);
       }
     }
+    noteFeatureRejection("belowTerrainFloor");
     return false;
   },
 });

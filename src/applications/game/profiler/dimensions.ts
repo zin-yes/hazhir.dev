@@ -93,6 +93,15 @@ export const DIMENSIONS = {
   waterLevel: "water.level",
   /** World store time per operation (put, getAll, delete, legacyImport). */
   worldStoreOperation: "worldStore.operation",
+  // worldgen detail
+  /** Decoration steps: time per step and features attempted (units). Key: step name (raw_generation, lakes, ...). */
+  worldgenDecorationStep: "worldgen.decorationStep",
+  /** Feature outcomes per feature type. Key: `${typeId}|placed`, `|rejected`, `|placedNested`, `|rejectedNested` or `|reason:<why>`. */
+  worldgenFeatureOutcome: "worldgen.featureOutcome",
+  /** Tree parts: placements and blocks written per trunk and foliage placer type. Key: `trunk:<type>|placements`, `|blocks`, `foliage:<type>|...`. */
+  worldgenTreePart: "worldgen.treePart",
+  /** Placement modifier chains: positions in and out per placed feature and modifier. Key: `${feature}|${modifier}|in` or `|out`. */
+  worldgenPlacementChain: "worldgen.placementChain",
 } as const;
 
 export type DimensionName = (typeof DIMENSIONS)[keyof typeof DIMENSIONS];

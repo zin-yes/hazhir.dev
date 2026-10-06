@@ -3,6 +3,7 @@
 // Noise sources are injected so this file has no dependency on engine/noise.
 
 import type { JsonObject, JsonValue } from "../registry/datapack-loader";
+import { beginColdStart, defineColdStartLabel, endColdStart } from "../profiling/cold-start-ledger";
 import { DensityFunctionCompiler } from "./compiler";
 import { type DensityNode, MemoizingDensityVisitor, NoiseHolder, type NormalNoiseSampler } from "./density-function";
 import { type BlendedNoiseParameters, type BlendedNoiseSampler, OldBlendedNoiseNode } from "./nodes/noise-nodes";
@@ -67,12 +68,15 @@ export class NoiseWiringVisitor extends MemoizingDensityVisitor {
   }
 }
 
+const WIRE_ROUTER_LABEL = defineColdStartLabel("world.wireNoiseRouter");
+
 /** Compiles and wires a noise_router JSON object against arbitrary noise sources (tests inject fakes here). */
 export function wireNoiseRouter(params: {
   densityFunctionsById: Record<string, JsonValue>;
   noiseRouterJson: JsonObject;
   sources: NoiseWiringSources;
 }): NoiseRouter {
+  const coldStartToken = beginColdStart(WIRE_ROUTER_LABEL);
   const compiler = new DensityFunctionCompiler(params.densityFunctionsById);
   const wiring = new NoiseWiringVisitor(params.sources);
   const router = {} as NoiseRouter;
@@ -81,6 +85,7 @@ export function wireNoiseRouter(params: {
     if (json === undefined) throw new Error(`noise_router is missing "${jsonName}"`);
     router[fieldName] = wiring.map(compiler.compileHolderHelper(json, `noise_router.${jsonName}`));
   }
+  endColdStart(WIRE_ROUTER_LABEL, coldStartToken, compiler.compiledReferenceCount);
   return router;
 }
 

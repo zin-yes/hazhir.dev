@@ -5,7 +5,7 @@
 
 import { defineFeatureType } from "../../feature/feature-type";
 import type { WorldGenLevel } from "../../level/world-gen-level";
-import { addFeatureCounter, endFeatureStep, startFeatureStep } from "../../profiling/feature-profiling";
+import { addFeatureCounter, endFeatureStep, noteFeatureRejection, startFeatureStep } from "../../profiling/feature-profiling";
 import { asObject } from "../../providers/json-fields";
 import type { BlockStateProvider } from "../../providers/block-state-providers";
 
@@ -65,7 +65,10 @@ export const lakeFeature = defineFeatureType<LakeConfig>({
     };
   },
   place({ level, random, origin, config }) {
-    if (origin.y <= level.minY + 4) return false;
+    if (origin.y <= level.minY + 4) {
+      noteFeatureRejection("tooCloseToBottom");
+      return false;
+    }
     const baseX = origin.x;
     const baseY = origin.y - 4;
     const baseZ = origin.z;
@@ -96,7 +99,10 @@ export const lakeFeature = defineFeatureType<LakeConfig>({
     startFeatureStep("feature.lake.check");
     const siteValid = isLakeSiteValid(level, shape, baseX, baseY, baseZ, fluidState);
     endFeatureStep("feature.lake.check");
-    if (!siteValid) return false;
+    if (!siteValid) {
+      noteFeatureRejection("invalidSite");
+      return false;
+    }
     const fillMark = startFeatureStep("feature.lake.fill", level);
     for (let x = 0; x < LAKE_SIZE_X; x++) {
       for (let z = 0; z < LAKE_SIZE_Z; z++) {

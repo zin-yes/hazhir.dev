@@ -3,6 +3,7 @@
 // are a later stage that plugs into `stages`.
 
 import { addWorkerCounter, isWorkerProfiling } from "@/applications/game/profiler/worker-recorder";
+import { defineColdStartLabel, timeColdStart } from "../profiling/cold-start-ledger";
 import { BiomeManager, MultiNoiseBiomeSource } from "../biome-source";
 import { createCarverSystem } from "../carvers";
 import { BlockPalette, ChunkBlocks, blockNameOf } from "../chunk";
@@ -17,6 +18,13 @@ import { createCarverStage, createNoiseFillStage, createSeedSurfaceSystem, creat
 import { createPointBiomeSampler } from "./point-biome-sampler";
 import { runStagesWithProfiling } from "./profiled-stage-runner";
 import { readOverworldSettings, type OverworldSettings } from "./noise-settings-reader";
+
+const READ_SETTINGS_LABEL = defineColdStartLabel("world.readSettings");
+const BIOME_STORE_LABEL = defineColdStartLabel("world.createBiomeStore");
+const SURFACE_SYSTEM_LABEL = defineColdStartLabel("world.createSurfaceSystem");
+const CARVER_SYSTEM_LABEL = defineColdStartLabel("world.createCarverSystem");
+const CARVER_BIOME_SAMPLER_LABEL = defineColdStartLabel("world.createCarverBiomeSampler");
+const CREATE_STAGES_LABEL = defineColdStartLabel("world.createStages");
 
 const MAX_CACHED_COLUMNS = 64;
 // A biome grid is about 3 KB; decoration and surface rules read biomes a few chunks around every base column.
@@ -60,7 +68,7 @@ const NON_MOTION_BLOCKING_NAMES = new Set(["minecraft:air", "minecraft:cave_air"
 
 export function createOverworldGenerator(params: OverworldGeneratorParams): OverworldGenerator {
   const { registries, overworldDimension, seed, blockTags } = params;
-  const settings = readOverworldSettings(registries, overworldDimension);
+  const settings = timeColdStart(READ_SETTINGS_LABEL, () => readOverworldSettings(registries, overworldDimension));
   const noiseSettings = registries.noise_settings[settings.noiseSettingsId]!;
   const router = wireNoiseRouter({
     densityFunctionsById: registries.density_function,
@@ -68,13 +76,10 @@ export function createOverworldGenerator(params: OverworldGeneratorParams): Over
     sources: createSeededNoiseSources({ registries, seed }),
   });
   const biomeSource = new MultiNoiseBiomeSource((overworldDimension.generator as JsonObject).biome_source as JsonObject, { reuseLastLeaf: true });
-  const biomeStore = new ChunkBiomeStore({
-    router,
-    biomeSource,
-    minY: settings.minY,
-    height: settings.height,
-    maxCachedChunks: MAX_CACHED_BIOME_CHUNKS,
-  });
+  const biomeStore = timeColdStart(
+    BIOME_STORE_LABEL,
+    () => new ChunkBiomeStore({ router, biomeSource, minY: settings.minY, height: settings.height, maxCachedChunks: MAX_CACHED_BIOME_CHUNKS }),
+  );
   const rawBiomeAtQuart = (quartX: number, quartY: number, quartZ: number) => biomeStore.rawBiomeAtQuart(quartX, quartY, quartZ);
   const biomeManager = new BiomeManager(rawBiomeAtQuart, seed, (quartX, quartZ) => biomeStore.hasQuartColumn(quartX, quartZ));
   const biomeAt = (blockX: number, blockY: number, blockZ: number) => biomeManager.getBiome(blockX, blockY, blockZ);
@@ -91,12 +96,14 @@ export function createOverworldGenerator(params: OverworldGeneratorParams): Over
 
   const palette = new BlockPalette();
   const rootRandomFactory = createRootRandomFactory(seed);
-  const seedSurface = createSeedSurfaceSystem({ registries, settings, randomFactory: rootRandomFactory });
+  const seedSurface = timeColdStart(SURFACE_SYSTEM_LABEL, () => createSeedSurfaceSystem({ registries, settings, randomFactory: rootRandomFactory }));
   const stages = params.stages ?? [createNoiseFillStage({ aquifers: { rootRandomFactory } }), createSurfaceStage(seedSurface.surfaceSystem)];
   if (params.stages === undefined && blockTags !== undefined) {
-    const carverBiomeSampler = createPointBiomeSampler(router, new MultiNoiseBiomeSource((overworldDimension.generator as JsonObject).biome_source as JsonObject));
-    const carverSystem = createCarverSystem({ registries, blockTags, seed, rawBiomeAtQuart: carverBiomeSampler });
-    stages.push(createCarverStage({ carverSystem, seedSurface, settings, router }));
+    const carverBiomeSampler = timeColdStart(CARVER_BIOME_SAMPLER_LABEL, () =>
+      createPointBiomeSampler(router, new MultiNoiseBiomeSource((overworldDimension.generator as JsonObject).biome_source as JsonObject)),
+    );
+    const carverSystem = timeColdStart(CARVER_SYSTEM_LABEL, () => createCarverSystem({ registries, blockTags, seed, rawBiomeAtQuart: carverBiomeSampler }));
+    timeColdStart(CREATE_STAGES_LABEL, () => stages.push(createCarverStage({ carverSystem, seedSurface, settings, router })));
   }
   const columnCache = new BoundedLruCache<number, ChunkBlocks>(params.maxCachedColumns ?? MAX_CACHED_COLUMNS, "baseColumns");
   const carvingMaskByColumn = new WeakMap<ChunkBlocks, CarvingMask>();

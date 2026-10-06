@@ -18,6 +18,16 @@ import {
 } from "./engine/pipeline";
 import { TerrainHeightSampler } from "./engine/terrain";
 import { loadTerralithRegistries } from "./terralith/load-terralith-registries";
+import { beginColdStart, defineColdStartLabel, endColdStart } from "./engine/profiling/cold-start-ledger";
+import { defineHotCounter, noteHot } from "./engine/profiling/hot-counters";
+
+const FULL_WORLD_LABEL = defineColdStartLabel("world.createFullWorld");
+const TERRAIN_ONLY_LABEL = defineColdStartLabel("world.createTerrainOnlyGenerator");
+const HEIGHT_SAMPLER_LABEL = defineColdStartLabel("world.createTerrainHeightSampler");
+const DECORATOR_LABEL = defineColdStartLabel("world.createFeatureDecorator");
+const WORLD_CACHE_HITS = defineHotCounter("world.seedEntryHits");
+const WORLD_CACHE_CREATED = defineHotCounter("world.seedEntriesCreated");
+const WORLD_CACHE_EVICTED = defineHotCounter("world.seedEntriesEvicted");
 
 const MAX_CACHED_SEEDS = 2;
 // A decorated column reads base terrain up to two columns away, so one 2x2 game column touches a 6x6 base area.
@@ -78,6 +88,15 @@ function createFullGenerator(seed: number): OverworldGenerator {
 }
 
 function createFullWorld(seed: number): FullWorld {
+  const coldStartToken = beginColdStart(FULL_WORLD_LABEL);
+  try {
+    return createFullWorldUntimed(seed);
+  } finally {
+    endColdStart(FULL_WORLD_LABEL, coldStartToken);
+  }
+}
+
+function createFullWorldUntimed(seed: number): FullWorld {
   const generator = createFullGenerator(seed);
   const { registries, overworldDimension, blockTags } = loadTerralithRegistries();
   const timedSource: OverworldGenerator = {
@@ -94,6 +113,7 @@ function createFullWorld(seed: number): FullWorld {
       }
     },
   };
+  const decoratorToken = beginColdStart(DECORATOR_LABEL);
   const decorator = new FeatureDecorator({
     source: timedSource,
     seed: BigInt(Math.trunc(seed)),
@@ -102,6 +122,7 @@ function createFullWorld(seed: number): FullWorld {
     possibleBiomes: possibleBiomesOfDimension(overworldDimension),
     maxCachedOrigins: CACHED_DECORATION_ORIGINS,
   });
+  endColdStart(DECORATOR_LABEL, decoratorToken);
   const decoratedColumns = new BoundedLruCache<number, ChunkBlocks>(CACHED_DECORATED_COLUMNS, "decoratedColumns");
   return {
     generator,
@@ -128,13 +149,18 @@ function createFullWorld(seed: number): FullWorld {
 
 function createTerrainOnlyGenerator(seed: number): OverworldGenerator {
   const { registries, overworldDimension } = loadTerralithRegistries();
-  return createOverworldGenerator({
-    registries,
-    overworldDimension,
-    seed: BigInt(Math.trunc(seed)),
-    stages: [createNoiseFillStage()],
-    maxCachedColumns: TERRAIN_ONLY_GENERATOR_CACHED_COLUMNS,
-  });
+  const coldStartToken = beginColdStart(TERRAIN_ONLY_LABEL);
+  try {
+    return createOverworldGenerator({
+      registries,
+      overworldDimension,
+      seed: BigInt(Math.trunc(seed)),
+      stages: [createNoiseFillStage()],
+      maxCachedColumns: TERRAIN_ONLY_GENERATOR_CACHED_COLUMNS,
+    });
+  } finally {
+    endColdStart(TERRAIN_ONLY_LABEL, coldStartToken);
+  }
 }
 
 const generatorsBySeed = new Map<
@@ -146,8 +172,13 @@ function entryForSeed(seed: number) {
   let entry = generatorsBySeed.get(seed);
   if (entry === undefined) {
     entry = {};
-    if (generatorsBySeed.size >= MAX_CACHED_SEEDS) generatorsBySeed.delete(generatorsBySeed.keys().next().value as number);
+    noteHot(WORLD_CACHE_CREATED);
+    if (generatorsBySeed.size >= MAX_CACHED_SEEDS) {
+      generatorsBySeed.delete(generatorsBySeed.keys().next().value as number);
+      noteHot(WORLD_CACHE_EVICTED);
+    }
   } else {
+    noteHot(WORLD_CACHE_HITS);
     generatorsBySeed.delete(seed);
   }
   generatorsBySeed.set(seed, entry);
@@ -172,7 +203,9 @@ export function getTerrainHeightSampler(seed: number): TerrainHeightSampler | nu
   const entry = entryForSeed(seed);
   if (entry.terrainHeights === undefined) {
     const generator = (entry.terrainOnly ??= createTerrainOnlyGenerator(seed));
+    const samplerToken = beginColdStart(HEIGHT_SAMPLER_LABEL);
     entry.terrainHeights = TerrainHeightSampler.create(generator.router, generator.settings) ?? null;
+    endColdStart(HEIGHT_SAMPLER_LABEL, samplerToken);
   }
   return entry.terrainHeights;
 }

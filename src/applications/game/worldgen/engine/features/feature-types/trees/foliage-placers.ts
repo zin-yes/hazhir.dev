@@ -285,6 +285,12 @@ class CherryFoliagePlacer extends FoliagePlacer {
 }
 
 export function parseFoliagePlacer(json: JsonValue | undefined, parser: FeatureParser): FoliagePlacer {
+  const placer = createFoliagePlacer(json, parser);
+  placer.typeId = typeOf(asObject(json, "foliage_placer"), "foliage_placer");
+  return placer;
+}
+
+function createFoliagePlacer(json: JsonValue | undefined, parser: FeatureParser): FoliagePlacer {
   const object = asObject(json, "foliage_placer");
   const type = typeOf(object, "foliage_placer");
   const radius = parser.intProvider(object.radius, `${type}.radius`);

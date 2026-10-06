@@ -5,7 +5,7 @@
 import { Direction } from "../../core/direction";
 import { defineFeatureType } from "../../feature/feature-type";
 import type { WorldGenLevel } from "../../level/world-gen-level";
-import { endFeatureStep, startFeatureStep } from "../../profiling/feature-profiling";
+import { endFeatureStep, noteFeatureRejection, startFeatureStep } from "../../profiling/feature-profiling";
 import { isBlock } from "./block-names";
 
 const SAND = "minecraft:sand";
@@ -34,7 +34,10 @@ export const desertWellFeature = defineFeatureType<undefined>({
     while (level.isEmptyBlock(x, y, z) && y > level.minY + 2) y--;
     const canBuild = isBlock(level.getBlockState(x, y, z), SAND) && hasSolidFooting(level, x, y, z);
     endFeatureStep("feature.desert_well.ground_check", level, groundCheckMark);
-    if (!canBuild) return false;
+    if (!canBuild) {
+      noteFeatureRejection("noSandFooting");
+      return false;
+    }
     const buildMark = startFeatureStep("feature.desert_well.build", level);
     for (let offsetY = -2; offsetY <= 0; offsetY++) {
       for (let offsetX = -2; offsetX <= 2; offsetX++) {

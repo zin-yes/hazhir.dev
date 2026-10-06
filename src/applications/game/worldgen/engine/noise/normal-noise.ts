@@ -5,6 +5,14 @@ import type { RandomSource } from "../random/random-source";
 import { buildGeneratedFunction } from "../generated-function";
 import { InlineNoiseSource, NOISE_IO, NOISE_IO_RESULT, NOISE_IO_X, NOISE_IO_Y, NOISE_IO_Z } from "./inline-noise-source";
 import { PerlinNoise } from "./perlin-noise";
+import { beginColdStart, defineColdStartLabel, endColdStart, recordColdStartUnits } from "../profiling/cold-start-ledger";
+import { defineHotCounter, noteHot, noteHotAmount } from "../profiling/hot-counters";
+
+const NORMAL_NOISE_CREATED = defineHotCounter("noise.normalNoiseCreated");
+const NORMAL_NOISE_SAMPLES = defineHotCounter("noise.normalNoiseInterpretedSamples");
+const NORMAL_NOISE_OCTAVES = defineHotCounter("noise.normalNoiseInterpretedOctaves");
+const COMPILE_NORMAL_LABEL = defineColdStartLabel("codegen.normalNoise");
+const COMPILE_NORMAL_CHARACTERS_LABEL = defineColdStartLabel("codegen.normalNoise.sourceCharacters");
 
 /** The `minecraft:noise` registry entry shape. */
 export interface NoiseParameters {
@@ -28,6 +36,7 @@ export class NormalNoise {
   private readonly first: PerlinNoise;
   private readonly second: PerlinNoise;
   private compiled: (() => void) | null | undefined;
+  private readonly octaveEvaluationCount: number;
 
   static create(random: RandomSource, parameters: NoiseParameters): NormalNoise {
     return new NormalNoise(random, parameters, true);
@@ -35,7 +44,7 @@ export class NormalNoise {
 
   /** ImprovedNoise evaluations of one getValue (both stacks, every octave with a non-zero amplitude). */
   get improvedNoiseEvaluationsPerSample(): number {
-    return this.first.activeOctaveCount + this.second.activeOctaveCount;
+    return this.octaveEvaluationCount;
   }
 
   /** Java `createLegacyNetherBiome`: legacy PerlinNoise initialization (only for legacy-random noise settings). */
@@ -44,10 +53,12 @@ export class NormalNoise {
   }
 
   private constructor(random: RandomSource, parameters: NoiseParameters, useNewInitialization: boolean) {
+    noteHot(NORMAL_NOISE_CREATED);
     this.parameters = parameters;
     const { firstOctave, amplitudes } = parameters;
     this.first = PerlinNoise.create(random, firstOctave, amplitudes, useNewInitialization);
     this.second = PerlinNoise.create(random, firstOctave, amplitudes, useNewInitialization);
+    this.octaveEvaluationCount = this.first.activeOctaveCount + this.second.activeOctaveCount;
     let lowestNonZeroIndex = INT_MAX;
     let highestNonZeroIndex = INT_MIN;
     for (let index = 0; index < amplitudes.length; index++) {
@@ -68,6 +79,7 @@ export class NormalNoise {
    */
   compiledSampler(): (() => void) | undefined {
     if (this.compiled === undefined) {
+      const coldStartToken = beginColdStart(COMPILE_NORMAL_LABEL);
       const source = new InlineNoiseSource();
       const lines = [
         "const x = noiseIo[0];",
@@ -80,7 +92,10 @@ export class NormalNoise {
       this.first.appendInlineSource(source, "firstTotal", "x", "y", "z", lines);
       this.second.appendInlineSource(source, "secondTotal", "scaledX", "scaledY", "scaledZ", lines);
       lines.push(`noiseIo[3] = (firstTotal + secondTotal) * ${String(this.valueFactor)};`);
-      this.compiled = buildGeneratedFunction<() => void>(["helpers"], source.factorySource("normalNoise", lines), [source.helperValues]) ?? null;
+      const functionSource = source.factorySource("normalNoise", lines);
+      this.compiled = buildGeneratedFunction<() => void>(["helpers"], functionSource, [source.helperValues]) ?? null;
+      endColdStart(COMPILE_NORMAL_LABEL, coldStartToken);
+      recordColdStartUnits(COMPILE_NORMAL_CHARACTERS_LABEL, functionSource.length);
     }
     return this.compiled ?? undefined;
   }
@@ -99,6 +114,8 @@ export class NormalNoise {
   }
 
   getValue(x: number, y: number, z: number): number {
+    noteHot(NORMAL_NOISE_SAMPLES);
+    noteHotAmount(NORMAL_NOISE_OCTAVES, this.octaveEvaluationCount);
     const scaledX = x * INPUT_FACTOR;
     const scaledY = y * INPUT_FACTOR;
     const scaledZ = z * INPUT_FACTOR;

@@ -18,6 +18,9 @@ export interface FoliagePlacementContext {
 }
 
 export abstract class FoliagePlacer {
+  /** The datapack type id (minecraft:blob_foliage_placer), set by the parser; names the placer in profiles. */
+  typeId = "unknown";
+
   constructor(
     protected readonly radius: IntProvider,
     protected readonly offset: IntProvider,

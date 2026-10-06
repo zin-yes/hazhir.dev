@@ -7,7 +7,7 @@ import type { BlockStateProvider } from "../../providers/block-state-providers";
 import { asObject, optionalNumber } from "../../providers/json-fields";
 import type { RandomSource } from "../../../random";
 import { BlockPos } from "../../core/block-pos";
-import { endFeatureStep, startFeatureStep } from "../../profiling/feature-profiling";
+import { endFeatureStep, noteFeatureRejection, startFeatureStep } from "../../profiling/feature-profiling";
 import { isSolidRender } from "./block-behavior";
 import { isDirtBlock, isLeavesBlock, isMushroomGrowBlock } from "./tree-world";
 import { parseTreeStateProvider } from "./tree-world";
@@ -134,7 +134,10 @@ function defineHugeMushroomType(
       startFeatureStep("feature.hugeMushroom.spaceCheck");
       const hasSpace = isValidPosition(level, position, height, config, radiusForHeight);
       endFeatureStep("feature.hugeMushroom.spaceCheck");
-      if (!hasSpace) return false;
+      if (!hasSpace) {
+        noteFeatureRejection("noSpace");
+        return false;
+      }
       const capMark = startFeatureStep("feature.hugeMushroom.cap", level);
       makeCap(level, random, position, height, config);
       endFeatureStep("feature.hugeMushroom.cap", level, capMark);

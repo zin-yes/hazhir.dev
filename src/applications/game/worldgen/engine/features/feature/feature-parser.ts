@@ -23,6 +23,19 @@ import {
 } from "../providers/value-providers";
 import { defineFeatureType, type FeatureType, FeatureTypeRegistry } from "./feature-type";
 import { ConfiguredFeature, PlacedFeature } from "./placed-feature";
+import { beginColdStart, defineColdStartLabel, endColdStart } from "../../profiling/cold-start-ledger";
+import { defineHotCounter, noteHot } from "../../profiling/hot-counters";
+
+const PLACED_CACHE_HITS = defineHotCounter("featureResolver.placedCacheHits");
+const PLACED_PARSED = defineHotCounter("featureResolver.placedParsed");
+const PLACED_INLINE_PARSED = defineHotCounter("featureResolver.placedInlineParsed");
+const CONFIGURED_CACHE_HITS = defineHotCounter("featureResolver.configuredCacheHits");
+const CONFIGURED_PARSED = defineHotCounter("featureResolver.configuredParsed");
+const CONFIGURED_INLINE_PARSED = defineHotCounter("featureResolver.configuredInlineParsed");
+const MODIFIERS_PARSED = defineHotCounter("featureResolver.placementModifiersParsed");
+const UNSUPPORTED_FEATURE_TYPES = defineHotCounter("featureResolver.unsupportedFeatureTypes");
+const PARSE_FAILURES = defineHotCounter("featureResolver.parseFailures");
+const PARSE_PLACED_LABEL = defineColdStartLabel("decoration.parsePlacedFeature");
 
 /** Codec helpers available to FeatureType.parseConfig implementations. */
 export interface FeatureParser {
@@ -89,18 +102,26 @@ export class FeatureResolver implements FeatureParser {
     if (typeof json === "string") {
       const id = normalizeTypeId(json);
       const cached = this.placedById.get(id);
-      if (cached) return cached;
+      if (cached) {
+        noteHot(PLACED_CACHE_HITS);
+        return cached;
+      }
       const definition = this.registries.placed_feature[id];
       if (!definition) throw new Error(`${what}: unknown placed feature ${id}`);
       this.guardCycle(`placed:${id}`);
+      const isOutermostParse = this.resolving.size === 1;
+      const coldStartToken = isOutermostParse ? beginColdStart(PARSE_PLACED_LABEL) : 0;
       try {
+        noteHot(PLACED_PARSED);
         const created = this.buildPlacedFeature(definition, id, id);
         this.placedById.set(id, created);
         return created;
       } finally {
         this.resolving.delete(`placed:${id}`);
+        if (isOutermostParse) endColdStart(PARSE_PLACED_LABEL, coldStartToken);
       }
     }
+    noteHot(PLACED_INLINE_PARSED);
     return this.buildPlacedFeature(asObject(json, what), `inline:${this.inlineCounter++}`, what);
   }
 
@@ -120,6 +141,7 @@ export class FeatureResolver implements FeatureParser {
     const typeId = typeOf(object, what);
     const type = this.placementModifierTypes.get(typeId);
     if (!type) throw new Error(`${what}: unknown placement modifier type ${typeId}`);
+    noteHot(MODIFIERS_PARSED);
     return type.parse(object, this);
   }
 
@@ -128,11 +150,15 @@ export class FeatureResolver implements FeatureParser {
     if (typeof json === "string") {
       const id = normalizeTypeId(json);
       const cached = this.configuredById.get(id);
-      if (cached) return cached;
+      if (cached) {
+        noteHot(CONFIGURED_CACHE_HITS);
+        return cached;
+      }
       const definition = this.registries.configured_feature[id];
       if (!definition) throw new Error(`${what}: unknown configured feature ${id}`);
       this.guardCycle(`configured:${id}`);
       try {
+        noteHot(CONFIGURED_PARSED);
         const created = this.buildConfiguredFeature(definition, id, id);
         this.configuredById.set(id, created);
         return created;
@@ -140,6 +166,7 @@ export class FeatureResolver implements FeatureParser {
         this.resolving.delete(`configured:${id}`);
       }
     }
+    noteHot(CONFIGURED_INLINE_PARSED);
     return this.buildConfiguredFeature(asObject(json, what), undefined, what);
   }
 
@@ -149,6 +176,7 @@ export class FeatureResolver implements FeatureParser {
     const type = this.featureTypes.get(typeId);
     if (!type) {
       if (this.strict) throw new Error(`${what}: feature type ${typeId} is not registered`);
+      noteHot(UNSUPPORTED_FEATURE_TYPES);
       this.diagnostics.count(this.diagnostics.unsupportedFeatureTypes, typeId);
       return new ConfiguredFeature(unsupportedFeatureType(typeId), undefined, id);
     }
@@ -161,6 +189,7 @@ export class FeatureResolver implements FeatureParser {
 
   private failedFeature(key: string, error: unknown): ConfiguredFeature {
     if (this.strict) throw error;
+    noteHot(PARSE_FAILURES);
     this.diagnostics.parseErrors.set(key, error instanceof Error ? error.message : String(error));
     return new ConfiguredFeature(unsupportedFeatureType("engine:parse_error"), undefined, key);
   }

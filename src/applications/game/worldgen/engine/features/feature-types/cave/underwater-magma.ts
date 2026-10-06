@@ -4,7 +4,7 @@ import { Direction } from "../../core/direction";
 import { defineFeatureType } from "../../feature/feature-type";
 import type { WorldGenLevel } from "../../level/world-gen-level";
 import { asObject, requireNumber } from "../../providers/json-fields";
-import { addFeatureCounter, endFeatureStep, startFeatureStep } from "../../profiling/feature-profiling";
+import { addFeatureCounter, endFeatureStep, noteFeatureRejection, startFeatureStep } from "../../profiling/feature-profiling";
 import { betweenClosed } from "./block-iteration";
 import { Column } from "./column";
 import { requireInt } from "./config-fields";
@@ -52,7 +52,10 @@ export const underwaterMagmaFeature = defineFeatureType<UnderwaterMagmaConfig>({
   },
   place({ level, random, origin, config }) {
     const floorY = findFloorY(level, origin.x, origin.y, origin.z, config);
-    if (floorY === undefined) return false;
+    if (floorY === undefined) {
+      noteFeatureRejection("noFloor");
+      return false;
+    }
     const radius = config.placementRadiusAroundFloor;
     let placedCount = 0;
     let candidateCellCount = 0;

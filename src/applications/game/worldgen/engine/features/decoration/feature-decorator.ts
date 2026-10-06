@@ -34,6 +34,12 @@ import {
 import { BaseHeightmapCache, type ColumnPatch, DecorationRegion } from "../level/decoration-region";
 import { BiomeFeatureIndex, DECORATION_STEPS } from "./biome-features";
 import { buildFeaturesPerStep, type StepFeatureData } from "./feature-sorter";
+import { DIMENSIONS } from "@/applications/game/profiler/dimensions";
+import { addWorkerCounter, addWorkerKeyedUnits } from "@/applications/game/profiler/worker-recorder";
+import { beginColdStart, defineColdStartLabel, endColdStart, recordColdStartUnits } from "../../profiling/cold-start-ledger";
+
+const FEATURES_PER_STEP_LABEL = defineColdStartLabel("decoration.buildFeaturesPerStep");
+const FEATURES_PER_STEP_ENTRIES_LABEL = defineColdStartLabel("decoration.buildFeaturesPerStep.features");
 
 export interface FeatureDecoratorParams {
   source: BaseColumnSource;
@@ -115,7 +121,15 @@ export class FeatureDecorator {
 
   /** ChunkGenerator.featuresPerStep (memoized FeatureSorter over the possible biomes). */
   get featuresPerStep(): StepFeatureData[] {
-    this.stepData ??= buildFeaturesPerStep(this.possibleBiomeOrder, (biome) => this.biomeFeatures.stepsOf(biome));
+    if (this.stepData === undefined) {
+      const coldStartToken = beginColdStart(FEATURES_PER_STEP_LABEL);
+      try {
+        this.stepData = buildFeaturesPerStep(this.possibleBiomeOrder, (biome) => this.biomeFeatures.stepsOf(biome));
+      } finally {
+        endColdStart(FEATURES_PER_STEP_LABEL, coldStartToken);
+      }
+      recordColdStartUnits(FEATURES_PER_STEP_ENTRIES_LABEL, this.stepData.reduce((total, data) => total + data.features.length, 0));
+    }
     return this.stepData;
   }
 
@@ -192,7 +206,12 @@ export class FeatureDecorator {
     for (let step = 0; step < stepCount; step++) {
       if (step >= stepData.length) continue;
       const data = stepData[step]!;
-      startDecorationSection(stepSectionName(step, DECORATION_STEPS[step]));
+      const stepLabel = DECORATION_STEPS[step] ?? String(step);
+      const isProfiling = isFeatureProfilingActive();
+      if (isProfiling) openFeatureSection(stepSectionName(step, DECORATION_STEPS[step]), DIMENSIONS.worldgenDecorationStep, stepLabel);
+      let featuresPlaced = 0;
+      let featuresNothingPlaced = 0;
+      let featuresErrored = 0;
       const indices = new Set<number>();
       for (const biome of biomes) {
         const steps = this.biomeFeatures.stepsOf(biome);
@@ -213,14 +232,34 @@ export class FeatureDecorator {
         } catch (error) {
           if (this.strict) throw error;
           this.diagnostics.count(this.diagnostics.placementErrors, featureKey);
+          featuresErrored++;
         }
         trace?.push({ step, featureIndex, featureKey, placed });
+        if (placed) featuresPlaced++;
+        else featuresNothingPlaced++;
       }
-      endDecorationSection();
+      if (isProfiling) {
+        endDecorationSection();
+        addWorkerKeyedUnits(DIMENSIONS.worldgenDecorationStep, stepLabel, sortedIndices.length);
+        addWorkerKeyedUnits(DIMENSIONS.worldgenDecorationStep, `${stepLabel}|placed`, featuresPlaced);
+        addWorkerKeyedUnits(DIMENSIONS.worldgenDecorationStep, `${stepLabel}|nothingPlaced`, featuresNothingPlaced);
+        addWorkerKeyedUnits(DIMENSIONS.worldgenDecorationStep, `${stepLabel}|errors`, featuresErrored);
+      }
     }
     startDecorationSection("feature.origin.extractPatches");
     const patches = region.extractPatches();
     endDecorationSection();
+    if (isFeatureProfilingActive()) {
+      let patchBlocks = 0;
+      for (const patch of patches) patchBlocks += patch.indices.length;
+      addWorkerCounter("decoration.originsDecorated", 1);
+      addWorkerCounter("decoration.originBiomesPresent", presentBiomes.size);
+      addWorkerCounter("decoration.originBiomesPossible", biomes.length);
+      addWorkerCounter("decoration.randomDraws", random.count);
+      addWorkerCounter("decoration.patchColumns", patches.length);
+      addWorkerCounter("decoration.patchBlocks", patchBlocks);
+      addWorkerCounter("decoration.patchBytes", patchBlocks * (Int32Array.BYTES_PER_ELEMENT + Uint16Array.BYTES_PER_ELEMENT));
+    }
     return { chunkX, chunkZ, decorationSeed, biomes, patches };
   }
 

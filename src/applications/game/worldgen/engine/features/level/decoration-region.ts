@@ -16,6 +16,7 @@ import {
   isWorldgenHeightmap,
 } from "../core/heightmap";
 import { addFeatureCounter, endDecorationSection, startDecorationSection } from "../profiling/feature-profiling";
+import { defineHotCounter, noteHot } from "../../profiling/hot-counters";
 import type { BaseColumnSource } from "./base-column-source";
 import { VOID_AIR_STATE, type WorldGenLevel } from "./world-gen-level";
 
@@ -36,6 +37,23 @@ function heightmapTypeIndex(type: HeightmapType): number {
       return 5;
   }
 }
+
+const COLUMN_COPIES_POOLED = defineHotCounter("region.columnCopiesFromPool");
+const COLUMN_COPIES_ALLOCATED = defineHotCounter("region.columnCopiesAllocated");
+const COLUMN_COPIES_RETURNED = defineHotCounter("region.columnCopiesReturnedToPool");
+const COLUMN_COPIES_DROPPED = defineHotCounter("region.columnCopiesDroppedPoolFull");
+const BASE_HEIGHTMAP_HITS = defineHotCounter("region.baseHeightmapCacheHits");
+const BASE_HEIGHTMAP_PRIMES = defineHotCounter("region.baseHeightmapPrimes");
+const WRITTEN_HEIGHTMAP_PRIMES = defineHotCounter("region.writtenColumnHeightmapPrimes");
+const WRITTEN_COLUMNS_RESCANNED = defineHotCounter("region.writtenColumnsRescanned");
+const OPACITY_CLASSIFICATIONS = defineHotCounter("region.opacityClassifications");
+const NORMALIZED_STATE_MISSES = defineHotCounter("region.normalizedStateMisses");
+const CARVING_MASKS_FETCHED = defineHotCounter("region.carvingMasksFetched");
+const WRITES_OUTSIDE_RADIUS = defineHotCounter("region.writesOutsideWriteRadius");
+const WRITES_OUTSIDE_BUILD_HEIGHT = defineHotCounter("region.writesOutsideBuildHeight");
+const READS_OUTSIDE_BUILD_HEIGHT = defineHotCounter("region.readsOutsideBuildHeight");
+const BIOME_READS = defineHotCounter("region.biomeReads");
+const HEIGHTMAP_UPDATES = defineHotCounter("region.heightmapUpdatesOnWrite");
 
 const WRITE_RADIUS = 1;
 const LAYER_SIZE = 256;
@@ -60,6 +78,7 @@ export class BaseHeightmapCache {
     }
     let bits = this.opacityBitsByPaletteId[paletteId]!;
     if (bits === -1) {
+      noteHot(OPACITY_CLASSIFICATIONS);
       const info = paletteInfo.info(paletteId);
       bits = 0;
       for (let typeIndex = 0; typeIndex < HEIGHTMAP_TYPES.length; typeIndex++) {
@@ -77,7 +96,9 @@ export class BaseHeightmapCache {
       this.heightmapsByColumn.set(base, heightmaps);
     }
     let heightmap = heightmaps.get(type);
+    if (heightmap !== undefined) noteHot(BASE_HEIGHTMAP_HITS);
     if (heightmap === undefined) {
+      noteHot(BASE_HEIGHTMAP_PRIMES);
       startDecorationSection("region.heightmap.prime");
       const minY = base.minY;
       const baseBlocks = base.blocks;
@@ -127,6 +148,7 @@ export class BaseHeightmapCache {
       const topLayerStart = (base.height - 1) * LAYER_SIZE;
       for (let columnIndex = 0; columnIndex < LAYER_SIZE; columnIndex++) {
         if (columnsToScan[columnIndex] === 0) continue;
+        noteHot(WRITTEN_COLUMNS_RESCANNED);
         let columnHeight = base.minY;
         for (let index = topLayerStart + columnIndex, y = base.minY + base.height - 1; index >= 0; index -= LAYER_SIZE, y--) {
           const paletteId = blocks[index]!;
@@ -180,9 +202,11 @@ class RegionColumn {
     if (!this.copied) {
       const pooled = pooledColumnCopies.pop();
       if (pooled !== undefined && pooled.length === this.base.blocks.length) {
+        noteHot(COLUMN_COPIES_POOLED);
         pooled.set(this.base.blocks);
         this.blocks = pooled;
       } else {
+        noteHot(COLUMN_COPIES_ALLOCATED);
         this.blocks = new Uint16Array(this.base.blocks);
       }
       this.copied = true;
@@ -194,7 +218,12 @@ class RegionColumn {
   /** Hands the private copy back to the pool; the column reads the base blocks again afterwards. */
   releaseCopy(): void {
     if (!this.copied) return;
-    if (pooledColumnCopies.length < MAX_POOLED_COLUMN_COPIES) pooledColumnCopies.push(this.blocks);
+    if (pooledColumnCopies.length < MAX_POOLED_COLUMN_COPIES) {
+      noteHot(COLUMN_COPIES_RETURNED);
+      pooledColumnCopies.push(this.blocks);
+    } else {
+      noteHot(COLUMN_COPIES_DROPPED);
+    }
     this.blocks = this.base.blocks;
     this.copied = false;
   }
@@ -214,6 +243,7 @@ class RegionColumn {
           infoAt: (localX, y, localZ) => this.paletteInfo.info(this.blocks[(y - minY) * LAYER_SIZE + localZ * 16 + localX]!),
         };
         startDecorationSection("region.heightmap.prime");
+        if (this.copied) noteHot(WRITTEN_HEIGHTMAP_PRIMES);
         const primedFrom = this.copied
           ? this.baseHeightmaps.primeWrittenColumn(this.base, this.blocks, this.writtenIndices, type, this.paletteInfo)
           : baseHeightmap;
@@ -227,6 +257,7 @@ class RegionColumn {
 
   /** ProtoChunk.setBlockState: POST_FEATURES heightmaps that exist are updated (missing ones prime lazily later). */
   updateHeightmaps(localX: number, y: number, localZ: number, info: BlockStateInfo): void {
+    noteHot(HEIGHTMAP_UPDATES);
     for (let typeIndex = 0; typeIndex < HEIGHTMAP_TYPES.length; typeIndex++) {
       if (isWorldgenHeightmap(HEIGHTMAP_TYPES[typeIndex]!)) continue;
       this.heightmaps[typeIndex]?.update(localX, y, localZ, info);
@@ -325,6 +356,7 @@ export class DecorationRegion implements WorldGenLevel {
   private normalizedState(paletteId: number): string {
     let state = this.normalizedStateById[paletteId];
     if (state === undefined) {
+      noteHot(NORMALIZED_STATE_MISSES);
       state = this.blockStates.normalize(this.palette!.stateOf(paletteId));
       this.normalizedStateById[paletteId] = state;
     }
@@ -360,7 +392,10 @@ export class DecorationRegion implements WorldGenLevel {
 
   getBlockState(x: number, y: number, z: number): string {
     this.blockReads++;
-    if (this.isOutsideBuildHeight(y)) return VOID_AIR_STATE;
+    if (this.isOutsideBuildHeight(y)) {
+      noteHot(READS_OUTSIDE_BUILD_HEIGHT);
+      return VOID_AIR_STATE;
+    }
     const column = this.column(x >> 4, z >> 4);
     return this.normalizedState(column.blocks[this.indexOf(x, y, z)]!);
   }
@@ -381,8 +416,14 @@ export class DecorationRegion implements WorldGenLevel {
   }
 
   setBlock(x: number, y: number, z: number, state: string, _flags = 3): boolean {
-    if (!this.ensureCanWrite(x, y, z)) return false;
-    if (this.isOutsideBuildHeight(y)) return true;
+    if (!this.ensureCanWrite(x, y, z)) {
+      noteHot(WRITES_OUTSIDE_RADIUS);
+      return false;
+    }
+    if (this.isOutsideBuildHeight(y)) {
+      noteHot(WRITES_OUTSIDE_BUILD_HEIGHT);
+      return true;
+    }
     const column = this.column(x >> 4, z >> 4);
     this.blocksWritten++;
     const normalized = this.blockStates.normalize(state);
@@ -398,6 +439,7 @@ export class DecorationRegion implements WorldGenLevel {
   }
 
   getBiome(x: number, y: number, z: number): string {
+    noteHot(BIOME_READS);
     return this.source.biomeAt(x, y, z);
   }
 
@@ -410,6 +452,7 @@ export class DecorationRegion implements WorldGenLevel {
     const key = `${chunkX},${chunkZ},${step}`;
     let mask = this.carvingMasks.get(key);
     if (!mask) {
+      noteHot(CARVING_MASKS_FETCHED);
       mask = this.source.carvingMask?.(chunkX, chunkZ, step) ?? new CarvingMask(this.minY, this.height);
       this.carvingMasks.set(key, mask);
     }

@@ -2,7 +2,7 @@
 // the first dirt or stone block found below the origin.
 
 import { defineFeatureType } from "../../feature/feature-type";
-import { endFeatureStep, startFeatureStep } from "../../profiling/feature-profiling";
+import { endFeatureStep, noteFeatureRejection, startFeatureStep } from "../../profiling/feature-profiling";
 import { asObject } from "../../providers/json-fields";
 import { isDirt, isStone } from "./block-names";
 import { roundFloat } from "./java-float-math";
@@ -36,7 +36,10 @@ export const forestRockFeature = defineFeatureType<ForestRockConfig>({
       centerY--;
     }
     endFeatureStep("feature.forest_rock.ground_scan", level, groundScanMark);
-    if (centerY <= level.minY + BOTTOM_CLEARANCE) return false;
+    if (centerY <= level.minY + BOTTOM_CLEARANCE) {
+      noteFeatureRejection("noGroundAboveBottom");
+      return false;
+    }
     const blobsMark = startFeatureStep("feature.forest_rock.blobs", level);
     for (let blob = 0; blob < 3; blob++) {
       const radiusX = random.nextIntBounded(2);

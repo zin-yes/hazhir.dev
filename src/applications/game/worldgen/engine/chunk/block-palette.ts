@@ -1,7 +1,12 @@
 // Interns block state strings ("minecraft:stone", "minecraft:oak_log[axis=y]") as small integers.
 // Id 0 is always air. State strings list properties sorted by name, the way Minecraft prints them.
 
+import { defineHotCounter, noteHot } from "../profiling/hot-counters";
+
 export const AIR_STATE = "minecraft:air";
+
+const PALETTE_LOOKUPS = defineHotCounter("palette.idLookups");
+const PALETTE_STATES_ADDED = defineHotCounter("palette.statesAdded");
 
 export interface ParsedBlockState {
   name: string;
@@ -36,8 +41,10 @@ export class BlockPalette {
   private readonly idsByState = new Map<string, number>([[AIR_STATE, 0]]);
 
   idOf(state: string): number {
+    noteHot(PALETTE_LOOKUPS);
     const existing = this.idsByState.get(state);
     if (existing !== undefined) return existing;
+    noteHot(PALETTE_STATES_ADDED);
     const created = this.states.length;
     this.states.push(state);
     this.idsByState.set(state, created);

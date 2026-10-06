@@ -6,7 +6,7 @@ import { Direction } from "../../../core/direction";
 import { defineFeatureType } from "../../../feature/feature-type";
 import type { WorldGenLevel } from "../../../level/world-gen-level";
 import { asObject, requireNumber } from "../../../providers/json-fields";
-import { addFeatureCounter, endDecorationSection, startSampledDecorationSection } from "../../../profiling/feature-profiling";
+import { addFeatureCounter, endDecorationSection, noteFeatureRejection, startSampledDecorationSection } from "../../../profiling/feature-profiling";
 import { type FloatProvider, type IntProvider, mthNormal, randomBetweenInclusive } from "../../../providers/value-providers";
 import { Column } from "../column";
 import { requireInt } from "../config-fields";
@@ -105,10 +105,16 @@ function placeColumn(
     (state) => isNeitherEmptyNorWaterState(level, state),
   );
   endDecorationSection();
-  if (scanned === undefined) return false;
+  if (scanned === undefined) {
+    noteFeatureRejection("noCaveScan");
+    return false;
+  }
   const ceiling = scanned.ceiling;
   const floor = scanned.floor;
-  if (ceiling === undefined && floor === undefined) return false;
+  if (ceiling === undefined && floor === undefined) {
+    noteFeatureRejection("noFloorOrCeiling");
+    return false;
+  }
   const placePool = random.nextFloat() < wetness;
   let column: Column;
   if (placePool && floor !== undefined && canPlacePool(level, x, floor, z)) {
@@ -184,7 +190,10 @@ export const dripstoneClusterFeature = defineFeatureType<DripstoneClusterConfig>
     };
   },
   place({ level, random, origin, config }) {
-    if (!isEmptyOrWater(level, origin.x, origin.y, origin.z)) return false;
+    if (!isEmptyOrWater(level, origin.x, origin.y, origin.z)) {
+      noteFeatureRejection("originNotEmpty");
+      return false;
+    }
     const height = config.height.sample(random);
     const wetness = config.wetness.sample(random);
     const density = config.density.sample(random);

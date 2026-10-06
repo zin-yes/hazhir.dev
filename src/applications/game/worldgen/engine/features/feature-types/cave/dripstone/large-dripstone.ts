@@ -6,7 +6,7 @@ import { Direction } from "../../../core/direction";
 import { defineFeatureType } from "../../../feature/feature-type";
 import type { WorldGenLevel } from "../../../level/world-gen-level";
 import { asObject, requireNumber } from "../../../providers/json-fields";
-import { endFeatureStep, startFeatureStep } from "../../../profiling/feature-profiling";
+import { endFeatureStep, noteFeatureRejection, startFeatureStep } from "../../../profiling/feature-profiling";
 import { type FloatProvider, type IntProvider, randomBetweenInclusive } from "../../../providers/value-providers";
 import { Column } from "../column";
 import { optionalInt, requireInt } from "../config-fields";
@@ -160,7 +160,10 @@ export const largeDripstoneFeature = defineFeatureType<LargeDripstoneConfig>({
     };
   },
   place({ level, random, origin, config }) {
-    if (!isEmptyOrWater(level, origin.x, origin.y, origin.z)) return false;
+    if (!isEmptyOrWater(level, origin.x, origin.y, origin.z)) {
+      noteFeatureRejection("originNotEmpty");
+      return false;
+    }
     startFeatureStep("feature.large_dripstone.search");
     const column = Column.scan(
       (x, y, z) => level.getBlockState(x, y, z),
@@ -170,11 +173,17 @@ export const largeDripstoneFeature = defineFeatureType<LargeDripstoneConfig>({
       (state) => isDripstoneBaseOrLavaState(level, state),
     );
     endFeatureStep("feature.large_dripstone.search");
-    if (column === undefined || !column.isRange()) return false;
+    if (column === undefined || !column.isRange()) {
+      noteFeatureRejection("noFloorToCeilingColumn");
+      return false;
+    }
     const floor = column.floor!;
     const ceiling = column.ceiling!;
     const caveHeight = column.height!;
-    if (caveHeight < 4) return false;
+    if (caveHeight < 4) {
+      noteFeatureRejection("caveTooLow");
+      return false;
+    }
     const maxRadius = Math.trunc(fround(caveHeight * config.maxColumnRadiusToCaveHeightRatio));
     const clampedRadius = clampInt(maxRadius, config.columnRadius.minValue, config.columnRadius.maxValue);
     const radius = randomBetweenInclusive(random, config.columnRadius.minValue, clampedRadius);

@@ -21,6 +21,12 @@ function parseUniformInt(json: JsonValue | undefined, what: string): IntProvider
 }
 
 export function parseTrunkPlacer(json: JsonValue | undefined, parser: FeatureParser): TrunkPlacer {
+  const placer = createTrunkPlacer(json, parser);
+  placer.typeId = typeOf(asObject(json, "trunk_placer"), "trunk_placer");
+  return placer;
+}
+
+function createTrunkPlacer(json: JsonValue | undefined, parser: FeatureParser): TrunkPlacer {
   const object = asObject(json, "trunk_placer");
   const type = typeOf(object, "trunk_placer");
   const baseHeight = requireNumber(object, "base_height", type);

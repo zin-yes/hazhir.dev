@@ -3,6 +3,8 @@
 import { buildProfileReport } from "@/applications/game/profiler/report";
 import { renderMarkdownReport } from "@/applications/game/profiler/markdown-report";
 import type { BreakdownEntry, ProfileSnapshot } from "@/applications/game/profiler/types";
+import { readTerralithDataFileSizes } from "./terralith-data-sizes";
+import { renderWorldgenDetailMarkdown } from "./worldgen-detail-report";
 import type { BiomeProbeRow, WorldgenProbeResult } from "./worldgen-probe";
 
 const DEFAULT_TOP_COUNT = 15;
@@ -124,5 +126,6 @@ export function renderProbeMarkdown(result: WorldgenProbeResult): string {
     "",
   );
   lines.push(renderMarkdownReport(buildProfileReport(result.snapshot)));
+  lines.push("", renderWorldgenDetailMarkdown({ snapshot: result.snapshot, dataFileSizes: readTerralithDataFileSizes() }));
   return lines.join("\n");
 }

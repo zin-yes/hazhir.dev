@@ -2,6 +2,10 @@
 // Operation order (smoothstep, lerp, gradient dot) is kept literal so results match Java to the last bit.
 
 import type { RandomSource } from "../random/random-source";
+import { defineHotCounter, noteHot } from "../profiling/hot-counters";
+
+const IMPROVED_NOISE_CREATED = defineHotCounter("noise.improvedNoiseCreated");
+const IMPROVED_COLUMN_PREPARES = defineHotCounter("noise.improvedColumnPrepares");
 
 // SimplexNoise.GRADIENT, split into components. ImprovedNoise indexes it with `hash & 0xF`.
 export const GRADIENT_X = new Float64Array([1, -1, 1, -1, 1, -1, 1, -1, 0, 0, 0, 0, 1, 0, -1, 0]);
@@ -40,6 +44,7 @@ export class ImprovedNoise {
   readonly permutation: Uint8Array;
 
   constructor(random: RandomSource) {
+    noteHot(IMPROVED_NOISE_CREATED);
     this.xOffset = random.nextDouble() * 256.0;
     this.yOffset = random.nextDouble() * 256.0;
     this.zOffset = random.nextDouble() * 256.0;
@@ -64,6 +69,7 @@ export class ImprovedNoise {
   private memoHashX1 = 0;
 
   private prepareColumn(x: number, z: number): void {
+    noteHot(IMPROVED_COLUMN_PREPARES);
     const shiftedX = x + this.xOffset;
     const shiftedZ = z + this.zOffset;
     const cellX = Math.floor(shiftedX);

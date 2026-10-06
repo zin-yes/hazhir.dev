@@ -4,6 +4,12 @@
 import type { PositionalRandomFactory } from "../random/random-source";
 import { XoroshiroRandomSource } from "../random/xoroshiro-random-source";
 import { NormalNoise, type NoiseParameters } from "./normal-noise";
+import { beginColdStart, defineColdStartLabel, endColdStart, recordColdStartUnits } from "../profiling/cold-start-ledger";
+import { defineHotCounter, noteHot } from "../profiling/hot-counters";
+
+const REGISTRY_HITS = defineHotCounter("noiseRegistry.cacheHits");
+const CREATE_LABEL = defineColdStartLabel("noiseRegistry.createNoise");
+const OCTAVES_LABEL = defineColdStartLabel("noiseRegistry.createNoise.octaves");
 
 /** Resource ids without a namespace default to `minecraft:`, as ResourceLocation parsing does. */
 export function normalizeResourceId(resourceId: string): string {
@@ -21,10 +27,16 @@ export class NoiseRegistry {
   get(noiseId: string): NormalNoise {
     const resourceId = normalizeResourceId(noiseId);
     const cached = this.instances.get(resourceId);
-    if (cached) return cached;
+    if (cached) {
+      noteHot(REGISTRY_HITS);
+      return cached;
+    }
     const parameters = this.parametersById[resourceId];
     if (!parameters) throw new Error(`Unknown noise "${resourceId}" (not in the minecraft:noise registry)`);
+    const coldStartToken = beginColdStart(CREATE_LABEL);
     const noise = NormalNoise.create(this.rootRandomFactory.fromHashOf(resourceId), parameters);
+    endColdStart(CREATE_LABEL, coldStartToken);
+    recordColdStartUnits(OCTAVES_LABEL, noise.improvedNoiseEvaluationsPerSample);
     this.instances.set(resourceId, noise);
     return noise;
   }

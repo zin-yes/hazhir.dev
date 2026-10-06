@@ -43,6 +43,11 @@ export class DensityFunctionCompiler {
 
   constructor(private readonly densityFunctionsById: Record<string, JsonValue>) {}
 
+  /** Registry entries compiled so far (each is shared by every reference to it). */
+  get compiledReferenceCount(): number {
+    return this.compiledById.size;
+  }
+
   /** The value of a registry entry (Holder.Reference#value). */
   resolveReference(rawId: string): DensityNode {
     const id = normalizeResourceId(rawId);

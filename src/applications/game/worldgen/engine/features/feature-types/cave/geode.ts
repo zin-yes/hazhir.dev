@@ -11,7 +11,7 @@ import type { WorldGenLevel } from "../../level/world-gen-level";
 import { asArray, asObject, type JsonObject, type JsonValue, optionalBoolean, optionalNumber, requireString } from "../../providers/json-fields";
 import { type IntProvider, parseIntProvider } from "../../providers/value-providers";
 import { Direction } from "../../core/direction";
-import { addFeatureCounter, endFeatureStep, startFeatureStep } from "../../profiling/feature-profiling";
+import { addFeatureCounter, endFeatureStep, noteFeatureRejection, startFeatureStep } from "../../profiling/feature-profiling";
 import { betweenClosed } from "./block-iteration";
 import { optionalInt, parseBlockStateIgnoringUnknownProperties, requireInt } from "./config-fields";
 import { mthInvSqrt } from "./java-math";
@@ -140,7 +140,10 @@ export const geodeFeature = defineFeatureType<GeodeConfig>({
       const y = origin.y + offsetY;
       const z = origin.z + offsetZ;
       const info = level.getBlockInfo(x, y, z);
-      if ((info.isAir || level.blockTags.is(info.name, GEODE_INVALID_BLOCKS_TAG)) && ++invalidBlockCount > config.invalidBlocksThreshold) return false;
+      if ((info.isAir || level.blockTags.is(info.name, GEODE_INVALID_BLOCKS_TAG)) && ++invalidBlockCount > config.invalidBlocksThreshold) {
+        noteFeatureRejection("tooManyInvalidBlocks");
+        return false;
+      }
       points.push({ x, y, z, offset: config.pointOffset.sample(random) });
     }
     if (hasCrack) {
