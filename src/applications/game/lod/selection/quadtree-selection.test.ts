@@ -1,5 +1,6 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { tileBoundsOf, tileKeyOf, type TileAddress } from "../core/tile-address";
+import { counterTotal, startLodProfiling, stopLodProfiling, timerCalls } from "../testing/profiler-readout.test-helper";
 import { computeRenderSet } from "./render-set";
 import { horizontalDistanceToBounds, projectionScaleOf, selectTiles, type SelectionParameters } from "./quadtree-selection";
 
@@ -150,5 +151,46 @@ describe("render set", () => {
     const renderSet = computeRenderSet(selection, smallParameters, () => false);
     expect(renderSet.drawn).toHaveLength(0);
     expect(renderSet.missingLeaves).toHaveLength(selection.leaves.length);
+  });
+});
+
+describe("selection profiling", () => {
+  beforeEach(startLodProfiling);
+  afterEach(stopLodProfiling);
+
+  test("visited nodes follow from the roots, splits and radius culls of the traversal", () => {
+    const result = selectTiles({ ...baseParameters, radiusBlocks: 1500, maximumLevel: 6 });
+    const roots = counterTotal("game.lod.select.roots");
+    const visited = counterTotal("game.lod.select.nodesVisited");
+    expect(roots).toBeGreaterThan(1);
+    expect(visited).toBe(roots + 4 * counterTotal("game.lod.select.nodesSplit") - counterTotal("game.lod.select.childrenCulledByRadius"));
+    expect(counterTotal("game.lod.select.leaves")).toBe(result.leaves.length);
+    expect(counterTotal("game.lod.select.childrenCulledByRadius")).toBeGreaterThan(0);
+    expect(timerCalls("main.lod.select.traverse")).toBe(1);
+    expect(timerCalls("main.lod.select.balance")).toBe(1);
+  });
+
+  test("tiles that were split and no longer need it are counted as merged, and hysteresis holds some of them", () => {
+    const first = selectTiles(baseParameters);
+    startLodProfiling();
+    const movedAway = { ...baseParameters, cameraY: baseParameters.cameraY + 40, previouslySplit: first.split };
+    selectTiles(movedAway);
+    expect(counterTotal("game.lod.select.nodesMerged")).toBeGreaterThan(0);
+    expect(counterTotal("game.lod.select.nodesMerged")).toBeLessThanOrEqual(first.split.size);
+    expect(counterTotal("game.lod.select.splitHeldByHysteresis")).toBeGreaterThan(0);
+  });
+
+  test("render set counters partition the regions it walked", () => {
+    const parameters = { ...baseParameters, radiusBlocks: 1500, maximumLevel: 6 };
+    const selection = selectTiles(parameters);
+    startLodProfiling();
+    const readyKeys = new Set(selection.leaves.filter((leaf) => leaf.level !== 2).map((leaf) => tileKeyOf(leaf.level, leaf.tileX, leaf.tileZ)));
+    const renderSet = computeRenderSet(selection, parameters, (address) => readyKeys.has(tileKeyOf(address.level, address.tileX, address.tileZ)));
+    expect(counterTotal("game.lod.renderSet.missingLeaves")).toBe(renderSet.missingLeaves.length);
+    expect(renderSet.missingLeaves.length).toBeGreaterThan(0);
+    expect(counterTotal("game.lod.renderSet.readyLeaves")).toBe(selection.leaves.length - renderSet.missingLeaves.length);
+    expect(counterTotal("game.lod.renderSet.childStandIns") + counterTotal("game.lod.renderSet.incompleteRegions")).toBeGreaterThanOrEqual(
+      renderSet.missingLeaves.length,
+    );
   });
 });

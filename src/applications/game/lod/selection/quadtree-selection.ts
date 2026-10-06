@@ -3,7 +3,9 @@
 // with distance and each level forms a ring. Previously split tiles only merge once the error drops below the threshold
 // times `mergeHysteresis`, which keeps tiles at a ring boundary from flickering between levels while the camera moves.
 
-import { cellSizeOfLevel, LOD_SEA_LEVEL, tileSizeOfLevel } from "../core/lod-constants";
+import { profiler } from "../../profiler";
+import { cellSizeOfLevel, LOD_SEA_LEVEL, MAX_LOD_LEVEL, tileSizeOfLevel } from "../core/lod-constants";
+import { metricNameOfLevel, perLevelMetricNames } from "../core/lod-level-keys";
 import { childAddressesOf, tileBoundsOf, tileKeyOf, type TileAddress, type TileBounds } from "../core/tile-address";
 import type { HeightRange } from "../data/tile-surface";
 
@@ -38,6 +40,74 @@ export interface SelectionResult {
 
 const DEFAULT_HEIGHT_RANGE: HeightRange = { minHeight: LOD_SEA_LEVEL - 30, maxHeight: LOD_SEA_LEVEL + 60 };
 const DEFAULT_MERGE_HYSTERESIS = 0.8;
+
+const VISITED_PER_LEVEL = perLevelMetricNames("game.lod.select.visited.");
+const SPLIT_PER_LEVEL = perLevelMetricNames("game.lod.select.split.");
+const MERGED_PER_LEVEL = perLevelMetricNames("game.lod.select.merged.");
+const CULLED_PER_LEVEL = perLevelMetricNames("game.lod.select.culled.");
+const BALANCE_SPLIT_PER_LEVEL = perLevelMetricNames("game.lod.select.balanceSplit.");
+
+/** Per-level tallies of one selection, kept only while the profiler is on. */
+interface SelectionTally {
+  visited: Int32Array;
+  split: Int32Array;
+  merged: Int32Array;
+  culled: Int32Array;
+  balanceSplit: Int32Array;
+  hysteresisHeld: number;
+  newSplits: number;
+  balanceVisits: number;
+  balanceProbes: number;
+  balanceLevelLookups: number;
+}
+
+function createSelectionTally(): SelectionTally {
+  const levelCount = MAX_LOD_LEVEL + 1;
+  return {
+    visited: new Int32Array(levelCount),
+    split: new Int32Array(levelCount),
+    merged: new Int32Array(levelCount),
+    culled: new Int32Array(levelCount),
+    balanceSplit: new Int32Array(levelCount),
+    hysteresisHeld: 0,
+    newSplits: 0,
+    balanceVisits: 0,
+    balanceProbes: 0,
+    balanceLevelLookups: 0,
+  };
+}
+
+function reportPerLevel(names: readonly string[], counts: Int32Array): void {
+  for (let level = 0; level < counts.length; level++) {
+    if (counts[level]! > 0) profiler.addCounter(metricNameOfLevel(names, level), counts[level]!);
+  }
+}
+
+function sumOf(counts: Int32Array): number {
+  let total = 0;
+  for (let level = 0; level < counts.length; level++) total += counts[level]!;
+  return total;
+}
+
+function reportSelectionTally(tally: SelectionTally, rootCount: number, leafCount: number): void {
+  profiler.addCounter("game.lod.select.roots", rootCount);
+  profiler.addCounter("game.lod.select.nodesVisited", sumOf(tally.visited));
+  profiler.addCounter("game.lod.select.nodesSplit", sumOf(tally.split));
+  profiler.addCounter("game.lod.select.nodesNewlySplit", tally.newSplits);
+  profiler.addCounter("game.lod.select.nodesMerged", sumOf(tally.merged));
+  profiler.addCounter("game.lod.select.childrenCulledByRadius", sumOf(tally.culled));
+  profiler.addCounter("game.lod.select.splitHeldByHysteresis", tally.hysteresisHeld);
+  profiler.addCounter("game.lod.select.leaves", leafCount);
+  profiler.addCounter("game.lod.select.balanceVisits", tally.balanceVisits);
+  profiler.addCounter("game.lod.select.balanceProbes", tally.balanceProbes);
+  profiler.addCounter("game.lod.select.balanceLevelLookups", tally.balanceLevelLookups);
+  profiler.addCounter("game.lod.select.balanceSplits", sumOf(tally.balanceSplit));
+  reportPerLevel(VISITED_PER_LEVEL, tally.visited);
+  reportPerLevel(SPLIT_PER_LEVEL, tally.split);
+  reportPerLevel(MERGED_PER_LEVEL, tally.merged);
+  reportPerLevel(CULLED_PER_LEVEL, tally.culled);
+  reportPerLevel(BALANCE_SPLIT_PER_LEVEL, tally.balanceSplit);
+}
 
 export function horizontalDistanceToBounds(bounds: TileBounds, pointX: number, pointZ: number): number {
   const deltaX = Math.max(bounds.minX - pointX, 0, pointX - bounds.maxX);
@@ -75,6 +145,7 @@ export function rootTilesAround(parameters: SelectionParameters): TileAddress[] 
 }
 
 export function selectTiles(parameters: SelectionParameters): SelectionResult {
+  const tally = profiler.enabled ? createSelectionTally() : null;
   const leaves: TileAddress[] = [];
   const split = new Set<number>();
   const hysteresis = parameters.mergeHysteresis ?? DEFAULT_MERGE_HYSTERESIS;
@@ -84,21 +155,45 @@ export function selectTiles(parameters: SelectionParameters): SelectionResult {
     const wasSplit = parameters.previouslySplit?.has(key) ?? false;
     const levelThreshold = parameters.maximumCellPixels * growth ** address.level;
     const threshold = wasSplit ? levelThreshold * hysteresis : levelThreshold;
-    if (address.level > parameters.minimumLevel && screenSpaceCellPixels(address, parameters) > threshold) {
+    const canSplit = address.level > parameters.minimumLevel;
+    const cellPixels = canSplit ? screenSpaceCellPixels(address, parameters) : 0;
+    if (tally !== null) tally.visited[address.level]!++;
+    if (canSplit && cellPixels > threshold) {
       split.add(key);
+      if (tally !== null) {
+        tally.split[address.level]!++;
+        if (!wasSplit) tally.newSplits++;
+        if (wasSplit && cellPixels <= levelThreshold) tally.hysteresisHeld++;
+      }
       for (const child of childAddressesOf(address)) {
         if (horizontalDistanceToBounds(tileBoundsOf(child), parameters.cameraX, parameters.cameraZ) <= parameters.radiusBlocks) visit(child);
+        else if (tally !== null) tally.culled[child.level]!++;
       }
       return;
     }
+    if (tally !== null && wasSplit) tally.merged[address.level]!++;
     leaves.push(address);
   };
-  for (const root of rootTilesAround(parameters)) visit(root);
-  return balanceNeighborLevels({ leaves, split }, parameters);
+  const traverseToken = profiler.begin("main.lod.select.traverse");
+  const roots = rootTilesAround(parameters);
+  try {
+    for (const root of roots) visit(root);
+  } finally {
+    profiler.end(traverseToken);
+  }
+  const balanceToken = profiler.begin("main.lod.select.balance");
+  try {
+    const balanced = balanceNeighborLevels({ leaves, split }, parameters, tally);
+    if (tally !== null) reportSelectionTally(tally, roots.length, balanced.leaves.length);
+    return balanced;
+  } finally {
+    profiler.end(balanceToken);
+  }
 }
 
-function leafAtPoint(leafKeys: ReadonlySet<number>, pointX: number, pointZ: number, maximumLevel: number): number | undefined {
+function leafAtPoint(leafKeys: ReadonlySet<number>, pointX: number, pointZ: number, maximumLevel: number, tally: SelectionTally | null): number | undefined {
   for (let level = 0; level <= maximumLevel; level++) {
+    if (tally !== null) tally.balanceLevelLookups++;
     const size = tileSizeOfLevel(level);
     if (leafKeys.has(tileKeyOf(level, Math.floor(pointX / size), Math.floor(pointZ / size)))) return level;
   }
@@ -109,12 +204,13 @@ function leafAtPoint(leafKeys: ReadonlySet<number>, pointX: number, pointZ: numb
  * Splits leaves until edge-adjacent leaves differ by at most one level (a restricted quadtree), so no tile ever borders
  * cells more than twice smaller or larger than its own and ring transitions stay gradual.
  */
-function balanceNeighborLevels(selection: SelectionResult, parameters: SelectionParameters): SelectionResult {
+function balanceNeighborLevels(selection: SelectionResult, parameters: SelectionParameters, tally: SelectionTally | null): SelectionResult {
   const leafByKey = new Map(selection.leaves.map((leaf) => [tileKeyOf(leaf.level, leaf.tileX, leaf.tileZ), leaf]));
   const leafKeys = new Set(leafByKey.keys());
   const pending = [...selection.leaves];
   while (pending.length > 0) {
     const leaf = pending.pop()!;
+    if (tally !== null) tally.balanceVisits++;
     const key = tileKeyOf(leaf.level, leaf.tileX, leaf.tileZ);
     if (!leafKeys.has(key) || leaf.level < 2) continue;
     const bounds = tileBoundsOf(leaf);
@@ -128,7 +224,8 @@ function balanceNeighborLevels(selection: SelectionResult, parameters: Selection
         [bounds.minX + along, bounds.maxZ + 0.5],
       ];
       for (const [probeX, probeZ] of probes) {
-        const neighborLevel = leafAtPoint(leafKeys, probeX!, probeZ!, parameters.maximumLevel);
+        if (tally !== null) tally.balanceProbes++;
+        const neighborLevel = leafAtPoint(leafKeys, probeX!, probeZ!, parameters.maximumLevel, tally);
         if (neighborLevel !== undefined && neighborLevel < leaf.level - 1) {
           needsSplit = true;
           break;
@@ -139,6 +236,7 @@ function balanceNeighborLevels(selection: SelectionResult, parameters: Selection
     leafKeys.delete(key);
     leafByKey.delete(key);
     selection.split.add(key);
+    if (tally !== null) tally.balanceSplit[leaf.level]!++;
     for (const child of childAddressesOf(leaf)) {
       if (horizontalDistanceToBounds(tileBoundsOf(child), parameters.cameraX, parameters.cameraZ) > parameters.radiusBlocks) continue;
       const childKey = tileKeyOf(child.level, child.tileX, child.tileZ);
