@@ -168,7 +168,7 @@ export function emitStairs(
     );
   };
 
-  const riserFace = RISER_FACE_BY_DIRECTION[direction];
+  const riserFace = RISER_FACE_BY_DIRECTION[direction ?? ""];
   const sideTexture = (faceTexture: number | undefined) =>
     faceTexture ?? textureIndexSides ?? textureIndexDefault;
 
