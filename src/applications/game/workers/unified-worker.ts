@@ -14,8 +14,12 @@ import { generateMesh, listTransferables } from "./mesh";
 import { loadTextureArray } from "./texture-array";
 import { sampleHumidityGrid } from "../sky/climate/humidity-grid";
 import {
+  addWorkerCounter,
   beginWorkerTask,
+  endWorkerSection,
   finishWorkerTask,
+  isWorkerProfiling,
+  startWorkerSection,
 } from "../profiler/worker-recorder";
 
 const workerScope = self as unknown as {
@@ -80,6 +84,7 @@ addEventListener("message", async (event: MessageEvent) => {
       transfer = listRegionTransferables(result);
     } else if (method === "propagateChunkLight") {
       // neighbors and neighborLights are objects with ArrayBuffers
+      startWorkerSection("unpackNeighborParams");
       const neighbors: { [key: string]: Uint8Array } = {};
       if (params[2]) {
         Object.keys(params[2]).forEach((key) => {
@@ -94,6 +99,12 @@ addEventListener("message", async (event: MessageEvent) => {
             neighborLights[key] = new Uint8Array(params[3][key]);
         });
       }
+
+      if (isWorkerProfiling()) {
+        addWorkerCounter("neighborBlockArraysUnpacked", Object.keys(neighbors).length);
+        addWorkerCounter("neighborLightArraysUnpacked", Object.keys(neighborLights).length);
+      }
+      endWorkerSection();
 
       result = propagateChunkLight(
         new Uint8Array(params[0]),
