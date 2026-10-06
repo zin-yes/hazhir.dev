@@ -7,6 +7,23 @@ const CLONE_SIZES_BYTES = [32 * 1024, 1024 * 1024];
 const CLONE_REPETITIONS = 6;
 const CLONES_PER_REPETITION = 12;
 const MAX_SCRIPT_ATTRIBUTIONS = 3;
+const SLOW_INPUT_DURATION_THRESHOLD_MS = 16;
+const TRACKED_INPUT_EVENT_NAMES = new Set([
+  "pointerdown",
+  "pointerup",
+  "pointermove",
+  "mousedown",
+  "mouseup",
+  "mousemove",
+  "click",
+  "keydown",
+  "keyup",
+  "touchstart",
+  "touchmove",
+  "touchend",
+  "wheel",
+]);
+const TRACKED_RESOURCE_KINDS = new Set(["script", "img", "css", "fetch", "xmlhttprequest", "link", "other"]);
 
 export interface HeapChange {
   isGcLikely: boolean;
@@ -64,15 +81,98 @@ export function describeLongAnimationFrame(entry: LongAnimationFrameEntry): stri
   return `${blocking}${scripts.join(" | ")}`.trim() || "no script attribution";
 }
 
+export interface InputEventTiming {
+  /** Time the event waited for the main thread before its handlers started. */
+  inputDelayMs: number;
+  /** Time spent inside the event's handlers. */
+  processingMs: number;
+  /** Time from the end of the handlers to the next paint (rounded by the browser to 8 ms). */
+  presentationDelayMs: number;
+  /** Event name when it is one the profiler tracks, else "other" (keeps metric names bounded). */
+  eventName: string;
+}
+
+interface EventTimingEntry {
+  name: string;
+  startTime: number;
+  duration: number;
+  processingStart?: number;
+  processingEnd?: number;
+}
+
+/** Splits an Event Timing entry into where the input latency went. Null when the browser gave no processing times. */
+export function describeInputEvent(entry: EventTimingEntry): InputEventTiming | null {
+  if (entry.processingStart === undefined || entry.processingEnd === undefined) return null;
+  return {
+    inputDelayMs: Math.max(0, entry.processingStart - entry.startTime),
+    processingMs: Math.max(0, entry.processingEnd - entry.processingStart),
+    presentationDelayMs: Math.max(0, entry.startTime + entry.duration - entry.processingEnd),
+    eventName: TRACKED_INPUT_EVENT_NAMES.has(entry.name) ? entry.name : "other",
+  };
+}
+
+interface ResourceTimingEntry {
+  initiatorType: string;
+  duration: number;
+  transferSize?: number;
+  decodedBodySize?: number;
+}
+
+/** Bounded resource kind for metric names (script, img, fetch, ...). */
+export function resourceKindOf(entry: ResourceTimingEntry): string {
+  return TRACKED_RESOURCE_KINDS.has(entry.initiatorType) ? entry.initiatorType : "other";
+}
+
 function observeEntryType(
   entryType: string,
   onEntries: (entries: PerformanceEntryList) => void,
+  extraOptions: { durationThreshold?: number; buffered?: boolean } = {},
 ): PerformanceObserver | null {
   if (typeof PerformanceObserver === "undefined") return null;
   if (!PerformanceObserver.supportedEntryTypes?.includes(entryType)) return null;
   const observer = new PerformanceObserver((list) => onEntries(list.getEntries()));
-  observer.observe({ type: entryType });
+  observer.observe({ type: entryType, ...extraOptions } as PerformanceObserverInit);
   return observer;
+}
+
+function installVisibilityTracker(profiler: Profiler): () => void {
+  if (typeof document === "undefined") return () => {};
+  let hiddenSinceMs: number | null = document.visibilityState === "hidden" ? performance.now() : null;
+  const onVisibilityChange = () => {
+    if (!profiler.enabled) return;
+    const now = performance.now();
+    if (document.visibilityState === "hidden") {
+      hiddenSinceMs = now;
+      profiler.addCounter("browser.visibility.hidden");
+      return;
+    }
+    profiler.addCounter("browser.visibility.visible");
+    if (hiddenSinceMs !== null) {
+      profiler.recordTimer("browser.visibility.hiddenDuration", now - hiddenSinceMs, "browser");
+      profiler.logEvent("marker", now - hiddenSinceMs, "tab was hidden, frames and timers were throttled");
+    }
+    hiddenSinceMs = null;
+  };
+  document.addEventListener("visibilitychange", onVisibilityChange);
+  return () => document.removeEventListener("visibilitychange", onVisibilityChange);
+}
+
+function installDevicePixelRatioTracker(profiler: Profiler): () => void {
+  if (typeof window === "undefined" || typeof window.matchMedia !== "function") return () => {};
+  let query: MediaQueryList | null = null;
+  const watch = () => {
+    query = window.matchMedia(`(resolution: ${window.devicePixelRatio}dppx)`);
+    query.addEventListener("change", onChange, { once: true });
+  };
+  const onChange = () => {
+    if (profiler.enabled) {
+      profiler.addCounter("browser.devicePixelRatioChanges");
+      profiler.sampleGauge("browser.devicePixelRatio", window.devicePixelRatio, "ratio");
+    }
+    watch();
+  };
+  watch();
+  return () => query?.removeEventListener("change", onChange);
 }
 
 function installEventLoopLagMonitor(profiler: Profiler): () => void {
@@ -82,6 +182,7 @@ function installEventLoopLagMonitor(profiler: Profiler): () => void {
     const latenessMs = now - expectedAtMs;
     expectedAtMs = now + EVENT_LOOP_PROBE_INTERVAL_MS;
     const isTabHidden = typeof document !== "undefined" && document.visibilityState === "hidden";
+    if (profiler.enabled && !isTabHidden) profiler.recordTimer("browser.eventLoopDrift", Math.max(0, latenessMs), "browser");
     if (!profiler.enabled || isTabHidden || latenessMs <= EVENT_LOOP_LAG_THRESHOLD_MS) return;
     profiler.recordTimer("browser.eventLoopLag", latenessMs, "browser");
     profiler.logEvent("event-loop-lag", latenessMs, "main thread was busy when a 50ms timer was due");
@@ -93,11 +194,15 @@ function installHeapSampler(profiler: Profiler): () => void {
   let previousHeapBytes: number | null = null;
   return profiler.addSampler(() => {
     const memory = (performance as unknown as {
-      memory?: { usedJSHeapSize: number; totalJSHeapSize: number };
+      memory?: { usedJSHeapSize: number; totalJSHeapSize: number; jsHeapSizeLimit?: number };
     }).memory;
     if (!memory) return;
     profiler.sampleGauge("memory.jsHeapUsedBytes", memory.usedJSHeapSize, "bytes");
     profiler.sampleGauge("memory.jsHeapTotalBytes", memory.totalJSHeapSize, "bytes");
+    if (memory.jsHeapSizeLimit) {
+      profiler.sampleGauge("memory.jsHeapLimitBytes", memory.jsHeapSizeLimit, "bytes");
+      profiler.sampleGauge("memory.jsHeapLimitUsedPercent", (memory.usedJSHeapSize / memory.jsHeapSizeLimit) * 100, "percent");
+    }
 
     if (previousHeapBytes !== null) {
       const change = describeHeapChange(previousHeapBytes, memory.usedJSHeapSize);
@@ -165,7 +270,42 @@ export function installBrowserObservers(profiler: Profiler): () => void {
         );
       }
     }),
+    observeEntryType(
+      "event",
+      (entries) => {
+        if (!profiler.enabled) return;
+        for (const entry of entries) {
+          const timing = describeInputEvent(entry as unknown as EventTimingEntry);
+          if (!timing) continue;
+          profiler.recordTimer("browser.input.delay", timing.inputDelayMs, "browser");
+          profiler.recordTimer("browser.input.processing", timing.processingMs, "browser");
+          profiler.recordTimer("browser.input.presentationDelay", timing.presentationDelayMs, "browser");
+          profiler.recordTimer(`browser.input.total.${timing.eventName}`, entry.duration, "browser");
+        }
+      },
+      { durationThreshold: SLOW_INPUT_DURATION_THRESHOLD_MS, buffered: false },
+    ),
+    observeEntryType("paint", (entries) => {
+      if (!profiler.enabled) return;
+      for (const entry of entries) profiler.logEvent("marker", entry.startTime, `${entry.name} at ${entry.startTime.toFixed(0)}ms since navigation`);
+    }),
+    observeEntryType(
+      "resource",
+      (entries) => {
+        if (!profiler.enabled) return;
+        for (const entry of entries) {
+          const resource = entry as unknown as ResourceTimingEntry;
+          const kind = resourceKindOf(resource);
+          profiler.recordTimer(`browser.resource.${kind}`, resource.duration, "browser");
+          if (resource.transferSize) profiler.recordBytes(`bytes.resource.${kind}.transfer`, resource.transferSize);
+          if (resource.decodedBodySize) profiler.recordBytes(`bytes.resource.${kind}.decoded`, resource.decodedBodySize);
+        }
+      },
+      { buffered: false },
+    ),
   ];
+  const stopVisibilityTracker = installVisibilityTracker(profiler);
+  const stopPixelRatioTracker = installDevicePixelRatioTracker(profiler);
   const stopEventLoopMonitor = installEventLoopLagMonitor(profiler);
   const stopHeapSampler = installHeapSampler(profiler);
 
@@ -182,6 +322,8 @@ export function installBrowserObservers(profiler: Profiler): () => void {
 
   return () => {
     observers.forEach((observer) => observer?.disconnect());
+    stopVisibilityTracker();
+    stopPixelRatioTracker();
     stopEventLoopMonitor();
     stopHeapSampler();
     stopListening();

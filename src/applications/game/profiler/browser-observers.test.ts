@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { describeHeapChange, describeLongAnimationFrame } from "./browser-observers";
+import { describeHeapChange, describeInputEvent, describeLongAnimationFrame, resourceKindOf } from "./browser-observers";
 
 describe("describeHeapChange", () => {
   test("reads a large drop as garbage collection and counts the freed bytes", () => {
@@ -36,5 +36,32 @@ describe("describeLongAnimationFrame", () => {
 
   test("says so when the browser gave no attribution", () => {
     expect(describeLongAnimationFrame({ duration: 80 })).toBe("no script attribution");
+  });
+});
+
+describe("describeInputEvent", () => {
+  test("splits a pointer event into queue delay, handler time and time to next paint", () => {
+    const timing = describeInputEvent({
+      name: "pointerdown",
+      startTime: 1000,
+      processingStart: 1012,
+      processingEnd: 1040,
+      duration: 64,
+    });
+    expect(timing).toEqual({ inputDelayMs: 12, processingMs: 28, presentationDelayMs: 24, eventName: "pointerdown" });
+  });
+
+  test("folds event names the profiler does not track into one bucket and skips entries without processing times", () => {
+    expect(
+      describeInputEvent({ name: "contextmenu", startTime: 0, processingStart: 1, processingEnd: 2, duration: 16 })?.eventName,
+    ).toBe("other");
+    expect(describeInputEvent({ name: "keydown", startTime: 0, duration: 16 })).toBeNull();
+  });
+});
+
+describe("resourceKindOf", () => {
+  test("keeps known initiators and buckets the rest so metric names stay bounded", () => {
+    expect(resourceKindOf({ initiatorType: "script", duration: 5 })).toBe("script");
+    expect(resourceKindOf({ initiatorType: "audio", duration: 5 })).toBe("other");
   });
 });
