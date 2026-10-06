@@ -146,6 +146,7 @@ import {
   installBrowserObservers,
 } from "./profiler/browser-observers";
 import { saveBenchmarkResult } from "./profiler/export-report";
+import { measureGpuPass } from "./profiler/gpu-pass-registry";
 import { mountProfilerOverlay } from "./profiler/mount-overlay";
 import {
   createProfiledRender,
@@ -2421,12 +2422,18 @@ export default function Game() {
     if (strokes.length === 0) return;
     const frameStartedAtMs = performance.now();
     let appliedPieces = 0;
-    while (strokes.length > 0 && (appliedPieces === 0 || performance.now() - frameStartedAtMs < BRUSH_FRAME_BUDGET_MS)) {
+    while (strokes.length > 0) {
+      const isOverBudget = appliedPieces > 0 && performance.now() - frameStartedAtMs >= BRUSH_FRAME_BUDGET_MS;
+      if (isOverBudget) {
+        profiler.addCounter("game.brush.frameBudgetExhausted");
+        break;
+      }
       const stroke = strokes[0]!;
       const piece = stroke.pieces.shift();
       if (piece) {
         const result = applyBlockEditBatch(piece);
         appliedPieces++;
+        profiler.addCounter("game.brush.piecesApplied");
         if (result) {
           stroke.meshesApplied.push(...result.meshesApplied);
           stroke.blocksChanged += result.stats.blocksChanged;
@@ -2438,7 +2445,9 @@ export default function Game() {
       }
       if (stroke.pieces.length > 0) continue;
       strokes.shift();
+      profiler.addCounter("game.brush.strokesCompleted");
       void Promise.all(stroke.meshesApplied).then(() => {
+        profiler.recordTimer("latency.brush.strokeOnScreen", performance.now() - stroke.startedAtMs, "latency");
         lastBrushEditRef.current = {
           blocksChanged: stroke.blocksChanged,
           chunksRebuilt: stroke.chunksRebuilt.size,
@@ -2457,6 +2466,7 @@ export default function Game() {
     const time = performance.now();
     const delta = (time - prevTime) / 1000;
 
+    const frameGaugesToken = profiler.begin("main.frame.sampleGauges");
     const pipeline = pipelineRef.current;
     if (profiler.enabled && pipeline) {
       const gauges = pipeline.queueGauges();
@@ -2470,17 +2480,25 @@ export default function Game() {
     profiler.sampleGauge("game.remotePlayers", remotePlayers.current.size);
     profiler.sampleGauge("game.water.pendingUpdates", pendingWaterUpdates.current.size);
     profiler.sampleGauge("game.light.pendingEdits", pendingLightEditsRef.current);
+    profiler.sampleGauge("game.scene.children", scene.children.length);
+    profiler.sampleGauge("game.brush.pendingStrokes", pendingBrushStrokesRef.current.length);
+    profiler.sampleGauge("game.network.connectedPeers", networkManager.current.connectedPeerCount);
+    profiler.end(frameGaugesToken);
 
     // Update FPS counter
+    const fpsCounterToken = profiler.begin("main.frame.fpsCounter");
     fpsFrames.current.push(time);
     // Keep only frames from the last second
     while (fpsFrames.current.length > 0 && fpsFrames.current[0] < time - 1000) {
       fpsFrames.current.shift();
     }
+    profiler.end(fpsCounterToken);
 
     updateIndicator();
     updateBrush();
+    const brushEditsToken = profiler.begin("main.frame.brushEdits");
     applyPendingBrushEdits();
+    profiler.end(brushEditsToken);
 
     if (time - lastPlantDetailUpdateMs >= PLANT_DETAIL_UPDATE_INTERVAL_MS) {
       lastPlantDetailUpdateMs = time;
@@ -2581,24 +2599,38 @@ export default function Game() {
     getBlockCallsRef.current = 0;
 
     const sky = skyControllerRef.current;
-    if (sky && sky.update(Math.min(delta, 0.1), camera.position)) lodBridgeRef.current?.refreshBackgroundHaze();
+    const skyUpdateToken = profiler.begin("main.frame.sky.update");
+    const skyChangedHaze = sky ? sky.update(Math.min(delta, 0.1), camera.position) : false;
+    profiler.end(skyUpdateToken);
+    if (skyChangedHaze) {
+      profiler.addCounter("game.sky.hazeRefreshes");
+      const hazeToken = profiler.begin("main.frame.sky.refreshBackgroundHaze");
+      lodBridgeRef.current?.refreshBackgroundHaze();
+      profiler.end(hazeToken);
+    }
 
     const shadowPass = shadowPassRef.current;
     if (shadowPass) {
+      const shadowUpdateToken = profiler.begin("main.frame.shadow.update");
       shadowPass.setQuality(gameSettingsRef.current.shadowQuality);
       shadowPass.update(camera);
+      profiler.end(shadowUpdateToken);
     }
 
     const bloomPass = bloomPassRef.current;
     const worldSnapshot = worldSnapshotRef.current;
     const waterReflections = gameSettingsRef.current.waterReflections;
+    const bloomBeginToken = profiler.begin("main.frame.bloom.begin");
     bloomPass?.setBloomEnabled(gameSettingsRef.current.bloomEnabled);
     bloomPass?.setOffscreenRequired(waterReflections);
     bloomPass?.beginFrame();
+    profiler.end(bloomBeginToken);
     const worldTarget = bloomPass?.worldTarget ?? null;
     const readsOpaqueWorld = waterReflections && worldTarget !== null && worldSnapshot !== null;
 
+    const clearToken = profiler.begin("main.frame.clear");
     renderer.clear();
+    profiler.end(clearToken);
     const drawFarTerrain = () => lodBridgeRef.current?.renderPass(renderer, camera);
     if (readsOpaqueWorld) camera.layers.disable(TRANSLUCENT_LAYER);
     if (profiledRenderRef.current) {
@@ -2608,16 +2640,26 @@ export default function Game() {
       renderer.render(scene, camera);
     }
     if (readsOpaqueWorld) {
+      profiler.addCounter("game.water.reflectionFrames");
       camera.layers.enable(TRANSLUCENT_LAYER);
       camera.layers.disable(0);
+      const snapshotToken = profiler.begin("main.frame.worldSnapshot");
       worldSnapshot?.capture(worldTarget, camera);
-      renderer.render(scene, camera);
+      profiler.end(snapshotToken);
+      measureGpuPass("waterTranslucent", () => renderer.render(scene, camera));
       camera.layers.enable(0);
     } else {
+      profiler.addCounter("game.water.plainFrames");
+      const snapshotReleaseToken = profiler.begin("main.frame.worldSnapshot.release");
       worldSnapshot?.release();
+      profiler.end(snapshotReleaseToken);
     }
+    const cloudsToken = profiler.begin("main.frame.clouds");
     sky?.cloudPass.render(camera);
+    profiler.end(cloudsToken);
+    const bloomEndToken = profiler.begin("main.frame.bloom.end");
     bloomPass?.endFrame();
+    profiler.end(bloomEndToken);
     // stats.end();
     profiler.endFrame();
   };
