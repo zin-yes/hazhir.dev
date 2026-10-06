@@ -1,4 +1,6 @@
 import { BlockType } from "../blocks";
+import { profiler } from "../profiler";
+import { DIMENSIONS } from "../profiler/dimensions";
 
 export interface BlockEdit {
   x: number;
@@ -46,15 +48,24 @@ export class BlockEditBatch {
     this.blocks = new Uint8Array(initialCapacity);
   }
 
+  /** Bytes the four parallel arrays hold (allocated capacity, not just the used part). */
+  get allocatedBytes(): number {
+    return this.xs.byteLength + this.ys.byteLength + this.zs.byteLength + this.blocks.byteLength;
+  }
+
   static fromEdits(
     edits: ArrayLike<BlockEdit>,
     replaceRule: ReplaceRule = "any",
   ): BlockEditBatch {
+    const scopeToken = profiler.begin("main.edit.batchFromEdits");
     const batch = new BlockEditBatch(replaceRule, Math.max(edits.length, 1));
     for (let position = 0; position < edits.length; position++) {
       const edit = edits[position];
       batch.push(edit.x, edit.y, edit.z, edit.block);
     }
+    profiler.end(scopeToken);
+    profiler.addCounter("game.edit.batchesFromObjects");
+    profiler.addCounter("game.edit.objectEditsConverted", edits.length);
     return batch;
   }
 
@@ -68,6 +79,7 @@ export class BlockEditBatch {
   }
 
   toEdits(): BlockEdit[] {
+    const scopeToken = profiler.begin("main.edit.batchToEdits");
     const edits: BlockEdit[] = [];
     for (let position = 0; position < this.length; position++) {
       edits.push({
@@ -77,10 +89,15 @@ export class BlockEditBatch {
         block: this.blocks[position],
       });
     }
+    profiler.end(scopeToken);
+    profiler.addCounter("game.edit.batchesToObjects");
+    profiler.addCounter("game.edit.objectEditsAllocated", edits.length);
     return edits;
   }
 
   private grow() {
+    profiler.addCounter("game.edit.batchGrowths");
+    profiler.recordBytes("bytes.edit.batchGrowth", this.allocatedBytes);
     const capacity = this.xs.length * 2;
     const grownInts = (existing: Int32Array) => {
       const grown = new Int32Array(capacity);
@@ -121,6 +138,34 @@ export function sphereEdits(
   block: number,
   mode: BrushMode,
 ): BlockEditBatch {
+  const scopeToken = profiler.begin("main.edit.buildSphere", DIMENSIONS.editMode, mode);
+  try {
+    const batch = buildSphereBatch(center, radius, block, mode);
+    recordBuiltBatch("sphere", mode, batch);
+    profiler.sampleGauge("game.edit.sphereRadius", radius);
+    return batch;
+  } finally {
+    profiler.end(scopeToken);
+  }
+}
+
+/** Counts what a brush shape produced: cells per mode, the size distribution and how much capacity went unused. */
+function recordBuiltBatch(shape: "sphere" | "box", mode: BrushMode, batch: BlockEditBatch) {
+  if (!profiler.enabled) return;
+  profiler.addCounter(shape === "sphere" ? "game.edit.spheresBuilt" : "game.edit.boxesBuilt");
+  profiler.addCounter("game.edit.cellsGenerated", batch.length);
+  profiler.sampleGauge("game.edit.generatedBatchCells", batch.length);
+  profiler.sampleGauge("game.edit.generatedBatchUnusedCapacity", batch.xs.length - batch.length);
+  profiler.recordBytes("bytes.edit.batch", batch.allocatedBytes);
+  profiler.recordBreakdown(DIMENSIONS.editMode, mode, { units: batch.length, calls: 1 });
+}
+
+function buildSphereBatch(
+  center: BlockPosition,
+  radius: number,
+  block: number,
+  mode: BrushMode,
+): BlockEditBatch {
   const editBlock = blockForMode(mode, block);
   const reach = Math.floor(radius);
   const radiusSquared = radius * radius;
@@ -149,6 +194,22 @@ export function sphereEdits(
 
 /** Every block of the box between two corners, both inclusive, in the same modes as sphereEdits. */
 export function boxEdits(
+  firstCorner: BlockPosition,
+  secondCorner: BlockPosition,
+  block: number,
+  mode: BrushMode,
+): BlockEditBatch {
+  const scopeToken = profiler.begin("main.edit.buildBox", DIMENSIONS.editMode, mode);
+  try {
+    const batch = buildBoxBatch(firstCorner, secondCorner, block, mode);
+    recordBuiltBatch("box", mode, batch);
+    return batch;
+  } finally {
+    profiler.end(scopeToken);
+  }
+}
+
+function buildBoxBatch(
   firstCorner: BlockPosition,
   secondCorner: BlockPosition,
   block: number,

@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { BlockType } from "../blocks";
+import { DIMENSIONS } from "../profiler/dimensions";
+import { breakdownUnits, byteTotal, counterTotal, withEnabledProfiler } from "../world/profiler-readings.test-helper";
 import { BlockEditBatch, boxEdits, sphereEdits } from "./block-edit-batch";
 
 function cellsOf(batch: BlockEditBatch): Set<string> {
@@ -80,5 +82,27 @@ describe("BlockEditBatch", () => {
     expect(batch.ys[4999]).toBe(-4999);
     expect(batch.zs[4999]).toBe(9998);
     expect(batch.blocks[4999]).toBe(4999 % 200);
+  });
+});
+
+describe("block edit batch profiling", () => {
+  test("counts generated cells per brush mode, batch memory and the objects converted to and from a batch", () => {
+    withEnabledProfiler(() => {
+      const filled = sphereEdits({ x: 0, y: 70, z: 0 }, 6, BlockType.STONE, "fill");
+      const erased = sphereEdits({ x: 40, y: 70, z: 0 }, 4, BlockType.STONE, "erase");
+      const box = boxEdits({ x: 0, y: 0, z: 0 }, { x: 4, y: 2, z: 3 }, BlockType.DIRT, "fillAirOnly");
+      expect(counterTotal("game.edit.spheresBuilt")).toBe(2);
+      expect(counterTotal("game.edit.boxesBuilt")).toBe(1);
+      expect(counterTotal("game.edit.cellsGenerated")).toBe(filled.length + erased.length + box.length);
+      expect(box.length).toBe(5 * 3 * 4);
+      expect(breakdownUnits(DIMENSIONS.editMode, "fill")).toBe(filled.length);
+      expect(breakdownUnits(DIMENSIONS.editMode, "erase")).toBe(erased.length);
+      expect(byteTotal("bytes.edit.batch")).toBe(filled.allocatedBytes + erased.allocatedBytes + box.allocatedBytes);
+
+      const objects = BlockEditBatch.fromEdits(box.toEdits());
+      expect(objects.length).toBe(box.length);
+      expect(counterTotal("game.edit.objectEditsConverted")).toBe(box.length);
+      expect(counterTotal("game.edit.objectEditsAllocated")).toBe(box.length);
+    });
   });
 });
