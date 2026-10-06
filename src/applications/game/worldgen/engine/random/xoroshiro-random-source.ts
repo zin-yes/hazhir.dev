@@ -5,6 +5,17 @@ import { bigIntToHalves, halvesToBigInt, type Int64Halves, multiplyUnsigned32Hig
 import { MarsagliaPolarGaussian } from "./marsaglia-polar-gaussian";
 import type { PositionalRandomFactory, RandomSource } from "./random-source";
 import { seedWordsFromHashOf, upgradeSeedTo128bit } from "./random-support";
+import { defineHotCounter, noteHot } from "../profiling/hot-counters";
+
+const CREATED_FROM_SEED = defineHotCounter("random.xoroshiroCreatedFromSeed");
+const CREATED_FROM_STATE = defineHotCounter("random.xoroshiroCreatedFromState");
+const FORKS = defineHotCounter("random.xoroshiroForks");
+const POSITIONAL_FORKS = defineHotCounter("random.xoroshiroPositionalForks");
+const SET_SEED_CALLS = defineHotCounter("random.xoroshiroSetSeed");
+const POSITIONAL_AT = defineHotCounter("random.xoroshiroPositionalAt");
+const POSITIONAL_REUSED_AT = defineHotCounter("random.xoroshiroPositionalReusedAt");
+const POSITIONAL_FROM_HASH = defineHotCounter("random.xoroshiroPositionalFromHashOf");
+const POSITIONAL_FROM_SEED = defineHotCounter("random.xoroshiroPositionalFromSeed");
 
 const FLOAT_UNIT = 5.9604644775390625e-8; // 2^-24, exactly Java's 5.9604645E-8f
 const DOUBLE_UNIT = 1.1102230246251565e-16; // 2^-53, exactly Java's (double)1.110223E-16f
@@ -36,8 +47,13 @@ export class XoroshiroRandomSource implements RandomSource {
   /** Internal: raw 128-bit state as int32 words (low long high/low word, high long high/low word). */
   constructor(seedLowHigh: number, seedLowLow: number, seedHighHigh: number, seedHighLow: number);
   constructor(seedOrLowHigh: bigint | number, seedLowLow = 0, seedHighHigh = 0, seedHighLow = 0) {
-    if (typeof seedOrLowHigh === "bigint") this.setSeedWithoutGaussianReset(seedOrLowHigh);
-    else this.setRawState(seedOrLowHigh, seedLowLow, seedHighHigh, seedHighLow);
+    if (typeof seedOrLowHigh === "bigint") {
+      noteHot(CREATED_FROM_SEED);
+      this.setSeedWithoutGaussianReset(seedOrLowHigh);
+    } else {
+      noteHot(CREATED_FROM_STATE);
+      this.setRawState(seedOrLowHigh, seedLowLow, seedHighHigh, seedHighLow);
+    }
   }
 
   /** Java `new XoroshiroRandomSource(long seedLo, long seedHi)`: raw state, no mixing. */
@@ -167,6 +183,7 @@ export class XoroshiroRandomSource implements RandomSource {
   }
 
   fork(): XoroshiroRandomSource {
+    noteHot(FORKS);
     this.advance();
     const lowHigh = this.resultHigh;
     const lowLow = this.resultLow;
@@ -175,6 +192,7 @@ export class XoroshiroRandomSource implements RandomSource {
   }
 
   forkPositional(): XoroshiroPositionalRandomFactory {
+    noteHot(POSITIONAL_FORKS);
     this.advance();
     const lowHigh = this.resultHigh;
     const lowLow = this.resultLow;
@@ -183,6 +201,7 @@ export class XoroshiroRandomSource implements RandomSource {
   }
 
   setSeed(seed: bigint): void {
+    noteHot(SET_SEED_CALLS);
     this.setSeedWithoutGaussianReset(seed);
     this.gaussianSource?.reset();
   }
@@ -227,6 +246,7 @@ export class XoroshiroPositionalRandomFactory implements PositionalRandomFactory
   }
 
   at(x: number, y: number, z: number): XoroshiroRandomSource {
+    noteHot(POSITIONAL_AT);
     positionalSeedInto(x, y, z, positionalScratch);
     return new XoroshiroRandomSource(
       positionalScratch.high ^ this.seedLowHigh,
@@ -241,6 +261,7 @@ export class XoroshiroPositionalRandomFactory implements PositionalRandomFactory
    * factory) re-seeds. Only for callers that finish drawing before anything else can ask for a positional random.
    */
   reusedAt(x: number, y: number, z: number): XoroshiroRandomSource {
+    noteHot(POSITIONAL_REUSED_AT);
     positionalSeedInto(x, y, z, positionalScratch);
     reusedPositionalSource.resetToRawState(
       positionalScratch.high ^ this.seedLowHigh,
@@ -252,6 +273,7 @@ export class XoroshiroPositionalRandomFactory implements PositionalRandomFactory
   }
 
   fromHashOf(name: string): XoroshiroRandomSource {
+    noteHot(POSITIONAL_FROM_HASH);
     const words = seedWordsFromHashOf(name);
     return new XoroshiroRandomSource(
       words[0] ^ this.seedLowHigh,
@@ -262,6 +284,7 @@ export class XoroshiroPositionalRandomFactory implements PositionalRandomFactory
   }
 
   fromSeed(seed: bigint): XoroshiroRandomSource {
+    noteHot(POSITIONAL_FROM_SEED);
     bigIntToHalves(seed, positionalScratch);
     return new XoroshiroRandomSource(
       positionalScratch.high ^ this.seedLowHigh,

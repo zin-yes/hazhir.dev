@@ -14,6 +14,11 @@ import {
   halvesToBigInt,
 } from "../../random";
 
+import { defineHotCounter, noteHot } from "../../profiling/hot-counters";
+
+const DECORATION_SEEDS_SET = defineHotCounter("random.worldgenDecorationSeeds");
+const FEATURE_SEEDS_SET = defineHotCounter("random.worldgenFeatureSeeds");
+
 const FLOAT_UNIT = 5.9604644775390625e-8; // (double)5.9604645E-8f == 2^-24
 const DOUBLE_UNIT = 1.1102230246251565e-16; // (double)1.110223E-16f == 2^-53
 const TWO_POW_27 = 134217728;
@@ -127,6 +132,7 @@ export class WorldgenRandom implements RandomSource {
 
   /** WorldgenRandom.setDecorationSeed: seeds per chunk origin and returns the decoration seed. */
   setDecorationSeed(levelSeed: bigint, minBlockX: number, minBlockZ: number): bigint {
+    noteHot(DECORATION_SEEDS_SET);
     this.setSeed(levelSeed);
     const xMultiplier = this.nextLong() | BigInt(1);
     const zMultiplier = this.nextLong() | BigInt(1);
@@ -137,6 +143,7 @@ export class WorldgenRandom implements RandomSource {
 
   /** WorldgenRandom.setFeatureSeed: decorationSeed + featureIndex + 10000 * step. */
   setFeatureSeed(decorationSeed: bigint, featureIndex: number, step: number): void {
+    noteHot(FEATURE_SEEDS_SET);
     this.setSeed(BigInt.asIntN(64, decorationSeed + BigInt(featureIndex) + BigInt(10000 * step)));
   }
 }

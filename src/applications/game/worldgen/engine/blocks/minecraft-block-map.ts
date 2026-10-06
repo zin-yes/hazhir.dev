@@ -13,6 +13,14 @@ import {
   STRUCTURE_SOLID_BLOCKS,
 } from "./structure-block-names";
 import { TERRAIN_BLOCKS } from "./terrain-block-names";
+import { defineHotCounter, noteHot } from "../profiling/hot-counters";
+
+const BLOCK_MAP_CACHE_HITS = defineHotCounter("blockMap.cacheHits");
+const BLOCK_MAP_RESOLUTIONS = defineHotCounter("blockMap.resolutions");
+const BLOCK_MAP_RESOLVED_STATEFUL = defineHotCounter("blockMap.resolvedStateful");
+const BLOCK_MAP_RESOLVED_EXACT = defineHotCounter("blockMap.resolvedExact");
+const BLOCK_MAP_RESOLVED_DROPPED = defineHotCounter("blockMap.resolvedDropped");
+const BLOCK_MAP_RESOLVED_FAMILY = defineHotCounter("blockMap.resolvedFamily");
 
 const MINECRAFT_NAMESPACE_PREFIX = "minecraft:";
 const FALLING_WATER_MINIMUM_LEVEL = 8;
@@ -83,13 +91,23 @@ function resolveBlockPath(blockPath: string, properties: BlockStateProperties): 
   }
 
   const statefulBlock = resolveStatefulBlock(blockPath, properties);
-  if (statefulBlock !== undefined) return statefulBlock;
+  if (statefulBlock !== undefined) {
+    noteHot(BLOCK_MAP_RESOLVED_STATEFUL);
+    return statefulBlock;
+  }
 
   const exactBlock = EXACT_BLOCKS.get(blockPath);
-  if (exactBlock !== undefined) return exactBlock;
+  if (exactBlock !== undefined) {
+    noteHot(BLOCK_MAP_RESOLVED_EXACT);
+    return exactBlock;
+  }
 
-  if (INTENTIONALLY_DROPPED_EXACT_BLOCKS.has(blockPath)) return BlockType.AIR;
+  if (INTENTIONALLY_DROPPED_EXACT_BLOCKS.has(blockPath)) {
+    noteHot(BLOCK_MAP_RESOLVED_DROPPED);
+    return BlockType.AIR;
+  }
 
+  noteHot(BLOCK_MAP_RESOLVED_FAMILY);
   const familyBlock = resolveFamilyBlock(blockPath, properties);
   if (familyBlock === "water-plant") return properties.waterlogged === "false" ? BlockType.AIR : BlockType.WATER;
   return familyBlock;
@@ -115,7 +133,11 @@ function mapBlockState(blockState: string): BlockType {
 
 export function toGameBlock(blockState: string): BlockType {
   const cachedBlock = blockStateCache.get(blockState);
-  if (cachedBlock !== undefined) return cachedBlock;
+  if (cachedBlock !== undefined) {
+    noteHot(BLOCK_MAP_CACHE_HITS);
+    return cachedBlock;
+  }
+  noteHot(BLOCK_MAP_RESOLUTIONS);
   const gameBlock = mapBlockState(blockState);
   blockStateCache.set(blockState, gameBlock);
   return gameBlock;

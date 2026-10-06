@@ -1,6 +1,12 @@
 // Pure TypeScript MD5 and SHA-256 (Web Workers have no synchronous crypto digest), plus Java String.hashCode.
 // MD5 seeds `XoroshiroPositionalRandomFactory.fromHashOf`; SHA-256 seeds `BiomeManager.obfuscateSeed`.
 
+import { defineHotCounter, noteHot } from "../profiling/hot-counters";
+
+const MD5_HASHES = defineHotCounter("random.md5Hashes");
+const SHA256_HASHES = defineHotCounter("random.sha256Hashes");
+const JAVA_STRING_HASHES = defineHotCounter("random.javaStringHashes");
+
 const MD5_SHIFTS = [
   7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22, 5, 9, 14, 20, 5, 9, 14, 20, 5, 9, 14, 20, 5, 9, 14, 20,
   4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23, 6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15,
@@ -36,6 +42,7 @@ function rotateLeft32(value: number, count: number): number {
 }
 
 export function md5(bytes: Uint8Array): Uint8Array {
+  noteHot(MD5_HASHES);
   const padded = padMessage(bytes, false);
   const view = new DataView(padded.buffer);
   let stateA = 0x67452301;
@@ -101,6 +108,7 @@ function rotateRight32(value: number, count: number): number {
 }
 
 export function sha256(bytes: Uint8Array): Uint8Array {
+  noteHot(SHA256_HASHES);
   const padded = padMessage(bytes, true);
   const view = new DataView(padded.buffer);
   const state = new Int32Array([
@@ -177,6 +185,7 @@ export function sha256HashLong(value: bigint): bigint {
 
 /** Java `String.hashCode()` over UTF-16 code units. */
 export function javaStringHashCode(text: string): number {
+  noteHot(JAVA_STRING_HASHES);
   let hash = 0;
   for (let index = 0; index < text.length; index++) hash = (Math.imul(31, hash) + text.charCodeAt(index)) | 0;
   return hash;

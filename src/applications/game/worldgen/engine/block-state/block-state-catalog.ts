@@ -7,8 +7,20 @@
 // block as a full solid stone-like block and count it in `unknownBlockCounts`.
 
 import { BlockPalette, blockNameOf, formatBlockState, parseBlockState } from "../chunk";
+import { defineHotCounter, noteHot } from "../profiling/hot-counters";
 import { GENERATED_BLOCK_ENTRIES } from "./block-state-table.generated";
 import type { GeneratedBlockEntry, GeneratedSurvivalRule } from "./block-state-table-types";
+
+const INFO_HITS = defineHotCounter("blockState.infoCacheHits");
+const INFO_CLASSIFICATIONS = defineHotCounter("blockState.infoClassifications");
+const PALETTE_INFO_HITS = defineHotCounter("blockState.paletteInfoHits");
+const PALETTE_INFO_MISSES = defineHotCounter("blockState.paletteInfoMisses");
+const NORMALIZE_HITS = defineHotCounter("blockState.normalizeCacheHits");
+const NORMALIZE_MISSES = defineHotCounter("blockState.normalizeCacheMisses");
+const PROPERTIES_HITS = defineHotCounter("blockState.propertiesCacheHits");
+const PROPERTIES_MISSES = defineHotCounter("blockState.propertiesCacheMisses");
+const WITH_PROPERTY_CALLS = defineHotCounter("blockState.withPropertyCalls");
+const UNKNOWN_BLOCK_REPORTS = defineHotCounter("blockState.unknownBlockReports");
 
 export type FluidKind = "empty" | "water" | "flowing_water" | "lava" | "flowing_lava";
 
@@ -102,6 +114,7 @@ export class BlockStateCatalog {
   /** Records (or throws for) an unknown block name. Returns false so callers can fall back. */
   reportUnknownBlock(name: string, context: string): false {
     if (this.strict) throw new UnknownBlockError(`Unknown block "${name}" (${context})`);
+    noteHot(UNKNOWN_BLOCK_REPORTS);
     this.unknownBlockCounts.set(name, (this.unknownBlockCounts.get(name) ?? 0) + 1);
     return false;
   }
@@ -124,9 +137,12 @@ export class BlockStateCatalog {
   propertiesOf(state: string): Readonly<Record<string, string>> {
     let properties = this.propertiesByState.get(state);
     if (!properties) {
+      noteHot(PROPERTIES_MISSES);
       const parsed = parseBlockState(state);
       properties = Object.freeze({ ...this.defaultProperties(parsed.name), ...parsed.properties });
       this.propertiesByState.set(state, properties);
+    } else {
+      noteHot(PROPERTIES_HITS);
     }
     return properties;
   }
@@ -135,15 +151,19 @@ export class BlockStateCatalog {
   normalize(state: string): string {
     let normalized = this.normalizedByState.get(state);
     if (normalized === undefined) {
+      noteHot(NORMALIZE_MISSES);
       const parsed = parseBlockState(state);
       normalized = this.isKnownBlock(parsed.name) ? formatBlockState(parsed.name, { ...this.defaultProperties(parsed.name), ...parsed.properties }) : state;
       this.normalizedByState.set(state, normalized);
+    } else {
+      noteHot(NORMALIZE_HITS);
     }
     return normalized;
   }
 
   /** BlockState.setValue on a state string (the state is normalized first). */
   withProperty(state: string, propertyName: string, value: string): string {
+    noteHot(WITH_PROPERTY_CALLS);
     const name = blockNameOf(state);
     const properties = { ...this.propertiesOf(state) };
     if (this.isKnownBlock(name) && !(propertyName in properties)) {
@@ -159,7 +179,11 @@ export class BlockStateCatalog {
 
   info(state: string): BlockStateInfo {
     const cached = this.infoByState.get(state);
-    if (cached) return cached;
+    if (cached) {
+      noteHot(INFO_HITS);
+      return cached;
+    }
+    noteHot(INFO_CLASSIFICATIONS);
     const created = this.classify(state);
     this.infoByState.set(state, created);
     return created;
@@ -232,8 +256,11 @@ export class PaletteBlockInfo {
   info(paletteId: number): BlockStateInfo {
     let cached = this.infoById[paletteId];
     if (!cached) {
+      noteHot(PALETTE_INFO_MISSES);
       cached = this.catalog.info(this.palette.stateOf(paletteId));
       this.infoById[paletteId] = cached;
+    } else {
+      noteHot(PALETTE_INFO_HITS);
     }
     return cached;
   }

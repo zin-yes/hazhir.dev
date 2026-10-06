@@ -1,5 +1,15 @@
 import { BlockType } from "../../../blocks";
+import { defineHotCounter, noteHot } from "../profiling/hot-counters";
 import { ORE_MATERIALS } from "./terrain-block-names";
+
+const FAMILY_DROPPED = defineHotCounter("materialFamilies.dropped");
+const FAMILY_COLORED = defineHotCounter("materialFamilies.colored");
+const FAMILY_WOOD = defineHotCounter("materialFamilies.wood");
+const FAMILY_SHAPED = defineHotCounter("materialFamilies.shaped");
+const FAMILY_ORE = defineHotCounter("materialFamilies.ore");
+const FAMILY_COPPER = defineHotCounter("materialFamilies.copper");
+const FAMILY_CORAL = defineHotCounter("materialFamilies.coral");
+const FAMILY_UNMATCHED = defineHotCounter("materialFamilies.unmatched");
 
 export type CompassDirection = "north" | "south" | "east" | "west";
 
@@ -192,10 +202,14 @@ function resolveCoralBlock(coralMatch: RegExpExecArray): BlockType | "water-plan
  * Returns undefined when the name is not part of any family, so the caller can throw for unknown names.
  */
 export function resolveFamilyBlock(blockPath: string, properties: BlockStateProperties): BlockType | "water-plant" | undefined {
-  if (isDroppedFamilyBlock(blockPath)) return BlockType.AIR;
+  if (isDroppedFamilyBlock(blockPath)) {
+    noteHot(FAMILY_DROPPED);
+    return BlockType.AIR;
+  }
 
   const coloredMatch = COLORED_BLOCK_PATTERN.exec(blockPath);
   if (coloredMatch) {
+    noteHot(FAMILY_COLORED);
     const color = coloredMatch[1]!;
     const kind = coloredMatch[2]!;
     if (kind === "stained_glass" || kind === "stained_glass_pane") return BlockType.GLASS;
@@ -204,6 +218,7 @@ export function resolveFamilyBlock(blockPath: string, properties: BlockStateProp
 
   const woodMatch = WOOD_BLOCK_PATTERN.exec(blockPath);
   if (woodMatch) {
+    noteHot(FAMILY_WOOD);
     const species = WOOD_SPECIES[woodMatch[1]!]!;
     const kind = woodMatch[2]!;
     if (kind === "planks") return species.planks;
@@ -213,20 +228,31 @@ export function resolveFamilyBlock(blockPath: string, properties: BlockStateProp
   }
 
   const shapedMatch = SHAPED_BLOCK_PATTERN.exec(blockPath);
-  if (shapedMatch) return resolveShapedBlock(shapedMatch[1]!, shapedMatch[2]!, properties);
+  if (shapedMatch) {
+    noteHot(FAMILY_SHAPED);
+    return resolveShapedBlock(shapedMatch[1]!, shapedMatch[2]!, properties);
+  }
 
   const oreMatch = ORE_BLOCK_PATTERN.exec(blockPath);
   if (oreMatch && ORE_MATERIALS.includes(oreMatch[2]!)) {
+    noteHot(FAMILY_ORE);
     if (oreMatch[1] === "deepslate_") return BlockType.DEEPSLATE;
     if (oreMatch[1] === "nether_") return BlockType.NETHERRACK;
     return BlockType.STONE;
   }
 
   const copperMatch = COPPER_BLOCK_PATTERN.exec(blockPath);
-  if (copperMatch) return COPPER_BY_OXIDATION[copperMatch[1] ?? ""];
+  if (copperMatch) {
+    noteHot(FAMILY_COPPER);
+    return COPPER_BY_OXIDATION[copperMatch[1] ?? ""];
+  }
 
   const coralMatch = CORAL_PATTERN.exec(blockPath);
-  if (coralMatch) return resolveCoralBlock(coralMatch);
+  if (coralMatch) {
+    noteHot(FAMILY_CORAL);
+    return resolveCoralBlock(coralMatch);
+  }
 
+  noteHot(FAMILY_UNMATCHED);
   return undefined;
 }

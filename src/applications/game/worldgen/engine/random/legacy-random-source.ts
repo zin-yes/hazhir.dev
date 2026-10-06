@@ -6,6 +6,14 @@ import { javaStringHashCode } from "./hashing";
 import { bigIntToHalves, halvesToBigInt, type Int64Halves, positionalSeedInto } from "./int64";
 import { MarsagliaPolarGaussian } from "./marsaglia-polar-gaussian";
 import type { PositionalRandomFactory, RandomSource } from "./random-source";
+import { defineHotCounter, noteHot } from "../profiling/hot-counters";
+
+const LEGACY_CREATED = defineHotCounter("random.legacyCreated");
+const LEGACY_FORKS = defineHotCounter("random.legacyForks");
+const LEGACY_POSITIONAL_FORKS = defineHotCounter("random.legacyPositionalForks");
+const LEGACY_SET_SEED = defineHotCounter("random.legacySetSeed");
+const LEGACY_POSITIONAL_AT = defineHotCounter("random.legacyPositionalAt");
+const LEGACY_POSITIONAL_FROM_HASH = defineHotCounter("random.legacyPositionalFromHashOf");
 
 const TWO_POW_24 = 16777216;
 // MULTIPLIER = 0x5DEECE66D = MULTIPLIER_HIGH * 2^24 + MULTIPLIER_LOW
@@ -32,6 +40,7 @@ export class LegacyRandomSource implements RandomSource {
   /** Internal: seed given as int32 halves of a Java long. */
   constructor(seedHigh: number, seedLow: number);
   constructor(seedOrHigh: bigint | number, seedLow = 0) {
+    noteHot(LEGACY_CREATED);
     if (typeof seedOrHigh === "bigint") {
       bigIntToHalves(seedOrHigh, scratchHalves);
       this.setSeedFromHalves(scratchHalves.high, scratchHalves.low);
@@ -128,11 +137,13 @@ export class LegacyRandomSource implements RandomSource {
   }
 
   fork(): LegacyRandomSource {
+    noteHot(LEGACY_FORKS);
     this.nextLongInto(scratchHalves);
     return new LegacyRandomSource(scratchHalves.high, scratchHalves.low);
   }
 
   forkPositional(): LegacyPositionalRandomFactory {
+    noteHot(LEGACY_POSITIONAL_FORKS);
     this.nextLongInto(scratchHalves);
     return new LegacyPositionalRandomFactory(scratchHalves.high, scratchHalves.low);
   }
@@ -144,6 +155,7 @@ export class LegacyRandomSource implements RandomSource {
 
   /** setSeed for a Java long given as int32 halves (no BigInt). */
   setSeedFromLongHalves(seedHigh: number, seedLow: number): void {
+    noteHot(LEGACY_SET_SEED);
     this.setSeedFromHalves(seedHigh, seedLow);
     this.gaussianSource?.reset();
   }
@@ -168,11 +180,13 @@ export class LegacyPositionalRandomFactory implements PositionalRandomFactory {
   }
 
   at(x: number, y: number, z: number): LegacyRandomSource {
+    noteHot(LEGACY_POSITIONAL_AT);
     positionalSeedInto(x, y, z, positionalScratch);
     return new LegacyRandomSource(positionalScratch.high ^ this.seedHigh, positionalScratch.low ^ this.seedLow);
   }
 
   fromHashOf(name: string): LegacyRandomSource {
+    noteHot(LEGACY_POSITIONAL_FROM_HASH);
     const hash = javaStringHashCode(name);
     return new LegacyRandomSource((hash >> 31) ^ this.seedHigh, hash ^ this.seedLow);
   }
