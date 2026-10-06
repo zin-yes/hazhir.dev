@@ -1,26 +1,34 @@
 import * as THREE from "three";
 import { Texture } from "../blocks";
 import { TEXTURE_SIZE } from "../config";
+import { DIMENSIONS } from "../profiler/dimensions";
 import {
   addWorkerCounter,
+  addWorkerKeyedUnits,
   endWorkerSection,
   startWorkerSection,
 } from "../profiler/worker-recorder";
 
-async function loadImage(url: string) {
+const BYTES_PER_PIXEL = 4;
+
+async function loadImage(url: string, textureFileName: string) {
   startWorkerSection("fetchResponse");
   const response = await fetch(url);
   endWorkerSection();
+  if (!response.ok) addWorkerCounter("fetchFailures", 1);
 
   startWorkerSection("readBlob");
   const image = await response.blob();
   endWorkerSection();
   addWorkerCounter("bytesFetched", image.size);
+  addWorkerKeyedUnits(DIMENSIONS.textureFile, textureFileName, image.size);
 
   startWorkerSection("decodeBitmap");
   const bitmap = await createImageBitmap(image);
   endWorkerSection();
   addWorkerCounter("pixelsDecoded", bitmap.width * bitmap.height);
+  addWorkerCounter("bitmapBytesDecoded", bitmap.width * bitmap.height * BYTES_PER_PIXEL);
+  if (bitmap.width !== TEXTURE_SIZE || bitmap.height !== TEXTURE_SIZE) addWorkerCounter("bitmapsRescaled", 1);
   return bitmap;
 }
 
@@ -40,8 +48,8 @@ export async function loadTextureArray(
     const texturesToLoad: string[] = Object.values(Texture);
 
     for (let i = 0; i < texturesToLoad.length; i++) {
-      startWorkerSection("fetchAndDecode");
-      const image = await loadImage(baseUrl + "/game/" + texturesToLoad[i]);
+      startWorkerSection("fetchAndDecode", DIMENSIONS.textureFile, texturesToLoad[i]);
+      const image = await loadImage(baseUrl + "/game/" + texturesToLoad[i], texturesToLoad[i]);
       endWorkerSection();
 
       startWorkerSection("drawAndRead");
@@ -56,6 +64,8 @@ export async function loadTextureArray(
       endWorkerSection();
       endWorkerSection();
       addWorkerCounter("bytesRead", imageData.data.byteLength);
+      addWorkerCounter("layerPixelsRead", TEXTURE_SIZE * TEXTURE_SIZE);
+      addWorkerCounter("progressCallbacks", onProgress ? 1 : 0);
 
       textureData.push(new Uint8ClampedArray(imageData.data.buffer));
       onProgress?.(textureData.length / texturesToLoad.length);

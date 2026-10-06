@@ -53,6 +53,8 @@ export const DIMENSIONS = {
   poolPriority: "pool.priority",
   /** Geometry attribute bytes per attribute name. Units = bytes. */
   geometryAttribute: "geometry.attribute",
+  /** Texture array load time and bytes fetched per texture file. */
+  textureFile: "texture.file",
 } as const;
 
 export type DimensionName = (typeof DIMENSIONS)[keyof typeof DIMENSIONS];
