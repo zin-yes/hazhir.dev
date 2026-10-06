@@ -40,6 +40,19 @@ export const DIMENSIONS = {
   // shadows, post and sky
   /** Shadow cascade draws: calls and CPU time per cascade (`cascade0`, `cascade1`, `cascade2`). */
   shadowCascade: "shadow.cascade",
+  // workers, lod, worker pool, chunk geometry
+  /** Cost per LOD level. Key: `L<level>`. */
+  lodLevel: "lod.level",
+  /** Mesh time and quads per face direction (up, down, front, back, left, right). */
+  meshFaceDirection: "mesh.faceDirection",
+  /** Packed vertex bytes per attribute (position, surface). Units = bytes. */
+  meshVertexAttribute: "mesh.vertexAttribute",
+  /** Light propagation per channel (sky, block). */
+  lightChannel: "light.channel",
+  /** Worker pool queue wait and task count per priority. */
+  poolPriority: "pool.priority",
+  /** Geometry attribute bytes per attribute name. Units = bytes. */
+  geometryAttribute: "geometry.attribute",
 } as const;
 
 export type DimensionName = (typeof DIMENSIONS)[keyof typeof DIMENSIONS];
