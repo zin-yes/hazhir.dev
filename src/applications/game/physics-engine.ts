@@ -5,6 +5,14 @@ import { DIMENSIONS } from "./profiler/dimensions";
 
 const PHYSICS_COLLISION_CHECK_SYSTEM = "physics.collisionCheck";
 
+type CollisionOutcome = "hit" | "miss" | "unloadedChunk";
+
+const COLLISION_OUTCOME_COUNTERS: { [outcome in CollisionOutcome]: string } = {
+  hit: "game.physics.collisionHits",
+  miss: "game.physics.collisionMisses",
+  unloadedChunk: "game.physics.collisionUnloadedChunkHits",
+};
+
 
 export class PhysicsEngine {
   private getBlock: (x: number, y: number, z: number) => BlockType | null;
@@ -24,6 +32,7 @@ export class PhysicsEngine {
     isShifting: boolean = false
   ): void {
     const scopeToken = profiler.begin("main.physics.resolveCollision");
+    profiler.addCounter("game.physics.resolveCalls");
     try {
       this.resolveCollisionUnprofiled(
         position,
@@ -47,6 +56,7 @@ export class PhysicsEngine {
     isShifting: boolean
   ): void {
     const wasOnGround = this.isOnGround(position, eyeHeight);
+    profiler.addCounter("game.physics.axisResolutions", 3);
 
     // Apply X movement
     const axisXToken = profiler.begin(
@@ -73,6 +83,7 @@ export class PhysicsEngine {
       }
 
       if (!stepped) {
+        profiler.addCounter("game.physics.axisBlocked.x");
         position.x = originalX;
         velocity.x = 0;
       }
@@ -82,6 +93,7 @@ export class PhysicsEngine {
       velocity.y <= 0 &&
       !this.isOnGround(position, eyeHeight)
     ) {
+      profiler.addCounter("game.physics.sneakEdgeStops");
       position.x = originalX;
       velocity.x = 0;
     }
@@ -112,6 +124,7 @@ export class PhysicsEngine {
       }
 
       if (!stepped) {
+        profiler.addCounter("game.physics.axisBlocked.z");
         position.z = originalZ;
         velocity.z = 0;
       }
@@ -121,6 +134,7 @@ export class PhysicsEngine {
       velocity.y <= 0 &&
       !this.isOnGround(position, eyeHeight)
     ) {
+      profiler.addCounter("game.physics.sneakEdgeStops");
       position.z = originalZ;
       velocity.z = 0;
     }
@@ -135,6 +149,10 @@ export class PhysicsEngine {
     position.y += velocity.y * delta;
     this.updatePlayerBox(playerBox, position, eyeHeight);
     if (this.checkCollision(playerBox)) {
+      profiler.addCounter("game.physics.axisBlocked.y");
+      profiler.addCounter(
+        velocity.y < 0 ? "game.physics.landings" : "game.physics.ceilingHits",
+      );
       position.y -= velocity.y * delta;
       velocity.y = 0;
     }
@@ -158,6 +176,7 @@ export class PhysicsEngine {
     eyeHeight: number
   ): boolean {
     const box = new THREE.Box3();
+    profiler.addCounter("game.physics.probeBoxAllocations");
     this.updatePlayerBox(box, position, eyeHeight);
     box.min.y -= 0.05;
     box.max.y = box.min.y + 0.05;
@@ -178,6 +197,7 @@ export class PhysicsEngine {
     eyeHeight: number
   ): boolean {
     const box = new THREE.Box3();
+    profiler.addCounter("game.physics.probeBoxAllocations");
     this.updatePlayerBox(box, position, eyeHeight);
     const minX = Math.round(box.min.x);
     const maxX = Math.round(box.max.x);
@@ -187,14 +207,21 @@ export class PhysicsEngine {
     const maxZ = Math.round(box.max.z);
 
     profiler.addCounter("game.physics.waterProbes");
+    let probedBlocks = 0;
     for (let x = minX; x <= maxX; x++) {
       for (let y = minY; y <= maxY; y++) {
         for (let z = minZ; z <= maxZ; z++) {
           const block = this.getBlock(x, y, z);
-          if (block === BlockType.WATER) return true;
+          probedBlocks++;
+          if (block === BlockType.WATER) {
+            profiler.addCounter("game.physics.waterProbeBlocksQueried", probedBlocks);
+            profiler.addCounter("game.physics.waterProbeHits");
+            return true;
+          }
         }
       }
     }
+    profiler.addCounter("game.physics.waterProbeBlocksQueried", probedBlocks);
     return false;
   }
 
@@ -203,6 +230,7 @@ export class PhysicsEngine {
     position: THREE.Vector3,
     eyeHeight: number = 1.62
   ) {
+    profiler.addCounter("game.physics.playerBoxUpdates");
     const halfWidth = this.playerSize.x / 2;
     const halfDepth = this.playerSize.z / 2;
 
@@ -218,6 +246,7 @@ export class PhysicsEngine {
 
   private checkCollision(box: THREE.Box3): boolean {
     profiler.addCounter("game.physics.collisionChecks");
+    const isProfiling = profiler.enabled;
     const epsilon = 0.001;
     const minX = Math.round(box.min.x + epsilon);
     const maxX = Math.round(box.max.x - epsilon);
@@ -228,6 +257,7 @@ export class PhysicsEngine {
 
     let blocksQueried = 0;
     let hitboxesTested = 0;
+    let nonCollidableSkipped = 0;
 
     for (let x = minX; x <= maxX; x++) {
       for (let y = minY; y <= maxY; y++) {
@@ -235,14 +265,16 @@ export class PhysicsEngine {
           const block = this.getBlock(x, y, z);
           blocksQueried++;
           if (block === null) {
-            this.recordCollisionWork(blocksQueried, hitboxesTested);
+            this.recordCollisionWork(blocksQueried, hitboxesTested, nonCollidableSkipped, "unloadedChunk");
             return true;
           }
           if (NON_COLLIDABLE_BLOCKS.includes(block)) {
+            nonCollidableSkipped++;
             continue;
           }
 
           const hitboxes = getHitboxes(block);
+          const hitboxesBeforeBlock = hitboxesTested;
 
           for (const { scale, offset } of hitboxes) {
             const centerX = x + offset[0];
@@ -268,21 +300,39 @@ export class PhysicsEngine {
 
             hitboxesTested++;
             if (box.intersectsBox(blockBox)) {
-              this.recordCollisionWork(blocksQueried, hitboxesTested);
+              if (isProfiling) this.recordBlockHitboxes(block, hitboxesTested - hitboxesBeforeBlock);
+              this.recordCollisionWork(blocksQueried, hitboxesTested, nonCollidableSkipped, "hit");
               return true;
             }
           }
+          if (isProfiling) this.recordBlockHitboxes(block, hitboxesTested - hitboxesBeforeBlock);
         }
       }
     }
-    this.recordCollisionWork(blocksQueried, hitboxesTested);
+    this.recordCollisionWork(blocksQueried, hitboxesTested, nonCollidableSkipped, "miss");
     return false;
   }
 
-  private recordCollisionWork(blocksQueried: number, hitboxesTested: number) {
+  private recordBlockHitboxes(block: BlockType, hitboxCount: number) {
+    profiler.recordBreakdown(DIMENSIONS.physicsBlock, BlockType[block] ?? "UNKNOWN", {
+      units: hitboxCount,
+      calls: 1,
+    });
+  }
+
+  private recordCollisionWork(
+    blocksQueried: number,
+    hitboxesTested: number,
+    nonCollidableSkipped: number,
+    outcome: CollisionOutcome,
+  ) {
     if (!profiler.enabled) return;
     profiler.addCounter("game.physics.blocksQueried", blocksQueried);
     profiler.addCounter("game.physics.hitboxesTested", hitboxesTested);
+    profiler.addCounter("game.physics.nonCollidableSkipped", nonCollidableSkipped);
+    profiler.addCounter(COLLISION_OUTCOME_COUNTERS[outcome]);
+    profiler.noteFrame("physics.collisionChecks", 1);
+    profiler.noteFrame("physics.blocksQueried", blocksQueried);
     profiler.recordBreakdown(
       DIMENSIONS.simulationSystem,
       PHYSICS_COLLISION_CHECK_SYSTEM,
