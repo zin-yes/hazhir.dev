@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { chunkKeyX, chunkKeyY, chunkKeyZ, packChunkKey } from "./chunk-key";
 import { ChunkStore } from "./chunk-store";
+import { counterTotal, gaugeLast, withEnabledProfiler } from "./profiler-readings.test-helper";
 import { ChunkStreamPlanner } from "./streaming-plan";
 
 interface Label {
@@ -111,5 +112,35 @@ describe("ChunkStore", () => {
     expect(secondPlan.toUnload).toEqual([]);
     const movedPlan = planner.update({ ...player, chunkX: -2 }, { x: 0, y: 0, z: 1 }, store.asKnownChunkKeys());
     expect(movedPlan.toLoad.length).toBeGreaterThan(0);
+  });
+});
+
+describe("ChunkStore profiling", () => {
+  test("publishes hits, misses, neighbor traffic, inserts and deletes since the last publish", () => {
+    withEnabledProfiler(() => {
+      const store = new ChunkStore<Label>();
+      for (let chunkX = 0; chunkX < 4; chunkX++) store.set(chunkX, 0, 0, labelAt(chunkX, 0, 0));
+      store.set(0, 0, 0, labelAt(0, 0, 0));
+      store.get(1, 0, 0);
+      store.get(2, 0, 0);
+      store.get(40, 0, 0);
+      store.has(3, 0, 0);
+      store.has(9, 9, 9);
+      store.neighborsOf(1, 0, 0);
+      store.delete(3, 0, 0);
+      store.publishProfilerStats();
+      expect(counterTotal("game.chunkStore.hits")).toBe(2);
+      expect(counterTotal("game.chunkStore.misses")).toBe(1);
+      expect(counterTotal("game.chunkStore.existenceChecksFound")).toBe(1);
+      expect(counterTotal("game.chunkStore.existenceChecksMissing")).toBe(1);
+      expect(counterTotal("game.chunkStore.neighborHits")).toBe(2);
+      expect(counterTotal("game.chunkStore.neighborMisses")).toBe(4);
+      expect(counterTotal("game.chunkStore.inserts")).toBe(4);
+      expect(counterTotal("game.chunkStore.replacements")).toBe(1);
+      expect(counterTotal("game.chunkStore.deletes")).toBe(1);
+      expect(gaugeLast("game.chunkStore.size")).toBe(3);
+      store.publishProfilerStats();
+      expect(counterTotal("game.chunkStore.hits")).toBe(2);
+    });
   });
 });
