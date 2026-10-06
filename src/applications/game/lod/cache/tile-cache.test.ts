@@ -1,8 +1,9 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { tileKeyOf, type TileAddress } from "../core/tile-address";
 import { packTileSurface } from "../data/packed-tile-surface";
 import { heightRangeOf } from "../data/tile-surface";
 import { meshTileSurface } from "../meshing/heightfield-mesher";
+import { counterTotal, gaugeLast, startLodProfiling, stopLodProfiling, timerCalls } from "../testing/profiler-readout.test-helper";
 import { createSyntheticTileSurface } from "../testing/synthetic-terrain.test-helper";
 import { BuildQueue, BuildUrgency } from "./build-queue";
 import { LodTileCache } from "./tile-cache";
@@ -90,5 +91,62 @@ describe("LOD build queue", () => {
     expect(queue.inFlightCount).toBe(5);
     queue.markFinished(uncoveredRoot.address);
     expect(queue.isInFlight(uncoveredRoot.address)).toBe(false);
+  });
+});
+
+describe("LOD cache and queue profiling", () => {
+  beforeEach(startLodProfiling);
+  afterEach(stopLodProfiling);
+
+  test("the cache reports lookups, evictions and its size per level", () => {
+    const addresses = Array.from({ length: 12 }, (_, index) => ({ level: index < 8 ? 2 : 5, tileX: index, tileZ: 0 }));
+    const entries = addresses.map(builtEntry);
+    const cache = new LodTileCache<string>(entries.reduce((sum, entry) => sum + entry.packedSurface.byteLength + entry.geometryBytes, 0) / 2, () => {});
+    for (const entry of entries) cache.set(entry);
+    expect(cache.get(addresses[0]!)).toBeDefined();
+    expect(cache.get(addresses[9]!)).toBeDefined();
+    expect(cache.has({ level: 2, tileX: 99, tileZ: 99 })).toBe(false);
+    expect(cache.has({ level: 5, tileX: 99, tileZ: 99 })).toBe(false);
+    expect(cache.has({ level: 5, tileX: 99, tileZ: 98 })).toBe(false);
+
+    const evicted = cache.enforceBudget(new Set());
+    cache.reportToProfiler();
+
+    expect(evicted).toBeGreaterThan(3);
+    expect(counterTotal("game.lod.cache.inserts")).toBe(12);
+    expect(counterTotal("game.lod.cache.getHits")).toBe(2);
+    expect(counterTotal("game.lod.cache.hasMisses")).toBe(3);
+    expect(counterTotal("game.lod.cache.misses.L2")).toBe(1);
+    expect(counterTotal("game.lod.cache.misses.L5")).toBe(2);
+    expect(counterTotal("game.lod.cache.evictions")).toBe(evicted);
+    expect(counterTotal("game.lod.cache.evictions.L2") + counterTotal("game.lod.cache.evictions.L5")).toBe(evicted);
+    expect(gaugeLast("game.lod.cache.entries")).toBe(12 - evicted);
+    expect(gaugeLast("memory.lod.tileCache.L2")! + gaugeLast("memory.lod.tileCache.L5")!).toBe(cache.totalBytes);
+    expect(timerCalls("main.lod.cache.enforceBudget")).toBe(1);
+
+    cache.reportToProfiler();
+    expect(counterTotal("game.lod.cache.getHits")).toBe(2);
+  });
+
+  test("the queue reports carried-over and dropped candidates and the wait and round trip of a dispatched build", () => {
+    const queue = new BuildQueue();
+    const candidate = (tileX: number, urgency = BuildUrgency.Refine) => ({ address: { level: 2, tileX, tileZ: 0 }, urgency, inFrustum: true, distance: tileX });
+    queue.replaceCandidates([candidate(1), candidate(2), candidate(3, BuildUrgency.Refresh)]);
+    queue.replaceCandidates([candidate(2), candidate(4), candidate(4)]);
+
+    expect(counterTotal("game.lod.queue.candidatesOffered")).toBe(6);
+    expect(counterTotal("game.lod.queue.carriedOver")).toBe(1);
+    expect(counterTotal("game.lod.queue.droppedBeforeDispatch")).toBe(2);
+    expect(counterTotal("game.lod.queue.duplicatesMerged")).toBe(1);
+    expect(counterTotal("game.lod.queue.urgency.refresh")).toBe(1);
+
+    const dispatched = queue.takeNext()!;
+    expect(dispatched.address.tileX).toBe(2);
+    expect(timerCalls("latency.lod.buildQueueWait")).toBe(1);
+    expect(timerCalls("latency.lod.buildRoundTrip")).toBe(0);
+    queue.markFinished(dispatched.address);
+    expect(timerCalls("latency.lod.buildRoundTrip")).toBe(1);
+    expect(timerCalls("latency.lod.buildQueueToDone.L2")).toBe(1);
+    expect(counterTotal("game.lod.queue.dispatched.L2")).toBe(1);
   });
 });
