@@ -1,4 +1,5 @@
 import { renderBreakdownSection, renderCallTreeSection, renderSamplingSection } from "./detail-markdown";
+import { buildGpuPassRows } from "./gpu-pass-report";
 import { buildLightEditRows } from "./light-report";
 import { markdownHeading as heading, markdownTable } from "./markdown-table";
 import { buildEfficiencyLines, buildWorkerMethodRows } from "./metric-names";
@@ -74,6 +75,7 @@ function renderReportSections(
     ...renderFrameSection(report, headingLevel),
     ...renderHintSection(report, headingLevel),
     ...renderLightEditSection(report, headingLevel),
+    ...renderGpuPassSection(report, headingLevel),
     ...renderTargetSections(report.targets, headingLevel, targetRows),
     ...renderCallTreeSection(report.snapshot, headingLevel),
     ...renderBreakdownSection(report.snapshot, headingLevel),
@@ -149,6 +151,29 @@ function renderHintSection(report: ProfileReport, level: number): string[] {
   }
   lines.push("");
   return lines;
+}
+
+function renderGpuPassSection(report: ProfileReport, level: number): string[] {
+  const rows = buildGpuPassRows(report.snapshot);
+  if (rows.length === 0) return [];
+  return [
+    heading(level, "GPU passes"),
+    "",
+    markdownTable(
+      ["pass", "gpu mean", "gpu p95", "gpu max", "share of gpu", "cpu submit mean", "draw calls/pass", "triangles/pass"],
+      rows.map((row) => [
+        row.pass,
+        formatOptional(row.gpu, (timer) => formatMilliseconds(timer.mean)),
+        formatOptional(row.gpu, (timer) => formatMilliseconds(timer.p95)),
+        formatOptional(row.gpu, (timer) => formatMilliseconds(timer.max)),
+        `${(row.gpuShare * 100).toFixed(0)}%`,
+        formatOptional(row.cpu, (timer) => formatMilliseconds(timer.mean)),
+        row.drawCallsPerPass === null ? "-" : row.drawCallsPerPass.toFixed(0),
+        row.trianglesPerPass === null ? "-" : row.trianglesPerPass.toFixed(0),
+      ]),
+    ),
+    "",
+  ];
 }
 
 function renderLightEditSection(report: ProfileReport, level: number): string[] {

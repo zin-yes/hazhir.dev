@@ -1,4 +1,5 @@
 import type { ByteSummary, GaugeSummary, ProfileReport, TimerSummary } from "../../types";
+import { buildGpuPassRows, type GpuPassRow } from "../../gpu-pass-report";
 import { formatBytes, formatBytesPerSecond, formatMilliseconds } from "../format";
 import { DataTable, SectionTitle, type Column } from "../table";
 
@@ -26,6 +27,16 @@ const UPLOAD_COLUMNS: Column<ByteSummary>[] = [
   { header: "max", align: "right", render: (meter) => formatBytes(meter.max) },
 ];
 
+const PASS_COLUMNS: Column<GpuPassRow>[] = [
+  { header: "pass", render: (row) => row.pass, className: "text-zinc-100" },
+  { header: "gpu mean", align: "right", render: (row) => (row.gpu ? formatMilliseconds(row.gpu.mean) : "-") },
+  { header: "gpu p95", align: "right", render: (row) => (row.gpu ? formatMilliseconds(row.gpu.p95) : "-") },
+  { header: "share", align: "right", render: (row) => `${(row.gpuShare * 100).toFixed(0)}%` },
+  { header: "cpu submit", align: "right", render: (row) => (row.cpu ? formatMilliseconds(row.cpu.mean) : "-") },
+  { header: "draws", align: "right", render: (row) => (row.drawCallsPerPass === null ? "-" : row.drawCallsPerPass.toFixed(0)) },
+  { header: "tris", align: "right", render: (row) => (row.trianglesPerPass === null ? "-" : row.trianglesPerPass.toFixed(0)) },
+];
+
 function formatGauge(gauge: GaugeSummary, value: number): string {
   return gauge.unit === "bytes" ? formatBytes(value) : value.toFixed(value >= 100 ? 0 : 1);
 }
@@ -43,6 +54,8 @@ export function GpuTab({ report }: { report: ProfileReport }) {
         {session.gpuTimerSupported ? "" : " (GPU timing unavailable in this browser)"} | pass breakdown:{" "}
         {session.gpuPassBreakdownEnabled ? "on" : "off"}
       </div>
+      <SectionTitle>GPU passes (ranked by mean GPU time)</SectionTitle>
+      <DataTable columns={PASS_COLUMNS} rows={buildGpuPassRows(report.snapshot)} getKey={(row) => row.pass} emptyText="no GPU passes measured" />
       <SectionTitle>GPU execution time</SectionTitle>
       <DataTable columns={TIMER_COLUMNS} rows={gpuTimers} getKey={(timer) => timer.name} emptyText="no GPU timings (unsupported or not recording)" />
       <SectionTitle>GL driver CPU time (main thread, inside render)</SectionTitle>

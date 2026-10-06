@@ -278,7 +278,10 @@ function gpuFrameTimeHint(snapshot: ProfileSnapshot): OptimizationHint | null {
     .filter((timer) => timer.name.startsWith("gpu.pass."))
     .sort((first, second) => second.mean - first.mean)
     .map((timer) => `${timer.name.replace("gpu.pass.", "")} ${formatMilliseconds(timer.mean)}`);
-  const passText = passes.length > 0 ? ` Passes: ${passes.join(", ")}.` : " Enable GPU pass breakdown to see which pass costs most.";
+  const sceneSplitNote = snapshot.session.gpuPassBreakdownEnabled
+    ? ""
+    : " scene is the far terrain, sky and chunks together; enable GPU pass breakdown to split it.";
+  const passText = passes.length > 0 ? ` Passes: ${passes.join(", ")}.${sceneSplitNote}` : " Enable GPU pass breakdown to see which pass costs most.";
   return {
     severity: gpuFrame.mean >= GPU_FRAME_MS_HIGH ? "high" : "medium",
     title: "GPU frame time is high",
