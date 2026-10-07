@@ -48,6 +48,12 @@ export const UNATTRIBUTED_MIN_INTERVAL_MS = 18;
 export const UNATTRIBUTED_MIN_SHARE = 0.4;
 export const UNATTRIBUTED_HIGH_INTERVAL_MS = 33;
 export const GPU_BOUND_SHARE_OF_INTERVAL = 0.6;
+/**
+ * The GPU cannot work longer per frame than the frame lasts. Summed pass times above this multiple of the interval
+ * mean the timer queries cost more than the passes (a floor per query on some drivers), so they cannot be trusted
+ * as absolute times.
+ */
+export const GPU_TIMER_IMPLAUSIBLE_INTERVAL_RATIO = 1.5;
 
 export const DRAW_CALLS_MEDIUM = 500;
 export const DRAW_CALLS_HIGH = 1500;
@@ -117,6 +123,7 @@ export function buildOptimizationHints(
     unattributedFrameTimeHint(snapshot),
     structuredCloneHint(snapshot),
     drawCallsHint(snapshot),
+    gpuTimerInflatedHint(snapshot),
     gpuFrameTimeHint(snapshot),
     uploadSpikeHint(snapshot),
     bytesPerVertexHint(snapshot),
@@ -199,7 +206,10 @@ function unattributedFrameTimeHint(snapshot: ProfileSnapshot): OptimizationHint 
   const unattributedShare = (intervalMs.mean - busyMs.mean) / intervalMs.mean;
   if (unattributedShare < UNATTRIBUTED_MIN_SHARE) return null;
 
-  const isGpuBound = gpuMs.count > 0 && gpuMs.mean >= intervalMs.mean * GPU_BOUND_SHARE_OF_INTERVAL;
+  const isGpuBound =
+    gpuMs.count > 0 &&
+    gpuMs.mean >= intervalMs.mean * GPU_BOUND_SHARE_OF_INTERVAL &&
+    !isGpuTimeImplausible(snapshot);
   const severity = intervalMs.mean >= UNATTRIBUTED_HIGH_INTERVAL_MS ? "high" : "medium";
   const cause = isGpuBound
     ? `GPU time ${formatMilliseconds(gpuMs.mean)} is most of the interval, so the frame is GPU-bound`
@@ -271,9 +281,30 @@ function drawCallsHint(snapshot: ProfileSnapshot): OptimizationHint | null {
   };
 }
 
+function isGpuTimeImplausible(snapshot: ProfileSnapshot): boolean {
+  const { intervalMs, gpuMs } = snapshot.frames;
+  return gpuMs.count > 0 && intervalMs.count > 0 && gpuMs.mean > intervalMs.mean * GPU_TIMER_IMPLAUSIBLE_INTERVAL_RATIO;
+}
+
+function gpuTimerInflatedHint(snapshot: ProfileSnapshot): OptimizationHint | null {
+  if (!isGpuTimeImplausible(snapshot)) return null;
+  const { intervalMs, gpuMs } = snapshot.frames;
+  const passCount = snapshot.timers.filter(
+    (timer) => timer.name.startsWith("gpu.pass.") && !timer.name.endsWith(".syncEstimate"),
+  ).length;
+  return {
+    severity: "low",
+    title: "GPU timer readings exceed the frame time",
+    evidence: `Summed GPU time per frame is ${formatMilliseconds(gpuMs.mean)} across ${passCount} timed passes but frames last ${formatMilliseconds(intervalMs.mean)}, which is impossible for real GPU work.`,
+    suggestion:
+      "Each timer query has a fixed cost on this driver, so small passes read too high. Compare passes against each other and between runs, not against the frame budget, and do not treat the frame as GPU-bound from this number.",
+  };
+}
+
 function gpuFrameTimeHint(snapshot: ProfileSnapshot): OptimizationHint | null {
   const gpuFrame = snapshot.frames.gpuMs;
   if (gpuFrame.count === 0 || gpuFrame.mean < GPU_FRAME_MS_MEDIUM) return null;
+  if (isGpuTimeImplausible(snapshot)) return null;
   const passes = snapshot.timers
     .filter((timer) => timer.name.startsWith("gpu.pass."))
     .sort((first, second) => second.mean - first.mean)

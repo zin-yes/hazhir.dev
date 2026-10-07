@@ -227,4 +227,14 @@ describe("buildOptimizationHints from call trees and breakdowns", () => {
     const titles = hintsFor(worldgenScenario()).map((hint) => hint.title);
     expect(titles.some((title) => title.includes("uninstrumented"))).toBe(false);
   });
+
+  test("GPU time summed above what the frame can last is called out as a timer artifact, not GPU-bound", () => {
+    const report = buildProfileReport(
+      simulateSnapshot({ ...healthyScenario, frameIntervalMs: 25, gpuFrameMs: 60 }),
+    );
+    const titles = report.hints.map((hint) => hint.title);
+    expect(titles).toContain("GPU timer readings exceed the frame time");
+    expect(titles).not.toContain("Frames are GPU-bound");
+    expect(titles).not.toContain("GPU frame time is high");
+  });
 });
