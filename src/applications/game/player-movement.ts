@@ -75,7 +75,7 @@ export const SPRINT_DOUBLE_TAP_SECONDS = 0.3;
 export const JUMP_BUFFER_SECONDS = 0.12;
 export const COYOTE_SECONDS = 0.1;
 /** After touching down the player cannot jump again for this long, so holding jump does not bounce instantly. */
-export const JUMP_LANDING_COOLDOWN_SECONDS = 0.3;
+export const JUMP_LANDING_COOLDOWN_SECONDS = 0.1;
 
 export interface SurfaceMovement {
   /** Multiplier on walking speed while standing on this block. */

@@ -235,7 +235,7 @@ describe("jumping", () => {
 
     const feetOnLanding = player.getPlayerBox().min.y;
     player.setMoveState({ up: true });
-    run(player, 0.15);
+    run(player, 0.05);
     expect(player.getPlayerBox().min.y - feetOnLanding).toBeLessThan(0.01);
 
     run(player, 0.3);
