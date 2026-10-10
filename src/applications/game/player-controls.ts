@@ -26,6 +26,8 @@ import {
   GROUND_BRAKING_RATE,
   GROUND_COAST_RATE,
   JUMP_BUFFER_SECONDS,
+  JUMP_FORWARD_BOOST,
+  JUMP_FORWARD_SPEED_CAP,
   JUMP_SPEED,
   LEDGE_CLEARED_HOP_SPEED,
   LEDGE_CLIMB_SPEED,
@@ -542,7 +544,7 @@ export class PlayerControls {
       hasInput && this.moveForward && !this.moveBackward && this.stance === "standing" && this.isSprintHeld();
 
     this.updateHorizontalVelocity(deltaSeconds, wish, hasInput, isSprinting, submersion, swimBlend);
-    this.updateVerticalVelocity(deltaSeconds, isSteerable, submersion, swimBlend);
+    this.updateVerticalVelocity(deltaSeconds, wish, isSteerable, submersion, swimBlend);
 
     const fallSpeedBeforeCollision = this.velocity.y;
     const wasGrounded = this.canJump;
@@ -610,6 +612,7 @@ export class PlayerControls {
 
   private updateVerticalVelocity(
     deltaSeconds: number,
+    wish: THREE.Vector3,
     isSteerable: boolean,
     submersion: number,
     swimBlend: number,
@@ -639,9 +642,25 @@ export class PlayerControls {
     const wantsJump = this.jumpBufferSeconds > 0 || this.moveUp;
     if (wantsJump && this.coyoteSeconds > 0 && this.stance !== "prone") {
       this.velocity.y = JUMP_SPEED * (1 - 0.25 * submersion);
+      this.hopForward(wish);
       this.canJump = false;
       this.coyoteSeconds = 0;
       this.jumpBufferSeconds = 0;
+    }
+  }
+
+  /** Kicks the player a little along the keys they hold; the speed it adds stops at the cap and never trims a faster run. */
+  private hopForward(wish: THREE.Vector3) {
+    if (wish.lengthSq() === 0) return;
+    const speedBeforeHop = Math.hypot(this.velocity.x, this.velocity.z);
+    this.velocity.x += wish.x * JUMP_FORWARD_BOOST;
+    this.velocity.z += wish.z * JUMP_FORWARD_BOOST;
+    const speedLimit = Math.max(JUMP_FORWARD_SPEED_CAP, speedBeforeHop);
+    const speedAfterHop = Math.hypot(this.velocity.x, this.velocity.z);
+    if (speedAfterHop > speedLimit) {
+      const scale = speedLimit / speedAfterHop;
+      this.velocity.x *= scale;
+      this.velocity.z *= scale;
     }
   }
 
