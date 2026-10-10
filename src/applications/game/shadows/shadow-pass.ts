@@ -174,8 +174,11 @@ export class ShadowPass {
     }
   }
 
-  /** Redraws whatever cascades are stale for the camera's current view and the sky's current light. */
-  update(camera: THREE.PerspectiveCamera): void {
+  /**
+   * Redraws whatever cascades are stale for the camera's current view and the sky's current light. The maps follow
+   * `focusPosition` (the eyes without their walking sway) so the shadow edges do not shimmer with every step.
+   */
+  update(camera: THREE.PerspectiveCamera, focusPosition: THREE.Vector3 = camera.position): void {
     const preset = this.quality === "off" ? null : SHADOW_PRESETS[this.quality];
     const direct = skyLightingUniforms.skyDirectColor.value;
     const directLuminance = 0.2126 * direct.x + 0.7152 * direct.y + 0.0722 * direct.z;
@@ -203,7 +206,7 @@ export class ShadowPass {
         const sliceNear = cascade === 0 ? camera.near : ends[cascade - 1]! / cornerStretch;
         const box = fitCascadeBox(
           {
-            cameraPosition: [camera.position.x, camera.position.y, camera.position.z],
+            cameraPosition: [focusPosition.x, focusPosition.y, focusPosition.z],
             cameraForward: [forward.x, forward.y, forward.z],
             verticalFieldOfViewRadians: THREE.MathUtils.degToRad(camera.fov),
             aspect: camera.aspect,
