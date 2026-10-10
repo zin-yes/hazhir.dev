@@ -133,6 +133,8 @@ export function PauseMenu({
             onBloomEnabledChange={(bloomEnabled) => onGameSettingsChange({ bloomEnabled })}
             waterReflections={gameSettings.waterReflections}
             onWaterReflectionsChange={(waterReflections) => onGameSettingsChange({ waterReflections })}
+            godRays={gameSettings.godRays}
+            onGodRaysChange={(godRays) => onGameSettingsChange({ godRays })}
           />
         )}
         {activeTab === "controls" && (

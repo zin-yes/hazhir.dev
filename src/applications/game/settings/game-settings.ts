@@ -20,6 +20,7 @@ export interface GameSettings {
   shadowQuality: ShadowQuality;
   bloomEnabled: boolean;
   waterReflections: boolean;
+  godRays: boolean;
 }
 
 export const FIELD_OF_VIEW_MINIMUM_DEGREES = 60;
@@ -44,6 +45,7 @@ export const DEFAULT_GAME_SETTINGS: Readonly<GameSettings> = {
   shadowQuality: "high",
   bloomEnabled: true,
   waterReflections: true,
+  godRays: true,
 };
 
 type MatchMedia = (query: string) => Pick<MediaQueryList, "matches">;
@@ -63,18 +65,24 @@ export function defaultWaterReflections(matchMedia: MatchMedia | undefined = bro
   return !matchMedia?.("(pointer: coarse)").matches;
 }
 
+/** God rays start off on touch devices (coarse primary pointer) and on elsewhere, including on the server. */
+export function defaultGodRays(matchMedia: MatchMedia | undefined = browserMatchMedia()): boolean {
+  return !matchMedia?.("(pointer: coarse)").matches;
+}
+
 function browserMatchMedia(): MatchMedia | undefined {
   if (typeof window === "undefined" || typeof window.matchMedia !== "function") return undefined;
   return (query) => window.matchMedia(query);
 }
 
-/** The defaults for this device: the static defaults plus the device-dependent shadow quality, bloom and water reflections. */
+/** The defaults for this device: the static defaults plus the device-dependent shadow quality, bloom and water reflections and god rays. */
 export function defaultGameSettings(matchMedia?: MatchMedia): GameSettings {
   return {
     ...DEFAULT_GAME_SETTINGS,
     shadowQuality: defaultShadowQuality(matchMedia),
     bloomEnabled: defaultBloomEnabled(matchMedia),
     waterReflections: defaultWaterReflections(matchMedia),
+    godRays: defaultGodRays(matchMedia),
   };
 }
 
@@ -130,5 +138,6 @@ function normalizeGameSettingsUnprofiled(settings: Partial<Record<keyof GameSett
     shadowQuality: allowedOption(settings.shadowQuality, SHADOW_QUALITIES, defaultShadowQuality()),
     bloomEnabled: booleanOrFallback(settings.bloomEnabled, defaultBloomEnabled()),
     waterReflections: booleanOrFallback(settings.waterReflections, defaultWaterReflections()),
+    godRays: booleanOrFallback(settings.godRays, defaultGodRays()),
   };
 }

@@ -2,13 +2,15 @@
 // the part above white is spread into a soft halo through a chain of shrinking targets, and the halo is added over the
 // picture on its way to the canvas. Anything that never goes above white (everything but light sources and the sun's
 // glints) leaves the bloom empty, so ordinary surfaces stay crisp. The same final pass draws the underwater view
-// (see underwater-view.ts) while the camera is in water, since it needs the finished world and its depth.
+// (see underwater-view.ts) while the camera is in water and the god rays (see god-rays.ts), since both need the finished
+// world and its depth.
 
 import * as THREE from "three";
 import { profiler } from "../profiler";
 import { measureGpuPass } from "../profiler/gpu-pass-registry";
 import { EMISSIVE_BLOOM_GAIN } from "../sky/surface-lighting";
 import { skyLightingUniforms } from "../sky/sky-lighting";
+import { GOD_RAY_RESOLUTION_DIVISOR, GOD_RAYS_FRAGMENT_SHADER, godRayUniforms } from "./god-rays";
 import { UNDERWATER_VIEW_GLSL, underwaterUniforms } from "./underwater-view";
 import { DEPTH_BYTES_PER_PIXEL, HALF_FLOAT_RGBA_BYTES_PER_PIXEL, estimateTargetBytes } from "./render-target-memory";
 
@@ -69,12 +71,17 @@ void main() {
 }
 `;
 
+/** Bloom is spread from the world as drawn, before the water bends and dims it, so under water most of it is dropped. */
+const UNDERWATER_BLOOM_SHARE = 0.12;
+
 const COMPOSITE_FRAGMENT_SHADER = `
 in vec2 vUv;
 uniform sampler2D scene;
 uniform sampler2D bloom;
 uniform float strength;
 ${UNDERWATER_VIEW_GLSL}
+uniform sampler2D godRays;
+uniform float godRayAmount;
 
 void main() {
   vec3 worldColor;
@@ -83,7 +90,9 @@ void main() {
   } else {
     worldColor = texture(scene, vUv).rgb;
   }
-  gl_FragColor = vec4(worldColor + texture(bloom, vUv).rgb * strength, 1.0);
+  if (godRayAmount > 0.001) worldColor += texture(godRays, vUv).rgb;
+  float bloomShare = underwaterActive > 0.5 ? ${UNDERWATER_BLOOM_SHARE.toFixed(2)} : 1.0;
+  gl_FragColor = vec4(worldColor + texture(bloom, vUv).rgb * strength * bloomShare, 1.0);
 }
 `;
 
@@ -145,6 +154,7 @@ function createTarget(width: number, height: number, withDepth: boolean): THREE.
 
 export class BloomPass {
   private sceneTarget: THREE.WebGLRenderTarget | null = null;
+  private godRayTarget: THREE.WebGLRenderTarget | null = null;
   private levelTargets: THREE.WebGLRenderTarget[] = [];
   private sceneTargetBytes = 0;
   private levelTargetBytes: number[] = [];
@@ -169,10 +179,19 @@ export class BloomPass {
     strength: { value: BLOOM_STRENGTH },
     ...skyLightingUniforms,
     ...underwaterUniforms,
+    ...godRayUniforms,
+    godRays: { value: null as THREE.Texture | null },
+  };
+  private readonly godRayUniformSet = {
+    ...skyLightingUniforms,
+    ...underwaterUniforms,
+    ...godRayUniforms,
   };
   private readonly downsampleMaterial = createFullscreenMaterial("bloom-downsample", DOWNSAMPLE_FRAGMENT_SHADER, this.downsampleUniforms, false);
   private readonly upsampleMaterial = createFullscreenMaterial("bloom-upsample", UPSAMPLE_FRAGMENT_SHADER, this.upsampleUniforms, true);
   private readonly compositeMaterial = createFullscreenMaterial("bloom-composite", COMPOSITE_FRAGMENT_SHADER, this.compositeUniforms, false);
+  private readonly godRayMaterial = createFullscreenMaterial("god-rays", GOD_RAYS_FRAGMENT_SHADER, this.godRayUniformSet, false);
+  private readonly godRayScene = createFullscreenScene(this.godRayMaterial);
   private readonly downsampleScene = createFullscreenScene(this.downsampleMaterial);
   private readonly upsampleScene = createFullscreenScene(this.upsampleMaterial);
   private readonly compositeScene = createFullscreenScene(this.compositeMaterial);
@@ -249,6 +268,11 @@ export class BloomPass {
       this.compositeUniforms.bloom.value = this.levelTargets[0]?.texture ?? this.sceneTarget.texture;
       this.compositeUniforms.strength.value = this.levelTargets.length > 0 ? BLOOM_STRENGTH : 0;
       this.compositeUniforms.underwaterDepth.value = this.sceneTarget.depthTexture;
+      if (godRayUniforms.godRayAmount.value > 0.001 && this.godRayTarget) {
+        this.godRayUniformSet.underwaterDepth.value = this.sceneTarget.depthTexture;
+        this.renderFullscreen(this.godRayTarget, this.godRayScene);
+        this.compositeUniforms.godRays.value = this.godRayTarget.texture;
+      }
       if (profiler.enabled) {
         measureGpuPass(COMPOSITE_PASS_LABEL, () => this.renderFullscreen(null, this.compositeScene));
       } else {
@@ -276,6 +300,11 @@ export class BloomPass {
       profiler.addCounter(this.sceneTarget ? "game.post.bloom.targetResizes" : "game.post.bloom.targetCreates");
       this.releaseTargets();
       this.sceneTarget = createTarget(width, height, true);
+      this.godRayTarget = createTarget(
+        Math.max(1, Math.floor(width / GOD_RAY_RESOLUTION_DIVISOR)),
+        Math.max(1, Math.floor(height / GOD_RAY_RESOLUTION_DIVISOR)),
+        false,
+      );
       this.sceneTargetBytes = estimateColorTargetBytes(width, height, true);
       if (this.isBloomEnabled) {
         const levelSizes = Array.from({ length: BLOOM_LEVELS }, (_, level) => ({
@@ -345,8 +374,8 @@ export class BloomPass {
 
   dispose(): void {
     this.releaseTargets();
-    for (const material of [this.downsampleMaterial, this.upsampleMaterial, this.compositeMaterial]) material.dispose();
-    for (const scene of [this.downsampleScene, this.upsampleScene, this.compositeScene]) {
+    for (const material of [this.downsampleMaterial, this.upsampleMaterial, this.compositeMaterial, this.godRayMaterial]) material.dispose();
+    for (const scene of [this.downsampleScene, this.upsampleScene, this.compositeScene, this.godRayScene]) {
       scene.traverse((object) => {
         if (object instanceof THREE.Mesh) object.geometry.dispose();
       });
@@ -358,6 +387,8 @@ export class BloomPass {
     if (releasedCount > 0) profiler.addCounter("game.post.bloom.targetsReleased", releasedCount);
     this.sceneTarget?.dispose();
     this.sceneTarget = null;
+    this.godRayTarget?.dispose();
+    this.godRayTarget = null;
     this.sceneTargetBytes = 0;
     for (const target of this.levelTargets) target.dispose();
     this.levelTargets = [];

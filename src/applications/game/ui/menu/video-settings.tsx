@@ -34,6 +34,11 @@ const BLOOM_CHOICES: readonly { value: "off" | "on"; label: string }[] = [
   { value: "on", label: "On" },
 ];
 
+const GOD_RAYS_CHOICES: readonly { value: "off" | "on"; label: string }[] = [
+  { value: "off", label: "Off" },
+  { value: "on", label: "On" },
+];
+
 const WATER_REFLECTIONS_CHOICES: readonly { value: "off" | "on"; label: string }[] = [
   { value: "off", label: "Off" },
   { value: "on", label: "On" },
@@ -58,6 +63,8 @@ interface VideoSettingsProps {
   onBloomEnabledChange: (bloomEnabled: boolean) => void;
   waterReflections: GameSettings["waterReflections"];
   onWaterReflectionsChange: (waterReflections: boolean) => void;
+  godRays: GameSettings["godRays"];
+  onGodRaysChange: (godRays: boolean) => void;
 }
 
 function nearestFarTerrainStep(chunks: number): number {
@@ -79,6 +86,8 @@ export function VideoSettings({
   onBloomEnabledChange,
   waterReflections,
   onWaterReflectionsChange,
+  godRays,
+  onGodRaysChange,
 }: VideoSettingsProps) {
   useProfiledRender("videoSettings");
   const farTerrainStep = nearestFarTerrainStep(values.farTerrainChunks);
@@ -107,6 +116,12 @@ export function VideoSettings({
         choices={WATER_REFLECTIONS_CHOICES}
         value={waterReflections ? "on" : "off"}
         onChange={(choice) => onWaterReflectionsChange(choice === "on")}
+      />
+      <ChoiceSetting
+        label="God rays"
+        choices={GOD_RAYS_CHOICES}
+        value={godRays ? "on" : "off"}
+        onChange={(choice) => onGodRaysChange(choice === "on")}
       />
 
       <SettingsHeading>Chunks</SettingsHeading>

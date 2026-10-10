@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { DEFAULT_GAME_SETTINGS, SHADOW_QUALITIES, defaultBloomEnabled, defaultGameSettings, defaultShadowQuality, defaultWaterReflections, normalizeGameSettings } from "./game-settings";
+import { DEFAULT_GAME_SETTINGS, SHADOW_QUALITIES, defaultBloomEnabled, defaultGameSettings, defaultShadowQuality, defaultGodRays,
+  defaultWaterReflections, normalizeGameSettings } from "./game-settings";
 import { loadStoredGameSettings, storeGameSettings } from "./game-settings-storage";
 
 function memoryStorage() {
@@ -134,5 +135,24 @@ describe("game settings", () => {
     storage.setItem("voxel-game.game-settings", JSON.stringify({ waterReflections: "junk" }));
     expect(loadStoredGameSettings(storage).waterReflections).toBe(true);
     console.log(`water reflections defaults test: ${(performance.now() - startedAt).toFixed(2)} ms`);
+  });
+
+  test("god rays default per device and keep valid stored values", () => {
+    const startedAt = performance.now();
+    const touchDevice = (query: string) => ({ matches: query === "(pointer: coarse)" });
+    const desktopDevice = () => ({ matches: false });
+
+    expect(defaultGodRays(touchDevice)).toBe(false);
+    expect(defaultGodRays(desktopDevice)).toBe(true);
+    expect(defaultGameSettings(touchDevice).godRays).toBe(false);
+    expect(normalizeGameSettings({ godRays: "yes" }).godRays).toBe(true);
+    expect(normalizeGameSettings({ godRays: false }).godRays).toBe(false);
+
+    const storage = memoryStorage();
+    storage.setItem("voxel-game.game-settings", JSON.stringify({ godRays: false }));
+    expect(loadStoredGameSettings(storage).godRays).toBe(false);
+    storage.setItem("voxel-game.game-settings", JSON.stringify({ shadowQuality: "low" }));
+    expect(loadStoredGameSettings(storage).godRays).toBe(true);
+    console.log(`god rays defaults test: ${(performance.now() - startedAt).toFixed(2)} ms`);
   });
 });
