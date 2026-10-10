@@ -17,7 +17,9 @@ import { buildTextureFlagUniforms } from "./sky/texture-flags";
 import { shadowUniforms } from "./shadows/shadow-glsl";
 import { ShadowPass } from "./shadows/shadow-pass";
 import { BloomPass } from "./post/bloom-pass";
+import { updateUnderwaterView } from "./post/underwater-view";
 import { WorldSnapshot, worldSnapshotUniforms } from "./post/world-snapshot";
+import { findWaterSurfaceHeight } from "./camera-water-surface";
 
 /** Translucent chunk surfaces (water, glass) draw in their own pass so they can read a copy of the opaque world. */
 const TRANSLUCENT_LAYER = 1;
@@ -2641,6 +2643,8 @@ export default function Game() {
     const bloomBeginToken = profiler.begin("main.frame.bloom.begin");
     bloomPass?.setBloomEnabled(gameSettingsRef.current.bloomEnabled);
     bloomPass?.setOffscreenRequired(waterReflections);
+    const cameraWaterSurfaceHeight = findWaterSurfaceHeight(getBlock, camera.position);
+    bloomPass?.setUnderwater(updateUnderwaterView(camera, cameraWaterSurfaceHeight));
     bloomPass?.beginFrame();
     profiler.end(bloomBeginToken);
     const worldTarget = bloomPass?.worldTarget ?? null;

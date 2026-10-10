@@ -1,13 +1,15 @@
 // World target and bloom: the world is drawn into a half float target instead of the canvas (emissive surfaces overshoot white there),
 // the part above white is spread into a soft halo through a chain of shrinking targets, and the halo is added over the
 // picture on its way to the canvas. Anything that never goes above white (everything but light sources and the sun's
-// glints) leaves the bloom empty, so ordinary surfaces stay crisp.
+// glints) leaves the bloom empty, so ordinary surfaces stay crisp. The same final pass draws the underwater view
+// (see underwater-view.ts) while the camera is in water, since it needs the finished world and its depth.
 
 import * as THREE from "three";
 import { profiler } from "../profiler";
 import { measureGpuPass } from "../profiler/gpu-pass-registry";
 import { EMISSIVE_BLOOM_GAIN } from "../sky/surface-lighting";
 import { skyLightingUniforms } from "../sky/sky-lighting";
+import { UNDERWATER_VIEW_GLSL, underwaterUniforms } from "./underwater-view";
 import { DEPTH_BYTES_PER_PIXEL, HALF_FLOAT_RGBA_BYTES_PER_PIXEL, estimateTargetBytes } from "./render-target-memory";
 
 const BLOOM_LEVELS = 5;
@@ -72,9 +74,16 @@ in vec2 vUv;
 uniform sampler2D scene;
 uniform sampler2D bloom;
 uniform float strength;
+${UNDERWATER_VIEW_GLSL}
 
 void main() {
-  gl_FragColor = vec4(texture(scene, vUv).rgb + texture(bloom, vUv).rgb * strength, 1.0);
+  vec3 worldColor;
+  if (underwaterActive > 0.5) {
+    worldColor = underwaterView(vUv, scene);
+  } else {
+    worldColor = texture(scene, vUv).rgb;
+  }
+  gl_FragColor = vec4(worldColor + texture(bloom, vUv).rgb * strength, 1.0);
 }
 `;
 
@@ -141,6 +150,7 @@ export class BloomPass {
   private levelTargetBytes: number[] = [];
   private isBloomEnabled = false;
   private isOffscreenRequired = false;
+  private isUnderwater = false;
   private readonly size = new THREE.Vector2();
   private readonly camera = new THREE.Camera();
   private readonly downsampleUniforms = {
@@ -157,6 +167,8 @@ export class BloomPass {
     scene: { value: null as THREE.Texture | null },
     bloom: { value: null as THREE.Texture | null },
     strength: { value: BLOOM_STRENGTH },
+    ...skyLightingUniforms,
+    ...underwaterUniforms,
   };
   private readonly downsampleMaterial = createFullscreenMaterial("bloom-downsample", DOWNSAMPLE_FRAGMENT_SHADER, this.downsampleUniforms, false);
   private readonly upsampleMaterial = createFullscreenMaterial("bloom-upsample", UPSAMPLE_FRAGMENT_SHADER, this.upsampleUniforms, true);
@@ -169,7 +181,7 @@ export class BloomPass {
 
   /** True while the world is drawn into the offscreen target (bloom, or another effect that reads the finished world). */
   get isOffscreen(): boolean {
-    return this.isBloomEnabled || this.isOffscreenRequired;
+    return this.isBloomEnabled || this.isOffscreenRequired || this.isUnderwater;
   }
 
   get worldTarget(): THREE.WebGLRenderTarget | null {
@@ -190,6 +202,14 @@ export class BloomPass {
     profiler.addCounter("game.post.offscreenRequiredChanges");
     this.isOffscreenRequired = isRequired;
     this.releaseTargets();
+  }
+
+  /** The underwater view reads the finished world and its depth, so the camera being in water needs the offscreen target too. */
+  setUnderwater(isUnderwater: boolean): void {
+    if (isUnderwater === this.isUnderwater) return;
+    profiler.addCounter("game.post.underwaterChanges");
+    this.isUnderwater = isUnderwater;
+    if (!this.isOffscreen) this.releaseTargets();
   }
 
   /** Points the renderer at the offscreen scene target (sized to the canvas); call before drawing the world. */
@@ -228,6 +248,7 @@ export class BloomPass {
       this.compositeUniforms.scene.value = this.sceneTarget.texture;
       this.compositeUniforms.bloom.value = this.levelTargets[0]?.texture ?? this.sceneTarget.texture;
       this.compositeUniforms.strength.value = this.levelTargets.length > 0 ? BLOOM_STRENGTH : 0;
+      this.compositeUniforms.underwaterDepth.value = this.sceneTarget.depthTexture;
       if (profiler.enabled) {
         measureGpuPass(COMPOSITE_PASS_LABEL, () => this.renderFullscreen(null, this.compositeScene));
       } else {
