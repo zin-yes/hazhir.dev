@@ -2644,7 +2644,7 @@ export default function Game() {
     if (shadowPass) {
       const shadowUpdateToken = profiler.begin("main.frame.shadow.update");
       shadowPass.setQuality(gameSettingsRef.current.shadowQuality);
-      shadowPass.update(camera);
+      shadowPass.update(camera, playerControlsRef.current?.stableEyePosition ?? camera.position);
       profiler.end(shadowUpdateToken);
     }
 

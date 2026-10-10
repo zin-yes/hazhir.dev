@@ -28,8 +28,12 @@ export const TERMINAL_FALL_SPEED = 55;
 /** Per second rates at which velocity closes on the speed the player asks for; grip scales the ground ones. */
 export const GROUND_ACCELERATION_RATE = 22;
 export const GROUND_BRAKING_RATE = 18;
-export const AIR_ACCELERATION_RATE = 6;
+export const AIR_ACCELERATION_RATE = 14;
 export const AIR_BRAKING_RATE = 0.6;
+/** Rates at which speed above what the keys ask for (after a sprint, a fall, a flight) bleeds off while still steering. */
+export const GROUND_COAST_RATE = 5;
+export const AIR_COAST_RATE = 1.2;
+export const SWIM_COAST_RATE = 2.5;
 
 export const SWIM_SPEED = 3.2;
 export const SWIM_SPRINT_FACTOR = 1.35;

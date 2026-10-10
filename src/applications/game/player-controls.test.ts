@@ -13,10 +13,14 @@ beforeAll(() => {
   Object.assign(globalThis, { document: fakeDocument });
 });
 
-function createPlayer(getBlock: BlockAt, eyePosition: THREE.Vector3, yawTowardPositiveX = true) {
+function look(camera: THREE.Camera, pitchRadians: number, yawRadians = -Math.PI / 2) {
+  camera.quaternion.setFromEuler(new THREE.Euler(pitchRadians, yawRadians, 0, "YXZ"));
+}
+
+function createPlayer(getBlock: BlockAt, eyePosition: THREE.Vector3) {
   const camera = new THREE.PerspectiveCamera();
   camera.position.copy(eyePosition);
-  if (yawTowardPositiveX) camera.rotation.y = -Math.PI / 2;
+  look(camera, 0);
   const domElement = { ownerDocument: { addEventListener() {}, removeEventListener() {} } } as unknown as HTMLElement;
   const player = new PlayerControls(camera, domElement, new PhysicsEngine(getBlock));
   player.controls.isLocked = true;
@@ -155,7 +159,7 @@ describe("water", () => {
 
   test("swimming forward does not need the camera to look up or down", () => {
     const { player, camera } = createPlayer(pool(0), new THREE.Vector3(-4, 0.5, 0));
-    camera.rotation.x = -1.2;
+    look(camera, -1.2);
     run(player, 1);
     const heightBefore = camera.position.y;
     player.setMoveState({ forward: true });
@@ -199,5 +203,123 @@ describe("water", () => {
 
     expect(climbsOut(1)).toBe(true);
     expect(climbsOut(3)).toBe(false);
+  });
+});
+
+function isGrounded(player: PlayerControls) {
+  return (player as unknown as { canJump: boolean }).canJump;
+}
+
+describe("looking straight up or down", () => {
+  test.each([Math.PI / 2, -Math.PI / 2])("forward still walks the way the player faces at pitch %f", (pitch) => {
+    const { player, camera } = createPlayer(flatFloor(BlockType.STONE), new THREE.Vector3(0, STANDING_EYE_ON_FLOOR, 0));
+    look(camera, pitch);
+    run(player, 0.2);
+    player.setMoveState({ forward: true });
+    run(player, 1);
+
+    expect(camera.position.x).toBeGreaterThan(2);
+    expect(Math.abs(camera.position.z)).toBeLessThan(0.3);
+  });
+});
+
+describe("jumping", () => {
+  test("a jump leaves the ground on the very frame after landing", () => {
+    const { player, camera } = createPlayer(flatFloor(BlockType.STONE), new THREE.Vector3(0, 6, 0));
+    let frames = 0;
+    while (!isGrounded(player) && frames < 240) {
+      player.update(FRAME_SECONDS);
+      frames++;
+    }
+    expect(isGrounded(player)).toBe(true);
+
+    const heightOnLanding = camera.position.y;
+    player.jump();
+    player.update(FRAME_SECONDS);
+    expect(camera.position.y - heightOnLanding).toBeGreaterThan(0.1);
+  });
+
+  test("a body falling onto the floor comes to rest on it within a few frames", () => {
+    const { player, camera } = createPlayer(flatFloor(BlockType.STONE), new THREE.Vector3(0, 3, 0));
+    run(player, 1.5);
+
+    expect(isGrounded(player)).toBe(true);
+    expect(camera.position.y - 1.62).toBeCloseTo(-0.5, 1);
+  });
+
+  test("jumping at a one block step from beside it climbs onto it", () => {
+    const stepAtTwo: BlockAt = (x, y) => (y <= -1 || (x >= 2 && y <= 0) ? BlockType.STONE : BlockType.AIR);
+    for (const startX of [0.5, 1.0, 1.19]) {
+      const { player, camera } = createPlayer(stepAtTwo, new THREE.Vector3(startX, STANDING_EYE_ON_FLOOR, 0));
+      run(player, 0.3);
+      player.setMoveState({ forward: true, up: true });
+      run(player, 2);
+
+      expect(camera.position.x).toBeGreaterThan(1.8);
+      expect(player.getPlayerBox().min.y).toBeGreaterThan(0.4);
+    }
+  });
+});
+
+describe("slabs and stairs", () => {
+  const slabsFromTwoToFour: BlockAt = (x, y) => {
+    if (y <= -1) return BlockType.STONE;
+    if (y === 0 && x >= 2 && x <= 4) return BlockType.STONE_SLAB;
+    return BlockType.AIR;
+  };
+
+  test("walking up and down a slab never leaves the ground and the camera glides over the step", () => {
+    const { player, camera } = createPlayer(slabsFromTwoToFour, new THREE.Vector3(0, STANDING_EYE_ON_FLOOR, 0));
+    run(player, 0.3);
+    player.setMoveState({ forward: true });
+
+    let airborneFrames = 0;
+    let largestCameraJump = 0;
+    let highestFeet = -Infinity;
+    let previousHeight = camera.position.y;
+    for (let frame = 0; frame < 180; frame++) {
+      player.update(FRAME_SECONDS);
+      if (!isGrounded(player)) airborneFrames++;
+      largestCameraJump = Math.max(largestCameraJump, Math.abs(camera.position.y - previousHeight));
+      highestFeet = Math.max(highestFeet, player.getPlayerBox().min.y);
+      previousHeight = camera.position.y;
+    }
+
+    expect(camera.position.x).toBeGreaterThan(5);
+    expect(highestFeet).toBeGreaterThan(-0.05);
+    expect(airborneFrames).toBe(0);
+    expect(largestCameraJump).toBeLessThan(0.2);
+  });
+});
+
+describe("momentum", () => {
+  test("running speed is not thrown away when flight is switched off", () => {
+    const { player } = createPlayer(flatFloor(BlockType.STONE), new THREE.Vector3(0, 40, 0));
+    player.setFlying(true);
+    player.setMoveState({ forward: true });
+    run(player, 2);
+    const flyingSpeed = horizontalSpeed(player);
+    player.toggleFlying();
+    run(player, 0.1);
+
+    expect(flyingSpeed).toBeGreaterThan(12);
+    expect(horizontalSpeed(player)).toBeGreaterThan(flyingSpeed * 0.8);
+  });
+
+  test("letting go of sprint coasts down to walking speed instead of snapping to it", () => {
+    const { player } = createPlayer(flatFloor(BlockType.STONE), new THREE.Vector3(0, STANDING_EYE_ON_FLOOR, 0));
+    run(player, 0.2);
+    player.setMoveState({ forward: true });
+    (player as unknown as { sprintKeyHeld: boolean }).sprintKeyHeld = true;
+    run(player, 1.5);
+    const sprintSpeed = horizontalSpeed(player);
+    (player as unknown as { sprintKeyHeld: boolean }).sprintKeyHeld = false;
+    run(player, 0.1);
+    const justAfter = horizontalSpeed(player);
+    run(player, 2);
+
+    expect(sprintSpeed).toBeGreaterThan(6.8);
+    expect(justAfter).toBeGreaterThan(5.5);
+    expect(horizontalSpeed(player)).toBeLessThan(5.3);
   });
 });

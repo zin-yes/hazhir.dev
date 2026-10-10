@@ -2,10 +2,11 @@ import * as THREE from "three";
 import { PointerLockControls } from "three/addons/controls/PointerLockControls.js";
 import type { BlockType } from "./blocks";
 import { countInputEvent, finishInputEvent, startInputEvent } from "./input-profiling";
-import { PhysicsEngine } from "./physics-engine";
+import { MAXIMUM_STEP_HEIGHT, PhysicsEngine } from "./physics-engine";
 import {
   AIR_ACCELERATION_RATE,
   AIR_BRAKING_RATE,
+  AIR_COAST_RATE,
   approachExponentially,
   BUOYANCY_SHARE,
   COYOTE_SECONDS,
@@ -23,6 +24,7 @@ import {
   GRAVITY,
   GROUND_ACCELERATION_RATE,
   GROUND_BRAKING_RATE,
+  GROUND_COAST_RATE,
   JUMP_BUFFER_SECONDS,
   JUMP_SPEED,
   LEDGE_CLEARED_HOP_SPEED,
@@ -35,6 +37,7 @@ import {
   type Stance,
   SWIM_ACCELERATION_RATE,
   SWIM_BRAKING_RATE,
+  SWIM_COAST_RATE,
   SWIM_SPEED,
   SWIM_SPRINT_FACTOR,
   SWIM_VERTICAL_RATE,
@@ -64,6 +67,11 @@ const STANCE_RISE_ORDER: Readonly<Record<Stance, readonly Stance[]>> = {
   prone: ["prone"],
 };
 
+/** Steps smaller than this are not worth smoothing. */
+const STEP_SMOOTHING_MINIMUM_BLOCKS = 0.04;
+const STEP_SMOOTHING_RATE = 13;
+/** Speed over what the keys ask for before the excess coasts off slowly instead of being steered away. */
+const COAST_MARGIN_SPEED = 0.3;
 const BOB_STRIDE_RADIANS_PER_BLOCK = 1.6;
 const BOB_VERTICAL_BLOCKS = 0.03;
 const BOB_SIDEWAYS_BLOCKS = 0.022;
@@ -112,11 +120,14 @@ export class PlayerControls {
   private bobPhase = 0;
   private bobAmplitude = 0;
   private landingDip = 0;
+  /** Camera height still owed after stepping up or down a stair or slab, eased back to zero. */
+  private stepSmoothing = 0;
   private readonly appliedBobOffset = new THREE.Vector3();
 
   private readonly forwardScratch = new THREE.Vector3();
   private readonly rightScratch = new THREE.Vector3();
   private readonly wishScratch = new THREE.Vector3();
+  private readonly upScratch = new THREE.Vector3();
 
   private playerBox = new THREE.Box3();
 
@@ -125,6 +136,9 @@ export class PlayerControls {
   }
 
   /** Whether the player is flying, so the wheel can steer flight speed instead of the hotbar. */
+  /** Where the eyes are without the walking sway and step smoothing; what the shadow maps should follow. */
+  public readonly stableEyePosition = new THREE.Vector3();
+
   public get flightActive() {
     return this.isFlying;
   }
@@ -348,7 +362,6 @@ export class PlayerControls {
   public toggleFlying() {
     profiler.addCounter("game.input.flyToggles");
     this.isFlying = !this.isFlying;
-    this.velocity.set(0, 0, 0);
     if (this.isFlying) this.isProne = false;
   }
 
@@ -389,6 +402,7 @@ export class PlayerControls {
     );
     try {
       this.updateMovement(Math.min(delta, MAXIMUM_FRAME_SECONDS));
+      this.stableEyePosition.copy(this.controls.object.position).sub(this.appliedBobOffset);
     } finally {
       profiler.end(scopeToken);
     }
@@ -453,15 +467,34 @@ export class PlayerControls {
     return this.sprintKeyHeld || this.sprintLatchedByDoubleTap;
   }
 
-  /** Writes the horizontal wish direction (unit length, or zero) of the held keys into wishScratch. */
-  private readHorizontalWish(): THREE.Vector3 {
+  /**
+   * Writes the horizontal direction the player faces into forwardScratch and the way their right hand points into
+   * rightScratch. Taken from both the view direction and the camera's up direction, so it stays steady when looking
+   * straight up or down, where the view direction alone has no horizontal part left.
+   */
+  private readFacing() {
     const forward = this.forwardScratch;
     const right = this.rightScratch;
-    this.controls.object.getWorldDirection(forward);
-    forward.y = 0;
+    const object = this.controls.object;
+    object.getWorldDirection(forward);
+    const lookHeight = forward.y;
+    const lookReach = Math.hypot(forward.x, forward.z);
+    const up = this.upScratch.set(0, 1, 0).applyQuaternion(object.quaternion);
+    forward.set(
+      forward.x * lookReach - up.x * lookHeight,
+      0,
+      forward.z * lookReach - up.z * lookHeight,
+    );
+    if (forward.lengthSq() < 1e-8) forward.set(0, 0, -1);
     forward.normalize();
-    right.crossVectors(forward, this.controls.object.up).normalize();
+    right.set(-forward.z, 0, forward.x);
+  }
 
+  /** Writes the horizontal wish direction (unit length, or zero) of the held keys into wishScratch. */
+  private readHorizontalWish(): THREE.Vector3 {
+    this.readFacing();
+    const forward = this.forwardScratch;
+    const right = this.rightScratch;
     const wish = this.wishScratch.set(0, 0, 0);
     if (this.moveForward) wish.add(forward);
     if (this.moveBackward) wish.sub(forward);
@@ -513,9 +546,24 @@ export class PlayerControls {
 
     const fallSpeedBeforeCollision = this.velocity.y;
     const wasGrounded = this.canJump;
+    const heightBeforeMove = position.y;
     this.moveWithCollisions(deltaSeconds);
 
-    const isGrounded = this.physics.isOnGround(position, this.currentEyeHeight) && this.velocity.y <= 0;
+    const isRisingOrJumping = fallSpeedBeforeCollision > 0;
+    if (wasGrounded && !isRisingOrJumping) {
+      const liftedByStep = position.y - heightBeforeMove - fallSpeedBeforeCollision * deltaSeconds;
+      if (liftedByStep > STEP_SMOOTHING_MINIMUM_BLOCKS) this.stepSmoothing -= liftedByStep;
+    }
+
+    let isGrounded = this.physics.isOnGround(position, this.currentEyeHeight) && this.velocity.y <= 0;
+    if (!isGrounded && wasGrounded && !isRisingOrJumping && swimBlend < 0.5) {
+      const drop = this.physics.snapDownToGround(position, this.playerBox, this.currentEyeHeight, MAXIMUM_STEP_HEIGHT);
+      if (drop > 0) {
+        this.stepSmoothing += drop;
+        this.velocity.y = 0;
+        isGrounded = true;
+      }
+    }
     this.canJump = isGrounded;
     if (isGrounded) {
       this.velocity.y = 0;
@@ -545,12 +593,15 @@ export class PlayerControls {
     const swimSpeed = SWIM_SPEED * (isSprinting ? SWIM_SPRINT_FACTOR : 1);
     const speed = lerp(landSpeed, swimSpeed, swimBlend);
 
-    const landRate = this.canJump
-      ? (hasInput ? GROUND_ACCELERATION_RATE : GROUND_BRAKING_RATE) * surface.grip
+    const isFasterThanAsked = hasInput && Math.hypot(this.velocity.x, this.velocity.z) > speed + COAST_MARGIN_SPEED;
+    const groundRate = isFasterThanAsked
+      ? GROUND_COAST_RATE
       : hasInput
-        ? AIR_ACCELERATION_RATE
-        : AIR_BRAKING_RATE;
-    const swimRate = hasInput ? SWIM_ACCELERATION_RATE : SWIM_BRAKING_RATE;
+        ? GROUND_ACCELERATION_RATE
+        : GROUND_BRAKING_RATE;
+    const airRate = isFasterThanAsked ? AIR_COAST_RATE : hasInput ? AIR_ACCELERATION_RATE : AIR_BRAKING_RATE;
+    const landRate = this.canJump ? groundRate * surface.grip : airRate;
+    const swimRate = isFasterThanAsked ? SWIM_COAST_RATE : hasInput ? SWIM_ACCELERATION_RATE : SWIM_BRAKING_RATE;
     const rate = lerp(landRate, swimRate, swimBlend);
 
     this.velocity.x = approachExponentially(this.velocity.x, wish.x * speed, rate, deltaSeconds);
@@ -609,7 +660,7 @@ export class PlayerControls {
         surfaceHeight !== null && (this.isClimbingLedge || position.y > surfaceHeight - LEDGE_CLIMB_EYE_DEPTH_BLOCKS);
       if (surfaceHeight !== null && isNearSurface) {
         const direction = this.readHorizontalWish();
-        if (direction.lengthSq() === 0) this.controls.object.getWorldDirection(direction).setY(0).normalize();
+        if (direction.lengthSq() === 0) direction.copy(this.forwardScratch);
         isClimbing = this.physics.canClimbOntoLedge(
           position,
           this.currentEyeHeight,
@@ -694,14 +745,14 @@ export class PlayerControls {
     if (isGrounded) this.bobPhase += horizontalSpeed * deltaSeconds * BOB_STRIDE_RADIANS_PER_BLOCK;
     this.landingDip = approachExponentially(this.landingDip, 0, LANDING_DIP_RATE, deltaSeconds);
 
-    const verticalOffset = Math.sin(this.bobPhase * 2) * BOB_VERTICAL_BLOCKS * this.bobAmplitude - this.landingDip;
+    this.stepSmoothing = approachExponentially(this.stepSmoothing, 0, STEP_SMOOTHING_RATE, deltaSeconds);
+
+    const verticalOffset =
+      Math.sin(this.bobPhase * 2) * BOB_VERTICAL_BLOCKS * this.bobAmplitude - this.landingDip + this.stepSmoothing;
     const sidewaysOffset = Math.cos(this.bobPhase) * BOB_SIDEWAYS_BLOCKS * this.bobAmplitude;
     if (verticalOffset === 0 && sidewaysOffset === 0) return;
 
-    this.controls.object.getWorldDirection(this.forwardScratch);
-    this.forwardScratch.y = 0;
-    this.forwardScratch.normalize();
-    this.rightScratch.crossVectors(this.forwardScratch, this.controls.object.up).normalize();
+    this.readFacing();
     this.appliedBobOffset.copy(this.rightScratch).multiplyScalar(sidewaysOffset);
     this.appliedBobOffset.y += verticalOffset;
     this.controls.object.position.add(this.appliedBobOffset);
