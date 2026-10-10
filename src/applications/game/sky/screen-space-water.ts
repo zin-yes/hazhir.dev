@@ -1,8 +1,10 @@
 // Water that reads the world behind it. A copy of the opaque world (colour and depth, see post/world-snapshot.ts) gives
 // the water its depth: light is absorbed the deeper you look (red first), the bottom shows through refracted by the
-// ripples, the shoreline foams where the water is thin, and the surface mirrors the actual terrain, trees and blocks by
-// marching the reflected ray through the depth buffer. Whatever the ray misses falls back to the mirrored sky. Needs
-// FOG_GLSL, SURFACE_LIGHTING_GLSL and REFLECTIVE_LIGHTING_GLSL before it.
+// ripples and lit by caustics, the shoreline foams where the water is thin, and the surface mirrors the actual terrain,
+// trees and blocks by marching the reflected ray through the depth buffer. Whatever the ray misses falls back to the
+// mirrored sky. Needs FOG_GLSL, SURFACE_LIGHTING_GLSL and REFLECTIVE_LIGHTING_GLSL before it.
+
+import { WATER_CAUSTICS_GLSL } from "./water-caustics";
 
 const REFLECTION_STEPS = 48;
 const REFLECTION_REFINE_STEPS = 6;
@@ -12,6 +14,7 @@ const FULL_EFFECT_DISTANCE_BLOCKS = 70;
 const NO_EFFECT_DISTANCE_BLOCKS = 150;
 
 export const SCREEN_SPACE_WATER_GLSL = `
+${WATER_CAUSTICS_GLSL}
 uniform sampler2D worldSnapshotColor;
 uniform sampler2D worldSnapshotDepth;
 uniform float worldSnapshotEnabled;
@@ -82,7 +85,9 @@ vec4 shadeScreenSpaceWater(
   if (effect <= 0.001) return plainWater;
 
   bool isTopFace = surfaceNormal.y > 0.9;
-  vec3 normal = isTopFace ? waterSurfaceNormal(worldPosition, distanceToCamera) : surfaceNormal;
+  WaterSurface surface = WaterSurface(surfaceNormal, 0.0);
+  if (isTopFace) surface = waterSurface(worldPosition.xz, distanceToCamera);
+  vec3 normal = surface.normal;
   vec3 toCamera = (cameraPosition - worldPosition) / max(distanceToCamera, 0.0001);
   float facingCamera = clamp(dot(normal, toCamera), 0.0, 1.0);
   float reflectivity = schlickFresnel(facingCamera, 0.02) * (isTopFace ? 1.0 : 0.5);
@@ -95,8 +100,17 @@ vec4 shadeScreenSpaceWater(
   vec2 refractedUv = screenUv + normal.xz * 0.03 * clamp(thickness * 0.4, 0.0, 1.0) / max(surfaceScreen.z * 0.05, 1.0);
   float refractedDepth = snapshotViewDepth(texture(worldSnapshotDepth, refractedUv).r);
   if (refractedDepth < surfaceScreen.z) refractedUv = screenUv;
-  float opticalDepth = max(snapshotViewDepth(texture(worldSnapshotDepth, refractedUv).r) - surfaceScreen.z, 0.0);
+  float bottomViewDepth = snapshotViewDepth(texture(worldSnapshotDepth, refractedUv).r);
+  float opticalDepth = max(bottomViewDepth - surfaceScreen.z, 0.0);
   vec3 behind = texture(worldSnapshotColor, refractedUv).rgb;
+  vec3 bottomPosition = cameraPosition + (worldPosition - cameraPosition) * (bottomViewDepth / max(surfaceScreen.z, 0.0001));
+  vec3 bottomSlope = cross(dFdx(bottomPosition), dFdy(bottomPosition));
+  vec3 bottomNormal = dot(bottomSlope, bottomSlope) > 0.000001 ? normalize(bottomSlope) : vec3(0.0, 1.0, 0.0);
+  if (dot(bottomNormal, cameraPosition - bottomPosition) < 0.0) bottomNormal = -bottomNormal;
+  float causticReach = isTopFace ? smoothstep(0.15, 0.7, opticalDepth) * (1.0 - smoothstep(30.0, 60.0, opticalDepth)) * skyExposure : 0.0;
+  if (causticReach > 0.001) {
+    behind *= mix(1.0, waterCausticLight(bottomPosition, bottomNormal, worldPosition.y, causticSunStrength()), causticReach);
+  }
 
   vec3 absorption = exp(-opticalDepth * vec3(0.34, 0.1, 0.055));
   vec3 skyLight = hemisphereLight(vec3(0.0, 1.0, 0.0)) + skyDirectColor * 0.35 * skyExposure;
@@ -120,6 +134,7 @@ vec4 shadeScreenSpaceWater(
 
   vec3 water = mix(transmitted, mirrored, clamp(reflectivity * 1.1, 0.0, 0.97));
   water = mix(water, foamColor, foam * 0.85);
+  water = mix(water, foamColor, surface.whitecaps * 0.85);
   return vec4(mix(plainWater.rgb, water, effect), mix(plainWater.a, 1.0, effect));
 }
 `;
