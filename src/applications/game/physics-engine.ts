@@ -35,6 +35,10 @@ const PLAYER_WIDTH = 0.6;
 const GROUND_PROBE_DEPTH = 0.05;
 /** How far past the body's own half width a ledge can be and still be climbed onto. */
 const LEDGE_REACH = 0.32;
+/** The highest ledge the body walks up without jumping. */
+export const MAXIMUM_STEP_HEIGHT = 0.6;
+/** How closely a blocked move is narrowed down to the point of contact: the travel divided by 2 to this power. */
+const CONTACT_BISECTION_STEPS = 7;
 
 export class PhysicsEngine {
   private getBlock: (x: number, y: number, z: number) => BlockType | null;
@@ -81,76 +85,61 @@ export class PhysicsEngine {
     const wasOnGround = this.isOnGround(position, eyeHeight);
     profiler.addCounter("game.physics.axisResolutions", 3);
 
-    // Apply X movement
     const axisXToken = profiler.begin(
       "main.physics.resolveCollision.axisX",
       DIMENSIONS.simulationSystem,
       "physics.moveAxisX"
     );
-    const originalX = position.x;
-    position.x += velocity.x * delta;
-    this.updatePlayerBox(playerBox, position, eyeHeight);
-    if (this.checkCollision(playerBox)) {
-      let stepped = false;
-      if (wasOnGround && !isShifting) {
-        const stepHeight = 0.6;
-        const originalY = position.y;
-        position.y += stepHeight;
-        this.updatePlayerBox(playerBox, position, eyeHeight);
-        if (!this.checkCollision(playerBox)) {
-          stepped = true;
-          profiler.addCounter("game.physics.stepUps");
-        } else {
-          position.y = originalY;
-        }
-      }
-
-      if (!stepped) {
-        profiler.addCounter("game.physics.axisBlocked.x");
-        position.x = originalX;
-        velocity.x = 0;
-      }
-    } else if (
-      isShifting &&
-      wasOnGround &&
-      velocity.y <= 0 &&
-      !this.isOnGround(position, eyeHeight)
-    ) {
-      profiler.addCounter("game.physics.sneakEdgeStops");
-      position.x = originalX;
-      velocity.x = 0;
-    }
+    this.moveHorizontalAxis("x", position, velocity, playerBox, delta, eyeHeight, wasOnGround, isShifting);
     profiler.end(axisXToken);
 
-    // Apply Z movement
     const axisZToken = profiler.begin(
       "main.physics.resolveCollision.axisZ",
       DIMENSIONS.simulationSystem,
       "physics.moveAxisZ"
     );
-    const originalZ = position.z;
-    position.z += velocity.z * delta;
+    this.moveHorizontalAxis("z", position, velocity, playerBox, delta, eyeHeight, wasOnGround, isShifting);
+    profiler.end(axisZToken);
+
+    const axisYToken = profiler.begin(
+      "main.physics.resolveCollision.axisY",
+      DIMENSIONS.simulationSystem,
+      "physics.moveAxisY"
+    );
+    const verticalDistance = velocity.y * delta;
+    if (this.advanceUntilContact("y", position, verticalDistance, playerBox, eyeHeight)) {
+      profiler.addCounter("game.physics.axisBlocked.y");
+      profiler.addCounter(
+        velocity.y < 0 ? "game.physics.landings" : "game.physics.ceilingHits",
+      );
+      velocity.y = 0;
+    }
+    profiler.end(axisYToken);
+  }
+
+  private moveHorizontalAxis(
+    axis: "x" | "z",
+    position: THREE.Vector3,
+    velocity: THREE.Vector3,
+    playerBox: THREE.Box3,
+    delta: number,
+    eyeHeight: number,
+    wasOnGround: boolean,
+    isShifting: boolean
+  ): void {
+    const distance = velocity[axis] * delta;
+    const originalAxisPosition = position[axis];
+    position[axis] += distance;
     this.updatePlayerBox(playerBox, position, eyeHeight);
     if (this.checkCollision(playerBox)) {
-      let stepped = false;
-      if (wasOnGround && !isShifting) {
-        const stepHeight = 0.6;
-        const originalY = position.y;
-        position.y += stepHeight;
-        this.updatePlayerBox(playerBox, position, eyeHeight);
-        if (!this.checkCollision(playerBox)) {
-          stepped = true;
-          profiler.addCounter("game.physics.stepUps");
-        } else {
-          position.y = originalY;
-        }
+      position[axis] = originalAxisPosition;
+      if (wasOnGround && !isShifting && this.stepUpOnto(axis, position, distance, playerBox, eyeHeight)) {
+        profiler.addCounter("game.physics.stepUps");
+        return;
       }
-
-      if (!stepped) {
-        profiler.addCounter("game.physics.axisBlocked.z");
-        position.z = originalZ;
-        velocity.z = 0;
-      }
+      profiler.addCounter(`game.physics.axisBlocked.${axis}`);
+      this.advanceUntilContact(axis, position, distance, playerBox, eyeHeight);
+      velocity[axis] = 0;
     } else if (
       isShifting &&
       wasOnGround &&
@@ -158,28 +147,98 @@ export class PhysicsEngine {
       !this.isOnGround(position, eyeHeight)
     ) {
       profiler.addCounter("game.physics.sneakEdgeStops");
-      position.z = originalZ;
-      velocity.z = 0;
+      position[axis] = originalAxisPosition;
+      velocity[axis] = 0;
     }
-    profiler.end(axisZToken);
+  }
 
-    // Apply Y movement
-    const axisYToken = profiler.begin(
-      "main.physics.resolveCollision.axisY",
-      DIMENSIONS.simulationSystem,
-      "physics.moveAxisY"
-    );
-    position.y += velocity.y * delta;
+  /**
+   * Moves along one axis as far as it goes without entering a block, ending flush against what stopped it rather than
+   * a frame's travel short of it. Returns whether something stopped it.
+   */
+  private advanceUntilContact(
+    axis: "x" | "y" | "z",
+    position: THREE.Vector3,
+    distance: number,
+    playerBox: THREE.Box3,
+    eyeHeight: number
+  ): boolean {
+    const start = position[axis];
+    position[axis] = start + distance;
+    this.updatePlayerBox(playerBox, position, eyeHeight);
+    if (!this.checkCollision(playerBox)) return false;
+
+    let freeShare = 0;
+    let blockedShare = 1;
+    for (let step = 0; step < CONTACT_BISECTION_STEPS; step++) {
+      const middleShare = (freeShare + blockedShare) / 2;
+      position[axis] = start + distance * middleShare;
+      this.updatePlayerBox(playerBox, position, eyeHeight);
+      if (this.checkCollision(playerBox)) blockedShare = middleShare;
+      else freeShare = middleShare;
+    }
+    position[axis] = start + distance * freeShare;
+    this.updatePlayerBox(playerBox, position, eyeHeight);
+    return true;
+  }
+
+  /**
+   * Steps onto a slab, stair or other low ledge in the way along `axis`: lifts the body by exactly as much as the
+   * ledge needs (at most MAXIMUM_STEP_HEIGHT) and moves on, so it ends standing on top instead of hovering above it.
+   */
+  private stepUpOnto(
+    axis: "x" | "z",
+    position: THREE.Vector3,
+    distance: number,
+    playerBox: THREE.Box3,
+    eyeHeight: number
+  ): boolean {
+    const originalY = position.y;
+    const originalAxisPosition = position[axis];
+    position[axis] = originalAxisPosition + distance;
+    position.y = originalY + MAXIMUM_STEP_HEIGHT;
     this.updatePlayerBox(playerBox, position, eyeHeight);
     if (this.checkCollision(playerBox)) {
-      profiler.addCounter("game.physics.axisBlocked.y");
-      profiler.addCounter(
-        velocity.y < 0 ? "game.physics.landings" : "game.physics.ceilingHits",
-      );
-      position.y -= velocity.y * delta;
-      velocity.y = 0;
+      position[axis] = originalAxisPosition;
+      position.y = originalY;
+      return false;
     }
-    profiler.end(axisYToken);
+    let lowestFreeLift = MAXIMUM_STEP_HEIGHT;
+    let highestBlockedLift = 0;
+    for (let step = 0; step < CONTACT_BISECTION_STEPS; step++) {
+      const middleLift = (lowestFreeLift + highestBlockedLift) / 2;
+      position.y = originalY + middleLift;
+      this.updatePlayerBox(playerBox, position, eyeHeight);
+      if (this.checkCollision(playerBox)) highestBlockedLift = middleLift;
+      else lowestFreeLift = middleLift;
+    }
+    position.y = originalY + lowestFreeLift;
+    this.updatePlayerBox(playerBox, position, eyeHeight);
+    return true;
+  }
+
+  /**
+   * When the body is just above the ground (walked off a stair or a slab), lowers it onto the ground at once instead
+   * of letting it fall. Returns how far it dropped; 0 when there is no ground within `maximumDrop`.
+   */
+  public snapDownToGround(
+    position: THREE.Vector3,
+    playerBox: THREE.Box3,
+    eyeHeight: number,
+    maximumDrop: number
+  ): number {
+    if (this.isOnGround(position, eyeHeight)) return 0;
+    const originalY = position.y;
+    position.y = originalY - maximumDrop;
+    this.updatePlayerBox(playerBox, position, eyeHeight);
+    const hasGroundWithinReach = this.checkCollision(playerBox);
+    position.y = originalY;
+    if (!hasGroundWithinReach) {
+      this.updatePlayerBox(playerBox, position, eyeHeight);
+      return 0;
+    }
+    this.advanceUntilContact("y", position, -maximumDrop, playerBox, eyeHeight);
+    return originalY - position.y;
   }
 
   public isOnGround(
