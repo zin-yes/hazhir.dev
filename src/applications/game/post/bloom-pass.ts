@@ -20,6 +20,7 @@ const DOWNSAMPLE_PASS_LABELS = Array.from({ length: BLOOM_LEVELS }, (_, level) =
 const UPSAMPLE_PASS_LABELS = Array.from({ length: BLOOM_LEVELS - 1 }, (_, level) => `bloomUp${level}`);
 const LEVEL_MEMORY_GAUGES = Array.from({ length: BLOOM_LEVELS }, (_, level) => `memory.post.bloomLevel${level}Bytes`);
 const COMPOSITE_PASS_LABEL = "bloomComposite";
+const GOD_RAY_PASS_LABEL = "godRays";
 const BLOOM_STRENGTH = 0.9;
 /** Colour above this (display space) feeds the bloom. */
 const BLOOM_THRESHOLD = 1.0;
@@ -74,7 +75,24 @@ void main() {
 /** Bloom is spread from the world as drawn, before the water bends and dims it, so under water most of it is dropped. */
 const UNDERWATER_BLOOM_SHARE = 0.12;
 
+/** The final pass on land: the world, the shafts of light and the glow. Kept free of the underwater code so it stays cheap. */
 const COMPOSITE_FRAGMENT_SHADER = `
+in vec2 vUv;
+uniform sampler2D scene;
+uniform sampler2D bloom;
+uniform float strength;
+uniform sampler2D godRays;
+uniform float godRayAmount;
+
+void main() {
+  vec3 worldColor = texture(scene, vUv).rgb;
+  if (godRayAmount > 0.001) worldColor += texture(godRays, vUv).rgb;
+  gl_FragColor = vec4(worldColor + texture(bloom, vUv).rgb * strength, 1.0);
+}
+`;
+
+/** The final pass with the camera in water: the underwater view replaces the world, then the shafts and a little glow. */
+const UNDERWATER_COMPOSITE_FRAGMENT_SHADER = `
 in vec2 vUv;
 uniform sampler2D scene;
 uniform sampler2D bloom;
@@ -84,15 +102,9 @@ uniform sampler2D godRays;
 uniform float godRayAmount;
 
 void main() {
-  vec3 worldColor;
-  if (underwaterActive > 0.5) {
-    worldColor = underwaterView(vUv, scene);
-  } else {
-    worldColor = texture(scene, vUv).rgb;
-  }
+  vec3 worldColor = underwaterView(vUv, scene);
   if (godRayAmount > 0.001) worldColor += texture(godRays, vUv).rgb;
-  float bloomShare = underwaterActive > 0.5 ? ${UNDERWATER_BLOOM_SHARE.toFixed(2)} : 1.0;
-  gl_FragColor = vec4(worldColor + texture(bloom, vUv).rgb * strength * bloomShare, 1.0);
+  gl_FragColor = vec4(worldColor + texture(bloom, vUv).rgb * strength * ${UNDERWATER_BLOOM_SHARE.toFixed(2)}, 1.0);
 }
 `;
 
@@ -195,6 +207,8 @@ export class BloomPass {
   private readonly downsampleScene = createFullscreenScene(this.downsampleMaterial);
   private readonly upsampleScene = createFullscreenScene(this.upsampleMaterial);
   private readonly compositeScene = createFullscreenScene(this.compositeMaterial);
+  private readonly underwaterCompositeMaterial = createFullscreenMaterial("bloom-composite-underwater", UNDERWATER_COMPOSITE_FRAGMENT_SHADER, this.compositeUniforms, false);
+  private readonly underwaterCompositeScene = createFullscreenScene(this.underwaterCompositeMaterial);
 
   constructor(private readonly renderer: THREE.WebGLRenderer) {}
 
@@ -270,13 +284,19 @@ export class BloomPass {
       this.compositeUniforms.underwaterDepth.value = this.sceneTarget.depthTexture;
       if (godRayUniforms.godRayAmount.value > 0.001 && this.godRayTarget) {
         this.godRayUniformSet.underwaterDepth.value = this.sceneTarget.depthTexture;
-        this.renderFullscreen(this.godRayTarget, this.godRayScene);
+        const godRayTarget = this.godRayTarget;
+        if (profiler.enabled) {
+          measureGpuPass(GOD_RAY_PASS_LABEL, () => this.renderFullscreen(godRayTarget, this.godRayScene));
+        } else {
+          this.renderFullscreen(godRayTarget, this.godRayScene);
+        }
         this.compositeUniforms.godRays.value = this.godRayTarget.texture;
       }
+      const compositeScene = this.isUnderwater ? this.underwaterCompositeScene : this.compositeScene;
       if (profiler.enabled) {
-        measureGpuPass(COMPOSITE_PASS_LABEL, () => this.renderFullscreen(null, this.compositeScene));
+        measureGpuPass(COMPOSITE_PASS_LABEL, () => this.renderFullscreen(null, compositeScene));
       } else {
-        this.renderFullscreen(null, this.compositeScene);
+        this.renderFullscreen(null, compositeScene);
       }
       profiler.addCounter("game.post.bloom.composites");
     } finally {
@@ -374,8 +394,8 @@ export class BloomPass {
 
   dispose(): void {
     this.releaseTargets();
-    for (const material of [this.downsampleMaterial, this.upsampleMaterial, this.compositeMaterial, this.godRayMaterial]) material.dispose();
-    for (const scene of [this.downsampleScene, this.upsampleScene, this.compositeScene, this.godRayScene]) {
+    for (const material of [this.downsampleMaterial, this.upsampleMaterial, this.compositeMaterial, this.underwaterCompositeMaterial, this.godRayMaterial]) material.dispose();
+    for (const scene of [this.downsampleScene, this.upsampleScene, this.compositeScene, this.underwaterCompositeScene, this.godRayScene]) {
       scene.traverse((object) => {
         if (object instanceof THREE.Mesh) object.geometry.dispose();
       });

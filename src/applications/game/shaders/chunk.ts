@@ -227,7 +227,11 @@ void main() {
   vec2 textureCoordinates = TextureCoordinates;
 #ifndef IS_PLANT_MATERIAL
   bool isLeaf = isFoliageTexture(TextureIndex);
-  if (isLeaf) textureCoordinates += windLeafFlutter(vFogWorldPosition, skyFogTime);
+  vec3 leafWind = vec3(0.0, 0.0, 1.0);
+  if (isLeaf) {
+    leafWind = windLeaf(vFogWorldPosition, skyFogTime);
+    textureCoordinates += leafWind.xy;
+  }
 #endif
   vec4 textureColor = sampleTiledTexture(Texture, textureCoordinates, TextureIndex);
   bool isWater = TextureIndex == waterTextureIndex;
@@ -254,7 +258,7 @@ void main() {
 #endif
     finalColor = shadeSurface(textureColor.rgb, vShade, surfaceNormal, vFogWorldPosition, vSkyExposure, foliage);
 #ifndef IS_PLANT_MATERIAL
-    if (isLeaf) finalColor *= windLeafShimmer(vFogWorldPosition, skyFogTime);
+    if (isLeaf) finalColor *= leafWind.z;
 #endif
     if (isGlass || isGlossyTexture(TextureIndex)) {
       vec4 mirrored = shadeMirrorSurface(finalColor, textureColor.a, surfaceNormal, vFogWorldPosition, vShade, vSkyExposure, isGlass ? 0.14 : 0.07);

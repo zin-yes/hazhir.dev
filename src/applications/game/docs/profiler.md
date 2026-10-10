@@ -26,7 +26,7 @@ Everything is a cheap early return while the profiler is disabled, so instrument
 | Queues and pipelines | `queue.*`, `latency.*`, `chunk.pipeline.*`, `chunk.load.*` | wall-clock durations, not CPU |
 | Memory and data sizes | `memory.*`, `meshes.*` gauges | chunk and light data, geometry bytes, bytes per vertex by attribute, JS heap |
 | Browser | long tasks, long animation frames, event loop lag and drift, GC estimates, input latency (`browser.input.*`: delay, processing, presentation, per event name), resource loads (`browser.resource.<kind>`, `bytes.resource.*`), tab visibility, devicePixelRatio, JS heap limit | Events tab |
-| Render passes | `gpu.pass.shadowCascade0..2`, `bloomDown0..4`, `bloomUp0..3`, `bloomComposite`, `worldSnapshotCopy`, `cloudDepthCapture`, `cloudMarch`, `cloudComposite`, `waterTranslucent` | each also has CPU `main.render.<label>`; the GPU tab and the markdown "GPU passes" table rank them with draws and triangles per pass |
+| Render passes | `gpu.pass.shadowCascade0..2`, `bloomDown0..4`, `bloomUp0..3`, `bloomComposite`, `godRays`, `worldSnapshotCopy`, `cloudDepthCapture`, `cloudMarch`, `cloudComposite`, `waterTranslucent` | each also has CPU `main.render.<label>`; the GPU tab and the markdown "GPU passes" table rank them with draws and triangles per pass |
 | Settings and display | `session.game` (shadow quality, bloom, water reflections, far terrain, FOV, volume shape), `gpu.drawingBufferPixels` | refreshed every second so every benchmark phase records the settings it ran with |
 | Network | `network.sent.<type>`, `network.received.<type>` | estimated packet bytes |
 

@@ -22,6 +22,9 @@ import { updateUnderwaterView } from "./post/underwater-view";
 import { WorldSnapshot, worldSnapshotUniforms } from "./post/world-snapshot";
 import { findWaterSurfaceHeight } from "./camera-water-surface";
 
+/** Retina screens draw at most this many pixels per CSS pixel; the full 2x costs four times the fill for little visible gain. */
+const MAXIMUM_RENDER_PIXEL_RATIO = 1.5;
+
 /** Translucent chunk surfaces (water, glass) draw in their own pass so they can read a copy of the opaque world. */
 const TRANSLUCENT_LAYER = 1;
 
@@ -780,7 +783,7 @@ export default function Game() {
       renderer.autoClear = false;
 
       renderer.setSize(window.innerWidth, window.innerHeight);
-      renderer.setPixelRatio(window.devicePixelRatio);
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, MAXIMUM_RENDER_PIXEL_RATIO));
       containerRef.current.appendChild(renderer.domElement);
 
       profiledRenderRef.current = createProfiledRender(renderer, scene, camera);

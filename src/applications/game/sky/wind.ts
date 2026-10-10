@@ -38,18 +38,20 @@ vec2 windPlantLean(vec3 worldPosition, float time) {
   return direction * lean * (0.7 + 0.3 * flutter) + acrossWind * lean * 0.35 * flutter;
 }
 
-/** Slide of a leaf texture, in texture widths, so the holes between the leaves drift in the wind. */
-vec2 windLeafFlutter(vec3 worldPosition, float time) {
-  float gust = windGustStrength(worldPosition.xz, vec2(cos(windAngle(time)), sin(windAngle(time))), time);
+/**
+ * What the wind does to a leaf at this spot, worked out together because both parts need the same gust. xy is the slide
+ * of the leaf texture, in texture widths, so the holes between the leaves drift; z is a brightness multiplier that
+ * rolls over a canopy with the gusts, so wind is visible even from far away.
+ */
+vec3 windLeaf(vec3 worldPosition, float time) {
+  float angle = windAngle(time);
+  float gust = windGustStrength(worldPosition.xz, vec2(cos(angle), sin(angle)), time);
   float phase = worldPosition.x * 2.1 + worldPosition.z * 1.7 + worldPosition.y * 2.9;
   vec2 wobble = vec2(sin(time * 1.9 + phase), sin(time * 1.5 + phase * 1.3 + 2.0));
-  return wobble * ${MAXIMUM_LEAF_FLUTTER_TEXTURE_WIDTHS.toFixed(2)} * (0.3 + 0.7 * gust);
-}
-
-/** Brightness multiplier that rolls over a canopy with the gusts, so wind is visible even from far away. */
-float windLeafShimmer(vec3 worldPosition, float time) {
-  float gust = windGustStrength(worldPosition.xz, vec2(cos(windAngle(time)), sin(windAngle(time))), time);
   float sparkle = sin(time * 3.1 + worldPosition.x * 3.3 + worldPosition.y * 2.7 + worldPosition.z * 3.9);
-  return 1.0 + 0.1 * (gust - 0.4) + 0.04 * sparkle * gust;
+  return vec3(
+    wobble * ${MAXIMUM_LEAF_FLUTTER_TEXTURE_WIDTHS.toFixed(2)} * (0.3 + 0.7 * gust),
+    1.0 + 0.1 * (gust - 0.4) + 0.04 * sparkle * gust
+  );
 }
 `;
