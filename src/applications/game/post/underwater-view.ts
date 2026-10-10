@@ -61,7 +61,7 @@ const ABSORPTION_PER_BLOCK = "vec3(0.30, 0.075, 0.045)";
 /** Share of the view replaced by scattered light per block. */
 const SCATTER_PER_BLOCK = 0.05;
 /** Light lost per block of depth below the surface. */
-const DEPTH_DIMMING_PER_BLOCK = 0.045;
+const DEPTH_DIMMING_PER_BLOCK = 0.03;
 /** Screen distance a surface ripple of full slope pushes the world seen through the surface. */
 const SURFACE_REFRACTION_SHIFT = 0.06;
 /** Cosine of the critical angle of water to air (about 48.6 degrees from straight up). */
@@ -90,11 +90,28 @@ vec3 underwaterUnproject(vec2 uv, float depth) {
   return world.xyz / world.w;
 }
 
+/**
+ * Unit direction of the view ray through this spot of the screen. Taken from a point about ten blocks out, not from the
+ * far plane: there the unprojection divides by a w that is the difference of two nearly equal numbers and can flip sign.
+ */
+vec3 underwaterRayDirection(vec2 uv, vec3 origin) {
+  return normalize(underwaterUnproject(uv, 0.99) - origin);
+}
+
+/** Depth values above this are beyond about 5000 blocks: treated as open sky at that distance. */
+const float UNDERWATER_SKY_DEPTH = 0.99999;
+const float UNDERWATER_SKY_DISTANCE = 5000.0;
+
+float underwaterHitDistance(vec2 uv, vec3 origin, float depth) {
+  if (depth > UNDERWATER_SKY_DEPTH) return UNDERWATER_SKY_DISTANCE;
+  return length(underwaterUnproject(uv, depth) - origin);
+}
+
 /** Linear colour of open water seen from this depth below the surface: deep blue-green, darker with depth and at night. */
 vec3 underwaterScatterColor(float depthBelowSurface) {
   float daylight = mix(0.14, 1.0, skyDaylight);
   float sunlit = exp(-max(depthBelowSurface, 0.0) * ${DEPTH_DIMMING_PER_BLOCK});
-  return vec3(0.004, 0.065, 0.11) * daylight * mix(0.22, 1.0, sunlit);
+  return vec3(0.008, 0.11, 0.17) * daylight * mix(0.5, 1.0, sunlit);
 }
 
 /** Motes of silt and plankton hanging in the water, in three layers that slide past at different speeds as you move. */
@@ -134,13 +151,12 @@ vec3 underwaterView(vec2 uv, sampler2D world) {
 
   vec3 origin = underwaterUnproject(warpedUv, 0.0);
   float depth = texture(underwaterDepth, warpedUv).r;
-  vec3 hit = underwaterUnproject(warpedUv, depth);
+  vec3 direction = underwaterRayDirection(warpedUv, origin);
+  float hitDistance = underwaterHitDistance(warpedUv, origin, depth);
+  vec3 hit = origin + direction * hitDistance;
   vec3 hitSlope = cross(dFdx(hit), dFdy(hit));
   vec3 hitNormal = dot(hitSlope, hitSlope) > 0.000000001 ? normalize(hitSlope) : vec3(0.0, 1.0, 0.0);
   if (dot(hitNormal, origin - hit) < 0.0) hitNormal = -hitNormal;
-  vec3 toHit = hit - origin;
-  float hitDistance = length(toHit);
-  vec3 direction = toHit / max(hitDistance, 0.0001);
   vec3 sceneColor = texture(world, warpedUv).rgb;
 
   startDepth = underwaterSurfaceY - origin.y;
@@ -187,14 +203,16 @@ vec3 underwaterView(vec2 uv, sampler2D world) {
     vec2 shifted = warpedUv + vec2(dot(horizontalSlope, underwaterCameraRight), dot(horizontalSlope, underwaterCameraUp)) * ${SURFACE_REFRACTION_SHIFT};
     shifted = clamp(shifted, vec2(0.001), vec2(0.999));
     float shiftedDepth = textureLod(underwaterDepth, shifted, 0.0).r;
-    bool shiftedLeavesThroughSurface = shiftedDepth > 0.99999 || underwaterUnproject(shifted, shiftedDepth).y > underwaterSurfaceY;
+    vec3 shiftedOrigin = underwaterUnproject(shifted, 0.0);
+    vec3 shiftedHit = shiftedOrigin + underwaterRayDirection(shifted, shiftedOrigin) * underwaterHitDistance(shifted, shiftedOrigin, shiftedDepth);
+    bool shiftedLeavesThroughSurface = shiftedHit.y > underwaterSurfaceY;
     vec3 airColor = srgbDecode(textureLod(world, shiftedLeavesThroughSurface ? shifted : warpedUv, 0.0).rgb);
-    float window = smoothstep(${CRITICAL_ANGLE_COSINE} - 0.05, ${CRITICAL_ANGLE_COSINE} + 0.08, facing);
+    float window = smoothstep(${CRITICAL_ANGLE_COSINE} - 0.12, ${CRITICAL_ANGLE_COSINE} + 0.2, facing);
     vec3 windowColor = airColor * visibility + scatter * scatterAmount;
-    vec3 reflectedColor = scatter * mix(1.0, 1.7, smoothstep(0.2, ${CRITICAL_ANGLE_COSINE}, facing));
+    vec3 reflectedColor = scatter * mix(1.0, 1.35, smoothstep(0.2, ${CRITICAL_ANGLE_COSINE}, facing));
     color = mix(reflectedColor, windowColor, window);
   } else {
-    if (causticReach > 0.0 && depth < 0.99999) {
+    if (causticReach > 0.0 && depth < UNDERWATER_SKY_DEPTH) {
       float lightMultiplier = waterCausticLight(hit, hitNormal, underwaterSurfaceY, sunStrength);
       color *= mix(1.0, lightMultiplier, causticReach * entryBlend * (1.0 - smoothstep(25.0, 70.0, hitDistance)));
     }
