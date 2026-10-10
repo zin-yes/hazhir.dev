@@ -16,6 +16,9 @@ describe("buildTextureFlagBits", () => {
   names[90] = "GLASS";
   names[150] = "BLUE_ICE";
   names[151] = "SLICE_OF_STONE";
+  names[160] = "TORCH";
+  names[161] = "LILY_PAD";
+  names[162] = "TALL_GRASS_TOP";
 
   test("marks only the leaf textures as foliage, wherever they sit in the array", () => {
     const words = buildTextureFlagBits(names, "foliage");
@@ -30,5 +33,11 @@ describe("buildTextureFlagBits", () => {
     expect(isSet(buildTextureFlagBits(names, "glass"), 90)).toBe(true);
     expect(isSet(buildTextureFlagBits(names, "glossy"), 150)).toBe(true);
     expect(isSet(buildTextureFlagBits(names, "glossy"), 151)).toBe(false);
+  });
+
+  test("marks stiff and floating plants as windless but lets grass and flowers sway", () => {
+    const words = buildTextureFlagBits(names, "windless");
+    expect([160, 161].every((index) => isSet(words, index))).toBe(true);
+    expect([178, 162, 3].some((index) => isSet(words, index))).toBe(false);
   });
 });

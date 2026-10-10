@@ -1,25 +1,37 @@
 // Which entries of the block texture array have a special surface, as bit sets the terrain fragment shader can test.
-// Foliage lets sunlight through, emissive textures give off their own light, glass mirrors the sky strongly and glossy
-// ones (ice, obsidian, amethyst) mirror it softly. Plants are foliage by being drawn with the plant material.
+// Foliage lets sunlight through and sways in the wind, emissive textures give off their own light, glass mirrors the sky
+// strongly and glossy ones (ice, obsidian, amethyst) mirror it softly. Windless plants are stiff or float on water, so
+// the wind never bends them. Plants are foliage by being drawn with the plant material.
 
 import { profiler } from "../profiler";
 
 const BITS_PER_WORD = 30;
 export const TEXTURE_FLAG_WORD_COUNT = 12;
 
-export type TextureFlag = "foliage" | "emissive" | "glass" | "glossy";
+export type TextureFlag = "foliage" | "emissive" | "glass" | "glossy" | "windless";
 
-export const TEXTURE_FLAGS: readonly TextureFlag[] = ["foliage", "emissive", "glass", "glossy"];
+export const TEXTURE_FLAGS: readonly TextureFlag[] = ["foliage", "emissive", "glass", "glossy", "windless"];
 
 const EMISSIVE_TEXTURE_NAMES = new Set(["GLOWSTONE", "LAVA", "MAGMA", "TORCH"]);
 const GLASS_TEXTURE_NAMES = new Set(["GLASS", "DECORATIVE_GLASS"]);
 const GLOSSY_TEXTURE_NAMES = new Set(["ICE", "PACKED_ICE", "BLUE_ICE", "OBSIDIAN", "AMETHYST_BLOCK"]);
+const WINDLESS_TEXTURE_NAMES = new Set([
+  "TORCH",
+  "COBWEB",
+  "POINTED_DRIPSTONE_UP",
+  "POINTED_DRIPSTONE_DOWN",
+  "BROWN_MUSHROOM",
+  "RED_MUSHROOM",
+  "DEAD_BUSH",
+  "LILY_PAD",
+]);
 
 const FLAG_TESTS: Record<TextureFlag, (textureName: string) => boolean> = {
   foliage: (textureName) => textureName.startsWith("LEAVES"),
   emissive: (textureName) => EMISSIVE_TEXTURE_NAMES.has(textureName),
   glass: (textureName) => GLASS_TEXTURE_NAMES.has(textureName),
   glossy: (textureName) => GLOSSY_TEXTURE_NAMES.has(textureName),
+  windless: (textureName) => WINDLESS_TEXTURE_NAMES.has(textureName),
 };
 
 /** `textureNames` are the keys of the texture table in texture-array order. */

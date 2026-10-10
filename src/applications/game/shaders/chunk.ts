@@ -27,6 +27,7 @@ import { TEXTURE_FLAG_LOOKUP_GLSL } from "../sky/texture-flags";
 import { DAYLIGHT_GLSL, FOG_GLSL } from "../sky/sky-lighting";
 import { REFLECTIVE_LIGHTING_GLSL } from "../sky/reflective-lighting";
 import { SCREEN_SPACE_WATER_GLSL } from "../sky/screen-space-water";
+import { WIND_GLSL } from "../sky/wind";
 import { SKY_EXPOSURE_BRIGHT_LEVEL, SKY_EXPOSURE_DARK_LEVEL, SURFACE_LIGHTING_GLSL } from "../sky/surface-lighting";
 
 /**
@@ -125,10 +126,27 @@ void main() {
  */
 export const PLANT_VERTEX_SHADER = `
 ${VERTEX_DECODING}
+${TEXTURE_FLAG_LOOKUP_GLSL}
+uniform float skyFogTime;
+${WIND_GLSL}
 
 attribute uint instanceData;
 
 const float NEIGHBOR_SHADOW_REACH = 6.0;
+const uint SOLID_ABOVE_BIT = 4u;
+const uint SOLID_BELOW_BIT = 8u;
+
+/**
+ * How much of the wind's lean a point of the plant takes, 0..1 and beyond. A plant standing on the ground is pinned
+ * at its foot and bends more the higher the point; one hanging from a ceiling is pinned at the top. A plant with
+ * nothing solid at either end is the upper half of a tall plant, so its foot moves exactly as much as the top of the
+ * half below it and the stem stays whole.
+ */
+float windBend(uint neighborMask, float heightInBlock) {
+  if ((neighborMask & SOLID_BELOW_BIT) != 0u) return heightInBlock * heightInBlock;
+  if ((neighborMask & SOLID_ABOVE_BIT) != 0u) return (1.0 - heightInBlock) * (1.0 - heightInBlock);
+  return 1.0 + heightInBlock * heightInBlock;
+}
 
 void main() {
   uint surfaceWord = packedVertex.y;
@@ -157,6 +175,13 @@ void main() {
   vSkyExposure = skyExposureForLightLevel(lightLevel);
 
   vec3 localPosition = blockOrigin + voxelPosition * ${(1 / POSITION_UNITS_PER_BLOCK).toFixed(6)};
+  int plantTextureIndex = int((surfaceWord >> ${SURFACE_TEXTURE_SHIFT}u) & ${mask(SURFACE_TEXTURE_BITS)});
+  if (!isWindlessTexture(plantTextureIndex)) {
+    vec3 blockCenter = (modelMatrix * vec4(blockOrigin + 0.5, 1.0)).xyz;
+    vec2 sway = windPlantLean(blockCenter, skyFogTime) * windBend(neighborMask, voxelPosition.y / ${POSITION_UNITS_PER_BLOCK}.0);
+    localPosition.xz += sway;
+    localPosition.y -= 0.5 * dot(sway, sway);
+  }
   vFogWorldPosition = (modelMatrix * vec4(localPosition, 1.0)).xyz;
   gl_Position = projectionMatrix * modelViewMatrix * vec4(localPosition, 1.0);
 }
@@ -186,6 +211,7 @@ ${FOG_GLSL}
 ${SURFACE_LIGHTING_GLSL}
 ${TEXTURE_FLAG_LOOKUP_GLSL}
 ${SAMPLE_TILED_TEXTURE_GLSL}
+${WIND_GLSL}
 ${REFLECTIVE_LIGHTING_GLSL}
 ${SCREEN_SPACE_WATER_GLSL}
 varying vec2 TextureCoordinates;
@@ -198,7 +224,12 @@ uniform sampler2DArray Texture;
 uniform int waterTextureIndex;
 
 void main() {
-  vec4 textureColor = sampleTiledTexture(Texture, TextureCoordinates, TextureIndex);
+  vec2 textureCoordinates = TextureCoordinates;
+#ifndef IS_PLANT_MATERIAL
+  bool isLeaf = isFoliageTexture(TextureIndex);
+  if (isLeaf) textureCoordinates += windLeafFlutter(vFogWorldPosition, skyFogTime);
+#endif
+  vec4 textureColor = sampleTiledTexture(Texture, textureCoordinates, TextureIndex);
   bool isWater = TextureIndex == waterTextureIndex;
   bool isGlass = isGlassTexture(TextureIndex);
   if (!isWater && !isGlass && textureColor.a < 0.5) discard;
@@ -215,9 +246,12 @@ void main() {
 #ifdef IS_PLANT_MATERIAL
     float foliage = 1.0;
 #else
-    float foliage = isFoliageTexture(TextureIndex) ? 1.0 : 0.0;
+    float foliage = isLeaf ? 1.0 : 0.0;
 #endif
     finalColor = shadeSurface(textureColor.rgb, vShade, surfaceNormal, vFogWorldPosition, vSkyExposure, foliage);
+#ifndef IS_PLANT_MATERIAL
+    if (isLeaf) finalColor *= windLeafShimmer(vFogWorldPosition, skyFogTime);
+#endif
     if (isGlass || isGlossyTexture(TextureIndex)) {
       vec4 mirrored = shadeMirrorSurface(finalColor, textureColor.a, surfaceNormal, vFogWorldPosition, vShade, vSkyExposure, isGlass ? 0.14 : 0.07);
       finalColor = mirrored.rgb;
