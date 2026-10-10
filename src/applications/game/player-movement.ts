@@ -22,8 +22,8 @@ export const WALK_SPEED = 5;
 export const SPRINT_SPEED_FACTOR = 1.45;
 export const JUMP_SPEED = 9.5;
 /** Each jump while steering adds this much speed along the keys, but never pushes the player past the cap. */
-export const JUMP_FORWARD_BOOST = 1.6;
-export const JUMP_FORWARD_SPEED_CAP = 8.5;
+export const JUMP_FORWARD_BOOST = 3;
+export const JUMP_FORWARD_SPEED_CAP = 9.5;
 export const GRAVITY = 37.5;
 /** Falling faster than this would pass through blocks; air drag caps the fall here. */
 export const TERMINAL_FALL_SPEED = 55;
@@ -74,6 +74,8 @@ export const FLIGHT_BRAKING_RATE = 6;
 export const SPRINT_DOUBLE_TAP_SECONDS = 0.3;
 export const JUMP_BUFFER_SECONDS = 0.12;
 export const COYOTE_SECONDS = 0.1;
+/** After touching down the player cannot jump again for this long, so holding jump does not bounce instantly. */
+export const JUMP_LANDING_COOLDOWN_SECONDS = 0.3;
 
 export interface SurfaceMovement {
   /** Multiplier on walking speed while standing on this block. */

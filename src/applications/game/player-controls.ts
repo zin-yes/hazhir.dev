@@ -28,6 +28,7 @@ import {
   JUMP_BUFFER_SECONDS,
   JUMP_FORWARD_BOOST,
   JUMP_FORWARD_SPEED_CAP,
+  JUMP_LANDING_COOLDOWN_SECONDS,
   JUMP_SPEED,
   LEDGE_CLEARED_HOP_SPEED,
   LEDGE_CLIMB_SPEED,
@@ -110,6 +111,7 @@ export class PlayerControls {
   private currentEyeHeight = STANCE_SHAPES.standing.eyeHeight;
   private jumpBufferSeconds = 0;
   private coyoteSeconds = 0;
+  private jumpCooldownSeconds = 0;
   private supportingBlock: BlockType | null = null;
   private isClimbingLedge = false;
   /** The water surface the climb started from, kept while the body rises out of the water. */
@@ -570,7 +572,10 @@ export class PlayerControls {
     if (isGrounded) {
       this.velocity.y = 0;
       this.supportingBlock = this.physics.getSupportingBlock(position, this.currentEyeHeight);
-      if (!wasGrounded) this.dipCameraForLanding(fallSpeedBeforeCollision);
+      if (!wasGrounded) {
+        this.jumpCooldownSeconds = JUMP_LANDING_COOLDOWN_SECONDS;
+        this.dipCameraForLanding(fallSpeedBeforeCollision);
+      }
     }
     profiler.addCounter(isGrounded ? "game.player.frames.walk" : "game.player.frames.airborne");
 
@@ -618,6 +623,7 @@ export class PlayerControls {
     swimBlend: number,
   ) {
     this.jumpBufferSeconds = Math.max(0, this.jumpBufferSeconds - deltaSeconds);
+    this.jumpCooldownSeconds = Math.max(0, this.jumpCooldownSeconds - deltaSeconds);
     this.coyoteSeconds = this.canJump ? COYOTE_SECONDS : Math.max(0, this.coyoteSeconds - deltaSeconds);
 
     if (this.climbOutOfWaterOntoLedge(isSteerable, swimBlend)) return;
@@ -640,7 +646,7 @@ export class PlayerControls {
       return;
     }
     const wantsJump = this.jumpBufferSeconds > 0 || this.moveUp;
-    if (wantsJump && this.coyoteSeconds > 0 && this.stance !== "prone") {
+    if (wantsJump && this.coyoteSeconds > 0 && this.jumpCooldownSeconds === 0 && this.stance !== "prone") {
       this.velocity.y = JUMP_SPEED * (1 - 0.25 * submersion);
       this.hopForward(wish);
       this.canJump = false;

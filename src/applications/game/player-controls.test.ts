@@ -224,8 +224,8 @@ describe("looking straight up or down", () => {
 });
 
 describe("jumping", () => {
-  test("a jump leaves the ground on the very frame after landing", () => {
-    const { player, camera } = createPlayer(flatFloor(BlockType.STONE), new THREE.Vector3(0, 6, 0));
+  test("a jump pressed on touchdown waits out the landing cooldown, then goes", () => {
+    const { player } = createPlayer(flatFloor(BlockType.STONE), new THREE.Vector3(0, 6, 0));
     let frames = 0;
     while (!isGrounded(player) && frames < 240) {
       player.update(FRAME_SECONDS);
@@ -233,10 +233,29 @@ describe("jumping", () => {
     }
     expect(isGrounded(player)).toBe(true);
 
-    const heightOnLanding = camera.position.y;
-    player.jump();
-    player.update(FRAME_SECONDS);
-    expect(camera.position.y - heightOnLanding).toBeGreaterThan(0.1);
+    const feetOnLanding = player.getPlayerBox().min.y;
+    player.setMoveState({ up: true });
+    run(player, 0.15);
+    expect(player.getPlayerBox().min.y - feetOnLanding).toBeLessThan(0.01);
+
+    run(player, 0.3);
+    expect(player.getPlayerBox().min.y - feetOnLanding).toBeGreaterThan(0.1);
+  });
+
+  test("jumping while walking carries the player further forward than walking alone, within the speed cap", () => {
+    const distanceCovered = (jumps: boolean) => {
+      const { player, camera } = createPlayer(flatFloor(BlockType.STONE), new THREE.Vector3(0, STANDING_EYE_ON_FLOOR, 0));
+      run(player, 0.3);
+      player.setMoveState({ forward: true });
+      run(player, 1);
+      const startX = camera.position.x;
+      player.setMoveState({ forward: true, up: jumps });
+      run(player, 1);
+      return camera.position.x - startX;
+    };
+
+    expect(distanceCovered(true)).toBeGreaterThan(distanceCovered(false) + 0.5);
+    expect(distanceCovered(true)).toBeLessThan(9.5 + 0.5);
   });
 
   test("a body falling onto the floor comes to rest on it within a few frames", () => {
