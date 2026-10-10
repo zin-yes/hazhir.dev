@@ -131,7 +131,7 @@ describe("flight", () => {
     player.setMoveState({ forward: true });
     run(player, 1.5);
     player.setMoveState({ forward: false });
-    run(player, 0.03);
+    run(player, 0.05);
     expect(horizontalSpeed(player)).toBeGreaterThan(1);
     run(player, 2);
     expect(horizontalSpeed(player)).toBeLessThan(0.1);
