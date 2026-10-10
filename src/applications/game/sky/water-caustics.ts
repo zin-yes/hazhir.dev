@@ -2,13 +2,16 @@
 // the water seen from above (it lights the bottom behind the surface) and the underwater view. Needs
 // WATER_SURFACE_GLSL (waterCellRandom) and the sky lighting uniforms before it.
 //
-// The pattern is the edge network of two drifting cellular layers at different scales. It is looked up where the
+// The pattern is the edge network of a drifting cellular layer, kept faint so it tints the bottom rather than covers it. It is looked up where the
 // sunlight crossed the surface, not where it landed, so the lines slide as the sun moves. Walls are dimmer and read the
 // pattern on a slant so it never stretches into vertical streaks.
 
 const DEPTH_FADE_PER_BLOCK = 0.07;
 /** The sun is never treated as lower than this, or its light would smear to infinity over the bottom. */
 const MINIMUM_LIGHT_HEIGHT = 0.65;
+/** How far the bright lines lift and the ground between them dips, as a share of the colour, at full sun in shallow water. */
+const LINE_BRIGHTENING = 0.28;
+const GROUND_DIMMING = 0.04;
 
 export const WATER_CAUSTICS_GLSL = `
 /** Distance gap between the nearest and second nearest drifting cell centre: zero along cell edges. */
@@ -35,14 +38,9 @@ float causticEdgeGap(vec2 point, float time) {
 }
 
 /** 0..1 brightness of the focused light at a point on the water surface plane. */
-float causticPattern(vec2 point, float time, float detail) {
-  float broad = causticEdgeGap(point * 0.55, time * 0.9);
-  float lines = pow(1.0 - clamp(broad * 2.6, 0.0, 1.0), 4.0);
-  if (detail > 0.2) {
-    float fine = causticEdgeGap(vec2(point.x * 0.6216 - point.y * 0.7833, point.x * 0.7833 + point.y * 0.6216) * 0.83 + 11.3, -time * 1.1);
-    lines += 0.7 * pow(1.0 - clamp(fine * 2.6, 0.0, 1.0), 4.0);
-  }
-  return clamp(lines, 0.0, 1.6);
+float causticPattern(vec2 point, float time) {
+  float gap = causticEdgeGap(point * 0.55, time * 0.9);
+  return pow(1.0 - clamp(gap * 2.2, 0.0, 1.0), 3.0);
 }
 
 /** How strongly sun (or moon) light reaches the bottom through the water: 0 at night or in cloud, 1 in full sun. */
@@ -62,6 +60,6 @@ float waterCausticLight(vec3 position, vec3 floorNormal, float waterTopY, float 
   vec2 slantedAcrossWall = vec2(0.83, 0.57) * position.y;
   vec2 crossing = position.xz + mix(slantedAcrossWall, slidAlongLight, upward);
   float amount = sunStrength * mix(0.2, 1.0, upward) * exp(-depthBelow * ${DEPTH_FADE_PER_BLOCK});
-  return 1.0 + amount * (causticPattern(crossing, skyFogTime, amount) * 1.9 - 0.3);
+  return 1.0 + amount * (causticPattern(crossing, skyFogTime) * ${LINE_BRIGHTENING.toFixed(2)} - ${GROUND_DIMMING.toFixed(2)});
 }
 `;
