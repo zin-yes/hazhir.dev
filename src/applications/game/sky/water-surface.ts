@@ -29,8 +29,7 @@ vec2 waterCellRandom(ivec2 cell) {
 }
 
 vec2 waterGradientAt(ivec2 corner) {
-  float angle = waterCellRandom(corner).x * 6.2831853;
-  return vec2(cos(angle), sin(angle));
+  return (waterCellRandom(corner) * 2.0 - 1.0) * 0.85;
 }
 
 /** Smooth gradient noise: x is the value (about -0.7..0.7), yz its slope across the plane. */
@@ -86,6 +85,10 @@ WaterSurface waterSurface(vec2 worldPlane, float distanceToCamera) {
   float seaState = clamp(0.5 + 0.9 * waterGradientNoise(position * 0.013 + windDirection * time * 0.02).x, 0.0, 1.0);
   float roughness = mix(0.45, 1.7, smoothstep(0.15, 0.85, seaState));
 
+  vec3 warpEven = waterGradientNoise(position * 0.07 + vec2(time * 0.01, 0.0));
+  vec3 warpOdd = waterGradientNoise(position * 0.083 + 17.3 + vec2(0.0, time * 0.01));
+  float patchNoise = waterGradientNoise(position * 0.04 + 5.7).x;
+
   vec2 slope = vec2(0.0);
   float crest = 0.0;
   for (int swell = 0; swell < SWELL_COUNT; swell++) {
@@ -93,23 +96,24 @@ WaterSurface waterSurface(vec2 worldPlane, float distanceToCamera) {
     float wavenumber = swellWavenumbers[swell];
     float angle = windAngle + swellAngles[swell] + 0.2 * sin(time * 0.02 + index * 1.9);
     vec2 direction = vec2(cos(angle), sin(angle));
-    vec3 phaseWarp = waterGradientNoise(position * 0.07 + index * 3.1 + vec2(time * 0.01, 0.0));
+    vec3 phaseWarp = swell % 2 == 0 ? warpEven : warpOdd;
     float phase = wavenumber * dot(direction, position) + 2.4 * phaseWarp.x - sqrt(9.81 * wavenumber) * ${SWELL_SPEED_SCALE.toFixed(2)} * time + index * 2.39;
     vec2 phaseGradient = wavenumber * direction + 2.4 * 0.07 * phaseWarp.yz;
     float peak = exp(sin(phase) - 1.0);
-    float patchiness = 0.45 + 1.1 * (0.5 + waterGradientNoise(position * (0.035 + 0.011 * index) + index * 13.7).x);
+    float patchiness = 0.45 + 1.1 * (0.5 + 0.7 * sin(patchNoise * 4.0 + index * 2.1));
     float strength = patchiness * (swell < 2 ? 1.0 : roughness) * waterWaveFade(distanceToCamera, wavenumber / 6.2831853);
     slope += phaseGradient * (swellAmplitudes[swell] * peak * cos(phase)) * strength;
     crest += swellAmplitudes[swell] * peak * strength;
   }
 
+  float rippleNoise = waterGradientNoise(position * 0.17 + vec2(time * 0.03, 0.0)).x;
   for (int octave = 0; octave < RIPPLE_OCTAVES; octave++) {
     float frequency = 0.9 * pow(2.13, float(octave));
     float fade = waterWaveFade(distanceToCamera, frequency);
     if (fade < 0.002) break;
     float turn = 0.7 * float(octave) + 0.3;
     mat2 octaveRotation = mat2(cos(turn), sin(turn), -sin(turn), cos(turn));
-    float patchStrength = 0.55 + 0.9 * (0.5 + waterGradientNoise(position * 0.17 + float(octave) * 7.3 + vec2(time * 0.03, 0.0)).x);
+    float patchStrength = 0.55 + 0.9 * (0.5 + 0.7 * sin(rippleNoise * 5.0 + float(octave) * 1.7));
     float height = 0.05 * pow(0.52, float(octave)) * (octave == 0 ? 1.0 : roughness) * patchStrength;
     vec2 turned = octaveRotation * position;
     vec2 dragged = turned - (octaveRotation * windDirection) * time * (0.5 + 0.12 * float(octave));
@@ -127,12 +131,16 @@ WaterSurface waterSurface(vec2 worldPlane, float distanceToCamera) {
     );
   }
 
-  float foamPatch = waterGradientNoise(position * 0.35 + windDirection * time * 0.15).x;
-  float foamGrain = waterGradientNoise(position * 2.3 + windDirection * time * 0.6).x
-    + 0.6 * waterGradientNoise(position * 6.1 - windDirection * time * 0.9 + 3.7).x
-    + 0.4 * waterGradientNoise(position * 15.7 + acrossWind * time * 0.7 + 8.9).x;
-  float whitecaps = smoothstep(0.55 - 0.35 * foamPatch, 1.0 - 0.35 * foamPatch, crest) * smoothstep(0.9, 1.5, roughness)
-    * smoothstep(-0.1, 0.35, foamGrain + 0.5 * foamPatch) * (1.0 - smoothstep(60.0, 140.0, distanceToCamera));
+  float whitecaps = 0.0;
+  float breaking = smoothstep(0.9, 1.5, roughness) * (1.0 - smoothstep(60.0, 140.0, distanceToCamera));
+  if (breaking > 0.0 && crest > 0.3) {
+    float foamPatch = waterGradientNoise(position * 0.35 + windDirection * time * 0.15).x;
+    float foamGrain = waterGradientNoise(position * 2.3 + windDirection * time * 0.6).x
+      + 0.6 * waterGradientNoise(position * 6.1 - windDirection * time * 0.9 + 3.7).x
+      + 0.4 * waterGradientNoise(position * 15.7 + acrossWind * time * 0.7 + 8.9).x;
+    whitecaps = smoothstep(0.55 - 0.35 * foamPatch, 1.0 - 0.35 * foamPatch, crest) * breaking
+      * smoothstep(-0.1, 0.35, foamGrain + 0.5 * foamPatch);
+  }
 
   WaterSurface surface;
   surface.normal = normalize(vec3(-slope.x, 1.0, -slope.y));

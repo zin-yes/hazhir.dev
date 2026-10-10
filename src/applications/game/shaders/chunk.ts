@@ -238,8 +238,12 @@ void main() {
   vec3 finalColor;
   float alpha = textureColor.a;
   if (isWater) {
-    vec4 plainWater = shadeWater(textureColor.rgb, vShade, surfaceNormal, vFogWorldPosition, vSkyExposure, 0.7);
-    vec4 water = shadeScreenSpaceWater(textureColor.rgb, vShade, surfaceNormal, vFogWorldPosition, vSkyExposure, 0.7, plainWater);
+    WaterSurface waterShape = waterSurfaceFor(surfaceNormal, vFogWorldPosition);
+    vec4 plainWater = vec4(0.0);
+    if (waterEffectAmount(vFogWorldPosition) < 0.999) {
+      plainWater = shadeWater(textureColor.rgb, vShade, surfaceNormal, vFogWorldPosition, vSkyExposure, 0.7, waterShape);
+    }
+    vec4 water = shadeScreenSpaceWater(textureColor.rgb, vShade, surfaceNormal, vFogWorldPosition, vSkyExposure, 0.7, plainWater, waterShape);
     finalColor = water.rgb;
     alpha = water.a;
   } else {

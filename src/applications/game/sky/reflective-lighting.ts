@@ -29,6 +29,12 @@ float schlickFresnel(float facingCamera, float reflectanceAtNormal) {
   return reflectanceAtNormal + (1.0 - reflectanceAtNormal) * pow(1.0 - facingCamera, 5.0);
 }
 
+/** The surface shape at a water fragment: rippled on top faces, flat on the sides. Compute it once and pass it to the shaders below. */
+WaterSurface waterSurfaceFor(vec3 surfaceNormal, vec3 worldPosition) {
+  if (surfaceNormal.y <= 0.9) return WaterSurface(surfaceNormal, 0.0);
+  return waterSurface(worldPosition.xz, length(cameraPosition - worldPosition));
+}
+
 /** Water with white foam laid over it where waves break. Foam is lit like any pale surface. */
 vec3 layWhitecaps(vec3 waterColor, float whitecaps, float bakedShade, vec3 worldPosition, float skyExposure) {
   if (whitecaps < 0.01) return waterColor;
@@ -37,11 +43,9 @@ vec3 layWhitecaps(vec3 waterColor, float whitecaps, float bakedShade, vec3 world
 }
 
 /** Water: its own colour lit by the sky, with the sky mirrored in. Alpha rises with the reflection. */
-vec4 shadeWater(vec3 albedoLinear, float bakedShade, vec3 surfaceNormal, vec3 worldPosition, float skyExposure, float baseAlpha) {
+vec4 shadeWater(vec3 albedoLinear, float bakedShade, vec3 surfaceNormal, vec3 worldPosition, float skyExposure, float baseAlpha, WaterSurface surface) {
   float distanceToCamera = length(cameraPosition - worldPosition);
   bool isTopFace = surfaceNormal.y > 0.9;
-  WaterSurface surface = WaterSurface(surfaceNormal, 0.0);
-  if (isTopFace) surface = waterSurface(worldPosition.xz, distanceToCamera);
   vec3 normal = surface.normal;
   vec3 toCamera = (cameraPosition - worldPosition) / max(distanceToCamera, 0.0001);
   float facingCamera = clamp(dot(normal, toCamera), 0.0, 1.0);

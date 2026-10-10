@@ -118,7 +118,7 @@ void main() {
   }
 
   bool isWater = surfaceAlpha < 0.99;
-  vec4 water = isWater ? shadeWater(vColor, vShade, vNormal, vWorldPosition, vSkyExposure, surfaceAlpha) : vec4(0.0);
+  vec4 water = isWater ? shadeWater(vColor, vShade, vNormal, vWorldPosition, vSkyExposure, surfaceAlpha, waterSurfaceFor(vNormal, vWorldPosition)) : vec4(0.0);
   vec3 displayColor = isWater ? water.rgb : shadeSurface(vColor, vShade, vNormal, vWorldPosition, vSkyExposure, 0.0);
   float hazeAmount = smoothstep(hazeStart, hazeEnd, distanceToCamera);
   vec3 skyBehind = useHazeCube > 0.5

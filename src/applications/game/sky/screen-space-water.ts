@@ -70,6 +70,12 @@ vec4 traceWorldReflection(vec3 origin, vec3 direction, float jitter) {
   return vec4(0.0);
 }
 
+/** 0..1: how much of the screen space treatment a water fragment gets; the plain water is only needed below 1. */
+float waterEffectAmount(vec3 worldPosition) {
+  float distanceToCamera = length(cameraPosition - worldPosition);
+  return worldSnapshotEnabled * (1.0 - smoothstep(${FULL_EFFECT_DISTANCE_BLOCKS}.0, ${NO_EFFECT_DISTANCE_BLOCKS}.0, distanceToCamera));
+}
+
 /** Water that is lit, deep, refracting, foaming and mirroring the world. Returns display colour and alpha. */
 vec4 shadeScreenSpaceWater(
   vec3 albedoLinear,
@@ -78,15 +84,14 @@ vec4 shadeScreenSpaceWater(
   vec3 worldPosition,
   float skyExposure,
   float plainAlpha,
-  vec4 plainWater
+  vec4 plainWater,
+  WaterSurface surface
 ) {
   float distanceToCamera = length(cameraPosition - worldPosition);
-  float effect = worldSnapshotEnabled * (1.0 - smoothstep(${FULL_EFFECT_DISTANCE_BLOCKS}.0, ${NO_EFFECT_DISTANCE_BLOCKS}.0, distanceToCamera));
+  float effect = waterEffectAmount(worldPosition);
   if (effect <= 0.001) return plainWater;
 
   bool isTopFace = surfaceNormal.y > 0.9;
-  WaterSurface surface = WaterSurface(surfaceNormal, 0.0);
-  if (isTopFace) surface = waterSurface(worldPosition.xz, distanceToCamera);
   vec3 normal = surface.normal;
   vec3 toCamera = (cameraPosition - worldPosition) / max(distanceToCamera, 0.0001);
   float facingCamera = clamp(dot(normal, toCamera), 0.0, 1.0);
