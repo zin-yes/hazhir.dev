@@ -550,6 +550,11 @@ export default function Game() {
         if (wheelDelta !== 0) setBrush({ radius: steppedBrushRadius(brushRef.current.radius, wheelDelta < 0 ? 1 : -1) });
         return;
       }
+      const playerControls = playerControlsRef.current;
+      if (!isInventoryOpen && playerControls?.controls.isLocked && playerControls.flightActive) {
+        if (event.deltaY !== 0) playerControls.adjustFlightSpeed(event.deltaY < 0 ? 1 : -1);
+        return;
+      }
       if (!isInventoryOpen && playerControlsRef.current?.controls.isLocked) {
         const direction = Math.sign(event.deltaY);
         setSelectedSlot((prev) => {
@@ -903,6 +908,8 @@ export default function Game() {
       );
 
       playerControlsRef.current.setLookSensitivity(gameSettingsRef.current.lookSensitivity);
+      playerControlsRef.current.onFlightSpeedChange = (multiplier) =>
+        toast(`Flight speed ${multiplier}x`, { id: "flight-speed", duration: 900 });
 
       const isMobileDevice = window.matchMedia(
         "(pointer: coarse) and (hover: none)",

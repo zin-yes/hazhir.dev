@@ -1,9 +1,78 @@
 import * as THREE from "three";
 import { PointerLockControls } from "three/addons/controls/PointerLockControls.js";
+import type { BlockType } from "./blocks";
 import { countInputEvent, finishInputEvent, startInputEvent } from "./input-profiling";
 import { PhysicsEngine } from "./physics-engine";
+import {
+  AIR_ACCELERATION_RATE,
+  AIR_BRAKING_RATE,
+  approachExponentially,
+  BUOYANCY_SHARE,
+  COYOTE_SECONDS,
+  DEFAULT_FLIGHT_SPEED_INDEX,
+  desiredStance,
+  FLIGHT_ACCELERATION_RATE,
+  FLIGHT_BASE_SPEED,
+  FLIGHT_BOOST_FACTOR,
+  FLIGHT_BRAKING_RATE,
+  FLIGHT_SPEED_STEPS,
+  FLOAT_GAIN,
+  FLOAT_RATE,
+  FLOAT_SUBMERSION,
+  getSurfaceMovement,
+  GRAVITY,
+  GROUND_ACCELERATION_RATE,
+  GROUND_BRAKING_RATE,
+  JUMP_BUFFER_SECONDS,
+  JUMP_SPEED,
+  LEDGE_CLEARED_HOP_SPEED,
+  LEDGE_CLIMB_SPEED,
+  LEDGE_HEIGHT_ABOVE_SURFACE,
+  lerp,
+  SPRINT_DOUBLE_TAP_SECONDS,
+  SPRINT_SPEED_FACTOR,
+  STANCE_SHAPES,
+  type Stance,
+  SWIM_ACCELERATION_RATE,
+  SWIM_BRAKING_RATE,
+  SWIM_SPEED,
+  SWIM_SPRINT_FACTOR,
+  SWIM_VERTICAL_RATE,
+  SWIM_VERTICAL_SPEED,
+  swimBlendForSubmersion,
+  TERMINAL_FALL_SPEED,
+  WADING_SLOWDOWN,
+  WALK_SPEED,
+  WATER_DRAG_RATE,
+} from "./player-movement";
 import { profiler } from "./profiler";
 import { DIMENSIONS } from "./profiler/dimensions";
+
+/** A frame longer than this (a hitch, a background tab) is simulated as this long, so nobody falls through the floor. */
+const MAXIMUM_FRAME_SECONDS = 0.05;
+/** No single physics step moves the body further than this, so fast falls cannot skip a block. */
+const MAXIMUM_STEP_BLOCKS = 0.4;
+const MAXIMUM_PHYSICS_STEPS = 4;
+const EYE_HEIGHT_RATE = 12;
+/** Swimming up eases to a stop over this much submersion above the floating depth, so holding jump never launches out of the water. */
+const RISE_EASE_SUBMERSION = 0.1;
+/** Climbing out only starts with the eyes this close to the surface, so a wall far below never speeds up a dive. */
+const LEDGE_CLIMB_EYE_DEPTH_BLOCKS = 0.9;
+const STANCE_RISE_ORDER: Readonly<Record<Stance, readonly Stance[]>> = {
+  standing: ["standing", "crouching", "prone"],
+  crouching: ["crouching", "prone"],
+  prone: ["prone"],
+};
+
+const BOB_STRIDE_RADIANS_PER_BLOCK = 1.6;
+const BOB_VERTICAL_BLOCKS = 0.03;
+const BOB_SIDEWAYS_BLOCKS = 0.022;
+const BOB_AMPLITUDE_RATE = 10;
+const BOB_STANCE_SCALE: Readonly<Record<Stance, number>> = { standing: 1, crouching: 0.6, prone: 0.25 };
+const LANDING_DIP_MINIMUM_SPEED = 7;
+const LANDING_DIP_BLOCKS_PER_SPEED = 0.01;
+const LANDING_DIP_MAXIMUM_BLOCKS = 0.16;
+const LANDING_DIP_RATE = 9;
 
 export class PlayerControls {
   public controls: PointerLockControls;
@@ -20,20 +89,44 @@ export class PlayerControls {
   private canJump = false;
   private isFlying = false;
   private isShifting = false;
+  private isProne = false;
+  private sprintKeyHeld = false;
+  private sprintLatchedByDoubleTap = false;
+  private lastForwardTapAtMilliseconds = -Infinity;
   public isMobile = false;
   private lookSensitivity = 1;
 
-  private readonly speed = 5;
-  private readonly jumpForce = 9.5;
-  private readonly gravity = 37.5;
-  private readonly standingEyeHeight = 1.62;
-  private readonly shiftingEyeHeight = 1.42;
-  private currentEyeHeight = 1.62;
+  private stance: Stance = "standing";
+  private currentEyeHeight = STANCE_SHAPES.standing.eyeHeight;
+  private jumpBufferSeconds = 0;
+  private coyoteSeconds = 0;
+  private supportingBlock: BlockType | null = null;
+  private isClimbingLedge = false;
+  /** The water surface the climb started from, kept while the body rises out of the water. */
+  private ledgeWaterSurfaceHeight = 0;
+  private flightSpeedIndex = DEFAULT_FLIGHT_SPEED_INDEX;
+  /** Called with the new flight speed multiplier whenever it changes. */
+  public onFlightSpeedChange: ((multiplier: number) => void) | null = null;
+
+  private isViewBobbingEnabled = true;
+  private bobPhase = 0;
+  private bobAmplitude = 0;
+  private landingDip = 0;
+  private readonly appliedBobOffset = new THREE.Vector3();
+
+  private readonly forwardScratch = new THREE.Vector3();
+  private readonly rightScratch = new THREE.Vector3();
+  private readonly wishScratch = new THREE.Vector3();
 
   private playerBox = new THREE.Box3();
 
   public getPlayerBox() {
     return this.playerBox;
+  }
+
+  /** Whether the player is flying, so the wheel can steer flight speed instead of the hotbar. */
+  public get flightActive() {
+    return this.isFlying;
   }
 
   constructor(
@@ -56,6 +149,9 @@ export class PlayerControls {
       this.moveRight = false;
       this.moveUp = false;
       this.moveDown = false;
+      this.isShifting = false;
+      this.sprintKeyHeld = false;
+      this.sprintLatchedByDoubleTap = false;
       this.canJump = false;
     });
   }
@@ -79,6 +175,7 @@ export class PlayerControls {
     switch (event.code) {
       case "ArrowUp":
       case "KeyW":
+        if (!event.repeat) this.registerForwardTap();
         this.moveForward = true;
         break;
       case "ArrowLeft":
@@ -94,37 +191,22 @@ export class PlayerControls {
         this.moveRight = true;
         break;
       case "Space":
-        if (this.isFlying) {
-          this.moveUp = true;
-        } else if (
-          this.physics.isInWater(
-            this.controls.object.position,
-            this.currentEyeHeight
-          )
-        ) {
-          this.moveUp = true;
-        } else if (this.canJump) {
-          this.velocity.y = this.jumpForce;
-          this.canJump = false;
-        }
+        this.pressJump();
         break;
       case "ShiftLeft":
       case "ShiftRight":
         this.isShifting = true;
-        if (
-          this.isFlying ||
-          this.physics.isInWater(
-            this.controls.object.position,
-            this.currentEyeHeight
-          )
-        ) {
-          this.moveDown = true;
-        }
+        this.moveDown = true;
+        break;
+      case "ControlLeft":
+      case "ControlRight":
+        this.sprintKeyHeld = true;
+        break;
+      case "KeyZ":
+        if (!event.repeat) this.toggleProne();
         break;
       case "KeyV":
-        profiler.addCounter("game.input.flyToggles");
-        this.isFlying = !this.isFlying;
-        this.velocity.set(0, 0, 0);
+        this.toggleFlying();
         break;
     }
   }
@@ -143,6 +225,7 @@ export class PlayerControls {
       case "ArrowUp":
       case "KeyW":
         this.moveForward = false;
+        this.sprintLatchedByDoubleTap = false;
         break;
       case "ArrowLeft":
       case "KeyA":
@@ -164,12 +247,30 @@ export class PlayerControls {
         this.isShifting = false;
         this.moveDown = false;
         break;
+      case "ControlLeft":
+      case "ControlRight":
+        this.sprintKeyHeld = false;
+        break;
     }
   }
 
   private initInputListeners() {
     document.addEventListener("keydown", this.onKeyDown);
     document.addEventListener("keyup", this.onKeyUp);
+  }
+
+  /** A second press of forward within a short time latches sprint until forward is released. */
+  private registerForwardTap() {
+    const nowMilliseconds = performance.now();
+    if (nowMilliseconds - this.lastForwardTapAtMilliseconds < SPRINT_DOUBLE_TAP_SECONDS * 1000) {
+      this.sprintLatchedByDoubleTap = true;
+    }
+    this.lastForwardTapAtMilliseconds = nowMilliseconds;
+  }
+
+  private pressJump() {
+    this.moveUp = true;
+    this.jumpBufferSeconds = JUMP_BUFFER_SECONDS;
   }
 
   public setMoveState(state: {
@@ -196,6 +297,10 @@ export class PlayerControls {
     this.controls.pointerSpeed = multiplier;
   }
 
+  public setViewBobbingEnabled(isEnabled: boolean) {
+    this.isViewBobbingEnabled = isEnabled;
+  }
+
   public rotateCamera(deltaX: number, deltaY: number) {
     profiler.addCounter("game.input.cameraRotations");
     profiler.addCounter(
@@ -213,19 +318,7 @@ export class PlayerControls {
 
   public jump() {
     profiler.addCounter("game.input.jumps");
-    if (this.isFlying) {
-      this.moveUp = true;
-    } else if (
-      this.physics.isInWater(
-        this.controls.object.position,
-        this.currentEyeHeight,
-      )
-    ) {
-      this.moveUp = true;
-    } else if (this.canJump) {
-      this.velocity.y = this.jumpForce;
-      this.canJump = false;
-    }
+    this.pressJump();
   }
 
   public resetMotion() {
@@ -236,6 +329,11 @@ export class PlayerControls {
     this.moveRight = false;
     this.moveUp = false;
     this.moveDown = false;
+    this.sprintLatchedByDoubleTap = false;
+    this.jumpBufferSeconds = 0;
+    this.removeViewBob();
+    this.bobAmplitude = 0;
+    this.landingDip = 0;
   }
 
   public stopJump() {
@@ -251,6 +349,25 @@ export class PlayerControls {
     profiler.addCounter("game.input.flyToggles");
     this.isFlying = !this.isFlying;
     this.velocity.set(0, 0, 0);
+    if (this.isFlying) this.isProne = false;
+  }
+
+  /** Lies down, or gets up when already lying; standing up waits for headroom (see updateStance). */
+  public toggleProne() {
+    profiler.addCounter("game.input.proneToggles");
+    if (this.isFlying) return;
+    this.isProne = !this.isProne;
+  }
+
+  /** Steps the flight speed up (1) or down (-1) through FLIGHT_SPEED_STEPS. */
+  public adjustFlightSpeed(direction: 1 | -1) {
+    const nextIndex = Math.min(
+      FLIGHT_SPEED_STEPS.length - 1,
+      Math.max(0, this.flightSpeedIndex + direction),
+    );
+    if (nextIndex === this.flightSpeedIndex) return;
+    this.flightSpeedIndex = nextIndex;
+    this.onFlightSpeedChange?.(FLIGHT_SPEED_STEPS[nextIndex]!);
   }
 
   public dispose() {
@@ -271,160 +388,328 @@ export class PlayerControls {
       movementMode,
     );
     try {
-      this.updateMovement(delta);
+      this.updateMovement(Math.min(delta, MAXIMUM_FRAME_SECONDS));
     } finally {
       profiler.end(scopeToken);
     }
   }
 
-  private updateMovement(delta: number) {
+  private updateMovement(deltaSeconds: number) {
     if (profiler.enabled) this.countFrameState();
-    const lastEyeHeight = this.currentEyeHeight;
-    // Interpolate eye height
-    const targetEyeHeight = this.isShifting
-      ? this.shiftingEyeHeight
-      : this.standingEyeHeight;
-    this.currentEyeHeight = THREE.MathUtils.lerp(
-      this.currentEyeHeight,
-      targetEyeHeight,
-      delta * 10
-    );
+    const position = this.controls.object.position;
+    this.removeViewBob();
+    const isSteerable = this.controls.isLocked || this.isMobile;
 
-    // Compensate camera position to keep feet planted
-    const diff = this.currentEyeHeight - lastEyeHeight;
-    this.controls.object.position.y += diff;
+    const submersion = this.isFlying
+      ? 0
+      : this.physics.getWaterSubmersion(position, this.currentEyeHeight);
+    const swimBlend = swimBlendForSubmersion(submersion);
+    if (swimBlend > 0.5) this.isProne = false;
+
+    this.updateStance(deltaSeconds, swimBlend > 0.5);
 
     if (this.isFlying) {
-      if (this.controls.isLocked || this.isMobile) {
-        const forward = new THREE.Vector3();
-        const right = new THREE.Vector3();
-
-        this.controls.object.getWorldDirection(forward);
-        forward.y = 0;
-        forward.normalize();
-
-        right.crossVectors(forward, this.controls.object.up).normalize();
-
-        const desiredVelocity = new THREE.Vector3();
-        if (this.moveForward) desiredVelocity.add(forward);
-        if (this.moveBackward) desiredVelocity.sub(forward);
-        if (this.moveRight) desiredVelocity.add(right);
-        if (this.moveLeft) desiredVelocity.sub(right);
-        if (this.moveUp) desiredVelocity.y += 1;
-        if (this.moveDown) desiredVelocity.y -= 1;
-
-        if (desiredVelocity.lengthSq() > 0) {
-          desiredVelocity.normalize().multiplyScalar(this.speed * 3);
-        }
-
-        this.velocity.copy(desiredVelocity);
-      } else {
-        this.velocity.set(0, 0, 0);
-      }
-
-      const position = this.controls.object.position;
-      position.addScaledVector(this.velocity, delta);
-      this.physics.updatePlayerBox(
-        this.playerBox,
-        position,
-        this.currentEyeHeight
-      );
+      this.updateFlight(deltaSeconds, isSteerable);
       return;
     }
 
+    this.updateWalkingAndSwimming(deltaSeconds, isSteerable, submersion, swimBlend);
+  }
+
+  /** Picks the stance that is wanted and fits, then eases the eyes to it with the feet staying planted. */
+  private updateStance(deltaSeconds: number, isSwimming: boolean) {
     const position = this.controls.object.position;
+    const wantedStance = desiredStance({
+      isFlying: this.isFlying,
+      isSwimming,
+      wantsProne: this.isProne,
+      wantsCrouch: this.isShifting,
+    });
+    this.stance = this.stanceThatFits(wantedStance);
 
-    if (this.physics.isInWater(position, this.currentEyeHeight)) {
-      profiler.addCounter("game.player.frames.swim");
-      this.velocity.y -= this.gravity * delta * 0.1;
-      this.velocity.multiplyScalar(0.9);
+    const lastEyeHeight = this.currentEyeHeight;
+    this.currentEyeHeight = approachExponentially(
+      lastEyeHeight,
+      STANCE_SHAPES[this.stance].eyeHeight,
+      EYE_HEIGHT_RATE,
+      deltaSeconds,
+    );
+    position.y += this.currentEyeHeight - lastEyeHeight;
+  }
 
-      if (this.controls.isLocked || this.isMobile) {
-        const forward = new THREE.Vector3();
-        const right = new THREE.Vector3();
+  /** The wanted stance, or the tallest lower one that fits when the wanted one would put the head into a block. */
+  private stanceThatFits(wantedStance: Stance): Stance {
+    const position = this.controls.object.position;
+    for (const candidate of STANCE_RISE_ORDER[wantedStance]) {
+      const candidateEyeHeight = STANCE_SHAPES[candidate].eyeHeight;
+      const isRising = candidateEyeHeight > this.currentEyeHeight + 0.01;
+      if (!isRising) return candidate;
+      if (this.physics.isStanceClear(position, this.currentEyeHeight, candidateEyeHeight)) return candidate;
+    }
+    return this.stance;
+  }
 
-        this.controls.object.getWorldDirection(forward);
-        forward.normalize();
+  private isSprintHeld(): boolean {
+    return this.sprintKeyHeld || this.sprintLatchedByDoubleTap;
+  }
 
-        right.crossVectors(forward, this.controls.object.up).normalize();
+  /** Writes the horizontal wish direction (unit length, or zero) of the held keys into wishScratch. */
+  private readHorizontalWish(): THREE.Vector3 {
+    const forward = this.forwardScratch;
+    const right = this.rightScratch;
+    this.controls.object.getWorldDirection(forward);
+    forward.y = 0;
+    forward.normalize();
+    right.crossVectors(forward, this.controls.object.up).normalize();
 
-        const desiredVelocity = new THREE.Vector3();
-        if (this.moveForward) desiredVelocity.add(forward);
-        if (this.moveBackward) desiredVelocity.sub(forward);
-        if (this.moveRight) desiredVelocity.add(right);
-        if (this.moveLeft) desiredVelocity.sub(right);
-        if (this.moveUp) desiredVelocity.y += 0.5;
-        if (this.moveDown) desiredVelocity.y -= 0.5;
+    const wish = this.wishScratch.set(0, 0, 0);
+    if (this.moveForward) wish.add(forward);
+    if (this.moveBackward) wish.sub(forward);
+    if (this.moveRight) wish.add(right);
+    if (this.moveLeft) wish.sub(right);
+    if (wish.lengthSq() > 0) wish.normalize();
+    return wish;
+  }
 
-        if (desiredVelocity.lengthSq() > 0) {
-          desiredVelocity.normalize().multiplyScalar(this.speed * 0.5);
-          this.velocity.add(desiredVelocity.multiplyScalar(delta * 10));
-        }
+  private updateFlight(deltaSeconds: number, isSteerable: boolean) {
+    const position = this.controls.object.position;
+    const wish = isSteerable ? this.readHorizontalWish() : this.wishScratch.set(0, 0, 0);
+    if (isSteerable) {
+      if (this.moveUp) wish.y += 1;
+      if (this.moveDown) wish.y -= 1;
+      if (wish.lengthSq() > 0) wish.normalize();
+    }
+    const hasInput = wish.lengthSq() > 0;
+    const boost = this.isSprintHeld() ? FLIGHT_BOOST_FACTOR : 1;
+    const speed = FLIGHT_BASE_SPEED * FLIGHT_SPEED_STEPS[this.flightSpeedIndex]! * boost;
+    const rate = hasInput ? FLIGHT_ACCELERATION_RATE : FLIGHT_BRAKING_RATE;
+
+    this.velocity.x = approachExponentially(this.velocity.x, wish.x * speed, rate, deltaSeconds);
+    this.velocity.y = approachExponentially(this.velocity.y, wish.y * speed, rate, deltaSeconds);
+    this.velocity.z = approachExponentially(this.velocity.z, wish.z * speed, rate, deltaSeconds);
+
+    position.addScaledVector(this.velocity, deltaSeconds);
+    this.physics.updatePlayerBox(this.playerBox, position, this.currentEyeHeight);
+    this.bobAmplitude = 0;
+  }
+
+  private updateWalkingAndSwimming(
+    deltaSeconds: number,
+    isSteerable: boolean,
+    submersion: number,
+    swimBlend: number,
+  ) {
+    const position = this.controls.object.position;
+    if (submersion > 0) profiler.addCounter("game.player.frames.swim");
+    if (this.stance === "prone") profiler.addCounter("game.player.frames.prone");
+
+    const wish = isSteerable ? this.readHorizontalWish() : this.wishScratch.set(0, 0, 0);
+    const hasInput = wish.lengthSq() > 0;
+    const isSprinting =
+      hasInput && this.moveForward && !this.moveBackward && this.stance === "standing" && this.isSprintHeld();
+
+    this.updateHorizontalVelocity(deltaSeconds, wish, hasInput, isSprinting, submersion, swimBlend);
+    this.updateVerticalVelocity(deltaSeconds, isSteerable, submersion, swimBlend);
+
+    const fallSpeedBeforeCollision = this.velocity.y;
+    const wasGrounded = this.canJump;
+    this.moveWithCollisions(deltaSeconds);
+
+    const isGrounded = this.physics.isOnGround(position, this.currentEyeHeight) && this.velocity.y <= 0;
+    this.canJump = isGrounded;
+    if (isGrounded) {
+      this.velocity.y = 0;
+      this.supportingBlock = this.physics.getSupportingBlock(position, this.currentEyeHeight);
+      if (!wasGrounded) this.dipCameraForLanding(fallSpeedBeforeCollision);
+    }
+    profiler.addCounter(isGrounded ? "game.player.frames.walk" : "game.player.frames.airborne");
+
+    this.applyViewBob(deltaSeconds, isSteerable && swimBlend < 0.3, isGrounded);
+  }
+
+  private updateHorizontalVelocity(
+    deltaSeconds: number,
+    wish: THREE.Vector3,
+    hasInput: boolean,
+    isSprinting: boolean,
+    submersion: number,
+    swimBlend: number,
+  ) {
+    const surface = getSurfaceMovement(this.supportingBlock);
+    const landSpeed =
+      WALK_SPEED *
+      STANCE_SHAPES[this.stance].speedFactor *
+      surface.speedMultiplier *
+      (isSprinting ? SPRINT_SPEED_FACTOR : 1) *
+      (1 - WADING_SLOWDOWN * submersion);
+    const swimSpeed = SWIM_SPEED * (isSprinting ? SWIM_SPRINT_FACTOR : 1);
+    const speed = lerp(landSpeed, swimSpeed, swimBlend);
+
+    const landRate = this.canJump
+      ? (hasInput ? GROUND_ACCELERATION_RATE : GROUND_BRAKING_RATE) * surface.grip
+      : hasInput
+        ? AIR_ACCELERATION_RATE
+        : AIR_BRAKING_RATE;
+    const swimRate = hasInput ? SWIM_ACCELERATION_RATE : SWIM_BRAKING_RATE;
+    const rate = lerp(landRate, swimRate, swimBlend);
+
+    this.velocity.x = approachExponentially(this.velocity.x, wish.x * speed, rate, deltaSeconds);
+    this.velocity.z = approachExponentially(this.velocity.z, wish.z * speed, rate, deltaSeconds);
+  }
+
+  private updateVerticalVelocity(
+    deltaSeconds: number,
+    isSteerable: boolean,
+    submersion: number,
+    swimBlend: number,
+  ) {
+    this.jumpBufferSeconds = Math.max(0, this.jumpBufferSeconds - deltaSeconds);
+    this.coyoteSeconds = this.canJump ? COYOTE_SECONDS : Math.max(0, this.coyoteSeconds - deltaSeconds);
+
+    if (this.climbOutOfWaterOntoLedge(isSteerable, swimBlend)) return;
+
+    this.velocity.y -= GRAVITY * (1 - BUOYANCY_SHARE * swimBlend) * deltaSeconds;
+    this.velocity.y = Math.max(this.velocity.y, -TERMINAL_FALL_SPEED);
+    if (submersion > 0) {
+      this.velocity.y *= Math.exp(-WATER_DRAG_RATE * submersion * deltaSeconds);
+    }
+
+    if (swimBlend > 0) {
+      this.steerVerticallyInWater(deltaSeconds, isSteerable, submersion, swimBlend);
+      return;
+    }
+    if (!isSteerable) return;
+
+    if (this.stance === "prone" && this.jumpBufferSeconds > 0) {
+      this.isProne = false;
+      this.jumpBufferSeconds = 0;
+      return;
+    }
+    const wantsJump = this.jumpBufferSeconds > 0 || this.moveUp;
+    if (wantsJump && this.coyoteSeconds > 0 && this.stance !== "prone") {
+      this.velocity.y = JUMP_SPEED * (1 - 0.25 * submersion);
+      this.canJump = false;
+      this.coyoteSeconds = 0;
+      this.jumpBufferSeconds = 0;
+    }
+  }
+
+  /**
+   * Holding jump against a ledge while swimming lifts the body up its face and over the top. Returns whether it is
+   * climbing this frame (gravity and drag are skipped then). Once the feet clear the top, a small hop carries on.
+   */
+  private climbOutOfWaterOntoLedge(isSteerable: boolean, swimBlend: number): boolean {
+    const position = this.controls.object.position;
+    let isClimbing = false;
+    if (isSteerable && this.moveUp && (swimBlend > 0 || this.isClimbingLedge)) {
+      const liveSurfaceHeight = this.physics.getWaterSurfaceHeight(position, this.currentEyeHeight);
+      if (liveSurfaceHeight !== null) this.ledgeWaterSurfaceHeight = liveSurfaceHeight;
+      const surfaceHeight = liveSurfaceHeight ?? (this.isClimbingLedge ? this.ledgeWaterSurfaceHeight : null);
+      const isNearSurface =
+        surfaceHeight !== null && (this.isClimbingLedge || position.y > surfaceHeight - LEDGE_CLIMB_EYE_DEPTH_BLOCKS);
+      if (surfaceHeight !== null && isNearSurface) {
+        const direction = this.readHorizontalWish();
+        if (direction.lengthSq() === 0) this.controls.object.getWorldDirection(direction).setY(0).normalize();
+        isClimbing = this.physics.canClimbOntoLedge(
+          position,
+          this.currentEyeHeight,
+          direction.x,
+          direction.z,
+          surfaceHeight,
+          LEDGE_HEIGHT_ABOVE_SURFACE,
+        );
       }
+    }
+    if (isClimbing) {
+      this.velocity.y = LEDGE_CLIMB_SPEED;
+    } else if (this.isClimbingLedge) {
+      this.velocity.y = Math.min(this.velocity.y, LEDGE_CLEARED_HOP_SPEED);
+    }
+    this.isClimbingLedge = isClimbing;
+    return isClimbing;
+  }
 
+  /** Swimming up, down and treading water: held keys pick a vertical speed, otherwise the body floats at the surface. */
+  private steerVerticallyInWater(
+    deltaSeconds: number,
+    isSteerable: boolean,
+    submersion: number,
+    swimBlend: number,
+  ) {
+    const position = this.controls.object.position;
+    let targetSpeed: number | null = null;
+    if (isSteerable && this.moveUp) {
+      const risingShare = Math.min(1, Math.max(0, (submersion - FLOAT_SUBMERSION) / RISE_EASE_SUBMERSION));
+      targetSpeed = SWIM_VERTICAL_SPEED * risingShare;
+    } else if (isSteerable && this.moveDown) {
+      targetSpeed = -SWIM_VERTICAL_SPEED;
+    }
+
+    if (targetSpeed !== null) {
+      this.velocity.y = approachExponentially(this.velocity.y, targetSpeed, SWIM_VERTICAL_RATE * swimBlend, deltaSeconds);
+      return;
+    }
+    const floatingSpeed = (submersion - FLOAT_SUBMERSION) * FLOAT_GAIN;
+    this.velocity.y = approachExponentially(this.velocity.y, floatingSpeed, FLOAT_RATE * swimBlend, deltaSeconds);
+  }
+
+  /** Moves the body by its velocity in as many physics steps as its speed needs to never skip a block. */
+  private moveWithCollisions(deltaSeconds: number) {
+    const position = this.controls.object.position;
+    const fastestAxis = Math.max(Math.abs(this.velocity.x), Math.abs(this.velocity.y), Math.abs(this.velocity.z));
+    const stepCount = Math.min(
+      MAXIMUM_PHYSICS_STEPS,
+      Math.max(1, Math.ceil((fastestAxis * deltaSeconds) / MAXIMUM_STEP_BLOCKS)),
+    );
+    const stepSeconds = deltaSeconds / stepCount;
+    for (let step = 0; step < stepCount; step++) {
       this.physics.resolveCollision(
         position,
         this.velocity,
         this.playerBox,
-        delta,
-        this.currentEyeHeight
+        stepSeconds,
+        this.currentEyeHeight,
+        this.stance === "crouching",
       );
-      return;
     }
+  }
 
-    // Apply Gravity
-    this.velocity.y -= this.gravity * delta;
-
-    if (this.controls.isLocked || this.isMobile) {
-      // Calculate desired horizontal velocity
-      const forward = new THREE.Vector3();
-      const right = new THREE.Vector3();
-
-      this.controls.object.getWorldDirection(forward);
-      forward.y = 0;
-      forward.normalize();
-
-      right.crossVectors(forward, this.controls.object.up).normalize();
-
-      const desiredVelocity = new THREE.Vector3();
-      if (this.moveForward) desiredVelocity.add(forward);
-      if (this.moveBackward) desiredVelocity.sub(forward);
-      if (this.moveRight) desiredVelocity.add(right);
-      if (this.moveLeft) desiredVelocity.sub(right);
-
-      if (desiredVelocity.lengthSq() > 0) {
-        const currentSpeed = this.isShifting ? this.speed * 0.3 : this.speed;
-        desiredVelocity.normalize().multiplyScalar(currentSpeed);
-      }
-
-      this.velocity.x = desiredVelocity.x;
-      this.velocity.z = desiredVelocity.z;
-    } else {
-      this.velocity.x = 0;
-      this.velocity.z = 0;
-    }
-
-    this.physics.resolveCollision(
-      position,
-      this.velocity,
-      this.playerBox,
-      delta,
-      this.currentEyeHeight,
-      this.isShifting
+  private dipCameraForLanding(fallSpeed: number) {
+    const impactSpeed = -fallSpeed;
+    if (impactSpeed < LANDING_DIP_MINIMUM_SPEED) return;
+    this.landingDip = Math.min(
+      LANDING_DIP_MAXIMUM_BLOCKS,
+      this.landingDip + impactSpeed * LANDING_DIP_BLOCKS_PER_SPEED,
     );
+  }
 
-    if (
-      this.physics.isOnGround(position, this.currentEyeHeight) &&
-      this.velocity.y <= 0
-    ) {
-      this.canJump = true;
-      this.velocity.y = 0;
-    } else {
-      this.canJump = false;
-    }
-    profiler.addCounter(
-      this.canJump ? "game.player.frames.walk" : "game.player.frames.airborne",
-    );
+  /** Sways the camera with the stride and dips it on landing; the offset is undone at the start of the next update. */
+  private applyViewBob(deltaSeconds: number, isWalkingFree: boolean, isGrounded: boolean) {
+    const horizontalSpeed = Math.hypot(this.velocity.x, this.velocity.z);
+    const strideAmount =
+      this.isViewBobbingEnabled && isWalkingFree && isGrounded
+        ? Math.min(horizontalSpeed / WALK_SPEED, 1.5) * BOB_STANCE_SCALE[this.stance]
+        : 0;
+    this.bobAmplitude = approachExponentially(this.bobAmplitude, strideAmount, BOB_AMPLITUDE_RATE, deltaSeconds);
+    if (isGrounded) this.bobPhase += horizontalSpeed * deltaSeconds * BOB_STRIDE_RADIANS_PER_BLOCK;
+    this.landingDip = approachExponentially(this.landingDip, 0, LANDING_DIP_RATE, deltaSeconds);
+
+    const verticalOffset = Math.sin(this.bobPhase * 2) * BOB_VERTICAL_BLOCKS * this.bobAmplitude - this.landingDip;
+    const sidewaysOffset = Math.cos(this.bobPhase) * BOB_SIDEWAYS_BLOCKS * this.bobAmplitude;
+    if (verticalOffset === 0 && sidewaysOffset === 0) return;
+
+    this.controls.object.getWorldDirection(this.forwardScratch);
+    this.forwardScratch.y = 0;
+    this.forwardScratch.normalize();
+    this.rightScratch.crossVectors(this.forwardScratch, this.controls.object.up).normalize();
+    this.appliedBobOffset.copy(this.rightScratch).multiplyScalar(sidewaysOffset);
+    this.appliedBobOffset.y += verticalOffset;
+    this.controls.object.position.add(this.appliedBobOffset);
+  }
+
+  private removeViewBob() {
+    this.controls.object.position.sub(this.appliedBobOffset);
+    this.appliedBobOffset.set(0, 0, 0);
   }
 
   /** Frame counters for the facts that hold before movement is resolved. */
